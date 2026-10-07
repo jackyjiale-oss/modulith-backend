@@ -127,6 +127,33 @@ public sealed class ListLeaveRequestsTests(IntegrationTestWebAppFactory factory)
     }
 
     [Fact]
+    public async Task Empty_previous_page_after_rows_leave_the_filter_still_leads_forward()
+    {
+        var seeded = await SeedAsync(25);
+        var newestFirst = seeded.AsEnumerable().Reverse().ToList();
+        var page1 = await GetPageAsync("?status=Pending&pageSize=10");
+        var page2 = await GetPageAsync($"?status=Pending&pageSize=10&cursor={page1.NextCursor}");
+        await using (var scope = Factory.Services.CreateAsyncScope())
+        {
+            // Approving the first page's requests moves them out of status=Pending.
+            var db = scope.ServiceProvider.GetRequiredService<SampleDbContext>();
+            var approved = await db.Set<LeaveRequest>().Where(entity => page1.Ids.Contains(entity.Id)).ToListAsync(Ct);
+            approved.ForEach(leaveRequest => leaveRequest.Approve(Guid.NewGuid()).IsSuccess.ShouldBeTrue());
+            await db.SaveChangesAsync(Ct);
+        }
+
+        var back = await GetPageAsync($"?status=Pending&pageSize=10&cursor={page2.PreviousCursor}");
+
+        back.Ids.ShouldBeEmpty();
+        back.PreviousCursor.ShouldBeNull();
+        back.NextCursor.ShouldNotBeNull();
+
+        // The next cursor starts after the position the client came from (page 2's first item, which it has already seen).
+        var forward = await GetPageAsync($"?status=Pending&pageSize=10&cursor={back.NextCursor}");
+        forward.Ids.ShouldBe(newestFirst.Skip(11).Take(10));
+    }
+
+    [Fact]
     public async Task Filters_and_sort_apply()
     {
         var employeeId = Guid.NewGuid();

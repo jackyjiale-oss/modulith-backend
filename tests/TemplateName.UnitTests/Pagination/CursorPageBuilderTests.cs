@@ -60,14 +60,29 @@ public sealed class CursorPageBuilderTests
     }
 
     [Fact]
-    public void Empty_page_has_no_cursors_and_keeps_the_total_count()
+    public void Empty_page_keeps_the_way_back_to_the_incoming_cursor_position_and_the_total_count()
     {
-        var page = Build([], Incoming(CursorDirection.Next), totalCount: 0);
+        // No cursor: an empty list has nowhere to go.
+        var first = Build([], cursor: null, totalCount: 0);
+        first.Items.ShouldBeEmpty();
+        first.NextCursor.ShouldBeNull();
+        first.PreviousCursor.ShouldBeNull();
+        first.TotalCount.ShouldBe(0);
 
-        page.Items.ShouldBeEmpty();
-        page.NextCursor.ShouldBeNull();
-        page.PreviousCursor.ShouldBeNull();
-        page.TotalCount.ShouldBe(0);
+        // Forward past the last row: nothing further, but the client can page back from the incoming position.
+        var forwardCursor = Incoming(CursorDirection.Next);
+        var forward = Build([], forwardCursor, totalCount: 0);
+        forward.Items.ShouldBeEmpty();
+        forward.NextCursor.ShouldBeNull();
+        Decode(forward.PreviousCursor!).ShouldBe((CursorDirection.Previous, 5, (Guid)forwardCursor.KeyValues[1]));
+        forward.TotalCount.ShouldBe(0);
+
+        // Backward before the first row: nothing further back, but the client can page forward from the incoming position.
+        var backwardCursor = Incoming(CursorDirection.Previous);
+        var backward = Build([], backwardCursor);
+        backward.Items.ShouldBeEmpty();
+        backward.PreviousCursor.ShouldBeNull();
+        Decode(backward.NextCursor!).ShouldBe((CursorDirection.Next, 5, (Guid)backwardCursor.KeyValues[1]));
     }
 
     private static CursorPage<Row> Build(IReadOnlyList<Row> rows, Cursor? cursor, long? totalCount = null)

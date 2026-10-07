@@ -25,8 +25,14 @@ public sealed class SortSpecification
     /// <paramref name="idField"/> is appended with the direction of the last term. An unknown, empty or repeated field (including the
     /// id itself) fails with <see cref="PaginationErrors.InvalidSort"/>.
     /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="allowedFields"/> contains <paramref name="idField"/>, which is always appended.</exception>
     public static Result<SortSpecification> Parse(string? sort, IReadOnlyList<SortField> allowedFields, SortField idField, string defaultSort)
     {
+        if (allowedFields.Contains(idField))
+        {
+            throw new ArgumentException("The id field is appended to every sort and must not be in the allow-list.", nameof(allowedFields));
+        }
+
         var text = string.IsNullOrWhiteSpace(sort) ? defaultSort : sort;
         var terms = new List<(SortField Field, bool Descending)>();
 

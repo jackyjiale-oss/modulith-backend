@@ -64,6 +64,20 @@ public sealed class KeysetSqlBuilderTests
         query.OrderByClause.ShouldBe("[StartDate] ASC, [CreatedAt] DESC, [Id] DESC");
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(CursorPageRequest.MaxPageSize + 1)]
+    [InlineData(int.MaxValue)]
+    public void Page_size_outside_1_to_max_throws(int pageSize)
+        => Should.Throw<ArgumentOutOfRangeException>(() => KeysetSqlBuilder.Build(NewestFirst, cursor: null, pageSize));
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(CursorPageRequest.MaxPageSize)]
+    public void Page_size_bounds_are_accepted(int pageSize)
+        => KeysetSqlBuilder.Build(NewestFirst, cursor: null, pageSize).Take.ShouldBe(pageSize + 1);
+
     [Fact]
     public void Cursor_with_the_wrong_number_of_key_values_throws()
         => Should.Throw<ArgumentException>(() => KeysetSqlBuilder.Build(

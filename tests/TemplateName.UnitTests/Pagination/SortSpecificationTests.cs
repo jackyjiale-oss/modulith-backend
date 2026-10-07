@@ -45,6 +45,10 @@ public sealed class SortSpecificationTests
     public void Duplicate_field_is_rejected(string sort)
         => SortSpecification.Parse(sort, Allowed, IdField, "-createdAt").Error.Code.ShouldBe("pagination.invalid_sort");
 
+    [Fact]
+    public void Id_field_in_the_allow_list_is_a_programming_error()
+        => Should.Throw<ArgumentException>(() => SortSpecification.Parse("id", [CreatedAt, IdField], IdField, "-createdAt"));
+
     [Theory]
     [InlineData("id")]
     [InlineData("-")]

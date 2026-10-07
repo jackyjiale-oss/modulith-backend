@@ -20,9 +20,14 @@ public static class KeysetSqlBuilder
     /// the rows (<see cref="CursorPageBuilder"/>). <see cref="KeysetQuery.Take"/> is <paramref name="pageSize"/> + 1, so the extra row
     /// tells whether another page exists.
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="pageSize"/> is not 1 to <see cref="CursorPageRequest.MaxPageSize"/>.</exception>
     /// <exception cref="ArgumentException">The cursor does not have one key value per sort term.</exception>
     public static KeysetQuery Build(SortSpecification sort, Cursor? cursor, int pageSize)
     {
+        // Validators reject these first; the guard keeps pageSize + 1 from overflowing or a non-positive TOP reaching SQL.
+        ArgumentOutOfRangeException.ThrowIfLessThan(pageSize, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(pageSize, CursorPageRequest.MaxPageSize);
+
         var isBackward = cursor?.Direction == CursorDirection.Previous;
         var parameters = new DynamicParameters();
         var orderBy = string.Join(", ", sort.Terms.Select(term => $"{term.Field.Column} {(term.Descending != isBackward ? "DESC" : "ASC")}"));
