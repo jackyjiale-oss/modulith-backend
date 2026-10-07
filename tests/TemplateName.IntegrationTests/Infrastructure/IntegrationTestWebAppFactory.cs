@@ -10,10 +10,12 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+
+        // A host setting, not an in-memory source, so tests can lower the limit with UseSetting on a derived factory.
+        builder.UseSetting("RateLimiting:GlobalPermitLimit", "100000");
         builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
             new Dictionary<string, string?>
             {
-                ["RateLimiting:GlobalPermitLimit"] = "100000",
                 ["Outbox:Enabled"] = "false",
 
                 // Keep test output to problems: no per-request or host-lifetime lines.

@@ -5,6 +5,7 @@ using Scalar.AspNetCore;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Web.Common;
 using TemplateName.Web.Common.Observability;
+using TemplateName.Web.Common.Security;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,7 +17,7 @@ builder.Services.AddWebCommon();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddOpenApi("v1");
 builder.Services.AddHealthChecks();
-// AddHttpSecurity (Task 7)
+builder.Services.AddHttpSecurity(builder.Configuration);
 // Module registrations (Task 11)
 
 // Kestrel binds only its endpoints from the "Kestrel" section; bind Limits (e.g. MaxRequestBodySize) lazily so test overrides apply.
@@ -28,7 +29,8 @@ builder.Services.AddApplicationDecorators();
 var app = builder.Build();
 
 // Pipeline order matters; later tasks insert at the marked slots.
-// 1. UseForwardedHeaders (Task 7)
+// 1. UseForwardedHeaders
+app.UseForwardedHeaders();
 // 1a. UseApiLocalization (Task 15) - must precede UseExceptionHandler
 // 2. UseExceptionHandler
 app.UseExceptionHandler();
@@ -38,17 +40,24 @@ app.UseStatusCodePages();
 app.UseTraceIdHeader();
 // 5. UseSecurityHeaders
 app.UseSecurityHeaders();
-// 6. HSTS + HTTPS redirection, non-Development (Task 7)
+// 6. HSTS + HTTPS redirection, non-Development
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+    app.UseHttpsRedirection();
+}
 // 7. UseRequestLogging
 app.UseRequestLogging();
 // 8. UseRouting
 app.UseRouting();
-// 9. UseCors (Task 7)
-// 10. UseRateLimiter (Task 7)
+// 9. UseCors
+app.UseCors();
+// 10. UseRateLimiter
+app.UseRateLimiter();
 // 11. UseIdempotency (Task 12)
-// 12. endpoints (health: .DisableRateLimiting() added in Task 7)
-app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
-app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = registration => registration.Tags.Contains("ready") });
+// 12. endpoints (health endpoints are exempt from rate limiting)
+app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false }).DisableRateLimiting();
+app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = registration => registration.Tags.Contains("ready") }).DisableRateLimiting();
 
 if (!app.Environment.IsProduction())
 {
