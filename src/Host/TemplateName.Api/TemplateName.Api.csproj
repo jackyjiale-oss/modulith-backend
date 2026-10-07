@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <UserSecretsId>98fe211a-0cbf-4e56-bc38-acafb05bfb77</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\BuildingBlocks\TemplateName.SharedKernel\TemplateName.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\BuildingBlocks\TemplateName.Application.Common\TemplateName.Application.Common.csproj" />
+    <ProjectReference Include="..\..\BuildingBlocks\TemplateName.Web.Common\TemplateName.Web.Common.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Scalar.AspNetCore" />
+  </ItemGroup>
+
+</Project>
