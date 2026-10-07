@@ -4,6 +4,16 @@
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
 
+  <ItemGroup Label="Application">
+    <PackageVersion Include="FluentValidation" Version="12.1.1" />
+    <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
+    <PackageVersion Include="Scrutor" Version="7.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+  </ItemGroup>
+
   <ItemGroup Label="Testing">
     <PackageVersion Include="xunit.v3" Version="4.0.1" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />

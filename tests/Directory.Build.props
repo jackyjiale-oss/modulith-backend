@@ -19,6 +19,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- NSubstitute (Castle DynamicProxy) must see internal test types such as handler fixtures. -->
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="Shouldly" />
   </ItemGroup>

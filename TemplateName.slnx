@@ -2,6 +2,7 @@
   <Folder Name="/src/" />
   <Folder Name="/src/BuildingBlocks/">
     <Project Path="src/BuildingBlocks/TemplateName.SharedKernel/TemplateName.SharedKernel.csproj" />
+    <Project Path="src/BuildingBlocks/TemplateName.Application.Common/TemplateName.Application.Common.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/TemplateName.UnitTests/TemplateName.UnitTests.csproj" />
