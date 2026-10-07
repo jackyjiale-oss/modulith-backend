@@ -1,0 +1,37 @@
+name: PR title
+
+# The pull request title becomes the squash-merge commit header, so it is checked like a commit message.
+# A workflow of its own, so editing a title or description re-runs only this check, not the whole CI pipeline.
+# Actions use their latest major tag so Dependabot can update them.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  commit-lint:
+    name: commit-lint
+    # Dependabot titles for long package names exceed 72 characters; a skipped job still satisfies a required check.
+    if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Only the checker script is needed.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: build/scripts/check-commit-msg.sh
+          sparse-checkout-cone-mode: false
+
+      # The title goes through env, never inline in run:, so a crafted title cannot inject shell commands.
+      - name: Check the pull request title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: bash build/scripts/check-commit-msg.sh --message "$PR_TITLE"

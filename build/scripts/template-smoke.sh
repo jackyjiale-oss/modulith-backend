@@ -5,20 +5,18 @@
 # Usage: bash build/scripts/template-smoke.sh
 #
 # Integration tests are not run here (they need Docker); CI runs them in the build-test job.
-# The template is always uninstalled again, so the global template cache is left as it was.
+# Every `dotnet new` call uses a private template hive inside the temporary directory, so the user's global
+# template cache is never touched; deleting the temporary directory removes the installed template too.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 project_name="Acme.Smoke"
 tmp="$(mktemp -d)"
 out="$tmp/$project_name"
-installed=false
+hive="$tmp/hive"
 
 cleanup() {
   local status=$?
-  if [[ "$installed" == true ]]; then
-    (cd "$repo_root" && dotnet new uninstall . >/dev/null) || echo "template-smoke: could not uninstall the template" >&2
-  fi
   rm -rf "$tmp"
   exit "$status"
 }
@@ -35,13 +33,12 @@ step() {
   echo "==> $1"
 }
 
-step "Installing the template from $repo_root"
+step "Installing the template from $repo_root (private hive $hive)"
 cd "$repo_root"
-installed=true
-dotnet new install . --force
+dotnet new install . --force --debug:custom-hive "$hive"
 
 step "Generating $project_name"
-dotnet new modulith-backend -n "$project_name" -o "$out"
+dotnet new modulith-backend -n "$project_name" -o "$out" --debug:custom-hive "$hive"
 
 step "Checking that no placeholder is left"
 leftover_content="$(grep -rIil "TemplateName" "$out" --exclude-dir=bin --exclude-dir=obj || true)"

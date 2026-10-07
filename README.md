@@ -120,7 +120,7 @@ These are about the template repository only and are not generated:
 - [`docs/repository-management.md`](docs/repository-management.md): repository settings, branch protection and releases
 - [`SECURITY.md`](SECURITY.md): reporting a vulnerability
 
-Maintainers: after changing anything that ships, run `bash build/scripts/template-smoke.sh`.
+Maintainers: after changing anything that ships, run `bash build/scripts/template-smoke.sh`. It installs the template into a private template hive in a temporary folder, so your installed templates are left alone.
 
 ## Releases and licences
 

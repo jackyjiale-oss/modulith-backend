@@ -18,4 +18,4 @@ We chose option 2. v1 targets SQL Server only. PostgreSQL becomes a post-v1 swit
 ## Consequences
 - Positive: one migration set per module, one SQL dialect, a single Testcontainers image, and SQL Server types usable without abstraction.
 - Negative / trade-offs accepted: teams that need PostgreSQL cannot use v1 as is.
-- Follow-up actions: revisit when PostgreSQL is added; UUID v7 ordering and `datetime2(3)` choices are SQL Server-specific and must be re-evaluated then.
+- Follow-up actions: revisit when PostgreSQL is added; sequential GUID ordering (ADR 0004) and `datetime2(3)` choices are SQL Server-specific and must be re-evaluated then.

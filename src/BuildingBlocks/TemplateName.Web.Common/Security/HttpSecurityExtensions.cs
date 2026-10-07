@@ -36,7 +36,10 @@ public static class HttpSecurityExtensions
                 .WithOrigins(apiCorsOptions.Value.AllowedOrigins)
                 .AllowAnyHeader()
                 .AllowAnyMethod()
-                .AllowCredentials()));
+                .AllowCredentials()
+
+                // Response headers browser code needs that are not CORS-safelisted.
+                .WithExposedHeaders("X-Trace-Id", "Location", "Retry-After", "Idempotency-Replayed")));
 
         services.AddRateLimiter(options => options.OnRejected = WriteRateLimitProblemAsync);
         services.AddOptions<RateLimiterOptions>().Configure<IOptions<RateLimitingOptions>>(

@@ -34,6 +34,24 @@ public sealed class HttpSecurityTests(IntegrationTestWebAppFactory factory) : In
     }
 
     [Fact]
+    public async Task Allowed_origin_can_read_the_api_response_headers()
+    {
+        await using var configured = Factory.WithWebHostBuilder(
+            builder => builder.UseSetting("Cors:AllowedOrigins:0", AllowedOrigin));
+        using var client = configured.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/health/live");
+        request.Headers.Add("Origin", AllowedOrigin);
+
+        using var response = await client.SendAsync(request, Ct);
+
+        response.Headers.GetValues("Access-Control-Allow-Origin").ShouldHaveSingleItem().ShouldBe(AllowedOrigin);
+        var exposed = response.Headers.GetValues("Access-Control-Expose-Headers")
+            .SelectMany(value => value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            .ToList();
+        exposed.ShouldBe(["X-Trace-Id", "Location", "Retry-After", "Idempotency-Replayed"], ignoreOrder: true);
+    }
+
+    [Fact]
     public async Task Unknown_origin_gets_no_cors_headers()
     {
         await using var configured = Factory.WithWebHostBuilder(

@@ -34,7 +34,7 @@ Error codes (messages in `Resources/InfrastructureErrorMessages.resx`, `.ms.resx
 
 ## Configuration
 
-`ConnectionStrings:Database`, `Database:ApplyMigrationsOnStartup`, `Outbox:*` and `Idempotency:TimeToLive`, with defaults and validation, are listed in [`docs/services/api.md`](../services/api.md#configuration).
+`ConnectionStrings:Database`, `Database:ApplyMigrationsOnStartup`, `Outbox:*`, `Idempotency:TimeToLive` and `Idempotency:InProgressTimeout`, with defaults and validation, are listed in [`docs/services/api.md`](../services/api.md#configuration).
 
 ## Persistence
 
@@ -63,18 +63,20 @@ Each module context that raises domain events maps its own `OutboxMessages` / `O
 
 1. The key must be one header value of 1 to 100 characters, else 400 `idempotency.invalid_key`. Keys are case-sensitive.
 2. The scope is the signed-in user's id, or `anonymous`. The request hash is the SHA-256 of the method, path and body.
-3. The first request inserts an in-progress row in `platform.IdempotencyKeys`; its primary key (`Scope`, `Key`) makes a concurrent duplicate fail, so the endpoint runs once and the duplicate gets 409 `idempotency.in_progress`.
-4. A response below 500 is buffered, stored (status, content type, `Location`, body) and then sent. A retry with the same key and body within `Idempotency:TimeToLive` gets the stored response with `Idempotency-Replayed: true`; with a different body, 422 `idempotency.key_reused`; while the first is still running, 409 `idempotency.in_progress`.
-5. A 5xx response or an exception deletes the row, so the client can retry. A key whose row has expired runs again.
+3. The first request inserts an in-progress row in `platform.IdempotencyKeys`; its primary key (`Scope`, `Key`) makes a concurrent duplicate fail, so the endpoint runs once and the duplicate gets 409 `idempotency.in_progress`. The row is a **lease**: it expires `Idempotency:InProgressTimeout` (five minutes by default) after the request started, and it carries the request's owner token `LockId`, a fresh GUID.
+4. A response below 500 is buffered, stored (status, content type, `Location`, body) and then sent; storing it moves `ExpiresAt` to `Idempotency:TimeToLive` from then. A retry with the same key and body within that time gets the stored response with `Idempotency-Replayed: true`; with a different body, 422 `idempotency.key_reused`; while the first is still running, 409 `idempotency.in_progress`.
+5. A 5xx response or an exception deletes the row, so the client can retry. A key whose row has expired (a stored response past `TimeToLive`, or an in-progress row past its lease) runs again: the next request deletes the expired row, only while it is still expired, and inserts its own.
+6. Storing the response and deleting the row both match `LockId`, so a request that outlived its lease cannot overwrite or release the row of the request that took the key over (it logs a warning instead). If the insert fails on the primary key, the row is read back: when its `LockId` is the request's own (the insert committed, then a transient error made EF's retry insert again), the request carries on as the owner; otherwise it is answered from that row as in step 4.
 
-`platform.IdempotencyKeys`: `Scope nvarchar(100)`, `Key nvarchar(100)` (binary collation `Latin1_General_100_BIN2`), `RequestHash varbinary(32)`, `StatusCode`, `ContentType`, `ResponseBody`, `Location`, `CreatedAt`, `ExpiresAt`; primary key (`Scope`, `Key`). Migration: `InitialPlatform` (`Idempotency/Migrations/`). The `platform` schema also gets a `ready` health check.
+`platform.IdempotencyKeys`: `Scope nvarchar(100)`, `Key nvarchar(100)` (binary collation `Latin1_General_100_BIN2`), `RequestHash varbinary(32)`, `StatusCode`, `ContentType`, `ResponseBody`, `Location`, `CreatedAt`, `ExpiresAt`, `LockId uniqueidentifier NULL`; primary key (`Scope`, `Key`). Migrations: `InitialPlatform`, `AddIdempotencyLockId` (`Idempotency/Migrations/`). `LockId` is nullable so the column can be added to a populated table: completed rows written before it need no owner, and in-progress rows written before it (no owner token, expiry still `TimeToLive`) cannot be stored or released by the new code, so they answer 409 until that original expiry and are then reclaimed. The `platform` schema also gets a `ready` health check.
 
 Known limitations:
 - A replayed 4xx ProblemDetails keeps the **original** `traceId` in its body; the `X-Trace-Id` header is the new request's.
 - `anonymous` is one namespace shared by every unauthenticated caller, so two anonymous clients can collide on a key.
 - Stored response bodies may hold personal data. They live until `TimeToLive` expires, and expired rows are deleted only when the same key is reused; a purge job comes with Plan 5.
 - The request hash ignores the query string, and stored responses have no size limit.
-- In-progress rows carry no owner token: if a request fails in a way that neither stores nor deletes its row (for example the store itself fails, or the process dies), the key answers 409 until it expires.
+- A request that runs longer than `InProgressTimeout` loses its lease: a retry after that runs the endpoint a second time, and the first request's response is then neither stored nor replayed. Keep `InProgressTimeout` above the slowest idempotent request. Leases compare against the clock of whichever instance handles the retry, so clock skew between instances shortens or lengthens them.
+- If a request fails in a way that neither stores nor deletes its row (the store itself fails, or the process dies), the key answers 409 until the lease ends, then runs again.
 - The OpenAPI document does not yet describe the `Idempotency-Key` header or the 400/409/422 responses on idempotent endpoints.
 
 ## How to use from a module

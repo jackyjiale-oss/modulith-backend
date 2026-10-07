@@ -18,10 +18,20 @@ namespace TemplateName.Infrastructure.Common.Idempotency;
 /// with the same body (<c>Idempotency-Replayed: true</c>); a 5xx or an exception deletes the row so the client can retry.
 /// </summary>
 /// <remarks>
+/// <para>
+/// The in-progress row is a lease: it expires <see cref="IdempotencyOptions.InProgressTimeout"/> after the request started, and it
+/// carries the request's owner token (<see cref="IdempotencyRecord.LockId"/>). Once the lease has ended, the next request with the
+/// key reclaims the row (the same compare-and-delete that frees any expired row) and runs the endpoint, so a key whose request died
+/// is not blocked for the whole time to live. Storing the response (which extends the expiry to <see cref="IdempotencyOptions.TimeToLive"/>)
+/// and deleting the row both match the owner token, so a request that outlived its lease cannot overwrite or release the row of the
+/// request that took the key over.
+/// </para>
+/// <para>
 /// The response is buffered and stored before it is sent, so a client that has the response can retry straight away and gets the
-/// replay. If storing it fails, the response is still sent and the row stays in progress until it expires: retries get 409 rather
-/// than running the endpoint again. Clean-ups after the endpoint ran ignore <see cref="HttpContext.RequestAborted"/>, so an aborted
-/// request still stores or deletes its row.
+/// replay. If storing it fails, the response is still sent and the row stays in progress until its lease ends: retries get 409 until
+/// then, and run the endpoint again after it. Clean-ups after the endpoint ran ignore <see cref="HttpContext.RequestAborted"/>, so an
+/// aborted request still stores or deletes its row.
+/// </para>
 /// </remarks>
 internal sealed partial class IdempotencyMiddleware(
     RequestDelegate next,
@@ -88,22 +98,39 @@ internal sealed partial class IdempotencyMiddleware(
             return;
         }
 
+        var lockId = Guid.NewGuid();
         var inProgress = new IdempotencyRecord
         {
             Scope = scope,
             Key = key,
             RequestHash = requestHash,
             CreatedAt = now,
-            ExpiresAt = now + options.Value.TimeToLive,
+            ExpiresAt = now + options.Value.InProgressTimeout,
+            LockId = lockId,
         };
 
         if (!await TryInsertAsync(db, inProgress, cancellationToken))
         {
-            await WriteProblemAsync(context, StatusCodes.Status409Conflict, InProgressCode, InProgressDetail);
-            return;
+            // Either a concurrent request inserted first, or this request's own insert committed and a transient error made the
+            // retry strategy insert again. The owner token tells the two apart.
+            var winner = await db.IdempotencyKeys.AsNoTracking()
+                .SingleOrDefaultAsync(record => record.Scope == scope && record.Key == key, cancellationToken);
+
+            if (winner is null)
+            {
+                // The other request released the key in between; the client may retry.
+                await WriteProblemAsync(context, StatusCodes.Status409Conflict, InProgressCode, InProgressDetail);
+                return;
+            }
+
+            if (winner.LockId != lockId)
+            {
+                await RespondWithExistingAsync(context, winner, requestHash, cancellationToken);
+                return;
+            }
         }
 
-        await RunAndStoreAsync(context, db, scope, key);
+        await RunAndStoreAsync(context, db, scope, key, lockId);
     }
 
     private static async Task<byte[]> ComputeRequestHashAsync(HttpRequest request, CancellationToken cancellationToken)
@@ -135,7 +162,8 @@ internal sealed partial class IdempotencyMiddleware(
         }
         catch (DbUpdateException exception) when (exception.InnerException is SqlException { Number: SqlUniqueConstraintViolation or SqlUniqueIndexViolation })
         {
-            // A concurrent request with the same key inserted first.
+            // A row with the same key exists; the caller reads it to find out whose it is.
+            db.ChangeTracker.Clear();
             return false;
         }
     }
@@ -175,7 +203,7 @@ internal sealed partial class IdempotencyMiddleware(
         }
     }
 
-    private async Task RunAndStoreAsync(HttpContext context, PlatformDbContext db, string scope, string key)
+    private async Task RunAndStoreAsync(HttpContext context, PlatformDbContext db, string scope, string key, Guid lockId)
     {
         // Buffer the response: it must be stored before the client sees it. Headers stay on the response, and the response starts
         // (running OnStarting callbacks) only when the buffer is copied to the real body.
@@ -192,7 +220,7 @@ internal sealed partial class IdempotencyMiddleware(
         catch
         {
             context.Features.Set(originalBody);
-            await TryDeleteAsync(db, scope, key);
+            await TryDeleteAsync(db, scope, key, lockId);
             throw;
         }
 
@@ -201,34 +229,41 @@ internal sealed partial class IdempotencyMiddleware(
         var response = context.Response;
         if (response.StatusCode >= StatusCodes.Status500InternalServerError)
         {
-            await TryDeleteAsync(db, scope, key);
+            await TryDeleteAsync(db, scope, key, lockId);
         }
         else
         {
-            await TryStoreAsync(db, scope, key, response, buffer.ToArray());
+            await TryStoreAsync(db, scope, key, lockId, response, buffer.ToArray());
         }
 
         buffer.Position = 0;
         await buffer.CopyToAsync(response.Body, context.RequestAborted);
     }
 
-    private async Task TryStoreAsync(PlatformDbContext db, string scope, string key, HttpResponse response, byte[] body)
+    private async Task TryStoreAsync(PlatformDbContext db, string scope, string key, Guid lockId, HttpResponse response, byte[] body)
     {
         var statusCode = response.StatusCode;
         var contentType = response.ContentType;
         string? location = response.Headers.Location;
+        var expiresAt = timeProvider.GetUtcNow().UtcDateTime + options.Value.TimeToLive;
 
         try
         {
-            await db.IdempotencyKeys
-                .Where(record => record.Scope == scope && record.Key == key && record.StatusCode == null)
+            var stored = await db.IdempotencyKeys
+                .Where(record => record.Scope == scope && record.Key == key && record.StatusCode == null && record.LockId == lockId)
                 .ExecuteUpdateAsync(
                     setters => setters
                         .SetProperty(record => record.StatusCode, statusCode)
                         .SetProperty(record => record.ContentType, contentType)
                         .SetProperty(record => record.Location, location)
-                        .SetProperty(record => record.ResponseBody, body),
+                        .SetProperty(record => record.ResponseBody, body)
+                        .SetProperty(record => record.ExpiresAt, expiresAt),
                     CancellationToken.None);
+
+            if (stored == 0)
+            {
+                LogLeaseLost(logger, key);
+            }
         }
         catch (Exception exception)
         {
@@ -236,13 +271,18 @@ internal sealed partial class IdempotencyMiddleware(
         }
     }
 
-    private async Task TryDeleteAsync(PlatformDbContext db, string scope, string key)
+    private async Task TryDeleteAsync(PlatformDbContext db, string scope, string key, Guid lockId)
     {
         try
         {
-            await db.IdempotencyKeys
-                .Where(record => record.Scope == scope && record.Key == key && record.StatusCode == null)
+            var deleted = await db.IdempotencyKeys
+                .Where(record => record.Scope == scope && record.Key == key && record.StatusCode == null && record.LockId == lockId)
                 .ExecuteDeleteAsync(CancellationToken.None);
+
+            if (deleted == 0)
+            {
+                LogLeaseLost(logger, key);
+            }
         }
         catch (Exception exception)
         {
@@ -265,9 +305,12 @@ internal sealed partial class IdempotencyMiddleware(
         });
     }
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Could not store the response for idempotency key {IdempotencyKey}; it stays in progress until it expires")]
+    [LoggerMessage(Level = LogLevel.Error, Message = "Could not store the response for idempotency key {IdempotencyKey}; it stays in progress until its lease ends")]
     private static partial void LogStoreFailed(ILogger logger, Exception exception, string idempotencyKey);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Could not release idempotency key {IdempotencyKey}; it stays in progress until it expires")]
+    [LoggerMessage(Level = LogLevel.Error, Message = "Could not release idempotency key {IdempotencyKey}; it stays in progress until its lease ends")]
     private static partial void LogDeleteFailed(ILogger logger, Exception exception, string idempotencyKey);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Idempotency key {IdempotencyKey} was taken over by another request after this request's lease ended; its outcome was not recorded")]
+    private static partial void LogLeaseLost(ILogger logger, string idempotencyKey);
 }

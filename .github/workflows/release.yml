@@ -49,9 +49,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Nothing is pushed: the notices are uploaded with gh and GH_TOKEN.
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@v6
         with:

@@ -49,6 +49,8 @@ Required status checks must already exist (have run at least once), or GitHub bl
 | 2 | after plan Task 17 is merged | `… --checks build-test,template-smoke,commit-lint,licenses` | licence check |
 | 3 | when a second maintainer joins | `… --checks … --approvals 1`, plus a `.github/CODEOWNERS` file | human review |
 
+The check names are job names: `build-test`, `template-smoke` and `licenses` run in `.github/workflows/ci.yml`; `commit-lint` (the PR-title check) runs in `.github/workflows/pr-title.yml`, so that editing a PR title re-runs only it.
+
 `enforce_admins` stays **off** so the owner can repair a broken `main` in an emergency. Use it only for that.
 
 ## 4. Day-to-day workflow

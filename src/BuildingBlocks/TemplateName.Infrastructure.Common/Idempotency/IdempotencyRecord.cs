@@ -30,5 +30,17 @@ internal sealed class IdempotencyRecord
 
     public DateTime CreatedAt { get; init; }
 
+    /// <summary>
+    /// While in progress, when the lease of the request that inserted the row ends (<c>InProgressTimeout</c> after it started); once
+    /// the response is stored, when the stored response expires (<c>TimeToLive</c> after it was stored). An expired row is reclaimed
+    /// by the next request with the key.
+    /// </summary>
     public DateTime ExpiresAt { get; init; }
+
+    /// <summary>
+    /// The owner token of the request that inserted the row: only that request may store its response or release the key, so a
+    /// request that outlived its lease cannot touch the row of the request that took the key over. Null on rows written before
+    /// the token existed.
+    /// </summary>
+    public Guid? LockId { get; init; }
 }

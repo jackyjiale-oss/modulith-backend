@@ -26,7 +26,7 @@ public sealed partial class EndpointDocumentationTests(IntegrationTestWebAppFact
 
         foreach (var module in endpoints.GroupBy(endpoint => endpoint.Module, StringComparer.OrdinalIgnoreCase))
         {
-            var path = Path.Combine(RepositoryPaths.Root, "docs", "modules", $"{module.Key.ToLowerInvariant()}.md");
+            var path = DocumentPaths.ModuleDocument(module.Key);
             if (!File.Exists(path))
             {
                 failures.Add($"{path} is missing; it must document {string.Join(", ", module.Select(endpoint => endpoint.Endpoint))}");

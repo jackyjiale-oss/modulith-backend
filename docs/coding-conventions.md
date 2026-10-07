@@ -148,7 +148,7 @@ Every type plays one of these roles. Its name follows the role's pattern, and it
 |---|---|---|
 | Conventional root files | UPPERCASE | `README.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `CLAUDE.md`, `LICENSE`, `THIRD-PARTY-NOTICES.md` |
 | Documentation | kebab-case | `docs/coding-conventions.md`, `docs/architecture/overview.md` |
-| Module / building-block / service docs | lowercase name of the unit; templates start with `_` | `docs/modules/sample.md`, `docs/modules/_template.md`, `docs/building-blocks/web-common.md`, `docs/services/api.md` |
+| Module / building-block / service docs | kebab-case name of the unit (module `LeaveManagement` → `leave-management.md`, the module's route segment); templates start with `_` | `docs/modules/sample.md`, `docs/modules/_template.md`, `docs/building-blocks/web-common.md`, `docs/services/api.md` |
 | Generated-project overrides | same file name under `build/template-content/` | `build/template-content/README.md` |
 | ADR | `NNNN-kebab-title.md` | `docs/adr/0007-per-module-outbox.md` |
 | Plans | `YYYY-MM-DD-kebab-title.md` | `2026-10-06-foundation-and-core-baseline.md` |
@@ -199,5 +199,5 @@ These are part of public contracts or operations. Changing one is a breaking cha
 | `.editorconfig` naming rules (IDE1006) + code style (IDE0130, IDE0161, `var`) | Casing, `I`/`T` prefixes, `_camelCase` fields, `Async` suffix on `async` methods, namespace = folder, file-scoped namespaces | `.editorconfig` (root) and `tests/.editorconfig` (test-method overrides) |
 | Build (`EnforceCodeStyleInBuild` + `TreatWarningsAsErrors` in Release) | Turns the above into build errors in CI | `Directory.Build.props` |
 | Architecture tests | Role suffixes (Command, Query, Handler, Validator, DomainEvent, Repository, DbContext, Configuration), forbidden suffixes (G5), `Async` on Task-returning methods, `CancellationToken cancellationToken` as the last parameter, sealed/internal rules, module layering, translation completeness | `tests/TemplateName.ArchitectureTests/` |
-| Commit-message hook + CI PR-title check | Conventional Commits format, allowed types and scopes, length | `.githooks/commit-msg`, `build/scripts/check-commit-msg.sh`, `.github/workflows/ci.yml` |
+| Commit-message hook + CI PR-title check | Conventional Commits format, allowed types and scopes, length | `.githooks/commit-msg`, `build/scripts/check-commit-msg.sh`, `.github/workflows/pr-title.yml` |
 | Code review | Everything marked *review*: meaning, domain language, abbreviations | `.github/pull_request_template.md` |

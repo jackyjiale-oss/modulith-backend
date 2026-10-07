@@ -14,6 +14,7 @@ cp .env.example .env                 # then set your own SQL_SA_PASSWORD
 docker compose up -d                 # SQL Server and the Aspire dashboard
 git init                             # skip if this folder is already a repository
 git config core.hooksPath .githooks  # commit-message check (CONTRIBUTING.md)
+chmod +x .githooks/commit-msg        # the hook must be executable (harmless on Windows)
 dotnet user-secrets set "ConnectionStrings:Database" \
   "Server=localhost,1433;Database=TemplateName;User Id=sa;Password=<from .env>;TrustServerCertificate=True" \
   --project src/Host/TemplateName.Api

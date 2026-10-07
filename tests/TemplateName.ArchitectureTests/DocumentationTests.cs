@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.Text;
 
 namespace TemplateName.ArchitectureTests;
 
@@ -22,7 +21,7 @@ public sealed class DocumentationTests
         "Testing",
     ];
 
-    private static string DocsDirectory => Path.Combine(RepositoryPaths.Root, "docs");
+    private static string DocsDirectory => DocumentPaths.DocsDirectory;
 
     [Fact]
     public void Every_module_has_a_document()
@@ -78,12 +77,24 @@ public sealed class DocumentationTests
         failures.ShouldBeEmpty(string.Join(Environment.NewLine, failures));
     }
 
+    [Theory]
+    [InlineData("Sample", "sample", "sample.md")]
+    [InlineData("LeaveManagement", "leave-management", "leave-management.md")]
+    public void Module_document_name_is_the_kebab_case_module_name(string moduleName, string routeSegment, string fileName)
+    {
+        // DocumentationTests derive the path from the assembly's module name, EndpointDocumentationTests from the route segment.
+        var expected = Path.Combine(DocsDirectory, "modules", fileName);
+
+        DocumentPaths.ModuleDocument(moduleName).ShouldBe(expected);
+        DocumentPaths.ModuleDocument(routeSegment).ShouldBe(expected);
+    }
+
     [Fact]
     public void Every_building_block_has_a_document()
     {
         var root = RootNamespace();
         var expected = Assemblies.BuildingBlocks
-            .Select(assembly => KebabCase(assembly.GetName().Name![(root.Length + 1)..]))
+            .Select(assembly => DocumentPaths.KebabCase(assembly.GetName().Name![(root.Length + 1)..]))
             .ToList();
 
         expected.ShouldBe(["shared-kernel", "application-common", "infrastructure-common", "web-common"], ignoreOrder: true);
@@ -128,12 +139,11 @@ public sealed class DocumentationTests
         File.ReadAllText(Path.Combine(templateContent, "CLAUDE.md")).ShouldContain("TemplateName");
     }
 
-    /// <summary><c>docs/modules/{module}.md</c>, where the module name is the assembly name after <c>.Modules.</c>, in lower case.</summary>
+    /// <summary><c>docs/modules/{module}.md</c>, where the module name is the assembly name after <c>.Modules.</c>, in kebab case.</summary>
     private static string ModuleDocumentPath(Assembly module)
     {
         var name = module.GetName().Name!;
-        var moduleName = name[(name.IndexOf(ModuleNameSeparator, StringComparison.Ordinal) + ModuleNameSeparator.Length)..];
-        return Path.Combine(DocsDirectory, "modules", $"{moduleName.ToLowerInvariant()}.md");
+        return DocumentPaths.ModuleDocument(name[(name.IndexOf(ModuleNameSeparator, StringComparison.Ordinal) + ModuleNameSeparator.Length)..]);
     }
 
     /// <summary>The project's root namespace (the placeholder <c>dotnet new</c> replaces), taken from the host assembly <c>{Root}.Api</c>.</summary>
@@ -141,29 +151,6 @@ public sealed class DocumentationTests
     {
         var api = Assemblies.Api.GetName().Name!;
         return api[..api.LastIndexOf('.')];
-    }
-
-    /// <summary><c>SharedKernel</c> → <c>shared-kernel</c>, <c>Application.Common</c> → <c>application-common</c>.</summary>
-    private static string KebabCase(string name)
-    {
-        var builder = new StringBuilder();
-        foreach (var character in name)
-        {
-            if (character == '.')
-            {
-                builder.Append('-');
-            }
-            else if (char.IsUpper(character) && builder.Length > 0 && builder[^1] != '-')
-            {
-                builder.Append('-').Append(char.ToLowerInvariant(character));
-            }
-            else
-            {
-                builder.Append(char.ToLowerInvariant(character));
-            }
-        }
-
-        return builder.ToString();
     }
 
     /// <summary>The text of every level-2 heading (<c>## …</c>) outside fenced code blocks, in document order.</summary>

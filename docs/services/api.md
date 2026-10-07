@@ -76,12 +76,17 @@ Shared by every module's dispatcher (ADR 0007).
 | Key | Default | Validation (on start) | Meaning |
 |---|---|---|---|
 | `TimeToLive` | `1.00:00:00` (one day) | `00:01:00` to `30.00:00:00` | How long a key and its stored response are kept; a reused expired key runs again. |
+| `InProgressTimeout` | `00:05:00` (five minutes) | `00:00:05` to `01:00:00`, and not longer than `TimeToLive` | How long a key stays leased to the request running with it. |
+
+The first request with a key holds it as a lease for `InProgressTimeout`; duplicates get 409 meanwhile. Storing the response replaces the lease with `TimeToLive`. If the request dies or its response cannot be stored, the next request with the key after the lease ends runs the endpoint again instead of getting 409 for the whole time to live, so keep `InProgressTimeout` longer than the slowest idempotent request: one that outlives its lease can run twice. Details: [infrastructure-common](../building-blocks/infrastructure-common.md#idempotency).
 
 ### `Cors`
 
 | Key | Default | Validation (on start) | Meaning |
 |---|---|---|---|
 | `AllowedOrigins` | `[]` (no cross-origin caller) | `*` is rejected | Origins allowed to call with credentials, e.g. `https://app.example.com`. Any header and method are allowed for them. |
+
+The policy exposes `X-Trace-Id`, `Location`, `Retry-After` and `Idempotency-Replayed` (`Access-Control-Expose-Headers`), so browser code on an allowed origin can read them.
 
 ### `RateLimiting`
 

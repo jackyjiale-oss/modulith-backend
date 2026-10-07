@@ -8,7 +8,7 @@ How changes get from your machine to `main`: branches, commit messages and pull 
 git config core.hooksPath .githooks
 ```
 
-This turns on the `commit-msg` hook, which rejects commit messages that break the rules below before they're created. CI runs the same check (`build/scripts/check-commit-msg.sh`) on every pull-request title.
+This turns on the `commit-msg` hook, which rejects commit messages that break the rules below before they're created. CI runs the same check (`build/scripts/check-commit-msg.sh`) on every pull-request title: the `commit-lint` job in `.github/workflows/pr-title.yml`, which re-runs when the title is edited, without re-running the main CI pipeline.
 
 ---
 
