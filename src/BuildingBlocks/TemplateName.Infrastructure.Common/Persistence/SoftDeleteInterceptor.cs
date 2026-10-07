@@ -9,6 +9,10 @@ namespace TemplateName.Infrastructure.Common.Persistence;
 /// Turns the deletion of an <see cref="ISoftDeletable"/> entity into an update that sets <c>IsDeleted</c>, <c>DeletedAt</c> and
 /// <c>DeletedBy</c>. Only those three columns are written.
 /// </summary>
+/// <remarks>
+/// NOTE: only the entity itself is converted. Owned or cascade-deleted dependents that EF marks Deleted alongside it are still
+/// hard-deleted unless they are <see cref="ISoftDeletable"/> themselves; owned types cannot carry the soft-delete query filter.
+/// </remarks>
 internal sealed class SoftDeleteInterceptor(ICurrentUser currentUser, TimeProvider timeProvider) : SaveChangesInterceptor
 {
     public override InterceptionResult<int> SavingChanges(DbContextEventData eventData, InterceptionResult<int> result)

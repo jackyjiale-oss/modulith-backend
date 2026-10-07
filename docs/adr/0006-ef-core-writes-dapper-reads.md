@@ -27,7 +27,9 @@ Reads:
 - **Dapper bypasses EF query filters.** Every Dapper query on a soft-deletable table filters `IsDeleted = 0` (and `TenantId` once tenancy exists) itself, and every Dapper query handler has an integration test proving that soft-deleted rows are invisible.
 
 Migrations:
-- Production and test environments deploy migrations as EF migration bundles (`efbundle`) in CD and never migrate on application start. `Database:ApplyMigrationsOnStartup` is `true` only in `appsettings.Development.json`, where the host calls `MigrateModuleDatabasesAsync` to migrate every module context in registration order.
+- `MigrateModuleDatabasesAsync` migrates every module context in registration order. It is the single code path for development, tests and production; there are no EF migration bundles (blueprint review, Section 4).
+- Production migrates through a `migrate` command-line mode of the API (`dotnet TemplateName.Api.dll migrate`, delivered in Plan 6), which calls `MigrateModuleDatabasesAsync` and can use a DDL-privileged connection string.
+- Applying migrations on application start is Development only: `Database:ApplyMigrationsOnStartup` is `true` only in `appsettings.Development.json`.
 
 ## Consequences
 - Positive: aggregates get audit, soft delete and (later) the outbox in one atomic save; reads are explicit SQL that is easy to tune and to page by keyset; each module's schema and migrations stay independent.

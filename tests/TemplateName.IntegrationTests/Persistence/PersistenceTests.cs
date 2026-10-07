@@ -1,6 +1,9 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -68,16 +71,23 @@ public sealed class PersistenceTests(IntegrationTestWebAppFactory factory) : Int
         deleted.IsDeleted.ShouldBeTrue();
         deleted.DeletedAt.ShouldBe(Factory.Time.GetUtcNow().UtcDateTime);
         deleted.DeletedBy.ShouldBe(UserA);
+
+        // Audit stamping runs before the soft-delete conversion, so a delete is not also an update.
+        deleted.UpdatedAt.ShouldBeNull();
+        deleted.UpdatedBy.ShouldBeNull();
     }
 
     [Fact]
     public async Task DateTime_values_round_trip_as_utc()
     {
+        Factory.Time.Advance(TimeSpan.FromMilliseconds(123));
         var aggregate = await SaveNewAggregateAsync("a");
 
         await using var read = NewTestDbContext();
         var saved = await read.Set<TestAggregate>().SingleAsync(x => x.Id == aggregate.Id, Ct);
 
+        // datetime2(3) keeps the milliseconds.
+        saved.CreatedAt.ShouldBe(new DateTime(2026, 1, 1, 0, 0, 0, 123, DateTimeKind.Utc));
         saved.CreatedAt.Kind.ShouldBe(DateTimeKind.Utc);
         JsonSerializer.Serialize(saved.CreatedAt).ShouldEndWith("Z\"");
     }
@@ -90,6 +100,22 @@ public sealed class PersistenceTests(IntegrationTestWebAppFactory factory) : Int
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var registrations = Factory.Services.GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations;
         registrations.ShouldContain(registration => registration.Name == TestDbContext.Schema && registration.Tags.Contains("ready"));
+    }
+
+    [Fact]
+    public async Task Concurrency_conflict_returns_409_problem_details_with_trace_id()
+    {
+        await using var conflicting = Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(
+            services => services.AddSingleton<IStartupFilter, ConflictingEndpointStartupFilter>()));
+        using var client = conflicting.CreateClient();
+
+        using var response = await client.GetAsync("/conflict", Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        body.GetProperty("code").GetString().ShouldBe("concurrency.conflict");
+        body.GetProperty("traceId").GetString().ShouldBe(response.Headers.GetValues("X-Trace-Id").Single());
     }
 
     [Fact]
@@ -147,5 +173,15 @@ public sealed class PersistenceTests(IntegrationTestWebAppFactory factory) : Int
                 pending.Enqueue(current.InnerException);
             }
         }
+    }
+
+    /// <summary>Adds a terminal <c>/conflict</c> branch inside the production pipeline that fails the way a stale save does.</summary>
+    private sealed class ConflictingEndpointStartupFilter : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            next(app);
+            app.Map("/conflict", branch => branch.Run(_ => throw new DbUpdateConcurrencyException("stale")));
+        };
     }
 }

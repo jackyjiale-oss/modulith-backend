@@ -6,8 +6,8 @@ public sealed class DatabaseOptions
     internal const string SectionName = "Database";
 
     /// <summary>
-    /// Migrates every module database when the host starts. Meant for Development only; other environments deploy migrations as EF
-    /// migration bundles (ADR 0006).
+    /// Migrates every module database when the host starts. Set it in Development only; production migrates through the API's
+    /// <c>migrate</c> mode (ADR 0006).
     /// </summary>
     public bool ApplyMigrationsOnStartup { get; set; }
 }

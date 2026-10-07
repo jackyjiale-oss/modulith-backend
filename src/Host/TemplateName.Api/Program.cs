@@ -32,10 +32,10 @@ builder.Services.AddApplicationDecorators();
 
 var app = builder.Build();
 
-// Development only (Database:ApplyMigrationsOnStartup); other environments deploy EF migration bundles (ADR 0006).
+// Migrate on start only when Database:ApplyMigrationsOnStartup is set (Development); production uses the API's migrate mode (ADR 0006).
 if (app.Services.GetRequiredService<IOptions<DatabaseOptions>>().Value.ApplyMigrationsOnStartup)
 {
-    await app.Services.MigrateModuleDatabasesAsync();
+    await app.Services.MigrateModuleDatabasesAsync(app.Lifetime.ApplicationStopping);
 }
 
 // Pipeline order matters; later tasks insert at the marked slots.
@@ -62,8 +62,8 @@ app.UseRequestLogging();
 app.UseRouting();
 // 9. UseCors
 app.UseCors();
+// UseAuthentication/UseAuthorization (Auth plan) go here, between slots 9 and 10, so the limiter's user:{sub} partition sees the signed-in user.
 // 10. UseRateLimiter
-// UseAuthentication/UseAuthorization (Auth plan) go between slots 9 and 10, so the limiter's user:{sub} partition sees the signed-in user.
 app.UseRateLimiter();
 // 11. UseIdempotency (Task 12)
 // 12. endpoints (health endpoints are exempt from rate limiting)
