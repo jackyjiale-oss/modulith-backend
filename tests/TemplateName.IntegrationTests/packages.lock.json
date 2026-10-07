@@ -965,6 +965,7 @@
           "Scalar.AspNetCore": "[2.17.14, )",
           "TemplateName.Application.Common": "[1.0.0, )",
           "TemplateName.Infrastructure.Common": "[1.0.0, )",
+          "TemplateName.Modules.Sample": "[1.0.0, )",
           "TemplateName.SharedKernel": "[1.0.0, )",
           "TemplateName.Web.Common": "[1.0.0, )"
         }
@@ -983,10 +984,20 @@
       "templatename.infrastructure.common": {
         "type": "Project",
         "dependencies": {
+          "Dapper": "[2.1.89, )",
           "Microsoft.EntityFrameworkCore.SqlServer": "[10.0.12, )",
           "Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore": "[10.0.12, )",
           "TemplateName.Application.Common": "[1.0.0, )",
           "TemplateName.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "templatename.modules.sample": {
+        "type": "Project",
+        "dependencies": {
+          "TemplateName.Application.Common": "[1.0.0, )",
+          "TemplateName.Infrastructure.Common": "[1.0.0, )",
+          "TemplateName.SharedKernel": "[1.0.0, )",
+          "TemplateName.Web.Common": "[1.0.0, )"
         }
       },
       "templatename.sharedkernel": {
@@ -1008,6 +1019,12 @@
           "TemplateName.Application.Common": "[1.0.0, )",
           "TemplateName.SharedKernel": "[1.0.0, )"
         }
+      },
+      "Dapper": {
+        "type": "CentralTransitive",
+        "requested": "[2.1.89, )",
+        "resolved": "2.1.89",
+        "contentHash": "1VjFE664wnxvuhlgP8kS4PeFFF4jqD3VkbIHW6Zlc52zuibgcz5ICnIHcQXlTp6pURpPNGLV0ZpNe5x9KePJnA=="
       },
       "FluentValidation": {
         "type": "CentralTransitive",

@@ -6,6 +6,7 @@ using Scalar.AspNetCore;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common;
 using TemplateName.Infrastructure.Common.Persistence;
+using TemplateName.Modules.Sample;
 using TemplateName.Web.Common;
 using TemplateName.Web.Common.Observability;
 using TemplateName.Web.Common.Security;
@@ -22,7 +23,8 @@ builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.C
 builder.Services.AddOpenApi("v1");
 builder.Services.AddHealthChecks();
 builder.Services.AddHttpSecurity(builder.Configuration);
-// Module registrations (Task 11)
+// Module registrations
+builder.Services.AddSampleModule();
 
 // Kestrel binds only its endpoints from the "Kestrel" section; bind Limits (e.g. MaxRequestBodySize) lazily so test overrides apply.
 builder.Services.AddOptions<KestrelServerOptions>().Configure<IConfiguration>((options, configuration) => configuration.GetSection("Kestrel").Bind(options));
@@ -76,8 +78,9 @@ if (!app.Environment.IsProduction())
     app.MapScalarApiReference();
 }
 
-// Module endpoints map on `api` (Task 11).
+// Module endpoints map on `api`.
 var api = app.MapGroup("/api/v1");
+api.MapSampleEndpoints();
 
 app.Run();
 
