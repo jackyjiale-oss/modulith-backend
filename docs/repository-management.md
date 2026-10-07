@@ -54,8 +54,8 @@ Required status checks must already exist (have run at least once), or GitHub bl
 ## 4. Day-to-day workflow
 
 - Every change goes through a branch and a PR ([CONTRIBUTING.md](../CONTRIBUTING.md)). Plan execution works **one task = one branch = one PR**. Branches are named after the task, e.g. `feature/task-01-repository-foundation`. The PR title is the task's commit header, and it's squash-merged when CI is green.
-- Releases: release-please keeps a `chore(release): release x.y.z` PR open. Merging it tags `vx.y.z`, writes `CHANGELOG.md` and creates the GitHub Release (plan Task 17).
-- Dependabot PRs: let CI run, check the changelog for breaking changes, and squash-merge with the Dependabot title (`chore(deps): …`).
+- Releases: release-please keeps a `chore(release): release x.y.z` PR open. Merging it tags `vx.y.z`, writes `CHANGELOG.md` and creates the GitHub Release (plan Task 17). It runs with the repository secret `RELEASE_PLEASE_TOKEN`, a fine-grained PAT for this repo only with Contents + Pull requests read/write: PRs opened with the default `GITHUB_TOKEN` do not trigger CI, so the release PR could never get its required checks.
+- Dependabot PRs: titles are `chore(deps): bump …` (NuGet) and `ci(deps): bump …` (actions), configured in `.github/dependabot.yml`. The `commit-lint` job skips Dependabot because long package names exceed 72 characters. Let CI run, check the changelog for breaking changes, and squash-merge.
 
 ## 5. Later (Plan 6)
 
