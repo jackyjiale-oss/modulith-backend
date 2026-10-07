@@ -152,6 +152,8 @@ _TeamCity*
 
 # Coverlet is a free, cross platform Code Coverage Tool
 coverage*.json
+# but not the coverage settings that CI and `dotnet test` use
+!coverage.testconfig.json
 coverage*.xml
 coverage*.info
 

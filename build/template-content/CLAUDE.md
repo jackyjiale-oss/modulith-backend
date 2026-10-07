@@ -14,7 +14,8 @@ dotnet format --verify-no-changes       # style check, same as CI
 dotnet ef migrations add {Verb}{What} \
   --project src/Modules/{Module}/TemplateName.Modules.{Module} \
   --startup-project src/Host/TemplateName.Api \
-  --context {Module}DbContext
+  --context {Module}DbContext \
+  --output-dir Infrastructure/Persistence/Migrations
 ```
 
 ## Where things go

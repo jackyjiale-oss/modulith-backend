@@ -175,7 +175,7 @@ public sealed class NamingConventionTests
     /// <summary>True for overrides and interface implementations of non-TemplateName types, whose names the framework fixes.</summary>
     private static bool IsFixedByExternalContract(MethodInfo method)
     {
-        if (!IsTemplateName(method.GetBaseDefinition().DeclaringType!))
+        if (!IsSolutionType(method.GetBaseDefinition().DeclaringType!))
         {
             return true;
         }
@@ -184,11 +184,11 @@ public sealed class NamingConventionTests
 
         return !declaringType.IsInterface
             && declaringType.GetInterfaces()
-                .Where(contract => !IsTemplateName(contract))
+                .Where(contract => !IsSolutionType(contract))
                 .Any(contract => declaringType.GetInterfaceMap(contract).TargetMethods.Contains(method));
     }
 
-    private static bool IsTemplateName(Type type) => type.Assembly.GetName().Name!.StartsWith("TemplateName", StringComparison.Ordinal);
+    private static bool IsSolutionType(Type type) => type.Assembly.GetName().Name!.StartsWith("TemplateName", StringComparison.Ordinal);
 
     private static string Describe(MethodBase method) => $"{method.DeclaringType!.FullName}.{method.Name}";
 }
