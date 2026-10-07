@@ -15,6 +15,9 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             {
                 ["RateLimiting:GlobalPermitLimit"] = "100000",
                 ["Outbox:Enabled"] = "false",
+
+                // Keep test output to problems: no per-request or host-lifetime lines.
+                ["Serilog:MinimumLevel:Default"] = "Warning",
             }));
     }
 

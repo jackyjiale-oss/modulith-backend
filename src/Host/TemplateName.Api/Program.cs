@@ -4,11 +4,12 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Scalar.AspNetCore;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Web.Common;
+using TemplateName.Web.Common.Observability;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Service order matters; later tasks insert at the marked slots.
-// AddObservability (Task 6)
+builder.AddObservability();
 // AddInfrastructureCommon (Task 8) - must come BEFORE AddWebCommon so its exception handler runs first
 builder.Services.AddWebCommon();
 // AddApiLocalization (Task 15)
@@ -38,7 +39,8 @@ app.UseTraceIdHeader();
 // 5. UseSecurityHeaders
 app.UseSecurityHeaders();
 // 6. HSTS + HTTPS redirection, non-Development (Task 7)
-// 7. UseRequestLogging (Task 6)
+// 7. UseRequestLogging
+app.UseRequestLogging();
 // 8. UseRouting
 app.UseRouting();
 // 9. UseCors (Task 7)
