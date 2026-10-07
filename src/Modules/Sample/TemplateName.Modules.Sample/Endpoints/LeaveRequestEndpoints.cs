@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using TemplateName.Application.Common.Messaging;
+using TemplateName.Infrastructure.Common.Idempotency;
 using TemplateName.Modules.Sample.Application.LeaveRequests.Approve;
 using TemplateName.Modules.Sample.Application.LeaveRequests.GetById;
 using TemplateName.Modules.Sample.Application.LeaveRequests.Submit;
@@ -20,6 +21,7 @@ internal static class LeaveRequestEndpoints
 
         group.MapPost("/", SubmitAsync)
             .WithName("SubmitLeaveRequest")
+            .WithIdempotency()
             .Produces<SubmitLeaveRequestResponse>(StatusCodes.Status201Created)
             .ProducesValidationProblem();
 

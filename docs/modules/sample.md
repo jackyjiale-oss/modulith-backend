@@ -22,9 +22,11 @@ All endpoints carry the OpenAPI tag `Sample`.
 
 | Method | Route | Purpose | Success | Errors |
 |---|---|---|---|---|
-| POST | `POST /api/v1/sample/leave-requests` | Submit a leave request. Body `{ "employeeId", "startDate", "endDate", "reason" }` (dates `yyyy-MM-dd`). | `201 Created`, `Location: /api/v1/sample/leave-requests/{id}`, body `{ "id": "<guid>" }` | 400 `validation.failed` (with `errors`), 400 `request.malformed` |
+| POST | `POST /api/v1/sample/leave-requests` | Submit a leave request. Body `{ "employeeId", "startDate", "endDate", "reason" }` (dates `yyyy-MM-dd`). Accepts an optional `Idempotency-Key` header. | `201 Created`, `Location: /api/v1/sample/leave-requests/{id}`, body `{ "id": "<guid>" }` | 400 `validation.failed` (with `errors`), 400 `request.malformed`, 400 `idempotency.invalid_key`, 409 `idempotency.in_progress`, 422 `idempotency.key_reused` |
 | GET | `GET /api/v1/sample/leave-requests/{id:guid}` | Read one leave request. | `200 OK`, `LeaveRequestResponse` | 404 `leave.not_found` |
 | POST | `POST /api/v1/sample/leave-requests/{id:guid}/approve` | Approve a pending request. Body `{ "approverId" }`. | `204 No Content` | 400 `request.malformed`, 404 `leave.not_found`, 409 `leave.not_pending`, 409 `concurrency.conflict` |
+
+Submit is idempotent when the client sends `Idempotency-Key` (1 to 100 characters, scoped to the signed-in user or `anonymous`): a retry with the same key and body within `Idempotency:TimeToLive` (one day by default) gets the first response again, with `Idempotency-Replayed: true`, instead of creating a second request. The same key with a different body gets 422, and a retry while the first request is still running gets 409. A 5xx response is not stored, so the client can retry it.
 
 `LeaveRequestResponse` is `{ id, employeeId, startDate, endDate, reason, status, approverId, createdAt }`; `status` is the enum name (`"Pending"`), `createdAt` is UTC with a trailing `Z`. Every error is RFC 9457 ProblemDetails with `code` and `traceId`.
 
@@ -127,6 +129,7 @@ dotnet ef migrations add {Verb}{What} \
 
 - Unit tests, `tests/TemplateName.UnitTests/Sample/`: `LeaveRequestTests` (aggregate rules), `SubmitLeaveRequestCommandValidatorTests`, `SubmitLeaveRequestCommandHandlerTests`, `ApproveLeaveRequestCommandHandlerTests`, `LeaveRequestSubmittedDomainEventHandlerTests`.
 - Integration tests, `tests/TemplateName.IntegrationTests/Sample/`: `LeaveRequestEndpointTests` runs the real API against SQL Server: submit, read, approve twice, validation and malformed-body errors, the 500 contract, soft-deleted rows hidden from the Dapper query, and the submitted event dispatched through the outbox (recorded by `RecordingLeaveSubmittedHandler`).
+- Integration tests, `tests/TemplateName.IntegrationTests/Idempotency/`: `IdempotencyTests` drives `Idempotency-Key` through the submit endpoint: replay, key reuse with another body, invalid and expired keys, a key still in progress, concurrent duplicates running once, and 5xx responses not being stored.
 
 ## Changelog
 

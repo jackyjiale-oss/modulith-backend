@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Scalar.AspNetCore;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common;
+using TemplateName.Infrastructure.Common.Idempotency;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Sample;
 using TemplateName.Web.Common;
@@ -67,7 +68,8 @@ app.UseCors();
 // UseAuthentication/UseAuthorization (Auth plan) go here, between slots 9 and 10, so the limiter's user:{sub} partition sees the signed-in user.
 // 10. UseRateLimiter
 app.UseRateLimiter();
-// 11. UseIdempotency (Task 12)
+// 11. UseIdempotency - after UseRouting, because it acts only on endpoints marked WithIdempotency()
+app.UseIdempotency();
 // 12. endpoints (health endpoints are exempt from rate limiting)
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false }).DisableRateLimiting();
 app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = registration => registration.Tags.Contains("ready") }).DisableRateLimiting();
