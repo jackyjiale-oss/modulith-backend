@@ -7,6 +7,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\BuildingBlocks\TemplateName.SharedKernel\TemplateName.SharedKernel.csproj" />
     <ProjectReference Include="..\..\BuildingBlocks\TemplateName.Application.Common\TemplateName.Application.Common.csproj" />
+    <ProjectReference Include="..\..\BuildingBlocks\TemplateName.Infrastructure.Common\TemplateName.Infrastructure.Common.csproj" />
     <ProjectReference Include="..\..\BuildingBlocks\TemplateName.Web.Common\TemplateName.Web.Common.csproj" />
   </ItemGroup>
 

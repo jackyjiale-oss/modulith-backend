@@ -1,0 +1,30 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using TemplateName.Application.Common.Data;
+using TemplateName.Infrastructure.Common.Persistence;
+
+namespace TemplateName.Infrastructure.Common;
+
+public static class InfrastructureServiceCollectionExtensions
+{
+    /// <summary>
+    /// Registers the system clock, the <c>ConnectionStrings</c> (validated on start) and <c>Database</c> options, the read-side connection
+    /// factory, the EF Core save interceptors and the concurrency-conflict exception handler. Call it before <c>AddWebCommon</c>, so the
+    /// concurrency handler runs before the global one, and before any <c>AddModuleDbContext</c>.
+    /// </summary>
+    public static IServiceCollection AddInfrastructureCommon(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.TryAddSingleton(TimeProvider.System);
+
+        services.AddOptions<ConnectionStringsOptions>().Bind(configuration.GetSection(ConnectionStringsOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<DatabaseOptions>().Bind(configuration.GetSection(DatabaseOptions.SectionName));
+
+        services.AddSingleton<IDbConnectionFactory, SqlConnectionFactory>();
+        services.AddScoped<AuditableEntityInterceptor>();
+        services.AddScoped<SoftDeleteInterceptor>();
+        services.AddExceptionHandler<ConcurrencyExceptionHandler>();
+
+        return services;
+    }
+}

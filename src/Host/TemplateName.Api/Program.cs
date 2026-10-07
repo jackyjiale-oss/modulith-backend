@@ -1,8 +1,11 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.Options;
 using Scalar.AspNetCore;
 using TemplateName.Application.Common.Messaging;
+using TemplateName.Infrastructure.Common;
+using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Web.Common;
 using TemplateName.Web.Common.Observability;
 using TemplateName.Web.Common.Security;
@@ -11,7 +14,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Service order matters; later tasks insert at the marked slots.
 builder.AddObservability();
-// AddInfrastructureCommon (Task 8) - must come BEFORE AddWebCommon so its exception handler runs first
+// Before AddWebCommon, so the concurrency exception handler runs before the global one.
+builder.Services.AddInfrastructureCommon(builder.Configuration);
 builder.Services.AddWebCommon();
 // AddApiLocalization (Task 15)
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
@@ -27,6 +31,12 @@ builder.Services.AddOptions<KestrelServerOptions>().Configure<IConfiguration>((o
 builder.Services.AddApplicationDecorators();
 
 var app = builder.Build();
+
+// Development only (Database:ApplyMigrationsOnStartup); other environments deploy EF migration bundles (ADR 0006).
+if (app.Services.GetRequiredService<IOptions<DatabaseOptions>>().Value.ApplyMigrationsOnStartup)
+{
+    await app.Services.MigrateModuleDatabasesAsync();
+}
 
 // Pipeline order matters; later tasks insert at the marked slots.
 // 1. UseForwardedHeaders
@@ -53,6 +63,7 @@ app.UseRouting();
 // 9. UseCors
 app.UseCors();
 // 10. UseRateLimiter
+// UseAuthentication/UseAuthorization (Auth plan) go between slots 9 and 10, so the limiter's user:{sub} partition sees the signed-in user.
 app.UseRateLimiter();
 // 11. UseIdempotency (Task 12)
 // 12. endpoints (health endpoints are exempt from rate limiting)

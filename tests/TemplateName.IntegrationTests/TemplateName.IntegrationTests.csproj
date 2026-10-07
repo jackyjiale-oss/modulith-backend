@@ -2,10 +2,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Host\TemplateName.Api\TemplateName.Api.csproj" />
+    <ProjectReference Include="..\..\src\BuildingBlocks\TemplateName.Infrastructure.Common\TemplateName.Infrastructure.Common.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <PackageReference Include="Respawn" />
+    <PackageReference Include="Testcontainers.MsSql" />
   </ItemGroup>
 
 </Project>
