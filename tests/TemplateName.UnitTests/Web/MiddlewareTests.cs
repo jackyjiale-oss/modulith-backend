@@ -7,12 +7,14 @@ namespace TemplateName.UnitTests.Web;
 public sealed class MiddlewareTests
 {
     [Fact]
-    public async Task Security_headers_are_set()
+    public async Task Security_headers_are_set_when_the_response_starts()
     {
         var context = new DefaultHttpContext();
+        var response = RecordingHttpResponseFeature.Attach(context);
         var sut = new SecurityHeadersMiddleware(_ => Task.CompletedTask);
 
         await sut.InvokeAsync(context);
+        await response.FireOnStartingAsync();
 
         var headers = context.Response.Headers;
         headers["X-Content-Type-Options"].ToString().ShouldBe("nosniff");
@@ -23,19 +25,20 @@ public sealed class MiddlewareTests
     }
 
     [Fact]
-    public async Task Security_headers_are_set_before_the_pipeline_continues()
+    public async Task Security_headers_are_registered_before_the_pipeline_continues()
     {
         var context = new DefaultHttpContext();
-        var wasSetBeforeNext = false;
-        var sut = new SecurityHeadersMiddleware(httpContext =>
+        var response = RecordingHttpResponseFeature.Attach(context);
+        var callbackCountSeenByNext = -1;
+        var sut = new SecurityHeadersMiddleware(_ =>
         {
-            wasSetBeforeNext = httpContext.Response.Headers.ContainsKey("X-Content-Type-Options");
+            callbackCountSeenByNext = response.CallbackCount;
             return Task.CompletedTask;
         });
 
         await sut.InvokeAsync(context);
 
-        wasSetBeforeNext.ShouldBeTrue();
+        callbackCountSeenByNext.ShouldBe(1);
     }
 
     [Fact]
@@ -43,17 +46,19 @@ public sealed class MiddlewareTests
     {
         using var activity = new Activity("test").Start();
         var context = new DefaultHttpContext();
-        string? headerSeenByNext = null;
-        var sut = new TraceIdHeaderMiddleware(httpContext =>
+        var response = RecordingHttpResponseFeature.Attach(context);
+        var callbackCountSeenByNext = -1;
+        var sut = new TraceIdHeaderMiddleware(_ =>
         {
-            headerSeenByNext = httpContext.Response.Headers["X-Trace-Id"];
+            callbackCountSeenByNext = response.CallbackCount;
             return Task.CompletedTask;
         });
 
         await sut.InvokeAsync(context);
+        await response.FireOnStartingAsync();
 
+        callbackCountSeenByNext.ShouldBe(1);
         context.Response.Headers["X-Trace-Id"].ToString().ShouldBe(activity.TraceId.ToHexString());
-        headerSeenByNext.ShouldBe(activity.TraceId.ToHexString());
     }
 
     [Fact]
@@ -61,9 +66,11 @@ public sealed class MiddlewareTests
     {
         Activity.Current = null;
         var context = new DefaultHttpContext { TraceIdentifier = "fallback-id" };
+        var response = RecordingHttpResponseFeature.Attach(context);
         var sut = new TraceIdHeaderMiddleware(_ => Task.CompletedTask);
 
         await sut.InvokeAsync(context);
+        await response.FireOnStartingAsync();
 
         context.Response.Headers["X-Trace-Id"].ToString().ShouldBe("fallback-id");
     }

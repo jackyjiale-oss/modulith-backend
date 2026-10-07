@@ -13,12 +13,18 @@ internal sealed partial class GlobalExceptionHandler(
     : IExceptionHandler
 {
     private const string UnexpectedErrorDetail = "An unexpected error occurred.";
+    private const string MalformedRequestDetail = "The request is malformed.";
 
     public async ValueTask<bool> TryHandleAsync(
         HttpContext httpContext,
         Exception exception,
         CancellationToken cancellationToken)
     {
+        if (httpContext.Response.HasStarted)
+        {
+            return false;
+        }
+
         int status;
         string code;
         string detail;
@@ -27,7 +33,8 @@ internal sealed partial class GlobalExceptionHandler(
         {
             status = badRequest.StatusCode;
             code = "request.malformed";
-            detail = badRequest.Message;
+            detail = MalformedRequestDetail;
+            LogMalformedRequest(logger, badRequest.Message);
         }
         else
         {
@@ -50,6 +57,9 @@ internal sealed partial class GlobalExceptionHandler(
             },
         });
     }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Malformed request: {Reason}")]
+    private static partial void LogMalformedRequest(ILogger logger, string reason);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Unhandled exception")]
     private static partial void LogUnhandledException(ILogger logger, Exception exception);

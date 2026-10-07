@@ -44,6 +44,24 @@ public sealed class GlobalExceptionHandlerTests
         handled.ShouldBeTrue();
         status.ShouldBe(400);
         body.GetProperty("code").GetString().ShouldBe("request.malformed");
+        body.GetProperty("detail").GetString().ShouldBe("The request is malformed.");
+        body.GetRawText().ShouldNotContain("bad body");
+    }
+
+    [Fact]
+    public async Task Response_already_started_is_not_handled()
+    {
+        var services = new ServiceCollection().AddLogging().AddProblemDetails().BuildServiceProvider();
+        var handler = new GlobalExceptionHandler(
+            services.GetRequiredService<IProblemDetailsService>(),
+            NullLogger<GlobalExceptionHandler>.Instance,
+            Substitute.For<IHostEnvironment>());
+        var context = new DefaultHttpContext { RequestServices = services };
+        RecordingHttpResponseFeature.Attach(context).MarkStarted();
+
+        var handled = await handler.TryHandleAsync(context, new InvalidOperationException("late"), TestContext.Current.CancellationToken);
+
+        handled.ShouldBeFalse();
     }
 
     private static async Task<(bool Handled, int Status, JsonElement Body)> HandleAsync(string environmentName, Exception exception)

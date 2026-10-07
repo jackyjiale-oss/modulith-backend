@@ -5,11 +5,11 @@ namespace TemplateName.Web.Common;
 
 public static class WebCommonApplicationBuilderExtensions
 {
-    /// <summary>Sets <c>X-Trace-Id</c> on every response. Register it first so error responses carry it too.</summary>
+    /// <summary>Adds <c>X-Trace-Id</c> to every response when it starts, including error responses. Register it before the exception handler.</summary>
     public static IApplicationBuilder UseTraceIdHeader(this IApplicationBuilder app)
         => app.UseMiddleware<TraceIdHeaderMiddleware>();
 
-    /// <summary>Sets the baseline security headers on every response.</summary>
+    /// <summary>Adds the baseline security headers to every response when it starts, including error responses. Register it before the exception handler.</summary>
     public static IApplicationBuilder UseSecurityHeaders(this IApplicationBuilder app)
         => app.UseMiddleware<SecurityHeadersMiddleware>();
 }
