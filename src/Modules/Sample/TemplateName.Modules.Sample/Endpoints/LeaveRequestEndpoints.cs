@@ -2,9 +2,11 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using TemplateName.Application.Common.Messaging;
+using TemplateName.Application.Common.Pagination;
 using TemplateName.Infrastructure.Common.Idempotency;
 using TemplateName.Modules.Sample.Application.LeaveRequests.Approve;
 using TemplateName.Modules.Sample.Application.LeaveRequests.GetById;
+using TemplateName.Modules.Sample.Application.LeaveRequests.List;
 using TemplateName.Modules.Sample.Application.LeaveRequests.Submit;
 using TemplateName.Web.Common.Results;
 
@@ -23,6 +25,11 @@ internal static class LeaveRequestEndpoints
             .WithName("SubmitLeaveRequest")
             .WithIdempotency()
             .Produces<SubmitLeaveRequestResponse>(StatusCodes.Status201Created)
+            .ProducesValidationProblem();
+
+        group.MapGet("/", ListAsync)
+            .WithName("ListLeaveRequests")
+            .Produces<CursorPage<LeaveRequestListItemResponse>>()
             .ProducesValidationProblem();
 
         group.MapGet("/{id:guid}", GetByIdAsync)
@@ -56,6 +63,21 @@ internal static class LeaveRequestEndpoints
         // A path (/api/v1/sample/leave-requests/{id}), not an absolute URI, so it holds behind proxies.
         var location = links.GetPathByName(GetByIdRouteName, new { id = result.Value });
         return TypedResults.Created(location, new SubmitLeaveRequestResponse(result.Value));
+    }
+
+    private static async Task<IResult> ListAsync(
+        [AsParameters] ListLeaveRequestsRequest request,
+        IQueryHandler<ListLeaveRequestsQuery, CursorPage<LeaveRequestListItemResponse>> handler,
+        CancellationToken cancellationToken)
+    {
+        var page = new CursorPageRequest(
+            request.PageSize ?? CursorPageRequest.DefaultPageSize,
+            request.Cursor,
+            request.Sort,
+            request.IncludeTotalCount ?? false);
+        var result = await handler.HandleAsync(new ListLeaveRequestsQuery(request.EmployeeId, request.Status, page), cancellationToken);
+
+        return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
     }
 
     private static async Task<IResult> GetByIdAsync(

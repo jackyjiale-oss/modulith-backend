@@ -770,6 +770,7 @@
       "templatename.application.common": {
         "type": "Project",
         "dependencies": {
+          "Dapper": "[2.1.89, )",
           "FluentValidation": "[12.1.1, )",
           "FluentValidation.DependencyInjectionExtensions": "[12.1.1, )",
           "Microsoft.Extensions.DependencyInjection.Abstractions": "[10.0.12, )",

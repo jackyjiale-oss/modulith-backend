@@ -79,4 +79,16 @@
     <value>Jenis kandungan permintaan tidak disokong.</value>
     <comment>Draft – needs native review</comment>
   </data>
+  <data name="pagination.invalid_cursor" xml:space="preserve">
+    <value>Kursor tidak sah. Mulakan semula dari halaman pertama.</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="pagination.cursor_mismatch" xml:space="preserve">
+    <value>Kursor ini dikeluarkan untuk isihan atau penapis yang berbeza. Mulakan semula dari halaman pertama.</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="pagination.invalid_sort" xml:space="preserve">
+    <value>Isihan tidak sah. Medan yang boleh diisih: {allowed}.</value>
+    <comment>Draft – needs native review</comment>
+  </data>
 </root>

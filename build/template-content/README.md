@@ -68,6 +68,20 @@ A new module creates `Resources/{Module}ErrorMessages.cs` (an empty `internal se
 3. Add the culture to `TranslationTests` and its FluentValidation messages to `ValidationMessageTranslations` (Web.Common) if FluentValidation does not ship that exact culture.
 4. Have a native speaker review the new strings before the next release.
 
+### Adding a paged list endpoint
+
+List endpoints page by cursor (keyset), never by offset (ADR 0010). Clients send `pageSize` (default 20, max 100), `cursor`, `sort` (`-createdAt`, `startDate,-createdAt`) and `includeTotalCount`, and get `{ items, pageSize, nextCursor, previousCursor, totalCount? }`. The Sample module's `GET /api/v1/sample/leave-requests` (`Application/LeaveRequests/List/`) is the worked example.
+
+1. **Allow-list the sort fields.** Add `{Aggregates}SortFields` next to the query: one `SortField(apiName, "[Column]", typeof(T))` per sortable field (camelCase API name, a bracketed column constant, a non-nullable column), the `Id` tie-breaker, `Allowed` and `Default`. Column names are written into SQL, so they are only ever these constants, never request text.
+2. **Index every allowed sort.** In the entity configuration add one index per sort, `(filter columns…, SortColumn, Id)`, for example `HasIndex(x => new { x.EmployeeId, x.CreatedAt, x.Id })`, then generate a migration with `dotnet ef migrations add` (see the module page). Migration review checks that each allowed sort has its index.
+3. **Write the query, validator and handler.** `List{Aggregates}Query(filters…, CursorPageRequest Page) : IQuery<CursorPage<{Item}Response>>`; the validator checks `Page.PageSize` is 1 to `CursorPageRequest.MaxPageSize` (`.OverridePropertyName("PageSize")`, so the error key is `pageSize`). The handler:
+   - parses the sort with `SortSpecification.Parse(page.Sort, Allowed, Id, Default)`;
+   - hashes the canonical filter text with `CursorCodec.ComputeFilterHash("employeeId=…;status=…")` and, when a cursor was sent, decodes it with `CursorCodec.Decode(cursor, sort, filterHash)` (return the error on failure);
+   - builds `KeysetSqlBuilder.Build(sort, cursor, page.PageSize)` and runs `SELECT TOP (@Take) … WHERE IsDeleted = 0 AND {filters} AND {WhereClause} ORDER BY {OrderByClause}` with Dapper, adding `Take` and the filter values to `keyset.Parameters`; with `IncludeTotalCount` it also runs `SELECT COUNT_BIG(*)` with the same filters and no keyset;
+   - marks `DateTime` columns `DateTimeKind.Utc` and returns `CursorPageBuilder.Build(rows, keyset, cursor, sort, filterHash, row => [.. sort.Terms.Select(term => ValueOf(row, term.Field))], totalCount)`. Key values come from the fetched rows, so they are exactly what SQL Server stored.
+4. **Map the endpoint.** `group.MapGet("/", ListAsync)` with an `[AsParameters]` request record whose parameters carry `[FromQuery(Name = "camelCase")]` (otherwise OpenAPI lists them in PascalCase), `.Produces<CursorPage<{Item}Response>>()` and `.ProducesValidationProblem()`.
+5. **Test it** against SQL Server: walking forward and backward visits every row once, rows inserted between pages cause no duplicates, ties on the sort value are broken by `Id`, filters and sort apply, soft-deleted rows never appear, and a changed sort or a tampered cursor gets `400 pagination.cursor_mismatch` or `400 pagination.invalid_cursor`.
+
 ## Conventions
 
 - [`docs/coding-conventions.md`](docs/coding-conventions.md): naming, files and code style

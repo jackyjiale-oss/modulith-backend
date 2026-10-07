@@ -69,4 +69,13 @@
   <data name="http.415" xml:space="preserve">
     <value>The request content type is not supported.</value>
   </data>
+  <data name="pagination.invalid_cursor" xml:space="preserve">
+    <value>The cursor is not valid. Start again from the first page.</value>
+  </data>
+  <data name="pagination.cursor_mismatch" xml:space="preserve">
+    <value>The cursor was issued for a different sort or filter. Start again from the first page.</value>
+  </data>
+  <data name="pagination.invalid_sort" xml:space="preserve">
+    <value>The sort is not valid. Sortable fields: {allowed}.</value>
+  </data>
 </root>

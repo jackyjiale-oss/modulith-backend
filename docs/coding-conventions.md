@@ -183,7 +183,7 @@ These are part of public contracts or operations. Changing one is a breaking cha
 | DB schema | lower-case module name | `sample`, `auth` |
 | DB tables | PascalCase plural | `LeaveRequests` |
 | DB columns | PascalCase; PK `Id`; FK `{Entity}Id`; booleans `Is…`/`Has…`; timestamps `{Event}At`; hashes `{Name}Hash`; encrypted `{Name}Encrypted` | `ApproverId`, `IsDeleted`, `TokenHash` |
-| DB indexes | EF default `IX_{Table}_{Columns}` | `IX_LeaveRequests_EmployeeId` |
+| DB indexes | EF default `IX_{Table}_{Columns}` | `IX_LeaveRequests_EmployeeId_CreatedAt_Id` |
 | Log message templates | PascalCase placeholders; message templates only, **never string interpolation** | `"Leave request {LeaveRequestId} submitted"` (CA2254) |
 | `ActivitySource` / `Meter` names | `TemplateName.{Module}` | `TemplateName.Auth` |
 | Metric instruments | lowercase, dot-separated | `templatename.auth.logins.failed` |

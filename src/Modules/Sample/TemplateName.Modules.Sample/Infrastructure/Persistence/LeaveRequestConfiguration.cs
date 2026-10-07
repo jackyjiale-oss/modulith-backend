@@ -18,7 +18,11 @@ internal sealed class LeaveRequestConfiguration : IEntityTypeConfiguration<Leave
         builder.Property(leaveRequest => leaveRequest.Reason).HasMaxLength(ReasonMaxLength);
         builder.Property(leaveRequest => leaveRequest.RowVersion).IsRowVersion();
 
-        builder.HasIndex(leaveRequest => leaveRequest.EmployeeId);
+        // One index per list sort, ending in (sort column, Id) to match the keyset ORDER BY (review P7, LeaveRequestSortFields);
+        // the employee filter leads its index, which also serves lookups by EmployeeId alone.
+        builder.HasIndex(leaveRequest => new { leaveRequest.EmployeeId, leaveRequest.CreatedAt, leaveRequest.Id });
+        builder.HasIndex(leaveRequest => new { leaveRequest.CreatedAt, leaveRequest.Id });
+        builder.HasIndex(leaveRequest => new { leaveRequest.StartDate, leaveRequest.Id });
 
         builder.Ignore(leaveRequest => leaveRequest.DomainEvents);
     }

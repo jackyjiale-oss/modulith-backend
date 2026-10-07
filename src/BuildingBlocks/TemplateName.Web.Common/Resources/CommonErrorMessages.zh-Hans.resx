@@ -79,4 +79,16 @@
     <value>不支持该请求的内容类型。</value>
     <comment>Draft – needs native review</comment>
   </data>
+  <data name="pagination.invalid_cursor" xml:space="preserve">
+    <value>游标无效。请从第一页重新开始。</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="pagination.cursor_mismatch" xml:space="preserve">
+    <value>该游标是为不同的排序或筛选条件生成的。请从第一页重新开始。</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="pagination.invalid_sort" xml:space="preserve">
+    <value>排序无效。可排序字段：{allowed}。</value>
+    <comment>Draft – needs native review</comment>
+  </data>
 </root>
