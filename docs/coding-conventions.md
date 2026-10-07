@@ -100,7 +100,7 @@ Every type plays one of these roles. Its name follows the role's pattern, and it
 |---|---|---|---|
 | M1 | Methods are verbs or verb phrases. Aggregates expose **domain verbs**, not setters. | `Approve(approverId)`, not `SetStatus(...)` | review |
 | M2 | Every method returning `Task`, `ValueTask` or `IAsyncEnumerable` ends in `Async`, including handlers and endpoint methods. Exceptions: test methods, and overrides whose name the framework fixes. | `HandleAsync`, `GetByIdAsync` | `.editorconfig` + architecture test |
-| M3 | `CancellationToken` is the **last** parameter, named `cancellationToken`. | `GetByIdAsync(Guid id, CancellationToken cancellationToken)` | review (CA2016 forwards it) |
+| M3 | `CancellationToken` is the **last** parameter, named `cancellationToken`. | `GetByIdAsync(Guid id, CancellationToken cancellationToken)` | architecture test (CA2016 forwards it) |
 | M4 | Repository lookups are `Get{By…}Async` and return `T?` when nothing is found. No exceptions for "not found". | `Task<LeaveRequest?> GetByIdAsync(...)` | review |
 | M5 | `Try{Verb}` methods return `bool` and use an `out` parameter. | `TryParse(string text, out DateRange range)` | review |
 | M6 | Boolean properties, fields and locals start with `Is`, `Has`, `Can` or `Should`. | `IsDeleted`, `HasExpired`, `canApprove` | review |
@@ -198,6 +198,6 @@ These are part of public contracts or operations. Changing one is a breaking cha
 |---|---|---|
 | `.editorconfig` naming rules (IDE1006) + code style (IDE0130, IDE0161, `var`) | Casing, `I`/`T` prefixes, `_camelCase` fields, `Async` suffix on `async` methods, namespace = folder, file-scoped namespaces | `.editorconfig` (root) and `tests/.editorconfig` (test-method overrides) |
 | Build (`EnforceCodeStyleInBuild` + `TreatWarningsAsErrors` in Release) | Turns the above into build errors in CI | `Directory.Build.props` |
-| Architecture tests | Role suffixes (Command, Query, Handler, Validator, DomainEvent, Repository, DbContext, Configuration), forbidden suffixes (G5), `Async` on Task-returning methods, sealed/internal rules, module layering, translation completeness | `tests/TemplateName.ArchitectureTests/` |
+| Architecture tests | Role suffixes (Command, Query, Handler, Validator, DomainEvent, Repository, DbContext, Configuration), forbidden suffixes (G5), `Async` on Task-returning methods, `CancellationToken cancellationToken` as the last parameter, sealed/internal rules, module layering, translation completeness | `tests/TemplateName.ArchitectureTests/` |
 | Commit-message hook + CI PR-title check | Conventional Commits format, allowed types and scopes, length | `.githooks/commit-msg`, `build/scripts/check-commit-msg.sh`, `.github/workflows/ci.yml` |
 | Code review | Everything marked *review*: meaning, domain language, abbreviations | `.github/pull_request_template.md` |

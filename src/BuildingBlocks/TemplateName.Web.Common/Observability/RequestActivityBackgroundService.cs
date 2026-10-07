@@ -33,5 +33,5 @@ internal sealed class RequestActivityBackgroundService : BackgroundService
         base.Dispose();
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken) => Task.CompletedTask;
+    protected override Task ExecuteAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

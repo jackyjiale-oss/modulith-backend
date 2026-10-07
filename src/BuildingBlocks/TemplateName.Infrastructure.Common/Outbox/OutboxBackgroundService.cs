@@ -17,7 +17,7 @@ internal sealed partial class OutboxBackgroundService<TContext>(
     : BackgroundService
     where TContext : DbContext
 {
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
         var outboxOptions = options.Value;
         if (!outboxOptions.Enabled)
@@ -33,17 +33,17 @@ internal sealed partial class OutboxBackgroundService<TContext>(
                 int claimed;
                 do
                 {
-                    claimed = await dispatcher.ProcessBatchAsync(stoppingToken);
+                    claimed = await dispatcher.ProcessBatchAsync(cancellationToken);
                 }
                 while (claimed == outboxOptions.BatchSize);
             }
-            catch (Exception exception) when (!stoppingToken.IsCancellationRequested)
+            catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
             {
                 // A database outage must not stop the host; the next poll tries again.
                 LogPollFailed(logger, exception, typeof(TContext).Name);
             }
         }
-        while (await timer.WaitForNextTickAsync(stoppingToken));
+        while (await timer.WaitForNextTickAsync(cancellationToken));
     }
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Outbox poll for {DbContext} failed")]
