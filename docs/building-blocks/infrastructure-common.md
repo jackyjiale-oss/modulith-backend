@@ -59,7 +59,7 @@ Each module context that raises domain events maps its own `OutboxMessages` / `O
 
 ## Idempotency
 
-`Idempotency-Key` makes an unsafe request safe to retry (review 2.12). Only endpoints marked `WithIdempotency()` are affected; a request without the header runs as usual.
+`Idempotency-Key` makes an unsafe request safe to retry, including two copies of it arriving at the same time. Only endpoints marked `WithIdempotency()` are affected; a request without the header runs as usual.
 
 1. The key must be one header value of 1 to 100 characters, else 400 `idempotency.invalid_key`. Keys are case-sensitive.
 2. The scope is the signed-in user's id, or `anonymous`. The request hash is the SHA-256 of the method, path and body.

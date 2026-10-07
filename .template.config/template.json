@@ -44,6 +44,8 @@
         "CHANGELOG.md",
         "CLAUDE.md",
         ".release-please-manifest.json",
+        "Version.props",
+        "**/*.received.*",
         "build/template-content/**"
       ]
     },

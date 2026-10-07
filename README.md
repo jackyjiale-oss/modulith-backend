@@ -55,7 +55,7 @@ From here the generated project's own `README.md` takes over. `dotnet new uninst
 .template.config/        dotnet new template definition
 build/licenses/          licence allow-list and licence-URL mappings for the licence check
 build/scripts/           commit-message check, template smoke test, GitHub repository setup
-build/template-content/  files that replace their root counterparts in generated projects (README, CHANGELOG, CLAUDE.md, release manifest)
+build/template-content/  files that replace their root counterparts in generated projects (README, CHANGELOG, CLAUDE.md, release manifest, Version.props)
 docs/                    architecture, host, building-block and module documents, ADRs, conventions, plans
 src/BuildingBlocks/      SharedKernel, Application.Common, Infrastructure.Common, Web.Common
 src/Host/                TemplateName.Api, the ASP.NET Core host
@@ -108,7 +108,7 @@ These ship with every generated project (index: [`docs/README.md`](docs/README.m
 - [`docs/services/api.md`](docs/services/api.md): the host's pipeline, every configuration section, health, environments, migrations
 - [`docs/building-blocks/`](docs/building-blocks/): SharedKernel, Application.Common, Infrastructure.Common, Web.Common
 - [`docs/modules/`](docs/modules/): one page per module, from [`_template.md`](docs/modules/_template.md)
-- [`docs/adr/`](docs/adr/): architecture decision records 0001 to 0011
+- [`docs/adr/`](docs/adr/): architecture decision records 0001 to 0013
 - [`docs/coding-conventions.md`](docs/coding-conventions.md): naming, files and code style
 - [`CONTRIBUTING.md`](CONTRIBUTING.md): branches, Conventional Commits, pull requests, releases and licences
 
@@ -124,7 +124,7 @@ Maintainers: after changing anything that ships, run `bash build/scripts/templat
 
 ## Releases and licences
 
-release-please turns the Conventional Commits on `main` into a release PR (`chore(release): release x.y.z`); merging it tags `vx.y.z`, writes `CHANGELOG.md`, bumps `<Version>` in `Directory.Build.props` and attaches a generated `THIRD-PARTY-NOTICES.md` to the GitHub Release (`.github/workflows/release.yml`, `release-please-config.json`). The `licenses` CI job fails when a NuGet dependency's licence is not in [`build/licenses/allowed-licenses.json`](build/licenses/allowed-licenses.json) (MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause); [`build/licenses/README.md`](build/licenses/README.md) has the local command and the verified exceptions.
+release-please turns the Conventional Commits on `main` into a release PR (`chore(release): release x.y.z`); merging it tags `vx.y.z`, writes `CHANGELOG.md`, bumps `<Version>` in `Version.props` (imported by `Directory.Build.props`; generated projects get their own, starting at `0.0.0`) and attaches a generated `THIRD-PARTY-NOTICES.md` to the GitHub Release (`.github/workflows/release.yml`, `release-please-config.json`). The `licenses` CI job fails when a NuGet dependency's licence is not in [`build/licenses/allowed-licenses.json`](build/licenses/allowed-licenses.json) (MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause); [`build/licenses/README.md`](build/licenses/README.md) has the local command and the verified exceptions.
 
 ## Licence
 

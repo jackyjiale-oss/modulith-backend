@@ -1,7 +1,8 @@
 <Project>
+  <!-- The product version lives in its own file, which release-please updates (release-please-config.json). -->
+  <Import Project="$(MSBuildThisFileDirectory)Version.props" />
+
   <PropertyGroup>
-    <!-- release-please rewrites this on every release (release-please-config.json); never edit it by hand. -->
-    <Version>0.0.0</Version>
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>

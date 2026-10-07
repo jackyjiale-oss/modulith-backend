@@ -25,7 +25,7 @@
     <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.19.0" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.19.0" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.SqlClient" Version="1.19.0" />
-    <!-- Prerelease: no stable release exists. Allowed for EF Core instrumentation only (plan Global Constraints); noted in the ADR. -->
+    <!-- Prerelease: no stable release exists. Allowed for EF Core instrumentation only (docs/adr/0013-prerelease-ef-core-opentelemetry-instrumentation.md). -->
     <PackageVersion Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="1.19.1-beta.1" />
   </ItemGroup>
 

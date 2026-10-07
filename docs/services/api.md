@@ -188,7 +188,7 @@ HTTP security:
 - A bare `Accept-Language: zh` gets English, because `zh` is not a supported culture and `zh-Hans` is its child, not its parent.
 
 Observability:
-- `OpenTelemetry.Instrumentation.EntityFrameworkCore` is `1.19.1-beta.1`, the only prerelease dependency: no stable release exists, and the plan allows prerelease for this instrumentation only.
+- `OpenTelemetry.Instrumentation.EntityFrameworkCore` is `1.19.1-beta.1`, the only prerelease dependency: no stable release exists ([ADR 0013](../adr/0013-prerelease-ef-core-opentelemetry-instrumentation.md)). The SqlClient instrumentation is stable.
 - With OTLP export on, traces record request URLs, so secrets in query strings reach the trace store. Never put secrets in query strings.
 - `RequestActivityBackgroundService` keeps a listener on ASP.NET Core's activity source, so every request has a W3C trace id (`traceId`, `X-Trace-Id`) even when OpenTelemetry is off.
 

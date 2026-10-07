@@ -48,7 +48,7 @@ Cursor (keyset) pagination for list queries (ADR 0010); the Sample module's list
 | Type | What it is |
 |---|---|
 | `CursorPageRequest(PageSize = 20, Cursor, Sort, IncludeTotalCount = false)` | The paging part of a list query; `DefaultPageSize` 20, `MaxPageSize` 100. |
-| `CursorPage<T>(Items, PageSize, NextCursor, PreviousCursor, TotalCount)` | The response; `totalCount` is omitted from JSON when null. |
+| `CursorPage<T>(Items, PageSize, NextCursor, PreviousCursor, TotalCount)` | The response; `totalCount` is omitted from JSON when null. The generated OpenAPI schema still lists `totalCount` as required (a generator quirk pinned by the OpenAPI snapshot, like the missing `Idempotency-Key` header on idempotent endpoints, see [infrastructure-common](infrastructure-common.md#idempotency)); clients must treat it as optional. |
 | `SortField(Name, Column, ValueType)` | One allow-listed sort field: camelCase API name, bracketed column constant, CLR type. |
 | `SortSpecification.Parse(sort, allowedFields, idField, defaultSort)` | Parses `-createdAt,startDate`; appends the id tie-breaker in the direction of the last term; an unknown, empty or repeated field fails with `pagination.invalid_sort`. `Signature` is the canonical text cursors carry. |
 | `Cursor`, `CursorDirection` | A decoded position: direction, sort signature, filter hash, key values. |

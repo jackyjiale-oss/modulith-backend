@@ -60,6 +60,7 @@ for required in \
   CLAUDE.md \
   CONTRIBUTING.md \
   .release-please-manifest.json \
+  Version.props \
   release-please-config.json \
   .github/workflows/release.yml \
   build/licenses/allowed-licenses.json \
@@ -70,6 +71,9 @@ for required in \
 done
 if [[ -f "$out/.release-please-manifest.json" && "$(tr -d '[:space:]' < "$out/.release-please-manifest.json")" != '{".":"0.0.0"}' ]]; then
   fail ".release-please-manifest.json must be { \".\": \"0.0.0\" }, not the template's own version"
+fi
+if [[ -f "$out/Version.props" ]] && ! grep -qF "<Version>0.0.0</Version>" "$out/Version.props"; then
+  fail "Version.props must contain <Version>0.0.0</Version>, not the template's own version"
 fi
 if [[ -f "$out/docs/README.md" ]] && grep -qF "repository-management.md" "$out/docs/README.md"; then
   fail "docs/README.md links repository-management.md, which is not generated"

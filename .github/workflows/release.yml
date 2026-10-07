@@ -1,7 +1,7 @@
 name: Release
 
 # release-please keeps a "chore(release): release x.y.z" pull request up to date from the Conventional Commits on main.
-# Merging it tags vx.y.z, writes CHANGELOG.md, bumps <Version> in Directory.Build.props and creates the GitHub Release;
+# Merging it tags vx.y.z, writes CHANGELOG.md, bumps <Version> in Version.props and creates the GitHub Release;
 # the second job then attaches THIRD-PARTY-NOTICES.md to that release.
 # Actions use their latest major tag so Dependabot can update them.
 

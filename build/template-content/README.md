@@ -97,7 +97,7 @@ The index is [`docs/README.md`](docs/README.md).
 
 ## Releases and licences
 
-release-please (`.github/workflows/release.yml`) keeps a `chore(release): release x.y.z` pull request open from the Conventional Commits on `main`; merging it tags `vx.y.z`, writes `CHANGELOG.md`, bumps `<Version>` in `Directory.Build.props` and attaches a generated `THIRD-PARTY-NOTICES.md` to the GitHub Release. Add the repository secret `RELEASE_PLEASE_TOKEN` so CI runs on that pull request ([`CONTRIBUTING.md`](CONTRIBUTING.md), Section 5). The `licenses` CI job checks every NuGet dependency against [`build/licenses/allowed-licenses.json`](build/licenses/allowed-licenses.json); see [`build/licenses/README.md`](build/licenses/README.md).
+release-please (`.github/workflows/release.yml`) keeps a `chore(release): release x.y.z` pull request open from the Conventional Commits on `main`; merging it tags `vx.y.z`, writes `CHANGELOG.md`, bumps `<Version>` in `Version.props` (imported by `Directory.Build.props`) and attaches a generated `THIRD-PARTY-NOTICES.md` to the GitHub Release. Add the repository secret `RELEASE_PLEASE_TOKEN` so CI runs on that pull request ([`CONTRIBUTING.md`](CONTRIBUTING.md), Section 5). The `licenses` CI job checks every NuGet dependency against [`build/licenses/allowed-licenses.json`](build/licenses/allowed-licenses.json); see [`build/licenses/README.md`](build/licenses/README.md).
 
 Generated from [Modulith Backend](https://github.com/jackyjiale-oss/modulith-backend).
 
