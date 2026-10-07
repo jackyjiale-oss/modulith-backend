@@ -27,7 +27,7 @@ All endpoints carry the OpenAPI tag `Sample`.
 | GET | `GET /api/v1/sample/leave-requests/{id:guid}` | Read one leave request. | `200 OK`, `LeaveRequestResponse` | 404 `leave.not_found` |
 | POST | `POST /api/v1/sample/leave-requests/{id:guid}/approve` | Approve a pending request. Body `{ "approverId" }`. | `204 No Content` | 400 `request.malformed`, 404 `leave.not_found`, 409 `leave.not_pending`, 409 `concurrency.conflict` |
 
-Submit is idempotent when the client sends `Idempotency-Key` (1 to 100 characters, scoped to the signed-in user or `anonymous`): a retry with the same key and body within `Idempotency:TimeToLive` (one day by default) gets the first response again, with `Idempotency-Replayed: true`, instead of creating a second request. The same key with a different body gets 422, and a retry while the first request is still running gets 409. A 5xx response is not stored, so the client can retry it.
+Submit is idempotent when the client sends `Idempotency-Key` (1 to 100 characters, scoped to the signed-in user or `anonymous`): a retry with the same key and body within `Idempotency:TimeToLive` (one day by default) gets the first response again, with `Idempotency-Replayed: true`, instead of creating a second request. The same key with a different body gets 422, and a retry while the first request is still running gets 409. A 5xx response is not stored, so the client can retry it. The OpenAPI document does not yet list the `Idempotency-Key` header or the 409/422 responses; the idempotency limitations are in [`infrastructure-common`](../building-blocks/infrastructure-common.md#idempotency).
 
 The list is cursor-paginated (ADR 0010); it has no page numbers or offsets. Query parameters:
 
@@ -104,7 +104,8 @@ The module has no configuration section of its own. It uses the shared keys:
 | Key | Default | Purpose |
 |---|---|---|
 | `ConnectionStrings:Database` | empty (user secrets or environment) | The database that holds the `sample` schema. |
-| `Outbox:*` | see `appsettings.json` | Polling, batch size, retries and lease of the Sample outbox dispatcher. |
+| `Outbox:*` | see [`docs/services/api.md`](../services/api.md#outbox) | Polling, batch size, retries and lease of the Sample outbox dispatcher. |
+| `Idempotency:TimeToLive` | one day | How long submit responses are kept for replay. |
 
 ## Data
 
@@ -159,6 +160,7 @@ dotnet ef migrations add {Verb}{What} \
 - Integration tests, `tests/TemplateName.IntegrationTests/Localization/`: `LocalizationTests` reads Sample errors in Malay, Simplified Chinese (from `zh-CN`) and English fallback, and checks that `code`, `params` and enum values stay unlocalized and that validation messages are translated.
 - Architecture tests, `TranslationTests`: every `LeaveRequestErrors` code has an English message, and the translations have the same keys and placeholders.
 - Integration tests, `tests/TemplateName.IntegrationTests/Idempotency/`: `IdempotencyTests` drives `Idempotency-Key` through the submit endpoint: replay, key reuse with another body, invalid and expired keys, a key still in progress, concurrent duplicates running once, and 5xx responses not being stored.
+- Documentation and contract: `DocumentationTests` (architecture tests) check that this page exists, keeps the required sections and lists every `LeaveRequestErrors` code; `EndpointDocumentationTests` check that every mapped `/api/v1/sample/…` route appears above as `METHOD /route`; `OpenApiSnapshotTests` pin the endpoints' OpenAPI description (ADR 0011).
 
 ## Changelog
 

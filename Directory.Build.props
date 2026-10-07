@@ -1,5 +1,7 @@
 <Project>
   <PropertyGroup>
+    <!-- release-please rewrites this on every release (release-please-config.json); never edit it by hand. -->
+    <Version>0.0.0</Version>
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>

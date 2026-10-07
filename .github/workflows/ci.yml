@@ -105,6 +105,35 @@ jobs:
         if: ${{ hashFiles('.template.config/template.json') != '' }}
         run: bash build/scripts/template-smoke.sh
 
+  # Every NuGet package, transitive ones included, must have an allowed licence (build/licenses/README.md).
+  licenses:
+    name: licenses
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+
+      # The licence tool reads the restored package graph (project.assets.json), so restore first.
+      - name: Restore (locked mode)
+        run: |
+          dotnet restore --locked-mode
+          dotnet tool restore
+
+      - name: Check dependency licences
+        run: >-
+          dotnet nuget-license -i TemplateName.slnx -t
+          -a build/licenses/allowed-licenses.json
+          -mapping build/licenses/license-url-mappings.json
+          -override build/licenses/package-overrides.json
+          -ignore build/licenses/ignored-packages.json
+          -err
+
   commit-lint:
     name: commit-lint
     # Dependabot titles for long package names exceed 72 characters; a skipped job still satisfies a required check.

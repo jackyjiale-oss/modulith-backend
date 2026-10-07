@@ -151,9 +151,9 @@ Every type plays one of these roles. Its name follows the role's pattern, and it
 | Module / building-block / service docs | lowercase name of the unit; templates start with `_` | `docs/modules/sample.md`, `docs/modules/_template.md`, `docs/building-blocks/web-common.md`, `docs/services/api.md` |
 | Generated-project overrides | same file name under `build/template-content/` | `build/template-content/README.md` |
 | ADR | `NNNN-kebab-title.md` | `docs/adr/0007-per-module-outbox.md` |
-| Plans | `YYYY-MM-DD-kebab-title.md` | `docs/superpowers/plans/2026-10-06-foundation-and-core-baseline.md` |
+| Plans | `YYYY-MM-DD-kebab-title.md` | `2026-10-06-foundation-and-core-baseline.md` |
 | Runbooks | kebab-case | `docs/runbooks/rotate-jwt-signing-keys.md` |
-| Scripts | kebab-case | `build/scripts/template-smoke.sh`, `deploy-iis.ps1` |
+| Scripts | kebab-case | `build/scripts/check-commit-msg.sh`, `deploy-iis.ps1` |
 | GitHub workflows | kebab-case `.yml`; reusable workflows prefixed `_` | `ci.yml`, `_reusable-dotnet-build.yml` |
 | App settings | `appsettings.json`, `appsettings.{Environment}.json` | `appsettings.Development.json` |
 | Resources | `{Marker}.resx`, `{Marker}.{culture}.resx` | `SampleErrorMessages.zh-Hans.resx` |

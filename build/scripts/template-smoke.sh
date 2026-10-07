@@ -54,9 +54,26 @@ if [[ -n "$leftover_names" ]]; then
 fi
 
 step "Checking the generated files"
-for required in README.md CHANGELOG.md CLAUDE.md; do
+for required in \
+  README.md \
+  CHANGELOG.md \
+  CLAUDE.md \
+  CONTRIBUTING.md \
+  .release-please-manifest.json \
+  release-please-config.json \
+  .github/workflows/release.yml \
+  build/licenses/allowed-licenses.json \
+  docs/README.md \
+  docs/architecture/overview.md \
+  docs/services/api.md; do
   [[ -f "$out/$required" ]] || fail "$required is missing"
 done
+if [[ -f "$out/.release-please-manifest.json" && "$(tr -d '[:space:]' < "$out/.release-please-manifest.json")" != '{".":"0.0.0"}' ]]; then
+  fail ".release-please-manifest.json must be { \".\": \"0.0.0\" }, not the template's own version"
+fi
+if [[ -f "$out/docs/README.md" ]] && grep -qF "repository-management.md" "$out/docs/README.md"; then
+  fail "docs/README.md links repository-management.md, which is not generated"
+fi
 if [[ -f "$out/README.md" && "$(head -n 1 "$out/README.md" | tr -d '\r')" != "# $project_name" ]]; then
   fail "README.md does not start with '# $project_name'"
 fi
@@ -97,6 +114,19 @@ fi
 if [[ -z "$generated_secrets_id" || "$generated_secrets_id" == "$template_secrets_id" ]]; then
   fail "the generated UserSecretsId ('$generated_secrets_id') must be new, not the template's ('$template_secrets_id')"
 fi
+
+step "Checking relative links in the generated documents"
+# Markdown links ](target) to files in the project; web links and in-page anchors are skipped, #anchors are not checked.
+link_count=0
+while IFS= read -r document; do
+  while IFS= read -r target; do
+    target="${target%%#*}"
+    [[ -z "$target" || "$target" =~ ^[a-zA-Z][a-zA-Z0-9+.-]*: ]] && continue
+    link_count=$((link_count + 1))
+    [[ -e "$(dirname "$document")/$target" ]] || fail "${document#"$out"/} links $target, which is not generated"
+  done < <(grep -oE '\]\([^) ]+\)' "$document" | sed -E 's/^\]\((.*)\)$/\1/')
+done < <(find "$out" -name '*.md' \( -path "$out/docs/*" -o -path "$out/README.md" -o -path "$out/CLAUDE.md" -o -path "$out/CONTRIBUTING.md" \))
+(( link_count > 0 )) || fail "no relative links were found to check"
 
 if (( failures > 0 )); then
   echo

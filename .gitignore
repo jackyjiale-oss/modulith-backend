@@ -487,5 +487,8 @@ $RECYCLE.BIN/
 TestResults/
 coverage/
 
+# Snapshot test output; accepted snapshots are the committed *.verified.* files (ADR 0011)
+*.received.*
+
 # Controller scratch workspace
 .superpowers/

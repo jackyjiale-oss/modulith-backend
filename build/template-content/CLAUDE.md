@@ -38,7 +38,7 @@ dotnet ef migrations add {Verb}{What} \
 - No secrets in files. Use user-secrets or environment variables.
 - No `DateTime.Now` or `DateTime.UtcNow`; inject `TimeProvider`.
 - No access to another module's tables.
-- No new package without Central Package Management (`Directory.Packages.props`) and an allowed licence.
+- No new package without Central Package Management (`Directory.Packages.props`) and an allowed licence (`build/licenses/`); also read its terms for usage fees.
 - Never use `--no-verify`.
 - Never edit a migration that has been applied; add a new one.
 
@@ -46,5 +46,6 @@ dotnet ef migrations add {Verb}{What} \
 
 - [`docs/coding-conventions.md`](docs/coding-conventions.md)
 - [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- [`docs/README.md`](docs/README.md) (index of every document)
 - [`docs/architecture/overview.md`](docs/architecture/overview.md)
 - [`docs/adr/`](docs/adr/)

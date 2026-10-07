@@ -12,4 +12,9 @@
     <PackageReference Include="Testcontainers.MsSql" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- One repository-root locator for both test projects. -->
+    <Compile Include="..\TemplateName.ArchitectureTests\RepositoryPaths.cs" Link="Documentation\RepositoryPaths.cs" />
+  </ItemGroup>
+
 </Project>
