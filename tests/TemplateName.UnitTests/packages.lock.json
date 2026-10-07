@@ -281,6 +281,13 @@
       "templatename.sharedkernel": {
         "type": "Project"
       },
+      "templatename.web.common": {
+        "type": "Project",
+        "dependencies": {
+          "TemplateName.Application.Common": "[1.0.0, )",
+          "TemplateName.SharedKernel": "[1.0.0, )"
+        }
+      },
       "FluentValidation": {
         "type": "CentralTransitive",
         "requested": "[12.1.1, )",
