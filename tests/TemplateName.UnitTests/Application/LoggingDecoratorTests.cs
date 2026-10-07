@@ -38,6 +38,9 @@ public sealed class LoggingDecoratorTests
         result.IsFailure.ShouldBeTrue();
         var warning = _logger.Entries.Single(entry => entry.Level == LogLevel.Warning);
         warning.Message.ShouldContain("ping.already_sent");
+        warning.Properties["RequestName"].ShouldBe("PingCommand");
+        warning.Properties["ErrorCode"].ShouldBe("ping.already_sent");
+        warning.Properties.ShouldContainKey("ElapsedMs");
     }
 
     [Fact]

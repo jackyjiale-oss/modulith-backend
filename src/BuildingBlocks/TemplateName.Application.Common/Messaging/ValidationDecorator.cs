@@ -73,11 +73,24 @@ internal static class ValidationDecorator
         }
 
         var errors = failures
-            .GroupBy(failure => JsonNamingPolicy.CamelCase.ConvertName(failure.PropertyName))
+            .GroupBy(failure => ToCamelCasePath(failure.PropertyName))
             .ToDictionary(
                 group => group.Key,
                 group => group.Select(failure => failure.ErrorMessage).Distinct().ToArray());
 
         return new ValidationError(errors);
+    }
+
+    // "Items[0].Name" -> "items[0].name": camel-case every dotted segment, keep any [n] index suffix as is.
+    private static string ToCamelCasePath(string propertyPath)
+        => string.Join('.', propertyPath.Split('.').Select(ToCamelCaseSegment));
+
+    private static string ToCamelCaseSegment(string segment)
+    {
+        var indexStart = segment.IndexOf('[', StringComparison.Ordinal);
+
+        return indexStart < 0
+            ? JsonNamingPolicy.CamelCase.ConvertName(segment)
+            : JsonNamingPolicy.CamelCase.ConvertName(segment[..indexStart]) + segment[indexStart..];
     }
 }

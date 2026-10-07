@@ -4,7 +4,7 @@ namespace TemplateName.UnitTests.Application;
 
 internal sealed class RecordingLogger<T> : ILogger<T>
 {
-    public List<(LogLevel Level, string Message)> Entries { get; } = [];
+    public List<(LogLevel Level, string Message, IReadOnlyDictionary<string, object?> Properties)> Entries { get; } = [];
 
     public IDisposable? BeginScope<TState>(TState state)
         where TState : notnull
@@ -18,5 +18,10 @@ internal sealed class RecordingLogger<T> : ILogger<T>
         TState state,
         Exception? exception,
         Func<TState, Exception?, string> formatter)
-        => Entries.Add((logLevel, formatter(state, exception)));
+    {
+        var properties = state is IEnumerable<KeyValuePair<string, object?>> pairs
+            ? pairs.ToDictionary(pair => pair.Key, pair => pair.Value)
+            : [];
+        Entries.Add((logLevel, formatter(state, exception), properties));
+    }
 }
