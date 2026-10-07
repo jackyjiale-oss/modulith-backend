@@ -1,0 +1,10 @@
+<Project>
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TemplateName.UnitTests" />
+    <InternalsVisibleTo Include="TemplateName.IntegrationTests" />
+    <InternalsVisibleTo Include="TemplateName.ArchitectureTests" />
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
+  </ItemGroup>
+</Project>
