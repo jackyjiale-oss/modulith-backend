@@ -46,6 +46,9 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     /// <summary>Makes the flaky outbox test handler fail.</summary>
     public FlakySwitch FlakySwitch { get; } = new();
 
+    /// <summary>Parks the gate outbox test handler inside a message.</summary>
+    public HandlerGate HandlerGate { get; } = new();
+
     public async ValueTask InitializeAsync()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -109,6 +112,7 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.AddOutbox<TestDbContext>(typeof(IntegrationTestWebAppFactory).Assembly);
             services.AddSingleton(EventRecorder);
             services.AddSingleton(FlakySwitch);
+            services.AddSingleton(HandlerGate);
         });
     }
 

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.IntegrationTests.Infrastructure;
 using TemplateName.IntegrationTests.Persistence;
@@ -129,8 +130,47 @@ public sealed class OutboxTests(IntegrationTestWebAppFactory factory) : Integrat
         await using var read = NewTestDbContext();
         (await read.Set<OutboxMessage>().CountAsync(message => message.ProcessedAt == null, Ct)).ShouldBe(0);
 
-        // Two handlers per message, each recorded once.
-        (await read.Set<OutboxMessageConsumer>().CountAsync(Ct)).ShouldBe(100);
+        // Three handlers per message, each recorded once.
+        (await read.Set<OutboxMessageConsumer>().CountAsync(Ct)).ShouldBe(150);
+    }
+
+    [Fact]
+    public async Task Dispatcher_that_lost_its_lease_does_not_overwrite_the_new_owner()
+    {
+        var first = await SaveNewAggregateAsync("a");
+        var second = await SaveNewAggregateAsync("b");
+        var leaseDuration = Factory.Services.GetRequiredService<IOptions<OutboxOptions>>().Value.LeaseDuration;
+        var loser = ActivatorUtilities.CreateInstance<OutboxDispatcher<TestDbContext>>(Factory.Services);
+        var winner = ActivatorUtilities.CreateInstance<OutboxDispatcher<TestDbContext>>(Factory.Services);
+
+        // The loser claims both messages and is parked inside the first one.
+        var entered = Factory.HandlerGate.Close();
+        var losing = Task.Run(() => loser.ProcessBatchAsync(Ct), Ct);
+        var gatedId = await entered.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+
+        // Its lease runs out, so the winner re-claims both messages and completes them.
+        Factory.Time.Advance(leaseDuration + TimeSpan.FromSeconds(1));
+        var winnerNow = Now;
+        (await winner.ProcessBatchAsync(Ct)).ShouldBe(2);
+
+        // The loser resumes later; nothing it does may change the winner's outcome.
+        Factory.Time.Advance(TimeSpan.FromSeconds(1));
+        Factory.HandlerGate.Open();
+        (await losing.WaitAsync(TimeSpan.FromSeconds(30), Ct)).ShouldBe(2);
+
+        await using var db = NewTestDbContext();
+        var messages = await db.Set<OutboxMessage>().AsNoTracking().ToListAsync(Ct);
+        messages.Count.ShouldBe(2);
+        messages.ShouldAllBe(message => message.ProcessedAt == winnerNow
+            && message.AttemptCount == 0
+            && message.Error == null
+            && message.NextAttemptAt == null
+            && message.LockedUntil == null);
+        (await db.Set<OutboxMessageConsumer>().CountAsync(Ct)).ShouldBe(6);
+
+        // The loser saw its lease had expired and did not start the second message.
+        var notGatedId = first.Id == gatedId ? second.Id : first.Id;
+        Factory.EventRecorder.Events.Cast<TestAggregateCreatedDomainEvent>().Count(domainEvent => domainEvent.Id == notGatedId).ShouldBe(1);
     }
 
     public override async ValueTask DisposeAsync()

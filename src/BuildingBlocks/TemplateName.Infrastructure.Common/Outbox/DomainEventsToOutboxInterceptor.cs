@@ -9,6 +9,10 @@ namespace TemplateName.Infrastructure.Common.Outbox;
 /// Writes the domain events of every tracked <see cref="IHasDomainEvents"/> entity as <see cref="OutboxMessage"/> rows in the same
 /// save, then clears them. The context must map the outbox (<c>ApplyOutbox</c>) to save entities that raise events.
 /// </summary>
+/// <remarks>
+/// The events are cleared before the save commits. If the save fails, the outbox rows stay tracked as Added, so retrying the save on
+/// the same context is safe. If that context is discarded and the aggregate is attached to a new one instead, the events are lost.
+/// </remarks>
 internal sealed class DomainEventsToOutboxInterceptor(TimeProvider timeProvider) : SaveChangesInterceptor
 {
     public override InterceptionResult<int> SavingChanges(DbContextEventData eventData, InterceptionResult<int> result)
