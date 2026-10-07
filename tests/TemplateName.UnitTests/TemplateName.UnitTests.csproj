@@ -5,12 +5,14 @@
     <ProjectReference Include="..\..\src\BuildingBlocks\TemplateName.Application.Common\TemplateName.Application.Common.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\TemplateName.Infrastructure.Common\TemplateName.Infrastructure.Common.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\TemplateName.Web.Common\TemplateName.Web.Common.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Sample\TemplateName.Modules.Sample\TemplateName.Modules.Sample.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
   </ItemGroup>
 
 </Project>

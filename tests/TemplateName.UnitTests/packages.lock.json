@@ -34,6 +34,12 @@
           "Microsoft.Extensions.Options": "10.0.12"
         }
       },
+      "Microsoft.Extensions.TimeProvider.Testing": {
+        "type": "Direct",
+        "requested": "[10.10.0, )",
+        "resolved": "10.10.0",
+        "contentHash": "8duZdxuO3Oo8tlyQXVq1drXee6GJC9DjUU97Pq3YaIqf92jrAHsWxbbRKwvjQI48Mer3IANwUKF0elqvHeY4Rw=="
+      },
       "Microsoft.NET.Test.Sdk": {
         "type": "Direct",
         "requested": "[18.10.1, )",
@@ -730,6 +736,15 @@
           "Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore": "[10.0.12, )",
           "TemplateName.Application.Common": "[1.0.0, )",
           "TemplateName.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "templatename.modules.sample": {
+        "type": "Project",
+        "dependencies": {
+          "TemplateName.Application.Common": "[1.0.0, )",
+          "TemplateName.Infrastructure.Common": "[1.0.0, )",
+          "TemplateName.SharedKernel": "[1.0.0, )",
+          "TemplateName.Web.Common": "[1.0.0, )"
         }
       },
       "templatename.sharedkernel": {

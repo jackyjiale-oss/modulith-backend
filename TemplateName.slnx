@@ -6,6 +6,9 @@
     <Project Path="src/BuildingBlocks/TemplateName.Infrastructure.Common/TemplateName.Infrastructure.Common.csproj" />
     <Project Path="src/BuildingBlocks/TemplateName.Web.Common/TemplateName.Web.Common.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Sample/">
+    <Project Path="src/Modules/Sample/TemplateName.Modules.Sample/TemplateName.Modules.Sample.csproj" />
+  </Folder>
   <Folder Name="/src/Host/">
     <Project Path="src/Host/TemplateName.Api/TemplateName.Api.csproj" />
   </Folder>
