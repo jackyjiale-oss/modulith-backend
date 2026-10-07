@@ -1,13 +1,27 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using TemplateName.IntegrationTests.Infrastructure;
 
 namespace TemplateName.IntegrationTests.Host;
 
 public sealed class HostTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)
 {
+    private static readonly (string Name, string Value)[] ExpectedSecurityHeaders =
+    [
+        ("X-Content-Type-Options", "nosniff"),
+        ("Referrer-Policy", "no-referrer"),
+        ("X-Frame-Options", "DENY"),
+        ("Content-Security-Policy", "frame-ancestors 'none'"),
+        ("Permissions-Policy", "camera=(), microphone=(), geolocation=()"),
+    ];
+
     [Fact]
     public async Task Live_returns_200()
     {
@@ -34,12 +48,37 @@ public sealed class HostTests(IntegrationTestWebAppFactory factory) : Integratio
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
         body.GetProperty("traceId").GetString().ShouldBe(response.Headers.GetValues("X-Trace-Id").Single());
         body.GetProperty("code").GetString().ShouldBe("http.404");
+        AssertSecurityHeaders(response);
+    }
+
+    [Fact]
+    public async Task Unhandled_exception_returns_500_problem_details_with_trace_id_and_security_headers()
+    {
+        await using var throwing = Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(
+            services => services.AddSingleton<IStartupFilter, ThrowingEndpointStartupFilter>()));
+        using var client = throwing.CreateClient();
+
+        using var response = await client.GetAsync("/throw", Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        body.GetProperty("traceId").GetString().ShouldBe(response.Headers.GetValues("X-Trace-Id").Single());
+        AssertSecurityHeaders(response);
     }
 
     [Fact]
     public async Task OpenApi_document_is_served_outside_production()
     {
         using var response = await Client.GetAsync("/openapi/v1.json", Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Scalar_is_served_outside_production()
+    {
+        using var response = await Client.GetAsync("/scalar/v1", Ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
@@ -60,7 +99,32 @@ public sealed class HostTests(IntegrationTestWebAppFactory factory) : Integratio
     {
         using var response = await Client.GetAsync("/health/live", Ct);
 
-        response.Headers.GetValues("X-Content-Type-Options").ShouldHaveSingleItem().ShouldBe("nosniff");
-        response.Headers.GetValues("X-Frame-Options").ShouldHaveSingleItem().ShouldBe("DENY");
+        AssertSecurityHeaders(response);
+    }
+
+    [Fact]
+    public void Kestrel_request_body_limit_is_bound_from_configuration()
+    {
+        var options = Factory.Services.GetRequiredService<IOptions<KestrelServerOptions>>().Value;
+
+        options.Limits.MaxRequestBodySize.ShouldBe(10485760);
+    }
+
+    private static void AssertSecurityHeaders(HttpResponseMessage response)
+    {
+        foreach (var (name, value) in ExpectedSecurityHeaders)
+        {
+            response.Headers.GetValues(name).ShouldHaveSingleItem().ShouldBe(value);
+        }
+    }
+
+    /// <summary>Adds a terminal <c>/throw</c> branch inside the production pipeline so the exception handler has something to catch.</summary>
+    private sealed class ThrowingEndpointStartupFilter : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            next(app);
+            app.Map("/throw", branch => branch.Run(_ => throw new InvalidOperationException("boom")));
+        };
     }
 }
