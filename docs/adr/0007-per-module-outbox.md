@@ -1,0 +1,30 @@
+# 0007. Per-module outbox with per-handler consumer tracking
+
+- Status: Accepted
+- Date: 2026-10-07
+- Deciders: Lee Jia Le
+
+## Context
+Aggregates raise domain events, and some reactions to them (sending mail, notifying another module, writing an audit record) must happen reliably after the aggregate is saved, but must not run inside the request or be lost when a process dies between the save and the reaction. The blueprint (Section 7.8) proposed one shared `platform.OutboxMessages` table written "inside the business transaction". With one `DbContext` per module (ADR 0001, ADR 0006), every module's context would have to map and migrate that one table, which breaks the rule that no module touches another module's tables and makes migrations from different contexts fight over it (blueprint review, Section 2.1). The blueprint also had Auth and Notifications write "in the same transaction", which is impossible when they use different contexts (review, Section 2.2). The app may run as several instances, so dispatch must be safe when more than one dispatcher polls the same table.
+
+## Options considered
+1. One shared outbox table (blueprint) — one dispatcher; but every module maps the same table, so module ownership and independent migrations are lost.
+2. Publish events in process right after `SaveChanges` — simplest; but a crash between the save and the handlers loses the event, and a failing handler cannot be retried.
+3. An outbox per module in its own schema, written in the same `SaveChanges` as the aggregate, plus a consumer table that records which handler has processed which message, dispatched by one generic dispatcher per context.
+4. A message broker library (for example MassTransit) with its outbox — mature; but MassTransit 9 is no longer open source (forbidden by the licence rules), and a broker is more infrastructure than v1 needs.
+
+## Decision
+We chose option 3 (namespace `TemplateName.Infrastructure.Common.Outbox`).
+
+- **Tables.** A module context calls `ApplyOutbox()`, which maps `OutboxMessages` (`Id`, `Type` = event `FullName`, `Content` = JSON, `OccurredAt`, `ProcessedAt`, `AttemptCount`, `NextAttemptAt`, `LockedUntil`, `Error`; filtered index on `OccurredAt` where `ProcessedAt IS NULL`) and `OutboxMessageConsumers` (primary key `OutboxMessageId`, `Name` = handler `FullName`; `ProcessedAt`) into the module's own schema. They are created by the module's migrations.
+- **Writing.** `DomainEventsToOutboxInterceptor`, added to every context by `AddModuleDbContext`, turns the events of every tracked `IHasDomainEvents` entity into outbox rows (`SequentialGuid` ids, `JsonSerializer.Serialize(evt, evt.GetType())`) during `SaveChanges` and clears them. The aggregate and its events commit or fail together.
+- **Dispatching.** `AddOutbox<TContext>(assembly)` registers a type map from `FullName` to every `IDomainEvent` in the module's assembly, a singleton `OutboxDispatcher<TContext>` and a background service that calls `ProcessBatchAsync` every `Outbox:PollingInterval` while `Outbox:Enabled` is set. `ProcessBatchAsync` claims up to `BatchSize` due messages with one `UPDATE ... OUTPUT` statement that reads `WITH (UPDLOCK, READPAST, ROWLOCK)` and sets a lease (`LockedUntil = now + LeaseDuration`). Concurrent dispatchers skip each other's rows, and no transaction is held while handlers run; if a process dies, its lease expires and another dispatcher takes the messages over.
+- **Delivery is at least once per handler.** Each message is dispatched in its own DI scope. Every `IDomainEventHandler<T>` without an `OutboxMessageConsumers` row for the message runs, and a row is written when it succeeds, so a retry runs only the handlers that failed. A handler can still run twice if the process dies, or the lease expires, between the handler finishing and its consumer row being saved, so **handlers must be idempotent**. When every handler has succeeded the message gets `ProcessedAt`.
+- **Retries.** If any handler throws, or the type is unknown or the content unreadable, the dispatcher logs at Error, increments `AttemptCount`, stores the error (truncated to 2000 characters), releases the lease and sets `NextAttemptAt` from `OutboxRetryPolicy`: 5 s, 30 s, 2 min and 10 min after attempts 1 to 4, then 1 h. After `MaxAttempts` (default 5) the message is abandoned: it stays unprocessed with its last error.
+- **Across modules.** A handler that must tell another module publishes an integration event from that module's `Contracts`; the consuming module records what it has processed (inbox, Plan 3). Cross-module effects are reliable and eventually consistent, never part of one transaction.
+- **Configuration** (section `Outbox`, validated on start): `Enabled` (`true`), `PollingInterval` (`00:00:05`), `BatchSize` (`20`, 1 to 500), `MaxAttempts` (`5`), `LeaseDuration` (`00:01:00`). Integration tests set `Enabled` to `false` and call `ProcessBatchAsync` directly.
+
+## Consequences
+- Positive: each module owns its outbox and migrations; an event is never lost once its aggregate is saved; several app instances can dispatch safely (covered by a test with two concurrent dispatchers); one flaky handler does not make the others run again; time comes from `TimeProvider`, so retry behavior is tested deterministically.
+- Negative / trade-offs accepted: handlers must be idempotent; dispatch latency is up to one polling interval; every module adds two tables and one polling background service; abandoned messages need someone to look at them; processed rows accumulate until a cleanup job removes them; renaming an event or handler type changes its stored `FullName`, so pending messages of the old name fail as unknown and handlers recorded under the old name run again.
+- Follow-up actions: the Sample module's migration creates `sample.OutboxMessages` and `sample.OutboxMessageConsumers` (Task 11); the inbox for integration events (Plan 3); a cleanup job for processed messages and alerting on abandoned ones (Plan 5); the audit trail written through the outbox (review Section 2.3, Plan 5).

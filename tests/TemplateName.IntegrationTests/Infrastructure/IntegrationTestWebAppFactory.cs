@@ -9,7 +9,10 @@ using Microsoft.Extensions.Time.Testing;
 using Respawn;
 using Respawn.Graph;
 using TemplateName.Application.Common.Identity;
+using TemplateName.Application.Common.Messaging;
+using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
+using TemplateName.IntegrationTests.Outbox;
 using TemplateName.IntegrationTests.Persistence;
 using Testcontainers.MsSql;
 
@@ -36,6 +39,12 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
 
     /// <summary>The user every host built by this factory sees; anonymous until a test sets <see cref="TestCurrentUser.UserId"/>.</summary>
     public TestCurrentUser CurrentUser { get; } = new();
+
+    /// <summary>The events the outbox test handlers have received.</summary>
+    public EventRecorder EventRecorder { get; } = new();
+
+    /// <summary>Makes the flaky outbox test handler fail.</summary>
+    public FlakySwitch FlakySwitch { get; } = new();
 
     public async ValueTask InitializeAsync()
     {
@@ -96,6 +105,10 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.RemoveAll<ICurrentUser>();
             services.AddSingleton<ICurrentUser>(CurrentUser);
             services.AddModuleDbContext<TestDbContext>(TestDbContext.Schema, PersistenceTestsConnectionStringName, includeInMigrations: false);
+            services.AddApplicationHandlers(typeof(IntegrationTestWebAppFactory).Assembly);
+            services.AddOutbox<TestDbContext>(typeof(IntegrationTestWebAppFactory).Assembly);
+            services.AddSingleton(EventRecorder);
+            services.AddSingleton(FlakySwitch);
         });
     }
 
