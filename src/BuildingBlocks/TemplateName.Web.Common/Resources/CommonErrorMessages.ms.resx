@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="validation.failed" xml:space="preserve">
+    <value>Satu atau lebih ralat pengesahan telah berlaku.</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="request.malformed" xml:space="preserve">
+    <value>Format permintaan tidak sah.</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="server.unexpected_error" xml:space="preserve">
+    <value>Ralat yang tidak dijangka telah berlaku.</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="rate_limit.exceeded" xml:space="preserve">
+    <value>Terlalu banyak permintaan. Sila cuba lagi kemudian.</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="http.400" xml:space="preserve">
+    <value>Permintaan tidak sah.</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="http.401" xml:space="preserve">
+    <value>Anda perlu log masuk untuk mengakses sumber ini.</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="http.403" xml:space="preserve">
+    <value>Anda tidak mempunyai kebenaran untuk mengakses sumber ini.</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="http.404" xml:space="preserve">
+    <value>Sumber yang diminta tidak ditemui.</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="http.405" xml:space="preserve">
+    <value>Kaedah HTTP ini tidak dibenarkan untuk sumber ini.</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="http.415" xml:space="preserve">
+    <value>Jenis kandungan permintaan tidak disokong.</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+</root>

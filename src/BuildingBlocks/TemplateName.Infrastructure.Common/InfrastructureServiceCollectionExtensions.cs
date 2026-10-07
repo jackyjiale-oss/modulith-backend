@@ -3,9 +3,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TemplateName.Application.Common.Data;
+using TemplateName.Application.Common.Localization;
 using TemplateName.Infrastructure.Common.Idempotency;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
+using TemplateName.Infrastructure.Common.Resources;
 
 namespace TemplateName.Infrastructure.Common;
 
@@ -14,7 +16,8 @@ public static class InfrastructureServiceCollectionExtensions
     /// <summary>
     /// Registers the system clock, the <c>ConnectionStrings</c>, <c>Outbox</c> and <c>Idempotency</c> options (validated on start) and
     /// the <c>Database</c> options, the read-side connection factory and Dapper's <c>DateOnly</c> type handler, the EF Core save
-    /// interceptors, the concurrency-conflict exception handler and the <c>platform</c> context (idempotency keys). Call it before
+    /// interceptors, the concurrency-conflict exception handler, the <c>platform</c> context (idempotency keys) and the messages of
+    /// their error codes (<c>InfrastructureErrorMessages</c>). Call it before
     /// <c>AddWebCommon</c>, so the concurrency handler runs before the global one, and before any <c>AddModuleDbContext</c> or
     /// <c>AddOutbox</c>, so the <c>platform</c> migrations apply first.
     /// </summary>
@@ -32,6 +35,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<SoftDeleteInterceptor>();
         services.AddSingleton<DomainEventsToOutboxInterceptor>();
         services.AddExceptionHandler<ConcurrencyExceptionHandler>();
+        services.AddErrorMessages<InfrastructureErrorMessages>();
         services.AddModuleDbContext<PlatformDbContext>(PlatformDbContext.Schema);
 
         // Dapper's type handlers are process-wide; adding the same handler again replaces it.

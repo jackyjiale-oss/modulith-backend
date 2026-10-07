@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="validation.failed" xml:space="preserve">
+    <value>发生了一个或多个验证错误。</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="request.malformed" xml:space="preserve">
+    <value>请求格式不正确。</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="server.unexpected_error" xml:space="preserve">
+    <value>发生了意外错误。</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="rate_limit.exceeded" xml:space="preserve">
+    <value>请求过于频繁，请稍后再试。</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="http.400" xml:space="preserve">
+    <value>请求无效。</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="http.401" xml:space="preserve">
+    <value>访问此资源需要身份验证。</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="http.403" xml:space="preserve">
+    <value>您无权访问此资源。</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="http.404" xml:space="preserve">
+    <value>找不到请求的资源。</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="http.405" xml:space="preserve">
+    <value>此资源不允许使用该 HTTP 方法。</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+  <data name="http.415" xml:space="preserve">
+    <value>不支持该请求的内容类型。</value>
+    <comment>Draft – needs native review</comment>
+  </data>
+</root>

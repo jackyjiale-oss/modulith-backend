@@ -12,6 +12,7 @@ internal sealed partial class ConcurrencyExceptionHandler(
     : IExceptionHandler
 {
     private const string ConflictCode = "concurrency.conflict";
+    // English default; CustomizeProblemDetails replaces it with the InfrastructureErrorMessages entry for the caller's language.
     private const string ConflictDetail = "The resource was changed by another request. Reload it and try again.";
 
     public async ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception, CancellationToken cancellationToken)

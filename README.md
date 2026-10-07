@@ -7,6 +7,7 @@ Modulith is a `dotnet new` template for production-ready backends: an ASP.NET Co
 
 - Modular monolith with two projects per module (`Modules.{Module}` and `Modules.{Module}.Contracts`), `internal` by default
 - `Result`/`Error` pattern mapped to RFC 9457 ProblemDetails, every error carrying `code` and `traceId`
+- Error messages in English, Malay and Simplified Chinese from `.resx` files, chosen by `Accept-Language`, with translation completeness checked by architecture tests
 - Injected command and query handlers with Scrutor decorators for validation (FluentValidation) and logging; no MediatR
 - EF Core for writes and Dapper for reads, one `DbContext` and schema per module, SQL Server-ordered sequential GUIDs
 - Per-module transactional outbox with leased, multi-instance-safe dispatch
@@ -19,7 +20,7 @@ Modulith is a `dotnet new` template for production-ready backends: an ASP.NET Co
 
 ## Status
 
-Pre-release, implementing Plan 1 (foundation and core baseline). Expect breaking changes until the first release.
+Pre-release, implementing Plan 1 (foundation and core baseline). Expect breaking changes until the first release. The Malay and Simplified Chinese messages are drafts awaiting native review (release checklist in [`CONTRIBUTING.md`](CONTRIBUTING.md), Section 5).
 
 ## Prerequisites
 
@@ -61,6 +62,27 @@ tests/                   unit, architecture and integration tests
 ```
 
 `TemplateName` is the placeholder that `dotnet new` replaces with the project name.
+
+## Adding a language / adding an error message
+
+Error messages are `.resx` resources keyed by the error code (ADR 0009). Clients get the stable `code` and `params`; only `detail` follows `Accept-Language` (`en`, `ms`, `zh-Hans`; anything else gets English).
+
+**Add an error message**
+
+1. Declare the error in the module's `Domain/{Aggregates}/{Aggregate}Errors.cs`, for example `Error.NotFound("leave.not_found", $"Leave request '{id}' was not found.") with { Parameters = new Dictionary<string, object?> { ["id"] = id } }`. Parameters are returned to clients: no secrets or personal data.
+2. Add the code as a key to `Resources/{Module}ErrorMessages.resx` (English), `.ms.resx` and `.zh-Hans.resx`, with the same `{placeholders}` in every language. Mark a translation you could not have reviewed with `<comment>Draft – needs native review</comment>`.
+3. Run `dotnet test --project tests/TemplateName.ArchitectureTests`: `TranslationTests` fails on a missing key, an extra key, a placeholder mismatch, or an error code without an English message.
+
+A new module creates `Resources/{Module}ErrorMessages.cs` (an empty `internal sealed class`) next to its three `.resx` files, calls `services.AddErrorMessages<{Module}ErrorMessages>()` in `Add{Module}Module`, and adds the marker to `Assemblies.ErrorMessageResources` in the architecture tests.
+
+**Add a language**
+
+1. Add a `{Marker}.{culture}.resx` next to every `*ErrorMessages.resx` (under `src/BuildingBlocks/` and `src/Modules/`) with every key translated.
+2. Add the culture to `Localization:SupportedUICultures` in `appsettings.json`.
+3. Add the culture to `TranslationTests` and its FluentValidation messages to `ValidationMessageTranslations` (Web.Common) if FluentValidation does not ship that exact culture.
+4. Have a native speaker review the new strings before the next release.
+
+Generated projects carry the same recipe in their own `README.md`.
 
 ## Documentation
 

@@ -150,6 +150,7 @@ A new module gets `docs/modules/{module}.md` copied from `docs/modules/_template
 - **Don't edit `CHANGELOG.md` by hand.** release-please generates it from the Conventional Commits on `main`, which is why commit and PR titles matter. You may polish wording inside the release PR.
 - On every push to `main`, release-please updates a PR titled `chore(release): release <version>`. Merging it tags `v<version>`, updates `CHANGELOG.md`, and bumps `<Version>` in `Directory.Build.props`. Add a repository secret `RELEASE_PLEASE_TOKEN` (a fine-grained token for this repository only, with Contents and Pull requests read/write). Without it, release PRs are opened by `GITHUB_TOKEN` and CI does not run on them.
 - SemVer: `feat` → minor, `fix`/`perf` → patch, `!` or `BREAKING CHANGE:` → major (Section 2.2). Database schema history is the EF migrations listed in each module document.
+- Release checklist: the `ms` and `zh-Hans` error messages are drafts until a native speaker has reviewed them. Before a release, have every `*.ms.resx` and `*.zh-Hans.resx` entry still commented `Draft – needs native review` reviewed, and remove the comment from each entry that passes.
 
 ## 6. Licences
 

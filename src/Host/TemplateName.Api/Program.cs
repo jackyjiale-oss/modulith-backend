@@ -9,6 +9,7 @@ using TemplateName.Infrastructure.Common.Idempotency;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Sample;
 using TemplateName.Web.Common;
+using TemplateName.Web.Common.Localization;
 using TemplateName.Web.Common.Observability;
 using TemplateName.Web.Common.Security;
 
@@ -19,7 +20,7 @@ builder.AddObservability();
 // Before AddWebCommon, so the concurrency exception handler runs before the global one.
 builder.Services.AddInfrastructureCommon(builder.Configuration);
 builder.Services.AddWebCommon();
-// AddApiLocalization (Task 15)
+builder.Services.AddApiLocalization(builder.Configuration);
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddOpenApi("v1");
 builder.Services.AddHealthChecks();
@@ -44,7 +45,8 @@ if (app.Services.GetRequiredService<IOptions<DatabaseOptions>>().Value.ApplyMigr
 // Pipeline order matters; later tasks insert at the marked slots.
 // 1. UseForwardedHeaders
 app.UseForwardedHeaders();
-// 1a. UseApiLocalization (Task 15) - must precede UseExceptionHandler
+// 1a. UseApiLocalization - must precede UseExceptionHandler, so error responses come back in the caller's language (ADR 0009)
+app.UseApiLocalization();
 // 2. UseExceptionHandler
 app.UseExceptionHandler();
 // 3. UseStatusCodePages

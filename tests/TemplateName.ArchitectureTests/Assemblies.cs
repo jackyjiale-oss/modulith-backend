@@ -1,13 +1,19 @@
 using System.Reflection;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common.Outbox;
+using TemplateName.Infrastructure.Common.Resources;
 using TemplateName.Modules.Sample;
+using TemplateName.Modules.Sample.Resources;
 using TemplateName.SharedKernel;
+using TemplateName.Web.Common.Resources;
 using TemplateName.Web.Common.Results;
 
 namespace TemplateName.ArchitectureTests;
 
-/// <summary>The assemblies the architecture rules inspect. Adding a module means adding one line to <see cref="Modules"/>.</summary>
+/// <summary>
+/// The assemblies the architecture rules inspect. Adding a module means adding one line to <see cref="Modules"/> and one to
+/// <see cref="ErrorMessageResources"/>.
+/// </summary>
 public static class Assemblies
 {
     public static Assembly SharedKernel { get; } = typeof(IDomainEvent).Assembly;
@@ -26,13 +32,27 @@ public static class Assemblies
         typeof(SampleModule).Assembly,
     ];
 
-    /// <summary>Every <c>TemplateName.*</c> assembly under <c>src</c>.</summary>
-    public static IReadOnlyList<Assembly> All { get; } =
+    /// <summary>The building-block assemblies (everything under <c>src/BuildingBlocks</c>).</summary>
+    public static IReadOnlyList<Assembly> BuildingBlocks { get; } =
     [
         SharedKernel,
         ApplicationCommon,
         InfrastructureCommon,
         WebCommon,
+    ];
+
+    /// <summary>The marker class of every <c>*ErrorMessages</c> resource set (neutral English plus one <c>.resx</c> per translation).</summary>
+    public static IReadOnlyList<Type> ErrorMessageResources { get; } =
+    [
+        typeof(CommonErrorMessages),
+        typeof(InfrastructureErrorMessages),
+        typeof(SampleErrorMessages),
+    ];
+
+    /// <summary>Every <c>TemplateName.*</c> assembly under <c>src</c>.</summary>
+    public static IReadOnlyList<Assembly> All { get; } =
+    [
+        .. BuildingBlocks,
         .. Modules,
         Api,
     ];

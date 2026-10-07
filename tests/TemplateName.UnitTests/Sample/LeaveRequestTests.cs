@@ -79,7 +79,7 @@ public sealed class LeaveRequestTests
 
         notFound.Code.ShouldBe("leave.not_found");
         notFound.Type.ShouldBe(ErrorType.NotFound);
-        notFound.Message.ShouldContain(EmployeeId.ToString());
+        notFound.Parameters.ShouldNotBeNull()["id"].ShouldBe(EmployeeId);
     }
 
     private static LeaveRequest SubmitPending()

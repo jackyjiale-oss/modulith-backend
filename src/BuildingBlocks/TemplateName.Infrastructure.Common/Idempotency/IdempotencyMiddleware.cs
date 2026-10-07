@@ -40,6 +40,7 @@ internal sealed partial class IdempotencyMiddleware(
     private const int SqlUniqueConstraintViolation = 2627;
     private const int SqlUniqueIndexViolation = 2601;
 
+    // English defaults; CustomizeProblemDetails replaces them with the InfrastructureErrorMessages entries for the caller's language.
     private const string InvalidKeyCode = "idempotency.invalid_key";
     private const string InvalidKeyDetail = "The Idempotency-Key header must be a single value of 1 to 100 characters.";
     private const string InProgressCode = "idempotency.in_progress";

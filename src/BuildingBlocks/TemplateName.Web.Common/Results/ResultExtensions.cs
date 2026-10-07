@@ -5,7 +5,10 @@ namespace TemplateName.Web.Common.Results;
 
 public static class ResultExtensions
 {
-    /// <summary>Maps a failed <see cref="Result"/> to an RFC 9457 problem response (status per <see cref="ErrorType"/>).</summary>
+    /// <summary>
+    /// Maps a failed <see cref="Result"/> to an RFC 9457 problem response (status per <see cref="ErrorType"/>) with <c>code</c> and, when
+    /// the error has any, <c>params</c>. <c>detail</c> is the English message here; <c>CustomizeProblemDetails</c> localizes it.
+    /// </summary>
     /// <exception cref="InvalidOperationException">The result is a success.</exception>
     public static IResult ToProblem(this Result result)
     {
@@ -16,6 +19,10 @@ public static class ResultExtensions
 
         var error = result.Error;
         var extensions = new Dictionary<string, object?> { ["code"] = error.Code };
+        if (error.Parameters is { Count: > 0 } parameters)
+        {
+            extensions["params"] = parameters;
+        }
 
         if (error is ValidationError validationError)
         {

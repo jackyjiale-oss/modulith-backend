@@ -22,6 +22,25 @@ public sealed class ResultExtensionsTests
     }
 
     [Fact]
+    public void Parameters_map_to_params_extension()
+    {
+        var id = Guid.NewGuid();
+        var error = Error.NotFound("x.missing", "msg") with { Parameters = new Dictionary<string, object?> { ["id"] = id } };
+
+        var problem = Result.Failure(error).ToProblem().ShouldBeOfType<ProblemHttpResult>();
+
+        problem.ProblemDetails.Extensions["params"].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>()!["id"].ShouldBe(id);
+    }
+
+    [Fact]
+    public void Error_without_parameters_has_no_params_extension()
+    {
+        var problem = Result.Failure(Error.NotFound("x.missing", "msg")).ToProblem().ShouldBeOfType<ProblemHttpResult>();
+
+        problem.ProblemDetails.Extensions.ContainsKey("params").ShouldBeFalse();
+    }
+
+    [Fact]
     public void Plain_validation_error_maps_to_400_with_code()
     {
         var problem = Result.Failure(Error.Validation("x.invalid", "msg")).ToProblem().ShouldBeOfType<ProblemHttpResult>();

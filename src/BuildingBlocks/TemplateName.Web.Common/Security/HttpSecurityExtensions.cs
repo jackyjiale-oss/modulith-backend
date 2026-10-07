@@ -17,6 +17,7 @@ public static class HttpSecurityExtensions
 {
     internal const string RateLimitExceededCode = "rate_limit.exceeded";
 
+    // English default; CustomizeProblemDetails replaces it with the CommonErrorMessages entry for the caller's language.
     private const string RateLimitExceededDetail = "Too many requests. Try again later.";
 
     /// <summary>

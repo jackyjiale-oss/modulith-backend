@@ -20,11 +20,11 @@
 
 ## Error codes
 
-<!-- Every error code the module returns ({module}.snake_case), its HTTP status and its English message. -->
+<!-- Every error code the module returns ({module}.snake_case), its HTTP status, its params and its English message. Messages live in Resources/{Module}ErrorMessages.resx with .ms.resx and .zh-Hans.resx (ADR 0009). -->
 
-| Code | HTTP | Message (en) |
-|---|---|---|
-| | | |
+| Code | HTTP | `params` | Message (en) |
+|---|---|---|---|
+| | | | |
 
 ## Events
 

@@ -1,11 +1,13 @@
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Sample.Application.Abstractions;
 using TemplateName.Modules.Sample.Endpoints;
 using TemplateName.Modules.Sample.Infrastructure.Persistence;
+using TemplateName.Modules.Sample.Resources;
 
 namespace TemplateName.Modules.Sample;
 
@@ -13,7 +15,8 @@ namespace TemplateName.Modules.Sample;
 public static class SampleModule
 {
     /// <summary>
-    /// Registers the module's context (schema <c>sample</c>), outbox, handlers and validators, and repository. Call it after
+    /// Registers the module's context (schema <c>sample</c>), outbox, handlers and validators, repository and error messages
+    /// (<c>SampleErrorMessages</c>). Call it after
     /// <c>AddInfrastructureCommon</c> and before <c>AddApplicationDecorators</c>.
     /// </summary>
     public static IServiceCollection AddSampleModule(this IServiceCollection services)
@@ -23,6 +26,7 @@ public static class SampleModule
         services.AddModuleDbContext<SampleDbContext>(SampleDbContext.Schema);
         services.AddOutbox<SampleDbContext>(assembly);
         services.AddApplicationHandlers(assembly);
+        services.AddErrorMessages<SampleErrorMessages>();
 
         services.AddScoped<ILeaveRequestRepository, LeaveRequestRepository>();
         services.AddScoped<IUnitOfWork>(serviceProvider => serviceProvider.GetRequiredService<SampleDbContext>());

@@ -19,7 +19,8 @@ public sealed class GlobalExceptionHandlerTests
 
         handled.ShouldBeTrue();
         status.ShouldBe(500);
-        body.GetProperty("detail").GetString()!.ShouldContain(ExceptionMessage);
+        body.GetProperty("exceptionDetails").GetString()!.ShouldContain(ExceptionMessage);
+        body.GetProperty("detail").GetString().ShouldBe("An unexpected error occurred.");
         body.GetProperty("code").GetString().ShouldBe("server.unexpected_error");
     }
 
@@ -33,6 +34,7 @@ public sealed class GlobalExceptionHandlerTests
         body.GetProperty("detail").GetString().ShouldBe("An unexpected error occurred.");
         body.GetRawText().ShouldNotContain(ExceptionMessage);
         body.GetRawText().ShouldNotContain("   at ");
+        body.TryGetProperty("exceptionDetails", out _).ShouldBeFalse();
         body.GetProperty("code").GetString().ShouldBe("server.unexpected_error");
     }
 
