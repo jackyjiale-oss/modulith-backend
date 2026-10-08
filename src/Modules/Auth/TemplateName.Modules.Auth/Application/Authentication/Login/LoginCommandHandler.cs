@@ -14,7 +14,8 @@ namespace TemplateName.Modules.Auth.Application.Authentication.Login;
 /// Signs a user in. Every wrong combination gets the same <see cref="UserErrors.InvalidCredentials"/> after the same work: one password
 /// verification always runs (the dummy one for an unknown email or an account without a password), a locked account answers like a wrong
 /// password (decision D10), and the 403s come only after a correct password, so they reveal nothing to someone who does not know it.
-/// Every outcome writes an audit entry and is saved, so failure counts survive the failure result.
+/// Every outcome writes an audit entry and is saved, so failure counts survive the failure result; a failure is counted by one atomic
+/// statement in the database, so parallel guesses are each counted and never lost to a concurrency conflict.
 /// </summary>
 internal sealed class LoginCommandHandler(
     IUserRepository users,
@@ -89,12 +90,18 @@ internal sealed class LoginCommandHandler(
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        // Only an account with a password counts failures: an unknown email and an account without a password change nothing.
-        var lockedNow = false;
+        // Only an account with a password counts failures: an unknown email and an account without a password change nothing. The count
+        // is one atomic statement in the database (the rules of User.RecordFailedSignIn), so failures that run at the same time are each
+        // counted; the tracked user is left unchanged, so the save below cannot conflict and never writes an outdated count back.
+        FailedSignIn? counted = null;
         if (user is { PasswordHash: not null })
         {
             var lockout = lockoutOptions.Value;
-            lockedNow = user.RecordFailedSignIn(now, lockout.MaxFailedAttempts, lockout.Duration);
+            counted = await users.RecordFailedSignInAsync(user.Id, now, lockout.MaxFailedAttempts, lockout.Duration, cancellationToken);
+            if (counted is { LockoutEnd: { } lockoutEnd })
+            {
+                user.NoteLockedOut(lockoutEnd);
+            }
         }
 
         auditWriter.Record(AuthAuditLog.Create(
@@ -105,7 +112,7 @@ internal sealed class LoginCommandHandler(
             failureReason: UserErrors.InvalidCredentials.Code,
             attemptedIdentifier: attemptedIdentifier));
 
-        if (lockedNow)
+        if (counted is { LockoutEnd: { } end })
         {
             auditWriter.Record(AuthAuditLog.Create(
                 AuthAuditEvents.LockedOut,
@@ -113,10 +120,11 @@ internal sealed class LoginCommandHandler(
                 now,
                 userId: user!.Id,
                 attemptedIdentifier: attemptedIdentifier,
-                details: JsonSerializer.Serialize(new { lockoutEnd = user.LockoutEnd!.Value.ToString("O", CultureInfo.InvariantCulture) })));
+                details: JsonSerializer.Serialize(new { lockoutEnd = end.ToString("O", CultureInfo.InvariantCulture) })));
         }
 
-        await unitOfWork.TrySaveChangesAsync(cancellationToken);
+        // Only inserts (audit rows, the lockout event's outbox row): nothing here can conflict, so every failure keeps its audit row.
+        await unitOfWork.SaveChangesAsync(cancellationToken);
         metrics.RecordLogin(LoginOutcome.InvalidCredentials);
 
         return Result.Failure<LoginResponse>(UserErrors.InvalidCredentials);
@@ -139,7 +147,8 @@ internal sealed class LoginCommandHandler(
             failureReason: failureReason,
             attemptedIdentifier: attemptedIdentifier));
 
-        await unitOfWork.TrySaveChangesAsync(cancellationToken);
+        // The user is unchanged on these paths: only the audit row is inserted, which cannot conflict.
+        await unitOfWork.SaveChangesAsync(cancellationToken);
         metrics.RecordLogin(outcome);
 
         return Result.Failure<LoginResponse>(error);

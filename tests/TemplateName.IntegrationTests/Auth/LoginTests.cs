@@ -7,10 +7,12 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.JsonWebTokens;
+using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.IntegrationTests.Infrastructure;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Users;
+using TemplateName.Modules.Auth.Domain.Users.Events;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
 
 namespace TemplateName.IntegrationTests.Auth;
@@ -204,6 +206,59 @@ public sealed class LoginTests(IntegrationTestWebAppFactory factory) : Integrati
         var stored = await FindUserAsync(Email);
         stored.AccessFailedCount.ShouldBe(0);
         stored.LockoutEnd.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Parallel_wrong_passwords_are_all_counted_and_lock_the_account()
+    {
+        const int Attempts = 10;
+        var user = await CreateUserAsync(Email);
+
+        // Ten wrong passwords at once, each from its own address, all verified before any of them saves. The database counts them one
+        // at a time: the first five raise the count to 5, the fifth sets the lockout, and the other five find the account locked, which
+        // changes nothing (User.RecordFailedSignIn). The clock does not move, so this arithmetic does not depend on the interleaving.
+        var responses = await Task.WhenAll(Enumerable.Range(1, Attempts)
+            .Select(attempt => LoginAsync(Client, Email, WrongPassword, address: $"203.0.113.{attempt}")));
+
+        try
+        {
+            // Every answer is the same generic 401: same status, headers and body but for the trace id.
+            var answers = new List<(HttpStatusCode Status, Dictionary<string, string> Headers, string Body)>();
+            foreach (var response in responses)
+            {
+                var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Ct)).RootElement;
+                body.GetProperty("code").GetString().ShouldBe("auth.invalid_credentials");
+                var members = body.EnumerateObject().Where(member => member.Name != "traceId").Select(member => $"{member.Name}={member.Value.GetRawText()}");
+                answers.Add((response.StatusCode, Headers(response), string.Join("|", members)));
+            }
+
+            answers.ShouldAllBe(answer => answer.Status == HttpStatusCode.Unauthorized);
+            answers.Select(answer => answer.Body).Distinct().ShouldHaveSingleItem();
+            answers.ShouldAllBe(answer => answer.Headers.Count == answers[0].Headers.Count
+                && answer.Headers.All(header => answers[0].Headers.GetValueOrDefault(header.Key) == header.Value));
+        }
+        finally
+        {
+            foreach (var response in responses)
+            {
+                response.Dispose();
+            }
+        }
+
+        var stored = await FindUserAsync(Email);
+        stored.AccessFailedCount.ShouldBe(5);
+        stored.LockoutEnd.ShouldBe(Factory.Time.GetUtcNow() + LockoutDuration);
+        var entries = await QueryAsync(context => context.Set<AuthAuditLog>().Where(entry => entry.UserId == user.Id).ToListAsync(Ct));
+        entries.Count(entry => entry.EventType == AuthAuditEvents.LoginFailed).ShouldBe(Attempts);
+        entries.Count(entry => entry.EventType == AuthAuditEvents.LockedOut).ShouldBe(1);
+        entries.Where(entry => entry.EventType == AuthAuditEvents.LoginFailed).Select(entry => entry.IpAddress).Distinct().Count().ShouldBe(Attempts);
+        var lockoutMessages = await QueryAsync(context => context.Set<OutboxMessage>()
+            .CountAsync(message => message.Type.Contains(nameof(UserLockedOutDomainEvent)), Ct));
+        lockoutMessages.ShouldBe(1);
+
+        // Locked for the right password too.
+        using var correct = await LoginAsync(Email, Password);
+        await AssertInvalidCredentialsAsync(correct);
     }
 
     [Fact]

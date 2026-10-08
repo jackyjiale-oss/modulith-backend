@@ -81,7 +81,9 @@ public sealed class LoginCommandHandlerTests
         audit.UserId.ShouldBeNull();
         audit.FailureReason.ShouldBe("auth.invalid_credentials");
         audit.AttemptedIdentifier.ShouldBe("A****@Example.com");
-        await _unitOfWork.Received(1).TrySaveChangesAsync(Ct);
+        await _unitOfWork.Received(1).SaveChangesAsync(Ct);
+        await _unitOfWork.DidNotReceiveWithAnyArgs().TrySaveChangesAsync(Ct);
+        await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
         _sessions.DidNotReceiveWithAnyArgs().Add(default!);
         _metrics.Received(1).RecordLogin(LoginOutcome.InvalidCredentials);
     }
@@ -98,6 +100,7 @@ public sealed class LoginCommandHandlerTests
         _passwordHasher.DidNotReceiveWithAnyArgs().Verify(default!, default!);
         user.AccessFailedCount.ShouldBe(0);
         user.LockoutEnd.ShouldBeNull();
+        await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
         _auditEntries.ShouldHaveSingleItem().FailureReason.ShouldBe("auth.invalid_credentials");
         _metrics.Received(1).RecordLogin(LoginOutcome.InvalidCredentials);
     }
@@ -113,13 +116,15 @@ public sealed class LoginCommandHandlerTests
         result.Error.ShouldBe(UserErrors.InvalidCredentials);
         user.AccessFailedCount.ShouldBe(1);
         user.LockoutEnd.ShouldBeNull();
+        await _users.Received(1).RecordFailedSignInAsync(user.Id, Now, 5, LockoutDuration, Ct);
+        user.DomainEvents.ShouldBeEmpty();
         _passwordHasher.DidNotReceiveWithAnyArgs().SpendVerificationCost(default!);
         var audit = _auditEntries.ShouldHaveSingleItem();
         audit.EventType.ShouldBe(AuthAuditEvents.LoginFailed);
         audit.UserId.ShouldBe(user.Id);
         audit.FailureReason.ShouldBe("auth.invalid_credentials");
         audit.AttemptedIdentifier.ShouldBe("a****@example.com");
-        await _unitOfWork.Received(1).TrySaveChangesAsync(Ct);
+        await _unitOfWork.Received(1).SaveChangesAsync(Ct);
         _sessions.DidNotReceiveWithAnyArgs().Add(default!);
         _accessTokenIssuer.DidNotReceiveWithAnyArgs().Issue(default!);
         _metrics.Received(1).RecordLogin(LoginOutcome.InvalidCredentials);
@@ -143,7 +148,7 @@ public sealed class LoginCommandHandlerTests
         lockedOut.UserId.ShouldBe(user.Id);
         lockedOut.AttemptedIdentifier.ShouldBe("a****@example.com");
         lockedOut.Details.ShouldNotBeNull().ShouldContain("2026-10-08T09:15:00");
-        await _unitOfWork.Received(1).TrySaveChangesAsync(Ct);
+        await _unitOfWork.Received(1).SaveChangesAsync(Ct);
     }
 
     [Fact]
@@ -178,7 +183,7 @@ public sealed class LoginCommandHandlerTests
         audit.EventType.ShouldBe(AuthAuditEvents.LoginFailed);
         audit.FailureReason.ShouldBe(LoginCommandHandler.LockedFailureReason);
         audit.UserId.ShouldBe(user.Id);
-        await _unitOfWork.Received(1).TrySaveChangesAsync(Ct);
+        await _unitOfWork.Received(1).SaveChangesAsync(Ct);
         _sessions.DidNotReceiveWithAnyArgs().Add(default!);
         _accessTokenIssuer.DidNotReceiveWithAnyArgs().Issue(default!);
         _metrics.Received(1).RecordLogin(LoginOutcome.Locked);
@@ -201,7 +206,7 @@ public sealed class LoginCommandHandlerTests
         user.LastLoginAt.ShouldBeNull();
         _auditEntries.Select(entry => entry.FailureReason).ShouldBe(["auth.invalid_credentials", "auth.email_not_verified"]);
         _auditEntries.ShouldAllBe(entry => entry.EventType == AuthAuditEvents.LoginFailed && !entry.Succeeded);
-        await _unitOfWork.Received(2).TrySaveChangesAsync(Ct);
+        await _unitOfWork.Received(2).SaveChangesAsync(Ct);
         _sessions.DidNotReceiveWithAnyArgs().Add(default!);
         _metrics.Received(1).RecordLogin(LoginOutcome.InvalidCredentials);
         _metrics.Received(1).RecordLogin(LoginOutcome.Unverified);
@@ -318,6 +323,7 @@ public sealed class LoginCommandHandlerTests
         _passwordHasher.DidNotReceiveWithAnyArgs().SpendVerificationCost(default!);
         await _users.DidNotReceiveWithAnyArgs().GetByNormalizedEmailAsync(default!, Ct);
         await _unitOfWork.DidNotReceiveWithAnyArgs().TrySaveChangesAsync(Ct);
+        await _unitOfWork.DidNotReceiveWithAnyArgs().SaveChangesAsync(Ct);
     }
 
     [Fact]
@@ -348,6 +354,23 @@ public sealed class LoginCommandHandlerTests
 
         user.ClearDomainEvents();
         _users.GetByNormalizedEmailAsync("ALICE@EXAMPLE.COM", Arg.Any<CancellationToken>()).Returns(user);
+
+        // The database counts atomically; User.RecordFailedSignIn is the specification of that count (AuthPersistenceTests runs both
+        // over the same states). The fake applies it to the test's instance, as if the row were read back, and keeps none of its events:
+        // the handler must raise the lockout event itself.
+        _users.RecordFailedSignInAsync(user.Id, Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var now = call.ArgAt<DateTimeOffset>(1);
+                if (user.IsLockedOut(now))
+                {
+                    return (FailedSignIn?)null;
+                }
+
+                user.RecordFailedSignIn(now, call.ArgAt<int>(2), call.ArgAt<TimeSpan>(3));
+                user.ClearDomainEvents();
+                return new FailedSignIn(user.AccessFailedCount, user.LockoutEnd);
+            });
         return user;
     }
 }

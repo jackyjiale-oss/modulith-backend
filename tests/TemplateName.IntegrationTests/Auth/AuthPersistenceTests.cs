@@ -309,6 +309,7 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
     [Fact]
     public async Task TrySaveChanges_answers_false_on_a_concurrency_conflict_and_saves_nothing()
     {
+        // Only a successful sign-in still changes the user through the change tracker; two at once conflict on RowVersion.
         var user = NewUser("alice@example.com");
         await SaveAsync(user);
         var firstScope = NewScope();
@@ -316,16 +317,128 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
         var secondScope = NewScope();
         var second = (await secondScope.GetRequiredService<IUserRepository>().GetByIdAsync(user.Id, Ct)).ShouldNotBeNull();
 
-        first.RecordFailedSignIn(Now, maxFailedAttempts: 5, TimeSpan.FromMinutes(15));
+        first.RecordSuccessfulSignIn(Now);
         (await firstScope.GetRequiredService<IUnitOfWork>().TrySaveChangesAsync(Ct)).ShouldBeTrue();
-        second.RecordFailedSignIn(Now, maxFailedAttempts: 5, TimeSpan.FromMinutes(15));
-        secondScope.GetRequiredService<IAuthAuditWriter>().Record(AuthAuditLog.Create(AuthAuditEvents.LoginFailed, succeeded: false, Now, user.Id));
+        second.RecordSuccessfulSignIn(Now.AddSeconds(1));
+        secondScope.GetRequiredService<IAuthAuditWriter>().Record(AuthAuditLog.Create(AuthAuditEvents.LoginSucceeded, succeeded: true, Now, user.Id));
 
         (await secondScope.GetRequiredService<IUnitOfWork>().TrySaveChangesAsync(Ct)).ShouldBeFalse();
 
         var saved = (await NewScope().GetRequiredService<IUserRepository>().GetByIdAsync(user.Id, Ct)).ShouldNotBeNull();
-        saved.AccessFailedCount.ShouldBe(1);
+        saved.LastLoginAt.ShouldBe(Now);
         (await NewScope().GetRequiredService<AuthDbContext>().Set<AuthAuditLog>().CountAsync(Ct)).ShouldBe(0);
+    }
+
+    /// <summary>
+    /// The atomic SQL count must be exactly <see cref="User.RecordFailedSignIn"/>: each state is built through the domain, then the
+    /// next failure is applied once through the domain (in memory) and once through the repository (in the database), and the results
+    /// must agree. Threshold 5 and 15 minutes unless the state says otherwise.
+    /// </summary>
+    [Theory]
+    [InlineData("never failed")]
+    [InlineData("one failure")]
+    [InlineData("one below the threshold")]
+    [InlineData("at the threshold without a lockout")]
+    [InlineData("currently locked")]
+    [InlineData("locked until one tick from now")]
+    [InlineData("lock expired exactly now")]
+    [InlineData("lock expired long ago")]
+    public async Task Atomic_failed_sign_in_count_matches_the_domain_rule(string state)
+    {
+        var lockoutDuration = TimeSpan.FromMinutes(15);
+        var maxFailedAttempts = state == "at the threshold without a lockout" ? 3 : 5;
+        var (priorFailures, elapsed) = state switch
+        {
+            "never failed" => (0, TimeSpan.Zero),
+            "one failure" => (1, TimeSpan.FromMinutes(1)),
+            "one below the threshold" => (4, TimeSpan.FromMinutes(1)),
+            "at the threshold without a lockout" => (4, TimeSpan.FromMinutes(1)),
+            "currently locked" => (5, TimeSpan.FromMinutes(5)),
+            "locked until one tick from now" => (5, lockoutDuration - TimeSpan.FromTicks(1)),
+            "lock expired exactly now" => (5, lockoutDuration),
+            "lock expired long ago" => (5, TimeSpan.FromDays(2)),
+            _ => throw new ArgumentOutOfRangeException(nameof(state), state, null),
+        };
+
+        // The prior failures are counted with the default threshold of 5, as they were when they happened.
+        var start = Now;
+        var user = NewUser("alice@example.com");
+        for (var failure = 0; failure < priorFailures; failure++)
+        {
+            user.RecordFailedSignIn(start, maxFailedAttempts: 5, lockoutDuration);
+        }
+
+        await SaveAsync(user);
+        var now = start + elapsed;
+
+        var inMemory = (await NewScope().GetRequiredService<IUserRepository>().GetByIdAsync(user.Id, Ct)).ShouldNotBeNull();
+        var domainLocked = inMemory.RecordFailedSignIn(now, maxFailedAttempts, lockoutDuration);
+        var counted = await NewScope().GetRequiredService<IUserRepository>()
+            .RecordFailedSignInAsync(user.Id, now, maxFailedAttempts, lockoutDuration, Ct);
+        var stored = (await NewScope().GetRequiredService<IUserRepository>().GetByIdAsync(user.Id, Ct)).ShouldNotBeNull();
+
+        stored.AccessFailedCount.ShouldBe(inMemory.AccessFailedCount, state);
+        stored.LockoutEnd.ShouldBe(inMemory.LockoutEnd, state);
+        (counted?.LockedOut ?? false).ShouldBe(domainLocked, state);
+        if (counted is null)
+        {
+            // Nothing was counted: only a locked account is left alone.
+            inMemory.IsLockedOut(now).ShouldBeTrue(state);
+        }
+        else
+        {
+            counted.AccessFailedCount.ShouldBe(stored.AccessFailedCount, state);
+            counted.LockoutEnd.ShouldBe(stored.LockoutEnd, state);
+        }
+    }
+
+    [Fact]
+    public async Task Atomic_failed_sign_in_skips_a_soft_deleted_user()
+    {
+        var user = NewUser("alice@example.com");
+        await SaveAsync(user);
+        var context = NewScope().GetRequiredService<AuthDbContext>();
+        context.Remove(await context.Set<User>().SingleAsync(candidate => candidate.Id == user.Id, Ct));
+        await context.SaveChangesAsync(Ct);
+
+        var counted = await NewScope().GetRequiredService<IUserRepository>()
+            .RecordFailedSignInAsync(user.Id, Now, maxFailedAttempts: 5, TimeSpan.FromMinutes(15), Ct);
+
+        counted.ShouldBeNull();
+        var stored = await NewScope().GetRequiredService<AuthDbContext>().Set<User>().IgnoreQueryFilters()
+            .SingleAsync(candidate => candidate.Id == user.Id, Ct);
+        stored.AccessFailedCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Count_made_in_the_database_is_not_overwritten_by_the_tracked_user()
+    {
+        // The login failure path: the user is tracked (loaded before the count), the count happens in SQL, the lockout event is raised
+        // on the tracked instance and the audit row is added; the save writes the event and the audit row and leaves the count alone.
+        var user = NewUser("alice@example.com");
+        for (var failure = 0; failure < 4; failure++)
+        {
+            user.RecordFailedSignIn(Now, maxFailedAttempts: 5, TimeSpan.FromMinutes(15));
+        }
+
+        user.ClearDomainEvents();
+        await SaveAsync(user);
+        var scope = NewScope();
+        var tracked = (await scope.GetRequiredService<IUserRepository>().GetByIdAsync(user.Id, Ct)).ShouldNotBeNull();
+
+        var counted = (await scope.GetRequiredService<IUserRepository>()
+            .RecordFailedSignInAsync(user.Id, Now, maxFailedAttempts: 5, TimeSpan.FromMinutes(15), Ct)).ShouldNotBeNull();
+        counted.LockedOut.ShouldBeTrue();
+        tracked.NoteLockedOut(counted.LockoutEnd!.Value);
+        scope.GetRequiredService<IAuthAuditWriter>().Record(AuthAuditLog.Create(AuthAuditEvents.LockedOut, succeeded: false, Now, user.Id));
+        await scope.GetRequiredService<IUnitOfWork>().SaveChangesAsync(Ct);
+
+        var stored = (await NewScope().GetRequiredService<IUserRepository>().GetByIdAsync(user.Id, Ct)).ShouldNotBeNull();
+        stored.AccessFailedCount.ShouldBe(5);
+        stored.LockoutEnd.ShouldBe(Now + TimeSpan.FromMinutes(15));
+        var outbox = NewScope().GetRequiredService<AuthDbContext>().Set<OutboxMessage>();
+        (await outbox.CountAsync(message => message.Type.Contains(nameof(UserLockedOutDomainEvent)), Ct)).ShouldBe(1);
+        (await NewScope().GetRequiredService<AuthDbContext>().Set<AuthAuditLog>().CountAsync(Ct)).ShouldBe(1);
     }
 
     public override async ValueTask DisposeAsync()

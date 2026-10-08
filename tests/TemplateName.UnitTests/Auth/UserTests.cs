@@ -214,6 +214,20 @@ public sealed class UserTests
     }
 
     [Fact]
+    public void NoteLockedOut_raises_the_lockout_event_and_changes_no_state()
+    {
+        var user = NewConfirmedUser();
+        user.ClearDomainEvents();
+        var lockoutEnd = Now + LockoutDuration;
+
+        user.NoteLockedOut(lockoutEnd);
+
+        user.DomainEvents.ShouldHaveSingleItem().ShouldBe(new UserLockedOutDomainEvent(user.Id, lockoutEnd));
+        user.AccessFailedCount.ShouldBe(0);
+        user.LockoutEnd.ShouldBeNull();
+    }
+
+    [Fact]
     public void UpgradePasswordHash_refuses_a_user_without_a_password_and_a_blank_hash()
     {
         var withoutPassword = User.Register("carol@example.com", "Carol", "en", null, Now).Value;

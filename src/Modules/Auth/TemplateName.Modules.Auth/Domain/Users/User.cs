@@ -164,6 +164,13 @@ internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
         return true;
     }
 
+    /// <summary>
+    /// Raises <see cref="UserLockedOutDomainEvent"/> for a failure that was counted outside this instance (the atomic count in the
+    /// database, by the rules of <see cref="RecordFailedSignIn"/>) and locked the account. Changes no state, so saving this instance
+    /// writes only the event and never an outdated count.
+    /// </summary>
+    public void NoteLockedOut(DateTimeOffset lockoutEnd) => Raise(new UserLockedOutDomainEvent(Id, lockoutEnd));
+
     public void RecordSuccessfulSignIn(DateTimeOffset now)
     {
         ResetFailures();

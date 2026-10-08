@@ -16,5 +16,19 @@ internal interface IUserRepository
     /// </summary>
     Task<bool> ExistsByNormalizedEmailIncludingDeletedAsync(string normalizedEmail, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Counts one failed sign-in of the user in a single atomic statement, by the rules of <see cref="User.RecordFailedSignIn"/>, so
+    /// simultaneous failures are each counted once and never lost to a concurrency conflict. Returns the new state, or null when nothing
+    /// was counted (the account is locked at <paramref name="now"/>, or the user does not exist or is soft-deleted). It bypasses the
+    /// change tracker: a tracked instance of the user keeps its old values and must not be changed and saved for this failure; raise the
+    /// lockout event on it with <see cref="User.NoteLockedOut"/>.
+    /// </summary>
+    Task<FailedSignIn?> RecordFailedSignInAsync(
+        Guid userId,
+        DateTimeOffset now,
+        int maxFailedAttempts,
+        TimeSpan lockoutDuration,
+        CancellationToken cancellationToken);
+
     void Add(User user);
 }
