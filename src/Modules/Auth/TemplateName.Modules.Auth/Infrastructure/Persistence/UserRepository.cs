@@ -61,6 +61,16 @@ internal sealed class UserRepository(AuthDbContext context) : IUserRepository
             : null;
     }
 
+    public Task<bool> IsActiveInRoleAsync(Guid userId, Guid roleId, CancellationToken cancellationToken)
+        => context.Set<User>().AnyAsync(
+            user => user.Id == userId && user.Status == UserStatus.Active && user.Roles.Any(assignment => assignment.RoleId == roleId),
+            cancellationToken);
+
+    public Task<bool> AnyOtherActiveInRoleAsync(Guid roleId, Guid exceptUserId, CancellationToken cancellationToken)
+        => context.Set<User>().AnyAsync(
+            user => user.Id != exceptUserId && user.Status == UserStatus.Active && user.Roles.Any(assignment => assignment.RoleId == roleId),
+            cancellationToken);
+
     public void Add(User user) => context.Set<User>().Add(user);
 
     // @Now keeps every tick, so the comparison with LockoutEnd is exact; @LockoutEnd has the column's precision, as EF Core sends it.

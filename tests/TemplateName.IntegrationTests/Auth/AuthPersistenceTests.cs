@@ -427,6 +427,65 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
         (await NewScope().GetRequiredService<AuthDbContext>().Set<AuthAuditLog>().CountAsync(Ct)).ShouldBe(0);
     }
 
+    [Fact]
+    public async Task Save_unless_duplicate_answers_false_when_the_unique_email_index_refuses_the_row_and_saves_nothing()
+    {
+        // Two administrators create the same address at once: both passed the lookup, the index lets one insert win.
+        await SaveAsync(NewUser("alice@example.com"));
+        var scope = NewScope();
+        scope.GetRequiredService<IUserRepository>().Add(NewUser(" ALICE@example.com", passwordHash: null));
+        scope.GetRequiredService<IAuthAuditWriter>().Record(AuthAuditLog.Create(AuthAuditEvents.AdminUserCreated, succeeded: true, Now));
+
+        (await scope.GetRequiredService<IUnitOfWork>().SaveChangesUnlessDuplicateAsync(Ct)).ShouldBeFalse();
+
+        var context = NewScope().GetRequiredService<AuthDbContext>();
+        (await context.Set<User>().CountAsync(Ct)).ShouldBe(1);
+        (await context.Set<AuthAuditLog>().CountAsync(Ct)).ShouldBe(0);
+        (await context.Set<OutboxMessage>().CountAsync(Ct)).ShouldBe(1);
+
+        // The context dropped the refused changes, so a later save does not try them again.
+        scope.GetRequiredService<AuthDbContext>().ChangeTracker.Entries().ShouldBeEmpty();
+        (await scope.GetRequiredService<IUnitOfWork>().SaveChangesUnlessDuplicateAsync(Ct)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Save_unless_duplicate_saves_like_save_changes_otherwise()
+    {
+        var scope = NewScope();
+        scope.GetRequiredService<IUserRepository>().Add(NewUser("bob@example.com", passwordHash: null));
+
+        (await scope.GetRequiredService<IUnitOfWork>().SaveChangesUnlessDuplicateAsync(Ct)).ShouldBeTrue();
+
+        (await NewScope().GetRequiredService<AuthDbContext>().Set<User>().CountAsync(Ct)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Active_role_membership_queries_skip_suspended_and_deleted_users()
+    {
+        var role = Role.CreateSystem("Probe", "Test role", Now);
+        var active = NewUser("active@example.com");
+        var suspended = NewUser("suspended@example.com");
+        var deleted = NewUser("deleted@example.com");
+        foreach (var user in new[] { active, suspended, deleted })
+        {
+            user.AssignRole(role.Id, assignedBy: null, Now);
+        }
+
+        suspended.Suspend(Now);
+        await SaveAsync(role, active, suspended, deleted);
+        var deleting = NewScope().GetRequiredService<AuthDbContext>();
+        deleting.Remove(await deleting.Set<User>().SingleAsync(user => user.Id == deleted.Id, Ct));
+        await deleting.SaveChangesAsync(Ct);
+        var users = NewScope().GetRequiredService<IUserRepository>();
+
+        (await users.IsActiveInRoleAsync(active.Id, role.Id, Ct)).ShouldBeTrue();
+        (await users.IsActiveInRoleAsync(suspended.Id, role.Id, Ct)).ShouldBeFalse();
+        (await users.IsActiveInRoleAsync(deleted.Id, role.Id, Ct)).ShouldBeFalse();
+        (await users.IsActiveInRoleAsync(active.Id, Guid.NewGuid(), Ct)).ShouldBeFalse();
+        (await users.AnyOtherActiveInRoleAsync(role.Id, suspended.Id, Ct)).ShouldBeTrue();
+        (await users.AnyOtherActiveInRoleAsync(role.Id, active.Id, Ct)).ShouldBeFalse();
+    }
+
     /// <summary>
     /// The atomic SQL count must be exactly <see cref="User.RecordFailedSignIn"/>: each state is built through the domain, then the
     /// next failure is applied once through the domain (in memory) and once through the repository (in the database), and the results

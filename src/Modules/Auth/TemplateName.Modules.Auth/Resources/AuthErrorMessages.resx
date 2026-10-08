@@ -87,4 +87,19 @@
   <data name="auth.invalid_token" xml:space="preserve">
     <value>The link is invalid or has expired.</value>
   </data>
+  <data name="auth.email_taken" xml:space="preserve">
+    <value>An account with this email address already exists.</value>
+  </data>
+  <data name="auth.cannot_lock_self" xml:space="preserve">
+    <value>You cannot lock your own account.</value>
+  </data>
+  <data name="auth.last_super_admin" xml:space="preserve">
+    <value>The last active SuperAdmin cannot be locked or lose the SuperAdmin role.</value>
+  </data>
+  <data name="auth.cannot_manage_super_admin" xml:space="preserve">
+    <value>Only a SuperAdmin can manage a SuperAdmin account or grant the SuperAdmin role.</value>
+  </data>
+  <data name="auth.role_assignment_not_allowed" xml:space="preserve">
+    <value>You may not assign roles, so a new account can only get the default role.</value>
+  </data>
 </root>

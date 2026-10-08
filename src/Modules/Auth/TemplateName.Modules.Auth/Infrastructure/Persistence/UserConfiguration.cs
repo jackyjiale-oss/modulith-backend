@@ -31,6 +31,10 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
         // A soft-deleted user frees the address for a new account.
         builder.HasIndex(user => user.NormalizedEmail).IsUnique().HasFilter("[IsDeleted] = 0");
 
+        // The user list (review P7): its email sort and prefix search use the index above, its createdAt sort this one. Both are
+        // filtered like the list, which never shows soft-deleted users.
+        builder.HasIndex(user => new { user.CreatedAt, user.Id }).HasFilter("[IsDeleted] = 0");
+
         builder.HasMany(user => user.PasswordHistory).WithOne().HasForeignKey(entry => entry.UserId).OnDelete(DeleteBehavior.Cascade);
         builder.Navigation(user => user.PasswordHistory).HasField("_passwordHistory").UsePropertyAccessMode(PropertyAccessMode.Field);
 

@@ -87,4 +87,19 @@
   <data name="auth.invalid_token" xml:space="preserve">
     <value>链接无效或已过期。</value>
   </data>
+  <data name="auth.email_taken" xml:space="preserve">
+    <value>使用此电子邮件地址的账户已存在。</value>
+  </data>
+  <data name="auth.cannot_lock_self" xml:space="preserve">
+    <value>您不能锁定自己的账户。</value>
+  </data>
+  <data name="auth.last_super_admin" xml:space="preserve">
+    <value>不能锁定最后一个活跃的 SuperAdmin，也不能移除其 SuperAdmin 角色。</value>
+  </data>
+  <data name="auth.cannot_manage_super_admin" xml:space="preserve">
+    <value>只有 SuperAdmin 才能管理 SuperAdmin 账户或授予 SuperAdmin 角色。</value>
+  </data>
+  <data name="auth.role_assignment_not_allowed" xml:space="preserve">
+    <value>您无权分配角色，因此新账户只能获得默认角色。</value>
+  </data>
 </root>

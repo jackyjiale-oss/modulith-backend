@@ -16,6 +16,7 @@ using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Auth.Application;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Application.Admin.Users;
 using TemplateName.Modules.Auth.Application.Authentication;
 using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Application.Verification;
@@ -37,7 +38,8 @@ public static class AuthModule
     private const string DefaultDataProtectionApplicationName = "TemplateName";
 
     /// <summary>
-    /// Registers the module's context (schema <c>auth</c>), outbox, handlers and validators, repositories, audit writer, error messages
+    /// Registers the module's context (schema <c>auth</c>), outbox, handlers and validators, repositories, audit writer, the user
+    /// administration's SuperAdmin rules and reset-link issuer, error messages
     /// (<c>AuthErrorMessages</c>), the SMTP email sender with <c>Auth:Links</c> and <c>Auth:Verification</c>, the sign-in settings
     /// <c>Auth:RefreshToken</c> and <c>Auth:Lockout</c>, the counters of the <c>TemplateName.Auth</c> meter (added to OpenTelemetry), the
     /// access tokens with the JWT bearer handler as the default authentication scheme, the permission checker with its cache, the
@@ -60,6 +62,8 @@ public static class AuthModule
         services.AddScoped<IVerificationCodeRepository, VerificationCodeRepository>();
         services.AddScoped<IAuthAuditWriter, AuthAuditWriter>();
         services.AddScoped<IUnitOfWork>(serviceProvider => serviceProvider.GetRequiredService<AuthDbContext>());
+        services.AddScoped<SuperAdminRules>();
+        services.AddScoped<PasswordResetLinkIssuer>();
 
         services.AddHttpContextAccessor();
         services.AddScoped<IClientContext, HttpClientContext>();
@@ -133,11 +137,15 @@ public static class AuthModule
     /// Maps the module's endpoints; <paramref name="app"/> is the host's <c>/api/v1</c> group. The self-service routes live in its
     /// <c>auth</c> group: <c>POST auth/register</c>, <c>POST auth/email/confirm</c>, <c>POST auth/email/resend-confirmation</c>,
     /// <c>POST auth/login</c>, <c>POST auth/token/refresh</c>, <c>GET auth/me</c>, <c>PUT auth/me</c>, <c>GET auth/sessions</c>, <c>DELETE auth/sessions/{id}</c>, <c>POST auth/logout</c>, <c>POST auth/logout-all</c>,
-    /// <c>POST auth/password/forgot</c>, <c>POST auth/password/reset</c> and <c>POST auth/password/change</c>.
+    /// <c>POST auth/password/forgot</c>, <c>POST auth/password/reset</c> and <c>POST auth/password/change</c>. The user administration
+    /// routes live in its <c>admin/auth/users</c> group, each behind its permission: <c>GET</c> (list) and <c>POST</c> (create) on the
+    /// group, <c>GET admin/auth/users/{id}</c>, <c>POST .../{id}/lock</c>, <c>/unlock</c>, <c>/force-password-reset</c>,
+    /// <c>/revoke-sessions</c> and <c>PUT .../{id}/roles</c>.
     /// </summary>
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
-        return app.MapSelfServiceEndpoints();
+        app.MapSelfServiceEndpoints();
+        return app.MapAdminUserEndpoints();
     }
 
     /// <summary>Maps the module's endpoints that live at fixed root paths, outside <c>/api/v1</c>: <c>GET /.well-known/jwks.json</c>.</summary>

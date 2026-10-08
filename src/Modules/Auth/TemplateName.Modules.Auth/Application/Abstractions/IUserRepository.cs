@@ -30,5 +30,14 @@ internal interface IUserRepository
         TimeSpan lockoutDuration,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Whether the user is active, not soft-deleted and holds the role. For the SuperAdmin rules of the user administration: an account
+    /// that cannot sign in any more does not count, even while its cached permissions still let one request through.
+    /// </summary>
+    Task<bool> IsActiveInRoleAsync(Guid userId, Guid roleId, CancellationToken cancellationToken);
+
+    /// <summary>Whether a user other than <paramref name="exceptUserId"/> that is active and not soft-deleted holds the role.</summary>
+    Task<bool> AnyOtherActiveInRoleAsync(Guid roleId, Guid exceptUserId, CancellationToken cancellationToken);
+
     void Add(User user);
 }

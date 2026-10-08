@@ -7,7 +7,10 @@ using TemplateName.IntegrationTests.Infrastructure;
 
 namespace TemplateName.IntegrationTests.Documentation;
 
-/// <summary>Enforces review Section 11.3: every mapped <c>/api/v1/{module}/…</c> endpoint appears in its module's document as <c>METHOD /route</c>.</summary>
+/// <summary>
+/// Enforces review Section 11.3: every mapped <c>/api/v1/{module}/…</c> endpoint, and every administration endpoint
+/// <c>/api/v1/admin/{module}/…</c>, appears in its module's document as <c>METHOD /route</c> (<see cref="DocumentPaths.ModuleOfApiRoute"/>).
+/// </summary>
 public sealed partial class EndpointDocumentationTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)
 {
     private const string ApiPrefix = "/api/v1/";
@@ -19,7 +22,7 @@ public sealed partial class EndpointDocumentationTests(IntegrationTestWebAppFact
             .OfType<RouteEndpoint>()
             .Where(endpoint => endpoint.RoutePattern.RawText?.StartsWith(ApiPrefix, StringComparison.OrdinalIgnoreCase) == true)
             .SelectMany(endpoint => (endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods ?? []).Select(method => (
-                Module: endpoint.RoutePattern.RawText![ApiPrefix.Length..].Split('/')[0],
+                Module: DocumentPaths.ModuleOfApiRoute(endpoint.RoutePattern.RawText!),
                 Endpoint: $"{method} {Normalize(endpoint.RoutePattern.RawText!)}")))
             .ToList();
         var failures = new List<string>();

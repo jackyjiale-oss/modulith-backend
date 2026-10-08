@@ -87,4 +87,19 @@
   <data name="auth.invalid_token" xml:space="preserve">
     <value>Pautan tidak sah atau telah tamat tempoh.</value>
   </data>
+  <data name="auth.email_taken" xml:space="preserve">
+    <value>Akaun dengan alamat e-mel ini sudah wujud.</value>
+  </data>
+  <data name="auth.cannot_lock_self" xml:space="preserve">
+    <value>Anda tidak boleh mengunci akaun anda sendiri.</value>
+  </data>
+  <data name="auth.last_super_admin" xml:space="preserve">
+    <value>SuperAdmin aktif yang terakhir tidak boleh dikunci atau kehilangan peranan SuperAdmin.</value>
+  </data>
+  <data name="auth.cannot_manage_super_admin" xml:space="preserve">
+    <value>Hanya SuperAdmin boleh mengurus akaun SuperAdmin atau memberikan peranan SuperAdmin.</value>
+  </data>
+  <data name="auth.role_assignment_not_allowed" xml:space="preserve">
+    <value>Anda tidak dibenarkan menetapkan peranan, jadi akaun baharu hanya boleh mendapat peranan lalai.</value>
+  </data>
 </root>

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -12,6 +13,9 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence;
 internal sealed class AuthDbContext : DbContext, IUnitOfWork, IDataProtectionKeyContext
 {
     internal const string Schema = "auth";
+
+    private const int SqlUniqueConstraintViolation = 2627;
+    private const int SqlUniqueIndexViolation = 2601;
 
     public AuthDbContext(DbContextOptions<AuthDbContext> options)
         : base(options)
@@ -35,6 +39,22 @@ internal sealed class AuthDbContext : DbContext, IUnitOfWork, IDataProtectionKey
         catch (DbUpdateConcurrencyException)
         {
             // The save ran in one transaction, which was rolled back; drop what was pending so a later save cannot repeat it.
+            ChangeTracker.Clear();
+            return false;
+        }
+    }
+
+    public async Task<bool> SaveChangesUnlessDuplicateAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException exception)
+            when (exception.InnerException is SqlException { Number: SqlUniqueIndexViolation or SqlUniqueConstraintViolation })
+        {
+            // As for a concurrency conflict: the transaction was rolled back, so drop what was pending.
             ChangeTracker.Clear();
             return false;
         }

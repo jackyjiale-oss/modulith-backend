@@ -42,7 +42,11 @@ internal sealed class Role : AggregateRoot<Guid>, IAuditable, ISoftDeletable
 
     public Guid? DeletedBy { get; private set; }
 
-    private bool IsSuperAdmin => IsSystem && string.Equals(Name, SystemRoles.SuperAdmin, StringComparison.Ordinal);
+    /// <summary>
+    /// Whether this is the seeded <see cref="SystemRoles.SuperAdmin"/> role: a system role whose <see cref="NormalizedName"/> is that
+    /// name's, so no spelling of the name escapes the protection, and a custom role never gets it by taking the name.
+    /// </summary>
+    public bool IsSuperAdmin => IsSystem && string.Equals(NormalizedName, NormalizeName(SystemRoles.SuperAdmin), StringComparison.Ordinal);
 
     public static string NormalizeName(string name) => name.Trim().ToUpperInvariant();
 

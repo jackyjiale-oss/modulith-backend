@@ -69,6 +69,23 @@ public sealed class RoleTests
         custom.Permissions.Single().RoleId.ShouldBe(custom.Id);
     }
 
+    [Theory]
+    [InlineData("SuperAdmin", true)]
+    [InlineData("superadmin", true)]
+    [InlineData(" SUPERADMIN ", true)]
+    [InlineData("Admin", false)]
+    public void SuperAdmin_is_recognised_by_its_normalized_name(string name, bool isSuperAdmin)
+    {
+        var system = Role.CreateSystem(name, "System", Now);
+        var custom = Role.Create(name, "Custom", Now).Value;
+
+        system.IsSuperAdmin.ShouldBe(isSuperAdmin);
+        system.SetPermissions([Guid.NewGuid()]).IsFailure.ShouldBe(isSuperAdmin);
+
+        // Only the system role is protected: a custom role cannot become SuperAdmin by its name.
+        custom.IsSuperAdmin.ShouldBeFalse();
+    }
+
     [Fact]
     public void SyncPermissions_replaces_the_set_for_any_role()
     {
