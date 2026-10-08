@@ -84,4 +84,7 @@
   <data name="auth.session_not_found" xml:space="preserve">
     <value>Sesi '{id}' tidak dijumpai.</value>
   </data>
+  <data name="auth.invalid_token" xml:space="preserve">
+    <value>Pautan tidak sah atau telah tamat tempoh.</value>
+  </data>
 </root>

@@ -29,7 +29,7 @@ None yet. The routes planned for this module are `/api/v1/auth/...` (self-servic
 
 <!-- Aggregates, their invariants and life cycle. Draw state machines as a Mermaid stateDiagram-v2. -->
 
-`User` (`Domain/Users/`) is the first aggregate and `Role` (`Domain/Roles/`) the second; `UserSession` (`Domain/Sessions/`) the third; `VerificationCode` arrives in a following task. A user is identified by its email, kept trimmed (`Email`) and upper-case (`NormalizedEmail`, the form used for lookups and the unique index). It owns its password history (`PasswordHistoryEntry`) and its role assignments (`UserRole`), and it is audited and soft-deleted.
+`User` (`Domain/Users/`) is the first aggregate and `Role` (`Domain/Roles/`) the second; `UserSession` (`Domain/Sessions/`) the third and `VerificationCode` (`Domain/Verification/`) the fourth; the audit log entry `AuthAuditLog` (`Domain/Audit/`) is a plain entity. A user is identified by its email, kept trimmed (`Email`) and upper-case (`NormalizedEmail`, the form used for lookups and the unique index). It owns its password history (`PasswordHistoryEntry`) and its role assignments (`UserRole`), and it is audited and soft-deleted.
 
 - **Registration:** `User.Register(email, displayName, locale, passwordHash, now)` creates an active, unconfirmed user with a new `SecurityStamp` and the time zone `UTC`. A user created by an administrator has no `PasswordHash` (valid; the history is then empty); a non-null hash is the first history entry.
 - **Email confirmation:** `ConfirmEmail` is idempotent; only the first call raises `EmailConfirmedDomainEvent`. `EnsureCanSignIn` refuses a suspended user (`auth.account_inactive`) and an unconfirmed one (`auth.email_not_verified`).
@@ -100,7 +100,35 @@ stateDiagram-v2
     Expired --> [*]
 ```
 
-The remaining aggregate (`VerificationCode`) arrives in a following task.
+`VerificationCode` (`Domain/Verification/`) is a single-use code behind an emailed link. `VerificationPurpose` (`EmailVerify = 1`, `PasswordReset = 2`) is persisted by its numeric value, so a new purpose is appended and existing values are never renumbered. Only the SHA-256 hash of the token is stored (`TokenHash`); the repository finds a code by that unique hash, so the domain compares no hashes. The token itself travels only inside the issued event, as `ProtectedToken`: the application encrypts it with Data Protection (ADR 0017) and the event handler decrypts it to build the link. It is never a property of the aggregate.
+
+- **Issue:** `VerificationCode.Issue(userId, purpose, target, tokenHash, protectedToken, lifetime, createdIp, now)` sets `ExpiresAt = now + lifetime` (a non-positive lifetime is a programming error) and raises `VerificationCodeIssuedDomainEvent`. `Target` is the normalized email address.
+- **Consume:** `Consume(expected, now)` succeeds once. It fails with `auth.invalid_token` when the purpose differs, or the code is consumed, invalidated or expired. A code is valid up to, not including, `ExpiresAt`. Every cause gives the same error so the answer does not tell which one applied.
+- **Invalidate:** `Invalidate(now)` makes a pending code unusable (a newer code replaces it, or the account state makes it useless). It is idempotent and leaves a consumed code unchanged. `IsPending(now)` is true while the code is neither consumed, invalidated nor expired.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: issue
+    Pending --> Consumed: consume
+    Pending --> Invalidated: invalidate
+    Pending --> Expired: ExpiresAt reached
+    Consumed --> [*]
+    Invalidated --> [*]
+    Expired --> [*]
+```
+
+`AuthAuditLog` (`Domain/Audit/`) is one line of the append-only audit log. It is a plain entity with a `bigint` identity key, not an aggregate, and raises no domain events. `AuthAuditLog.Create(eventType, succeeded, now, userId, failureReason, attemptedIdentifier, sessionId, details)` leaves the client fields empty; the audit writer calls `SetClientInfo(ipAddress, userAgent, traceId)` from the request, which cuts the values to their columns (45, 512 and 64 characters). `AttemptedIdentifier` is cut to 256 characters. `Details` is JSON text that the domain neither validates nor bounds. `MaskIdentifier` makes an identifier safe to log: `alice@example.com` becomes `a****@example.com`, a value without `@` keeps its first character (`a****`), and null or blank gives null.
+
+### Audit events
+
+The event types are the constants of `AuthAuditEvents` (stored as text, never renamed):
+
+- Registration and confirmation: `auth.registered`, `auth.register_duplicate`, `auth.email_confirmed`, `auth.email_confirm_failed`, `auth.confirmation_resent`.
+- Sign-in and tokens: `auth.login_succeeded`, `auth.login_failed`, `auth.locked_out`, `auth.token_refreshed`, `auth.refresh_failed`, `auth.token_reuse_detected`.
+- Sessions: `auth.logout`, `auth.logout_all`, `auth.session_revoked`.
+- Passwords and profile: `auth.password_forgot_requested`, `auth.password_reset`, `auth.password_reset_failed`, `auth.password_changed`, `auth.password_change_failed`, `auth.profile_updated`.
+- Administration: `auth.admin_user_created`, `auth.admin_user_locked`, `auth.admin_user_unlocked`, `auth.admin_password_reset_forced`, `auth.admin_sessions_revoked`, `auth.admin_roles_assigned`.
+- Roles: `auth.role_created`, `auth.role_updated`, `auth.role_deleted`, `auth.role_permissions_changed`.
 
 ## Error codes
 
@@ -123,8 +151,9 @@ The remaining aggregate (`VerificationCode`) arrives in a following task.
 | `auth.refresh_token_expired` | 401 | — | The refresh token has expired. Sign in again. |
 | `auth.refresh_token_reused` | 401 | — | The refresh token was already used. The session has been ended; sign in again. |
 | `auth.session_not_found` | 404 | `id` | Session '{id}' was not found. |
+| `auth.invalid_token` | 400 | — | The link is invalid or has expired. |
 
-The user codes are declared in `Domain/Users/UserErrors.cs`, the role and permission codes in `Domain/Roles/RoleErrors.cs` and the session codes in `Domain/Sessions/SessionErrors.cs`. Their messages are in `Resources/AuthErrorMessages.resx` (English) with `AuthErrorMessages.ms.resx` and `AuthErrorMessages.zh-Hans.resx` (drafts awaiting native review); every further code is added to all three files in the same change that introduces it. A locked account answers with `auth.invalid_credentials`, never a distinct code (it would reveal that the email exists).
+The user codes are declared in `Domain/Users/UserErrors.cs`, the role and permission codes in `Domain/Roles/RoleErrors.cs` and the session codes in `Domain/Sessions/SessionErrors.cs` and `auth.invalid_token` in `Domain/Verification/VerificationErrors.cs` (one answer for an unknown, used, replaced, expired or wrong-purpose token). Their messages are in `Resources/AuthErrorMessages.resx` (English) with `AuthErrorMessages.ms.resx` and `AuthErrorMessages.zh-Hans.resx` (drafts awaiting native review); every further code is added to all three files in the same change that introduces it. A locked account answers with `auth.invalid_credentials`, never a distinct code (it would reveal that the email exists).
 
 ## Events
 
@@ -138,8 +167,9 @@ The user codes are declared in `Domain/Users/UserErrors.cs`, the role and permis
 | `UserLockedOutDomainEvent(UserId, LockoutEnd)` | Domain | A failed sign-in reaches the lockout threshold | None yet |
 | `RegistrationAttemptedDomainEvent(UserId, Email, Locale)` | Domain | Someone registers an address that already has an account | None yet |
 | `RefreshTokenReuseDetectedDomainEvent(UserId, SessionId)` | Domain | A used or revoked refresh token is presented again and the session is revoked | None yet |
+| `VerificationCodeIssuedDomainEvent(CodeId, UserId, Purpose, Target, ProtectedToken)` | Domain | A verification code is issued; `ProtectedToken` is the encrypted token for the email link | None yet |
 
-The events are declared in `Domain/Users/Events/` and `Domain/Sessions/Events/`. Domain events are written to the module outbox in the same save as the aggregate (once the persistence task lands) and dispatched by the outbox (ADR 0007). The module publishes no integration events yet.
+The events are declared in `Domain/Users/Events/`, `Domain/Sessions/Events/` and `Domain/Verification/Events/`. Domain events are written to the module outbox in the same save as the aggregate (once the persistence task lands) and dispatched by the outbox (ADR 0007). The module publishes no integration events yet.
 
 ## Configuration
 

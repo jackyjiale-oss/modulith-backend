@@ -84,4 +84,7 @@
   <data name="auth.session_not_found" xml:space="preserve">
     <value>Session '{id}' was not found.</value>
   </data>
+  <data name="auth.invalid_token" xml:space="preserve">
+    <value>The link is invalid or has expired.</value>
+  </data>
 </root>

@@ -84,4 +84,7 @@
   <data name="auth.session_not_found" xml:space="preserve">
     <value>未找到会话“{id}”。</value>
   </data>
+  <data name="auth.invalid_token" xml:space="preserve">
+    <value>链接无效或已过期。</value>
+  </data>
 </root>
