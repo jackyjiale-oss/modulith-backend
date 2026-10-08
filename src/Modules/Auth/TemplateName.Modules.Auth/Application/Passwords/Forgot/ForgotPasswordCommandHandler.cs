@@ -14,15 +14,14 @@ namespace TemplateName.Modules.Auth.Application.Passwords.Forgot;
 /// reveals nothing: an unknown address, a suspended account, or a code issued within <see cref="VerificationOptions.ResendCooldown"/>
 /// issues nothing. Every case also writes one audit entry (with the masked address) and saves once, so a known and an unknown address do
 /// comparable work. An account without a password (created by an administrator) is a known account here: the reset is how it sets its
-/// first password (Ruling R3).
+/// first password (Ruling R3). The link itself is issued by <see cref="PasswordResetLinkIssuer"/>, the same mechanism the user
+/// administration uses.
 /// </summary>
 internal sealed class ForgotPasswordCommandHandler(
     IUserRepository users,
     IVerificationCodeRepository verificationCodes,
-    ISecureTokenService tokenService,
-    ISecretProtector secretProtector,
+    PasswordResetLinkIssuer linkIssuer,
     IAuthAuditWriter auditWriter,
-    IClientContext clientContext,
     IUnitOfWork unitOfWork,
     IOptions<VerificationOptions> verificationOptions,
     TimeProvider timeProvider) : ICommandHandler<ForgotPasswordCommand>
@@ -59,21 +58,7 @@ internal sealed class ForgotPasswordCommandHandler(
             return await IgnoreAsync(user.Id, CooldownReason, attemptedIdentifier, now, cancellationToken);
         }
 
-        foreach (var pending in await verificationCodes.GetPendingAsync(user.Id, VerificationPurpose.PasswordReset, now, cancellationToken))
-        {
-            pending.Invalidate(now);
-        }
-
-        var token = tokenService.Generate();
-        verificationCodes.Add(VerificationCode.Issue(
-            user.Id,
-            VerificationPurpose.PasswordReset,
-            user.NormalizedEmail,
-            token.Hash,
-            secretProtector.Protect(token.Value),
-            options.PasswordResetLifetime,
-            clientContext.IpAddress,
-            now));
+        await linkIssuer.IssueAsync(user, now, cancellationToken);
         auditWriter.Record(AuthAuditLog.Create(
             AuthAuditEvents.PasswordForgotRequested,
             succeeded: true,

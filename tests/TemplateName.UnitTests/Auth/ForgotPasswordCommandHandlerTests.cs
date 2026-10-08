@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Application.Passwords.Forgot;
 using TemplateName.Modules.Auth.Application.Verification;
 using TemplateName.Modules.Auth.Domain.Audit;
@@ -36,16 +37,10 @@ public sealed class ForgotPasswordCommandHandlerTests
         _clientContext.IpAddress.Returns("203.0.113.7");
         _auditWriter.Record(Arg.Do<AuthAuditLog>(_auditEntries.Add));
         _users.GetByNormalizedEmailAsync("ALICE@EXAMPLE.COM", Arg.Any<CancellationToken>()).Returns(_user);
-        _sut = new ForgotPasswordCommandHandler(
-            _users,
-            _verificationCodes,
-            _tokenService,
-            _secretProtector,
-            _auditWriter,
-            _clientContext,
-            _unitOfWork,
-            Options.Create(new VerificationOptions()),
-            new FakeTimeProvider(Now));
+        // The real issuer over the fakes: forgot and the user administration share it, so these tests cover the shared path.
+        var options = Options.Create(new VerificationOptions());
+        var linkIssuer = new PasswordResetLinkIssuer(_verificationCodes, _tokenService, _secretProtector, _clientContext, options);
+        _sut = new ForgotPasswordCommandHandler(_users, _verificationCodes, linkIssuer, _auditWriter, _unitOfWork, options, new FakeTimeProvider(Now));
     }
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

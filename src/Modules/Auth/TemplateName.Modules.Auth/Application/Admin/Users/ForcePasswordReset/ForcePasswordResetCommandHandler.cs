@@ -1,5 +1,6 @@
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Users;

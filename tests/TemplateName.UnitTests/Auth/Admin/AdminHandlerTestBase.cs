@@ -4,6 +4,7 @@ using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Application.Admin.Users;
+using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Application.Verification;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Roles;

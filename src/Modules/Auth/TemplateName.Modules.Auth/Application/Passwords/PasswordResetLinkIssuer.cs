@@ -4,13 +4,14 @@ using TemplateName.Modules.Auth.Application.Verification;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Domain.Verification;
 
-namespace TemplateName.Modules.Auth.Application.Admin.Users;
+namespace TemplateName.Modules.Auth.Application.Passwords;
 
 /// <summary>
-/// Issues a password-reset code for a user on an administrator's behalf, exactly as forgot-password does: the pending reset codes are
-/// invalidated, only the token's hash is stored, the token travels encrypted inside the issued event (ADR 0017) and
-/// <c>SendVerificationEmailDomainEventHandler</c> emails the reset link, valid for <see cref="VerificationOptions.PasswordResetLifetime"/>.
-/// The caller saves. There is no cooldown: an administrator's request is deliberate and limited by the permission.
+/// The one place a password-reset link is issued, for forgot-password and for the administrator's create and forced reset: the user's
+/// pending reset codes are invalidated, a new <see cref="VerificationPurpose.PasswordReset"/> code is issued of whose token only the hash
+/// is stored, the token travels encrypted inside the issued event (ADR 0017) and <c>SendVerificationEmailDomainEventHandler</c> emails
+/// the reset link, valid for <see cref="VerificationOptions.PasswordResetLifetime"/>. The caller decides whether to issue (forgot checks
+/// its cooldown first; an administrator's request has none, the permission is the limit), writes its own audit entry and saves.
 /// </summary>
 internal sealed class PasswordResetLinkIssuer(
     IVerificationCodeRepository verificationCodes,
