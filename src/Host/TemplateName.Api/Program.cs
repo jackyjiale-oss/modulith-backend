@@ -84,9 +84,10 @@ if (!app.Environment.IsProduction())
     app.MapScalarApiReference();
 }
 
-// Module endpoints map on `api`.
+// Module endpoints map on `api`; well-known documents (the JWKS) map at the root.
 var api = app.MapGroup("/api/v1");
 api.MapAuthEndpoints();
+app.MapAuthWellKnownEndpoints();
 api.MapSampleEndpoints();
 
 app.Run();

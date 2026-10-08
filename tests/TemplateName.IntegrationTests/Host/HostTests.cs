@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -86,12 +87,26 @@ public sealed class HostTests(IntegrationTestWebAppFactory factory) : Integratio
     [Fact]
     public async Task Scalar_is_not_mapped_in_production()
     {
-        await using var production = Factory.WithWebHostBuilder(builder => builder.UseEnvironment("Production"));
+        using var signingKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var production = Factory.WithWebHostBuilder(builder => builder
+            .UseEnvironment("Production")
+            .UseSetting("Auth:Jwt:SigningKeys:0:KeyId", "production-test")
+            .UseSetting("Auth:Jwt:SigningKeys:0:PrivateKeyPem", signingKey.ExportPkcs8PrivateKeyPem()));
         using var client = production.CreateClient();
 
         using var response = await client.GetAsync("/scalar/v1", Ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Production_does_not_start_without_a_signing_key()
+    {
+        await using var production = Factory.WithWebHostBuilder(builder => builder.UseEnvironment("Production"));
+
+        var failure = Should.Throw<OptionsValidationException>(() => production.CreateClient());
+
+        failure.Message.ShouldContain("Auth:Jwt:SigningKeys");
     }
 
     [Fact]

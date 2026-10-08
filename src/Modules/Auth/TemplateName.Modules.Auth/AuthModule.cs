@@ -1,7 +1,10 @@
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common.Outbox;
@@ -9,9 +12,11 @@ using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Application.Verification;
+using TemplateName.Modules.Auth.Endpoints;
 using TemplateName.Modules.Auth.Infrastructure.Email;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
 using TemplateName.Modules.Auth.Infrastructure.Security;
+using TemplateName.Modules.Auth.Infrastructure.Tokens;
 using TemplateName.Modules.Auth.Resources;
 
 namespace TemplateName.Modules.Auth;
@@ -24,8 +29,9 @@ public static class AuthModule
 
     /// <summary>
     /// Registers the module's context (schema <c>auth</c>), outbox, handlers and validators, repositories, audit writer, error messages
-    /// (<c>AuthErrorMessages</c>), the SMTP email sender and the Data Protection key ring stored in <c>auth.DataProtectionKeys</c>. Call it after
-    /// <c>AddInfrastructureCommon</c> and before <c>AddApplicationDecorators</c>.
+    /// (<c>AuthErrorMessages</c>), the SMTP email sender, the access tokens with the JWT bearer handler as the default authentication scheme,
+    /// and the Data Protection key ring stored in <c>auth.DataProtectionKeys</c>. Call it after <c>AddInfrastructureCommon</c> and before
+    /// <c>AddApplicationDecorators</c>.
     /// </summary>
     public static IServiceCollection AddAuthModule(this IServiceCollection services, IConfiguration configuration)
     {
@@ -67,6 +73,8 @@ public static class AuthModule
             .ValidateOnStart();
         services.AddSingleton<IEmailSender, SmtpEmailSender>();
 
+        AddAccessTokens(services, configuration);
+
         // One key ring for every instance, so an outbox event protected by one instance can be read by another (ADR 0017).
         var applicationName = configuration["Auth:DataProtection:ApplicationName"] is { Length: > 0 } configuredName
             ? configuredName
@@ -82,5 +90,40 @@ public static class AuthModule
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
         return app;
+    }
+
+    /// <summary>Maps the module's endpoints that live at fixed root paths, outside <c>/api/v1</c>: <c>GET /.well-known/jwks.json</c>.</summary>
+    public static IEndpointRouteBuilder MapAuthWellKnownEndpoints(this IEndpointRouteBuilder app)
+    {
+        return app.MapJwksEndpoints();
+    }
+
+    /// <summary>
+    /// Registers <c>Auth:Jwt</c> (validated on start, including every key and, outside Development and Testing, that a key exists), the
+    /// signing keys, the access token issuer and the JWT bearer handler as the default scheme (Ruling R4), whose parameters come from
+    /// <see cref="JwtValidation"/> with the application's <see cref="TimeProvider"/> and <c>MapInboundClaims = false</c>.
+    /// </summary>
+    internal static void AddAccessTokens(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<JwtOptions>()
+            .Bind(configuration.GetSection(JwtOptions.SectionName))
+            .ValidateDataAnnotations()
+            .Validate<IHostEnvironment>(
+                (options, environment) => options.SigningKeys.Count > 0 || SigningKeyProvider.AllowsEphemeralKey(environment),
+                SigningKeyProvider.MissingKeysMessage)
+            .ValidateOnStart();
+        services.AddSingleton<SigningKeyProvider>();
+        services.AddSingleton<ISigningKeyProvider>(serviceProvider => serviceProvider.GetRequiredService<SigningKeyProvider>());
+        // Built when the host starts (after the options are validated), so the keys load and an ephemeral key is logged at start.
+        services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<SigningKeyProvider>());
+        services.AddSingleton<IAccessTokenIssuer, AccessTokenIssuer>();
+
+        services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
+        services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+            .Configure<IOptions<JwtOptions>, ISigningKeyProvider, TimeProvider>((bearer, jwt, keys, timeProvider) =>
+            {
+                bearer.MapInboundClaims = false;
+                bearer.TokenValidationParameters = JwtValidation.CreateParameters(jwt.Value, keys, timeProvider);
+            });
     }
 }

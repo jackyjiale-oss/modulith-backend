@@ -17,7 +17,7 @@ The API issues short-lived access tokens and validates them on every request. Th
 We chose option 3.
 
 - **Algorithm:** ES256 only. The validator allow-lists `ES256`, so `none`, `HS256` and every other algorithm are rejected. It validates `iss`, `aud`, `exp` and `nbf` with a clock skew of 30 seconds, and `MapInboundClaims = false` keeps claim names as issued. The token carries no permission list and no personal data (ADR 0016).
-- **Keys:** `Auth:Jwt:SigningKeys` is a list of keys, the active key first. Each entry has a `kid` and a PEM private key; a retired key may keep only its public part. Secrets come from user-secrets, environment variables or a secret store, never from files in the repository.
+- **Keys:** `Auth:Jwt:SigningKeys` is a list of EC P-256 keys, the active key first. Each entry has a `KeyId` (the `kid`, required and unique), a `PrivateKeyPem` and an optional `PublicKeyPem`; a retired key carries only its `PublicKeyPem`. The first entry with a `PrivateKeyPem` signs; every entry validates and is published. Secrets come from user-secrets, environment variables or a secret store, never from files in the repository.
 - **Rotation:** add the new key at the head of the list and keep the previous key's public part for at least `AccessTokenLifetime + ClockSkew` (10 minutes and 30 seconds by default), so tokens signed with it stay valid until they expire; then remove it.
 - **Development and Testing:** when no key is configured, an ephemeral key is generated at start. In any other environment the application refuses to start without a key, so a deployment can never run with a throw-away key.
 - **JWKS:** the public keys are served at `/.well-known/jwks.json`, so other services verify tokens without a secret.

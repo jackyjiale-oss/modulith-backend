@@ -37,7 +37,7 @@ Order matters; `Program.cs` marks it with comments.
 | — | *(Auth plan)* `UseAuthentication` / `UseAuthorization` | Go between slots 9 and 10, so the rate limiter's `user:{sub}` partition sees the signed-in user. |
 | 10 | `UseRateLimiter` | Global fixed-window limiter; 429 `rate_limit.exceeded` with `Retry-After`. |
 | 11 | `UseIdempotency` | `Idempotency-Key` on endpoints marked `WithIdempotency()`; after routing because it reads endpoint metadata. |
-| 12 | Endpoints | `/health/live`, `/health/ready` (both exempt from rate limiting), OpenAPI and Scalar outside Production, then the `/api/v1` group with every module's endpoints. |
+| 12 | Endpoints | `/health/live`, `/health/ready` (both exempt from rate limiting), OpenAPI and Scalar outside Production, then the `/api/v1` group with every module's endpoints, and the Auth module's `GET /.well-known/jwks.json` at the root (`MapAuthWellKnownEndpoints`). |
 
 Slots 4 and 5 register their headers with `Response.OnStarting` before the rest of the pipeline runs, so they are written when the response starts and survive the exception handler clearing the response headers. `Content-Language` is the exception: responses written by the exception handler (500, malformed body, concurrency conflict) do not carry it, although their `detail` is still localized (ADR 0009).
 
@@ -171,6 +171,7 @@ Outside Production (Development, Testing, and any other non-Production environme
 | HSTS + HTTPS redirection | no | yes | yes |
 | `exceptionDetails` in 500 responses | yes | no | no |
 | OpenAPI + Scalar | yes | yes | no |
+| JWT signing key (`Auth:Jwt:SigningKeys`) | an ephemeral key when none is configured | an ephemeral key when none is configured | required: the host does not start without one ([Auth module](../modules/auth.md#access-tokens)) |
 
 Local URLs: `https://localhost:5001` and `http://localhost:5000`.
 

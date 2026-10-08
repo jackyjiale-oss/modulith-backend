@@ -6,24 +6,24 @@
 
 <!-- What the module owns, what it deliberately does not do, and which other modules it talks to (only through *.Contracts). -->
 
-The sign-in and authorization module: registration with email confirmation, login, refresh-token rotation, logout, password reset and change, session management, and role-based permissions with administration of users, roles and the audit log. It is built up over Plan 2 (auth core); this page describes what has landed so far (the domain model, its persistence, the security services and the email sender).
+The sign-in and authorization module: registration with email confirmation, login, refresh-token rotation, logout, password reset and change, session management, and role-based permissions with administration of users, roles and the audit log. It is built up over Plan 2 (auth core); this page describes what has landed so far (the domain model, its persistence, the security services, the email sender and the access tokens with their JWKS).
 
 - Owns: users, roles, permissions, sessions, verification codes, the auth audit log, the Data Protection key ring and the `auth` schema.
 - Does not: send localized emails (English only until Plan 3), check access tokens against session revocation on every request (ADR 0015), or support usernames, tenants or progressive lockout.
 - Talks to: no other module. It has no `TemplateName.Modules.Auth.Contracts` project yet, because nothing outside the module needs its data; Plan 3 adds the integration events.
 - Decisions: [ADR 0014](../adr/0014-own-identity-model-with-identity-password-hasher.md) (own identity model), [ADR 0015](../adr/0015-es256-jwt-with-configured-signing-keys.md) (ES256 tokens, configured keys), [ADR 0016](../adr/0016-server-side-permissions-with-per-user-cache.md) (permissions resolved server-side), [ADR 0017](../adr/0017-outbox-secrets-protected-with-data-protection.md) (outbox secrets protected with Data Protection).
 
-Code: `src/Modules/Auth/TemplateName.Modules.Auth/`. The host calls `AddAuthModule(configuration)` and maps `MapAuthEndpoints()` on the `/api/v1` group. Today the module registers its persistence (context, outbox, repositories, audit writer, Data Protection key ring; see [Data](#data)), the security services (see [Security services](#security-services)), its handlers and its error messages; `MapAuthEndpoints` maps nothing yet.
+Code: `src/Modules/Auth/TemplateName.Modules.Auth/`. The host calls `AddAuthModule(configuration)`, maps `MapAuthEndpoints()` on the `/api/v1` group and `MapAuthWellKnownEndpoints()` on the application root (for `/.well-known/jwks.json`). Today the module registers its persistence (context, outbox, repositories, audit writer, Data Protection key ring; see [Data](#data)), the security services (see [Security services](#security-services)), the access tokens and the JWT bearer handler (see [Access tokens](#access-tokens)), its handlers and its error messages; `MapAuthEndpoints` maps nothing yet.
 
 ## Endpoints
 
 <!-- Every endpoint, written as METHOD + full route (e.g. GET /api/v1/{module}/{resources}/{id:guid}), with its success status and error codes. -->
 
-None yet. The routes planned for this module are `/api/v1/auth/...` (self-service), `/api/v1/admin/auth/...` (administration) and `/.well-known/jwks.json`.
+The routes planned for this module are `/api/v1/auth/...` (self-service) and `/api/v1/admin/auth/...` (administration); none is mapped yet. The JWKS lives at the root, outside `/api/v1`, because verifiers look for it at the well-known path.
 
 | Method | Route | Purpose | Success | Errors |
 |---|---|---|---|---|
-| | None yet. | | | |
+| `GET` | `/.well-known/jwks.json` | The public keys that verify access tokens (RFC 7517). Anonymous; `Cache-Control: public, max-age=300`. Left out of the OpenAPI document, like the health checks. | 200 `{"keys":[...]}`: one key per configured entry, each with only `kty` (`EC`), `crv` (`P-256`), `x`, `y`, `kid`, `alg` (`ES256`) and `use` (`sig`) | — |
 
 ## Domain model
 
@@ -184,6 +184,37 @@ The abstractions are `internal` in `Application/Abstractions/` (the application 
 | `IBreachedPasswordChecker` | `HibpBreachedPasswordChecker` | `IsBreachedAsync` asks Have I Been Pwned with k-anonymity: it requests `https://api.pwnedpasswords.com/range/{first 5 hex characters of the uppercase SHA-1}` with `Add-Padding: true` and looks for the suffix itself; padding rows (count 0) are ignored. It uses the named client `hibp`. The whole lookup (request, headers and reading the body) has one budget of 2 seconds, also the client timeout (`HibpBreachedPasswordChecker.RequestBudget`), and the body is capped at 1 MB (a padded answer is some 40 KB). It is **fail-open**: a non-success status, the budget running out, a body over the cap or any transport error logs a warning (status code, exception type or the cap only, never the password, hash or prefix) and answers `false`. A cancelled caller token is not a failure and propagates. With `Auth:Password:CheckBreached` off it makes no request. |
 | `ISecretProtector` | `DataProtectionSecretProtector` | `Protect` and `Unprotect` encrypt a secret that must leave the process, with the Data Protection purpose `TemplateName.Auth.Secrets.v1` (ADR 0017). The same value protected twice differs; a changed value throws `CryptographicException`. Changing the purpose makes existing values unreadable. |
 
+### Access tokens
+
+`IAccessTokenIssuer` (`Application/Abstractions/`) issues the access token: `Issue(AccessTokenRequest(UserId, SessionId, SecurityStamp, AuthMethods, AuthTime, Locale))` returns `AccessToken(Value, ExpiresAt)`. `AccessTokenIssuer` (`Infrastructure/Tokens/`) signs it with `JsonWebTokenHandler`, ES256 only (ADR 0015), with the active key's `kid` in the header and the default `typ` (`JWT`). The times come from `TimeProvider`, truncated to whole seconds: `iat` = `nbf` = now, `exp` = now + `Auth:Jwt:AccessTokenLifetime`, and `ExpiresAt` is exactly the `exp` instant.
+
+| Claim | Value |
+|---|---|
+| `sub` | The user id. |
+| `sid` | The session id (`UserSession`). |
+| `sst` | The session's snapshot of the user's security stamp. |
+| `amr` | The session's authentication methods as a JSON array (`AuthMethods` split on spaces, for example `["pwd"]`). |
+| `auth_time` | When the user signed in (Unix seconds, a number), not when this token was issued. |
+| `locale` | The user's saved language. |
+| `jti` | A new random id per token. |
+| `iat`, `nbf`, `exp`, `iss`, `aud` | Issue time, not-before, expiry, `Auth:Jwt:Issuer`, `Auth:Jwt:Audience`. |
+
+There is no permission list, no email and no display name in the token (ADR 0016): permissions are resolved on the server.
+
+**Validation.** `JwtValidation.CreateParameters(JwtOptions, ISigningKeyProvider, TimeProvider?)` is the one definition the bearer handler uses: the algorithm allow-list is exactly `ES256` (so `none`, `HS256` signed with the public key's bytes and every other algorithm fail), `iss` and `aud` must match, `exp` is required, `exp` and `nbf` are checked with `Auth:Jwt:ClockSkew`, and signed tokens are required. The signing key is looked up by the header's `kid` among the configured keys; an unknown or missing `kid` finds no key and fails, and other keys are never tried (`TryAllIssuerSigningKeys = false`). Lifetime is checked against the application's `TimeProvider` through a `LifetimeValidator` (IdentityModel's own clock setting is not public), so a test clock moves token expiry too. `AddAuthModule` registers the bearer handler as the default scheme (`AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer()`) with `MapInboundClaims = false`, so claims keep their names (`sub`, `sid`, ...); `sub` is the identity's name claim. Access tokens are not checked against session revocation per request (ADR 0015, D9).
+
+**Keys.** `ISigningKeyProvider` (`Infrastructure/Tokens/`, `SigningKeyProvider`: a singleton, also registered as a hosted service that does nothing, so the host builds it when it starts) loads `Auth:Jwt:SigningKeys` once, at start, with `ECDsa.ImportFromPem`. Every key must be EC P-256. The first entry with a `PrivateKeyPem` signs (`Active`); every entry, active or retired, validates (`ValidationKeys`) and is published (`PublicKeySet`), both through public-only copies, so neither can carry a private part. Start-up validation (`ValidateOnStart`) refuses: a missing or duplicate `KeyId`; an entry with neither PEM; a `PrivateKeyPem` that is not a `PRIVATE KEY` or `EC PRIVATE KEY` block (an encrypted key, a public key, an RSA key, text that is not PEM); a `PublicKeyPem` that is not a `PUBLIC KEY` block; any other curve (P-384, P-521, brainpool); a `PublicKeyPem` that does not match the `PrivateKeyPem` next to it; and a list with no private key. Every message names the entry (`Auth:Jwt:SigningKeys:{index}:PrivateKeyPem ...`) and never quotes key material. With **no** key configured, Development and Testing generate one ephemeral P-256 key at start (kid `ephemeral-{random}`) and log a warning; tokens it signed stop validating when the process restarts, and other instances do not accept them. Every other environment refuses to start with a message that names `Auth:Jwt:SigningKeys`.
+
+**Generating a key.** Once per environment, on a trusted machine, and straight into the secret store, never into a file in the repository:
+
+```bash
+openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt
+```
+
+The output (`-----BEGIN PRIVATE KEY-----` ...) is the `PrivateKeyPem` of `Auth:Jwt:SigningKeys:0`; choose a `KeyId` that says when it was made (for example `2026-10`). Locally: `dotnet user-secrets set "Auth:Jwt:SigningKeys:0:KeyId" "2026-10" --project src/Host/TemplateName.Api`, and the same for `Auth:Jwt:SigningKeys:0:PrivateKeyPem`. As environment variables: `Auth__Jwt__SigningKeys__0__KeyId` and `Auth__Jwt__SigningKeys__0__PrivateKeyPem`; the PEM may lose its line breaks on the way (a one-line PEM is accepted). The public part, for a retired entry, is `openssl pkey -pubout` of the private key.
+
+**Rotating.** Put the new key first (index 0, with its `PrivateKeyPem`) and move the old one to index 1 with only its `PublicKeyPem`, so it no longer signs but still validates and stays in the JWKS. Keep it for at least `AccessTokenLifetime + ClockSkew` (10 minutes 30 seconds by default), then remove it. Every instance must have the new list before any of them signs with the new key. When other services verify tokens through the JWKS (which they may cache for 5 minutes), publish the new key first: add it at the end of the list with its `PrivateKeyPem` (published, not yet signing, because an earlier entry has a private key), wait at least 5 minutes, then do the swap above.
+
 ### Email sending
 
 `IEmailSender` (`Application/Abstractions/`) is the seam every Auth email goes through: `SendAsync(EmailMessage, CancellationToken)`, where `EmailMessage(To, Subject, TextBody, HtmlBody?)` is a plain record. `SmtpEmailSender` (`Infrastructure/Email/`) implements it with MailKit's `SmtpClient`: a fresh connection per call (`SecureSocketOptions.StartTls` when `Auth:Email:UseTls` is on, otherwise none), authentication only when `Auth:Email:Username` is set, then send and disconnect. `Auth:Email:Timeout` bounds the connect and the send. It **throws** on any failure, so the outbox handler that called it fails and the event is retried; a failure while saying goodbye after the server accepted the message is ignored, so a retry cannot send the email twice. It logs one generic line (information when sent, warning with only the exception type when it failed): never the message and never the recipient, who is personal data.
@@ -196,7 +227,7 @@ Locally, Mailpit from `docker-compose.yml` catches the mail: SMTP on `127.0.0.1:
 
 <!-- Configuration sections and keys the module reads, with defaults. -->
 
-`AddAuthModule` receives the `IConfiguration`; the rest of the `Auth` section (JWT, refresh token, verification, lockout) is bound as the tasks land. `Auth:Password`, `Auth:Email` and `Auth:Links` are validated at start-up, so an out-of-range value stops the host.
+`AddAuthModule` receives the `IConfiguration`; the rest of the `Auth` section (refresh token, verification, lockout) is bound as the tasks land. `Auth:Password`, `Auth:Email`, `Auth:Links` and `Auth:Jwt` are validated at start-up, so an out-of-range value or a bad signing key stops the host.
 
 | Key | Default | Purpose |
 |---|---|---|
@@ -216,6 +247,11 @@ Locally, Mailpit from `docker-compose.yml` catches the mail: SMTP on `127.0.0.1:
 | `Auth:Email:Timeout` | `00:00:30` (1 second to 5 minutes) | How long connecting and sending may each take. |
 | `Auth:Links:ConfirmEmailUrl` | `http://localhost:3000/confirm-email?token={token}` | The front-end page the confirmation link opens. Must be absolute `http(s)` and hold `{token}`, which is replaced by the URL-encoded token. |
 | `Auth:Links:ResetPasswordUrl` | `http://localhost:3000/reset-password?token={token}` | The front-end page the reset link opens; same rules. |
+| `Auth:Jwt:Issuer` | `templatename` | The `iss` claim written and required. Set it to the API's public address in a deployment. |
+| `Auth:Jwt:Audience` | `templatename-api` | The `aud` claim written and required. |
+| `Auth:Jwt:AccessTokenLifetime` | `00:10:00` (1 minute to 1 hour) | How long an access token is valid. |
+| `Auth:Jwt:ClockSkew` | `00:00:30` (0 to 5 minutes) | The tolerance for clock differences on `exp` and `nbf`. |
+| `Auth:Jwt:SigningKeys` | empty (user secrets, environment or a secret store) | The EC P-256 keys, each `{ KeyId, PrivateKeyPem?, PublicKeyPem? }`; the first with a private key signs, all validate and are published. Empty: an ephemeral key in Development and Testing, a start-up failure elsewhere. Never put a key in a file. See [Access tokens](#access-tokens). |
 
 The PBKDF2 iteration count has no setting of the module: it is Identity's default (`PasswordHasherOptions.IterationCount`, ADR 0014). Only the integration test factory lowers it, through `Configure<PasswordHasherOptions>`.
 
@@ -274,13 +310,17 @@ No outbox handler exists yet. The ones that land with registration and password 
 
 <!-- Log messages, ActivitySource and Meter names, and metrics the module emits. -->
 
-None yet.
+- `SigningKeyProvider` logs one warning at start when it generates an ephemeral key (Development and Testing with no configured key): the configuration path, the generated `kid` and the environment name. No key material is ever logged, and a validation message about a key names only its configuration path.
+- The JWT bearer handler logs failed authentications under ASP.NET Core's own `Microsoft.AspNetCore.Authentication` categories.
+- The breached-password checker and the email sender log the warnings described under [Security services](#security-services) and [Email sending](#email-sending).
+
+No metrics yet.
 
 ## Testing
 
 <!-- Where the module's unit and integration tests live and what they cover. -->
 
-The module is covered by the architecture tests (`tests/TemplateName.ArchitectureTests`): layering, module boundaries, naming, documentation and translations all include `TemplateName.Modules.Auth`. Unit tests of the domain live under `tests/TemplateName.UnitTests/Auth/`. Integration tests live under `tests/TemplateName.IntegrationTests/Auth/`: `AuthPersistenceTests` covers aggregate round trips, the unique and filtered indexes, soft delete, UTC timestamps, the outbox row written with a new user, the concurrent refresh-token claim and the key ring in `auth.DataProtectionKeys`. The email sender is covered by `AuthEmailsTests` and `EmailOptionsTests` (unit) and, against a real Mailpit container started by `MailpitFixture` (generic Testcontainers, image pinned to the tag in `docker-compose.yml`, which a test compares), by `SmtpEmailSenderTests`: text and HTML parts, sender and subject read back through Mailpit's REST API (`GET /api/v1/messages`, `GET /api/v1/message/{id}`), an unreachable server, a malformed address and a cancelled token. `RecordingEmailSender` (`tests/TemplateName.IntegrationTests/Infrastructure/`) is the test double that later API tests swap in for `IEmailSender`: it keeps the messages in `Sent`, `Clear()` empties it and `LastLinkToken(to)` returns the decoded `token=` value from the last message to an address.
+The module is covered by the architecture tests (`tests/TemplateName.ArchitectureTests`): layering, module boundaries, naming, documentation and translations all include `TemplateName.Modules.Auth`. Unit tests of the domain live under `tests/TemplateName.UnitTests/Auth/`. Integration tests live under `tests/TemplateName.IntegrationTests/Auth/`: `AuthPersistenceTests` covers aggregate round trips, the unique and filtered indexes, soft delete, UTC timestamps, the outbox row written with a new user, the concurrent refresh-token claim and the key ring in `auth.DataProtectionKeys`. The access tokens are covered by unit tests: `AccessTokenIssuerTests` (header, the exact claim set, expiry from `TimeProvider`, validation with only the published key), `JwtValidationTests` (Review Focus 4: `alg: none`, `HS256` signed with the public key's bytes, an unknown, missing or mislabelled `kid`, a tampered payload, a wrong audience or issuer, no `exp`, expiry and not-before inside and beyond the skew, a retired key) and `SigningKeyProviderTests` (other curves, malformed and mismatched PEMs, no echo of key material, missing keys outside Development and Testing, the ephemeral key and its warning, the JWKS members, the bearer registration); `JwksEndpointTests` (integration) reads the JWKS through the host. The email sender is covered by `AuthEmailsTests` and `EmailOptionsTests` (unit) and, against a real Mailpit container started by `MailpitFixture` (generic Testcontainers, image pinned to the tag in `docker-compose.yml`, which a test compares), by `SmtpEmailSenderTests`: text and HTML parts, sender and subject read back through Mailpit's REST API (`GET /api/v1/messages`, `GET /api/v1/message/{id}`), an unreachable server, a malformed address and a cancelled token. `RecordingEmailSender` (`tests/TemplateName.IntegrationTests/Infrastructure/`) is the test double that later API tests swap in for `IEmailSender`: it keeps the messages in `Sent`, `Clear()` empties it and `LastLinkToken(to)` returns the decoded `token=` value from the last message to an address.
 
 ## Changelog
 
