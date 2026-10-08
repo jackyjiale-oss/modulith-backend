@@ -1,0 +1,45 @@
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using TemplateName.Infrastructure.Common.Outbox;
+using TemplateName.Infrastructure.Common.Persistence;
+using TemplateName.Modules.Auth.Application.Abstractions;
+
+namespace TemplateName.Modules.Auth.Infrastructure.Persistence;
+
+/// <summary>The Auth module's write model, outbox and Data Protection key ring, in schema <c>auth</c>.</summary>
+internal sealed class AuthDbContext : DbContext, IUnitOfWork, IDataProtectionKeyContext
+{
+    internal const string Schema = "auth";
+
+    public AuthDbContext(DbContextOptions<AuthDbContext> options)
+        : base(options)
+    {
+        // A soft delete must not take the children with it. Cascading at save time lets SoftDeleteInterceptor turn the delete into an
+        // update first, so a soft-deleted user keeps its password history and role assignments. A child removed from its collection
+        // is still deleted at once (orphan deletion is unaffected).
+        ChangeTracker.CascadeDeleteTiming = CascadeTiming.OnSaveChanges;
+    }
+
+    /// <summary>The Data Protection key ring (ADR 0017), written by <c>PersistKeysToDbContext</c>.</summary>
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
+
+    // Password history, role assignments and grants are only read through their soft-deletable owner, whose filter already hides
+    // them, so EF's warning about a filtered principal with an unfiltered required dependent does not apply.
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        => optionsBuilder.ConfigureWarnings(
+            warnings => warnings.Ignore(CoreEventId.PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning));
+
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+        => configurationBuilder.ApplyDefaultConventions();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.HasDefaultSchema(Schema);
+        modelBuilder.ApplyConfigurationsFromAssembly(typeof(AuthDbContext).Assembly);
+        modelBuilder.Entity<DataProtectionKey>().ToTable("DataProtectionKeys");
+        modelBuilder.ApplyOutbox();
+        modelBuilder.ApplySoftDeleteQueryFilters();
+    }
+}

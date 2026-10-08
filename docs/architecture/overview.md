@@ -77,6 +77,7 @@ One SQL Server database, one schema per owner, each with its own `__EFMigrations
 | Schema | Owner | Context | Tables | Migrations |
 |---|---|---|---|---|
 | `platform` | Infrastructure.Common (building block) | `PlatformDbContext` | `IdempotencyKeys` | `src/BuildingBlocks/TemplateName.Infrastructure.Common/Idempotency/Migrations/` |
+| `auth` | Auth module | `AuthDbContext` | `Users`, `PasswordHistory`, `UserRoles`, `Roles`, `Permissions`, `RolePermissions`, `UserSessions`, `RefreshTokens`, `VerificationCodes`, `AuthAuditLogs`, `DataProtectionKeys`, `OutboxMessages`, `OutboxMessageConsumers` | `src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Persistence/Migrations/` |
 | `sample` | Sample module | `SampleDbContext` | `LeaveRequests`, `OutboxMessages`, `OutboxMessageConsumers` | `src/Modules/Sample/TemplateName.Modules.Sample/Infrastructure/Persistence/Migrations/` |
 
 `MigrateModuleDatabasesAsync` applies every registered context's migrations in registration order (`platform` first, because `AddInfrastructureCommon` registers it before any module). The tables of each module are described in its document; `platform.IdempotencyKeys` in [`infrastructure-common`](../building-blocks/infrastructure-common.md#idempotency).

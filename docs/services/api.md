@@ -152,7 +152,7 @@ The endpoint decides which OpenTelemetry services are registered, so it is **rea
 | Endpoint | Checks | Use |
 |---|---|---|
 | `GET /health/live` | none: 200 while the process serves requests | Liveness probe |
-| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `sample`, plus one per added module) | Readiness probe, load balancer |
+| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `auth`, `sample`, plus one per added module) | Readiness probe, load balancer |
 
 Both are exempt from rate limiting, logged at `Verbose` when healthy, and left out of traces.
 

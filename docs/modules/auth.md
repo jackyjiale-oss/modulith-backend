@@ -6,14 +6,14 @@
 
 <!-- What the module owns, what it deliberately does not do, and which other modules it talks to (only through *.Contracts). -->
 
-The sign-in and authorization module: registration with email confirmation, login, refresh-token rotation, logout, password reset and change, session management, and role-based permissions with administration of users, roles and the audit log. It is built up over Plan 2 (auth core); until its tasks land this page describes the skeleton only.
+The sign-in and authorization module: registration with email confirmation, login, refresh-token rotation, logout, password reset and change, session management, and role-based permissions with administration of users, roles and the audit log. It is built up over Plan 2 (auth core); this page describes what has landed so far (the domain model and its persistence).
 
-- Owns: users, roles, permissions, sessions, verification codes, the auth audit log and the `auth` schema (once the persistence task lands).
+- Owns: users, roles, permissions, sessions, verification codes, the auth audit log, the Data Protection key ring and the `auth` schema.
 - Does not: send localized emails (English only until Plan 3), check access tokens against session revocation on every request (ADR 0015), or support usernames, tenants or progressive lockout.
 - Talks to: no other module. It has no `TemplateName.Modules.Auth.Contracts` project yet, because nothing outside the module needs its data; Plan 3 adds the integration events.
 - Decisions: [ADR 0014](../adr/0014-own-identity-model-with-identity-password-hasher.md) (own identity model), [ADR 0015](../adr/0015-es256-jwt-with-configured-signing-keys.md) (ES256 tokens, configured keys), [ADR 0016](../adr/0016-server-side-permissions-with-per-user-cache.md) (permissions resolved server-side), [ADR 0017](../adr/0017-outbox-secrets-protected-with-data-protection.md) (outbox secrets protected with Data Protection).
 
-Code: `src/Modules/Auth/TemplateName.Modules.Auth/`. The host calls `AddAuthModule(configuration)` and maps `MapAuthEndpoints()` on the `/api/v1` group. Today the module registers its handlers and error messages only; `MapAuthEndpoints` maps nothing yet.
+Code: `src/Modules/Auth/TemplateName.Modules.Auth/`. The host calls `AddAuthModule(configuration)` and maps `MapAuthEndpoints()` on the `/api/v1` group. Today the module registers its persistence (context, outbox, repositories, audit writer, Data Protection key ring; see [Data](#data)), its handlers and its error messages; `MapAuthEndpoints` maps nothing yet.
 
 ## Endpoints
 
@@ -169,27 +169,62 @@ The user codes are declared in `Domain/Users/UserErrors.cs`, the role and permis
 | `RefreshTokenReuseDetectedDomainEvent(UserId, SessionId)` | Domain | A used or revoked refresh token is presented again and the session is revoked | None yet |
 | `VerificationCodeIssuedDomainEvent(CodeId, UserId, Purpose, Target, ProtectedToken)` | Domain | A verification code is issued; `ProtectedToken` is the encrypted token for the email link | None yet |
 
-The events are declared in `Domain/Users/Events/`, `Domain/Sessions/Events/` and `Domain/Verification/Events/`. Domain events are written to the module outbox in the same save as the aggregate (once the persistence task lands) and dispatched by the outbox (ADR 0007). The module publishes no integration events yet.
+The events are declared in `Domain/Users/Events/`, `Domain/Sessions/Events/` and `Domain/Verification/Events/`. Domain events are written to `auth.OutboxMessages` in the same save as the aggregate and dispatched by the module outbox (ADR 0007). The module publishes no integration events yet.
 
 ## Configuration
 
 <!-- Configuration sections and keys the module reads, with defaults. -->
 
-None yet. `AddAuthModule` receives the `IConfiguration` so the `Auth` section (JWT, refresh token, verification, password, lockout) can be bound as the tasks land.
+`AddAuthModule` receives the `IConfiguration`; the rest of the `Auth` section (JWT, refresh token, verification, password, lockout) is bound as the tasks land.
 
 | Key | Default | Purpose |
 |---|---|---|
-| | None yet. | |
+| `ConnectionStrings:Database` | empty (user secrets or environment) | The database that holds the `auth` schema. |
+| `Auth:DataProtection:ApplicationName` | `TemplateName` | The Data Protection application name. Every instance that must read the others' protected values (outbox tokens, ADR 0017) uses the same name and the same database. |
 
 ## Data
 
 <!-- The schema, its tables and indexes, and the migrations in order. -->
 
-None yet. The `auth` schema, `AuthDbContext` and the initial migration arrive with the persistence task.
+Schema `auth`, owned by `AuthDbContext` (`Infrastructure/Persistence/`), which is also the module's `IUnitOfWork` and the Data Protection key store (`IDataProtectionKeyContext`). Writes go through EF Core and the repositories in `Application/Abstractions/` (`IUserRepository`, `IRoleRepository`, `IPermissionRepository`, `ISessionRepository`, `IVerificationCodeRepository`); later list queries read with Dapper and filter `IsDeleted = 0` themselves (ADR 0006). Keys are `SequentialGuid`s set by the domain (`ValueGeneratedNever`), except the audit log's `bigint` identity. Every timestamp, `DateTime` or `DateTimeOffset`, is `datetime2(3)` holding UTC (`ApplyDefaultConventions`); a `DateTimeOffset` comes back with offset zero. Hashes are `varbinary(32)` (SHA-256); enums are `int`.
 
 | Table | Purpose | Indexes |
 |---|---|---|
-| | None yet. | |
+| `auth.Users` | The `User` aggregate. `Email`/`NormalizedEmail nvarchar(256)`, `PasswordHash nvarchar(256)` (null for an administrator-created user), `SecurityStamp nvarchar(64)`, `DisplayName nvarchar(200)`, `Locale nvarchar(16)`, `TimeZone nvarchar(64)`, `Status int`, `RowVersion rowversion`, audit and soft-delete columns. | `PK_Users`, `IX_Users_NormalizedEmail` (unique, filtered `[IsDeleted] = 0`) |
+| `auth.PasswordHistory` | The user's current and previous password hashes (`PasswordHistoryEntry`), loaded oldest first. | `PK_PasswordHistory`, `IX_PasswordHistory_UserId` (FK to `Users`, cascade) |
+| `auth.UserRoles` | Role assignments (`UserRole`): `AssignedBy`, `AssignedAt`. | `PK_UserRoles` (`UserId`, `RoleId`), `IX_UserRoles_RoleId` (FK to `Roles`, restrict; FK to `Users`, cascade) |
+| `auth.Roles` | The `Role` aggregate. `Name`/`NormalizedName nvarchar(100)`, `Description nvarchar(500)`, `IsSystem`, `RowVersion rowversion`, audit and soft-delete columns. | `PK_Roles`, `IX_Roles_NormalizedName` (unique, filtered `[IsDeleted] = 0`) |
+| `auth.Permissions` | Declared permissions. `Code nvarchar(128)`, `Module nvarchar(64)`, `Name nvarchar(200)`, `Description nvarchar(500)`, `IsDeprecated`. | `PK_Permissions`, `IX_Permissions_Code` (unique) |
+| `auth.RolePermissions` | Grants (`RolePermission`). | `PK_RolePermissions` (`RoleId`, `PermissionId`), `IX_RolePermissions_PermissionId` (FK to `Permissions`, restrict; FK to `Roles`, cascade) |
+| `auth.UserSessions` | The `UserSession` aggregate. `AuthMethods nvarchar(64)`, `DeviceName nvarchar(200)`, `UserAgent nvarchar(512)`, `IpAddress nvarchar(45)`, `SecurityStamp nvarchar(64)`, `RevokedReason int`. | `PK_UserSessions`, `IX_UserSessions_UserId` (FK to `Users`, restrict) |
+| `auth.RefreshTokens` | The session's token chain (`RefreshToken`): `TokenHash varbinary(32)`, `UsedAt`, `ReplacedByTokenId`, `RevokedAt`. | `PK_RefreshTokens`, `IX_RefreshTokens_TokenHash` (unique), `IX_RefreshTokens_SessionId` (FK to `UserSessions`, cascade) |
+| `auth.VerificationCodes` | The `VerificationCode` aggregate. `Purpose int`, `Target nvarchar(256)`, `TokenHash varbinary(32)`, `CreatedIp nvarchar(45)`. | `PK_VerificationCodes`, `IX_VerificationCodes_TokenHash` (unique), `IX_VerificationCodes_UserId_Purpose_CreatedAt` (also serves the FK to `Users`, restrict) |
+| `auth.AuthAuditLogs` | The audit log (`AuthAuditLog`). `Id bigint identity`, `EventType nvarchar(64)`, `FailureReason nvarchar(128)`, `AttemptedIdentifier nvarchar(256)`, `IpAddress nvarchar(45)`, `UserAgent nvarchar(512)`, `TraceId nvarchar(64)`, `Details nvarchar(max)`. No foreign keys, so entries outlive what they describe. | `PK_AuthAuditLogs`, `IX_AuthAuditLogs_UserId_OccurredAt`, `IX_AuthAuditLogs_EventType_OccurredAt`, `IX_AuthAuditLogs_IpAddress_OccurredAt` (each `OccurredAt DESC`) |
+| `auth.DataProtectionKeys` | The Data Protection key ring (ADR 0017), shared by every instance; not encrypted at rest yet. | `PK_DataProtectionKeys` |
+| `auth.OutboxMessages` | Domain events waiting for dispatch. | `PK_OutboxMessages`, `IX_OutboxMessages_OccurredAt` (filtered: `ProcessedAt IS NULL`) |
+| `auth.OutboxMessageConsumers` | Which handler has processed which message. | `PK_OutboxMessageConsumers` (`OutboxMessageId`, `Name`) |
+| `auth.__EFMigrationsHistory` | Applied migrations of this module. | — |
+
+Rules the repositories and the context keep:
+
+- **Whole aggregates.** A user is loaded with its password history (oldest first, which `ChangePassword` relies on to drop the oldest) and its roles; a role with its grants; a session with **every** refresh token, used or not, because `Rotate` and `Revoke` are only correct over the whole chain (Ruling R7). `GetByRefreshTokenHashAsync` uses the token only to pick the session; the include is never filtered.
+- **Claiming a refresh token.** `TryClaimRefreshTokenAsync` is one `UPDATE ... SET UsedAt = @now WHERE Id = @id AND UsedAt IS NULL AND RevokedAt IS NULL` (`ExecuteUpdateAsync`), true only for the caller whose statement changed the row. It bypasses the change tracker, so the refresh handler loads the session, claims, then rotates the instance it already holds; it never reloads after the claim.
+- **Soft delete keeps children.** Users and roles are soft-deleted by `SoftDeleteInterceptor`. The context cascades deletes at save time (`CascadeDeleteTiming = OnSaveChanges`), after the interceptor has turned the delete into an update, so a soft-deleted user keeps its history and assignments. Removing an item from a collection (`RemoveRole`, history trimming) still deletes that row.
+- **Audit entries.** `IAuthAuditWriter.Record` fills `IpAddress`, `UserAgent` and `TraceId` from `IClientContext` (`HttpClientContext`: the address after the forwarded-headers middleware, the `User-Agent` header, and the trace id that `X-Trace-Id` also carries) and stages the entry; the handler's `SaveChangesAsync` saves it with the rest.
+
+Migrations (`Infrastructure/Persistence/Migrations/`), in order:
+
+1. `InitialAuth`: creates the schema and every table above.
+
+Add one with:
+
+```bash
+dotnet ef migrations add {Verb}{What} \
+  --project src/Modules/Auth/TemplateName.Modules.Auth \
+  --startup-project src/Host/TemplateName.Api \
+  --context AuthDbContext \
+  --output-dir Infrastructure/Persistence/Migrations
+```
 
 ## Background processing
 
@@ -207,7 +242,7 @@ None yet.
 
 <!-- Where the module's unit and integration tests live and what they cover. -->
 
-The module is covered by the architecture tests (`tests/TemplateName.ArchitectureTests`): layering, module boundaries, naming, documentation and translations all include `TemplateName.Modules.Auth`. Unit tests will live under `tests/TemplateName.UnitTests/Auth/` and integration tests under `tests/TemplateName.IntegrationTests/Auth/`.
+The module is covered by the architecture tests (`tests/TemplateName.ArchitectureTests`): layering, module boundaries, naming, documentation and translations all include `TemplateName.Modules.Auth`. Unit tests of the domain live under `tests/TemplateName.UnitTests/Auth/`. Integration tests live under `tests/TemplateName.IntegrationTests/Auth/`: `AuthPersistenceTests` covers aggregate round trips, the unique and filtered indexes, soft delete, UTC timestamps, the outbox row written with a new user, the concurrent refresh-token claim and the key ring in `auth.DataProtectionKeys`.
 
 ## Changelog
 

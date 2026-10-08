@@ -12,12 +12,15 @@ public static class ModelConventions
 
     /// <summary>
     /// Maps every <see cref="DateTime"/> and nullable <see cref="DateTime"/> to <c>datetime2(3)</c>, stored as UTC and read back with
-    /// <see cref="DateTimeKind.Utc"/>. Call it from <c>ConfigureConventions</c>.
+    /// <see cref="DateTimeKind.Utc"/>. Every <see cref="DateTimeOffset"/> and nullable <see cref="DateTimeOffset"/> gets the same
+    /// column, holding its UTC instant, and is read back with offset zero. Call it from <c>ConfigureConventions</c>.
     /// </summary>
     public static void ApplyDefaultConventions(this ModelConfigurationBuilder builder)
     {
         builder.Properties<DateTime>().HaveConversion<UtcDateTimeConverter>().HavePrecision(3);
         builder.Properties<DateTime?>().HaveConversion<UtcDateTimeConverter>().HavePrecision(3);
+        builder.Properties<DateTimeOffset>().HaveConversion<UtcDateTimeOffsetConverter>().HavePrecision(3);
+        builder.Properties<DateTimeOffset?>().HaveConversion<UtcDateTimeOffsetConverter>().HavePrecision(3);
     }
 
     /// <summary>
