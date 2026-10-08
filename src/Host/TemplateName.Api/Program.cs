@@ -23,7 +23,8 @@ builder.Services.AddInfrastructureCommon(builder.Configuration);
 builder.Services.AddWebCommon();
 builder.Services.AddApiLocalization(builder.Configuration);
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
-builder.Services.AddOpenApi("v1");
+// The Bearer scheme, required by every operation that carries authorization data (RequirePermission, RequireAuthorization).
+builder.Services.AddOpenApi("v1", options => options.AddBearerSecurity());
 builder.Services.AddHealthChecks();
 builder.Services.AddHttpSecurity(builder.Configuration);
 // The fallback policy requires an authenticated user everywhere an endpoint does not say otherwise. It needs the explicit

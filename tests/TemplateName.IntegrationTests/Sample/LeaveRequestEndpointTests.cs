@@ -24,6 +24,12 @@ public sealed class LeaveRequestEndpointTests(IntegrationTestWebAppFactory facto
 {
     private const string BaseRoute = "/api/v1/sample/leave-requests";
 
+    public override async ValueTask InitializeAsync()
+    {
+        await base.InitializeAsync();
+        await SignInAsync("sample.leave_request.view", "sample.leave_request.create", "sample.leave_request.approve");
+    }
+
     [Fact]
     public async Task Submit_returns_201_with_location_and_id()
     {
@@ -81,10 +87,9 @@ public sealed class LeaveRequestEndpointTests(IntegrationTestWebAppFactory facto
     public async Task Approve_twice_returns_409_leave_not_pending()
     {
         var id = await SubmitAsync(Valid());
-        var approve = new ApproveLeaveRequestRequest(Guid.NewGuid());
 
-        using var first = await Client.PostAsJsonAsync($"{BaseRoute}/{id}/approve", approve, Ct);
-        using var second = await Client.PostAsJsonAsync($"{BaseRoute}/{id}/approve", approve, Ct);
+        using var first = await Client.PostAsync($"{BaseRoute}/{id}/approve", content: null, Ct);
+        using var second = await Client.PostAsync($"{BaseRoute}/{id}/approve", content: null, Ct);
 
         first.StatusCode.ShouldBe(HttpStatusCode.NoContent);
         second.StatusCode.ShouldBe(HttpStatusCode.Conflict);
@@ -118,7 +123,7 @@ public sealed class LeaveRequestEndpointTests(IntegrationTestWebAppFactory facto
             services.RemoveAll<IQueryHandler<GetLeaveRequestByIdQuery, LeaveRequestResponse>>();
             services.AddSingleton(throwingHandler);
         }));
-        using var client = throwing.CreateClient();
+        using var client = await CreateClientAsync(throwing);
 
         using var response = await client.GetAsync($"{BaseRoute}/{Guid.NewGuid()}", Ct);
 

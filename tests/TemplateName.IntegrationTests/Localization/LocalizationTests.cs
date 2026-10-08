@@ -17,6 +17,16 @@ public sealed class LocalizationTests(IntegrationTestWebAppFactory factory) : In
 {
     private const string BaseRoute = "/api/v1/sample/leave-requests";
 
+    // A saved locale the API does not support. The saved locale wins over Accept-Language (decision D7); this one leaves the choice to
+    // the header, which is what these tests are about. Saved_locale_claim_wins_over_accept_language (PipelineTests) covers the claim.
+    private const string UnsupportedSavedLocale = "fr";
+
+    public override async ValueTask InitializeAsync()
+    {
+        await base.InitializeAsync();
+        await SignInAsync(["sample.leave_request.view", "sample.leave_request.create"], UnsupportedSavedLocale);
+    }
+
     [Fact]
     public async Task Malay_request_gets_malay_detail_and_unchanged_code()
     {

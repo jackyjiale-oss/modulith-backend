@@ -31,6 +31,18 @@ public sealed class IdempotencyTests(IntegrationTestWebAppFactory factory) : Int
     // The default Idempotency:InProgressTimeout: how long an in-progress key stays leased to the request that inserted it.
     private static readonly TimeSpan InProgressTimeout = TimeSpan.FromMinutes(5);
 
+    private SignedInUser? _user;
+
+    private SignedInUser User => _user ?? throw new InvalidOperationException("InitializeAsync signs the user in.");
+
+    public override async ValueTask InitializeAsync()
+    {
+        await base.InitializeAsync();
+
+        // Keys are scoped to the signed-in user, and every host below sends this user's token.
+        _user = await SignInAsync("sample.leave_request.create");
+    }
+
     [Fact]
     public async Task Same_key_same_body_replays_response()
     {
@@ -100,6 +112,7 @@ public sealed class IdempotencyTests(IntegrationTestWebAppFactory factory) : Int
         using var first = await PostAsync(Client, request, Key);
 
         Factory.Time.Advance(TimeSpan.FromHours(24) + TimeSpan.FromSeconds(1));
+        await RenewAccessTokenAsync();
         using var second = await PostAsync(Client, request, Key);
 
         first.StatusCode.ShouldBe(HttpStatusCode.Created);
@@ -146,7 +159,7 @@ public sealed class IdempotencyTests(IntegrationTestWebAppFactory factory) : Int
                 return Result.Success(Guid.NewGuid());
             });
         await using var parking = WithSubmitHandler(parkingHandler);
-        using var client = parking.CreateClient();
+        using var client = await CreateClientAsync(parking);
         var request = Valid();
 
         var firstTask = PostAsync(client, request, Key);
@@ -168,7 +181,7 @@ public sealed class IdempotencyTests(IntegrationTestWebAppFactory factory) : Int
         throwingHandler.HandleAsync(Arg.Any<SubmitLeaveRequestCommand>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("Simulated failure in the submit handler."));
         await using var throwing = WithSubmitHandler(throwingHandler);
-        using var throwingClient = throwing.CreateClient();
+        using var throwingClient = await CreateClientAsync(throwing);
         var request = Valid();
 
         using var failed = await PostAsync(throwingClient, request, Key);
@@ -193,6 +206,7 @@ public sealed class IdempotencyTests(IntegrationTestWebAppFactory factory) : Int
                 http.Request.Path = SubmitRoute;
                 http.Request.ContentType = "application/json";
                 http.Request.Headers[KeyHeader] = string.Empty;
+                http.Request.Headers.Authorization = $"Bearer {User.AccessToken}";
                 http.Request.Body = new MemoryStream(body);
             },
             Ct);
@@ -241,7 +255,7 @@ public sealed class IdempotencyTests(IntegrationTestWebAppFactory factory) : Int
         failingHandler.HandleAsync(Arg.Any<SubmitLeaveRequestCommand>(), Arg.Any<CancellationToken>())
             .Returns(Result.Failure<Guid>(Error.Failure("test.simulated_failure", "Simulated failure result.")));
         await using var failing = WithSubmitHandler(failingHandler);
-        using var failingClient = failing.CreateClient();
+        using var failingClient = await CreateClientAsync(failing);
         var request = Valid();
 
         using var failed = await PostAsync(failingClient, request, Key);
@@ -262,7 +276,7 @@ public sealed class IdempotencyTests(IntegrationTestWebAppFactory factory) : Int
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource<Result<Guid>>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var parking = WithSubmitHandler(ParkingHandler(entered, release.Task));
-        using var parkingClient = parking.CreateClient();
+        using var parkingClient = await CreateClientAsync(parking);
         var request = Valid();
 
         var abandonedTask = PostAsync(parkingClient, request, Key);
@@ -311,7 +325,7 @@ public sealed class IdempotencyTests(IntegrationTestWebAppFactory factory) : Int
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource<Result<Guid>>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var parking = WithSubmitHandler(ParkingHandler(entered, release.Task));
-        using var parkingClient = parking.CreateClient();
+        using var parkingClient = await CreateClientAsync(parking);
         var request = Valid();
 
         var supersededTask = PostAsync(parkingClient, request, Key);
@@ -339,7 +353,7 @@ public sealed class IdempotencyTests(IntegrationTestWebAppFactory factory) : Int
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource<Result<Guid>>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var parking = WithSubmitHandler(ParkingHandler(entered, release.Task));
-        using var parkingClient = parking.CreateClient();
+        using var parkingClient = await CreateClientAsync(parking);
         var request = Valid();
 
         var supersededTask = PostAsync(parkingClient, request, Key);

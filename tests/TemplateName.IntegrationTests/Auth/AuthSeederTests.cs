@@ -10,6 +10,7 @@ using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Domain.Roles;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+using TemplateName.Modules.Sample.Application;
 
 namespace TemplateName.IntegrationTests.Auth;
 
@@ -35,7 +36,10 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
 
     private readonly List<AsyncServiceScope> _scopes = [];
 
-    private static IEnumerable<string> AuthCodes => new AuthPermissionSource().Permissions.Select(permission => permission.Code);
+    /// <summary>The codes the modules declare: the Auth module's own and the Sample module's (through its <c>IPermissionSource</c>).</summary>
+    private static IEnumerable<string> ModuleCodes => new IPermissionSource[] { new AuthPermissionSource(), new SamplePermissionSource() }
+        .SelectMany(source => source.Permissions)
+        .Select(permission => permission.Code);
 
     [Fact]
     public async Task Seeding_twice_is_idempotent()
@@ -46,15 +50,15 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
 
         var second = await SnapshotAsync();
         second.ShouldBe(first);
-        (await GrantedCodesAsync(SystemRoles.SuperAdmin)).ShouldBe(AuthCodes, ignoreOrder: true);
+        (await GrantedCodesAsync(SystemRoles.SuperAdmin)).ShouldBe(ModuleCodes, ignoreOrder: true);
         (await GrantedCodesAsync(SystemRoles.Admin)).ShouldBe(AdminDefaults, ignoreOrder: true);
         (await GrantedCodesAsync(SystemRoles.User)).ShouldBeEmpty();
         var roles = await Context().Set<Role>().ToListAsync(Ct);
         roles.Select(role => role.Name).ShouldBe([SystemRoles.SuperAdmin, SystemRoles.Admin, SystemRoles.User], ignoreOrder: true);
         roles.ShouldAllBe(role => role.IsSystem);
         var permissions = await Context().Set<Permission>().ToListAsync(Ct);
-        permissions.Select(permission => permission.Code).ShouldBe(AuthCodes, ignoreOrder: true);
-        permissions.ShouldAllBe(permission => !permission.IsDeprecated && permission.Module == "auth");
+        permissions.Select(permission => permission.Code).ShouldBe(ModuleCodes, ignoreOrder: true);
+        permissions.ShouldAllBe(permission => !permission.IsDeprecated && permission.Code.StartsWith(permission.Module + ".", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -64,7 +68,7 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
 
         await Factory.Services.SeedAuthModuleAsync(Ct);
 
-        (await GrantedCodesAsync(SystemRoles.SuperAdmin)).ShouldBe([.. AuthCodes, Widget.Code], ignoreOrder: true);
+        (await GrantedCodesAsync(SystemRoles.SuperAdmin)).ShouldBe([.. ModuleCodes, Widget.Code], ignoreOrder: true);
         (await GrantedCodesAsync(SystemRoles.Admin)).ShouldBe(AdminDefaults, ignoreOrder: true);
         (await GrantedCodesAsync(SystemRoles.User)).ShouldBeEmpty();
         var widget = await PermissionAsync(Widget.Code);

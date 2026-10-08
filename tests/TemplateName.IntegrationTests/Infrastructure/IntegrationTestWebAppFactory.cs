@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.SqlClient;
@@ -16,6 +17,7 @@ using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.IntegrationTests.Outbox;
 using TemplateName.IntegrationTests.Persistence;
 using TemplateName.Modules.Auth;
+using TemplateName.Modules.Auth.Application.Abstractions;
 using Testcontainers.MsSql;
 
 namespace TemplateName.IntegrationTests.Infrastructure;
@@ -29,6 +31,7 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     private const string PersistenceTestsDatabaseName = "TemplateName_PersistenceTests";
     private const string PersistenceTestsConnectionStringName = "PersistenceTests";
     private const string CreateDatabasesSql = $"CREATE DATABASE [{TestsDatabaseName}]; CREATE DATABASE [{PersistenceTestsDatabaseName}];";
+    private const int TestPasswordHashIterations = 1000;
 
     private static readonly DateTimeOffset StartTime = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
@@ -47,6 +50,9 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
 
     /// <summary>A permission source tests change to declare or drop permissions before seeding again; empty at the start of every test.</summary>
     public TestPermissionSource PermissionSource { get; } = new();
+
+    /// <summary>Every email the hosts built by this factory sent, kept in memory instead of going to SMTP; empty at the start of every test.</summary>
+    internal RecordingEmailSender EmailSender { get; } = new();
 
     /// <summary>The events the outbox test handlers have received.</summary>
     public EventRecorder EventRecorder { get; } = new();
@@ -118,6 +124,11 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.AddSingleton<TimeProvider>(Time);
             services.RemoveAll<ICurrentUser>();
             services.AddSingleton<ICurrentUser>(CurrentUser);
+            services.RemoveAll<IEmailSender>();
+            services.AddSingleton<IEmailSender>(EmailSender);
+
+            // Production keeps the Identity default iteration count and has no setting for it; tests hash far more often.
+            services.Configure<PasswordHasherOptions>(options => options.IterationCount = TestPasswordHashIterations);
             services.AddModuleDbContext<TestDbContext>(TestDbContext.Schema, PersistenceTestsConnectionStringName, includeInMigrations: false);
             services.AddApplicationHandlers(typeof(IntegrationTestWebAppFactory).Assembly);
             services.AddOutbox<TestDbContext>(typeof(IntegrationTestWebAppFactory).Assembly);

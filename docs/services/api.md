@@ -13,7 +13,7 @@ Order matters; `Program.cs` marks it with comments.
 | 3 | `AddWebCommon()` | ProblemDetails customization, the global exception handler, `ICurrentUser`, `ThrowOnBadRequest` ([web-common](../building-blocks/web-common.md)) |
 | 4 | `AddApiLocalization(configuration)` | The `Localization` options, request localization, FluentValidation translations |
 | 5 | `ConfigureHttpJsonOptions` | `JsonStringEnumConverter`: enums are strings in JSON (`"Pending"`) |
-| 6 | `AddOpenApi("v1")` | The OpenAPI document `v1` |
+| 6 | `AddOpenApi("v1", options => options.AddBearerSecurity())` | The OpenAPI document `v1`, with the `Bearer` security scheme required by every operation that names a permission or policy ([Web.Common](../building-blocks/web-common.md)) |
 | 7 | `AddHealthChecks()` | Health checks; each module context adds its own `ready` check |
 | 8 | `AddHttpSecurity(configuration)` | CORS, the global rate limiter, the `auth-strict` rate-limit policy, forwarded headers |
 | 9 | `AddPermissionAuthorization()` | The permission authorization handler behind `RequirePermission(code)` and the **fallback policy**: every endpoint requires an authenticated user unless it says `.AllowAnonymous()` ([web-common](../building-blocks/web-common.md)). It needs the explicit `UseAuthentication` and `UseAuthorization` of the pipeline (slots 1a and 10): without them `WebApplication` adds `UseAuthorization` ahead of `UseRouting` by itself, where no endpoint is known and the fallback policy answers 401 to every request. |
@@ -179,7 +179,7 @@ Both are anonymous, exempt from rate limiting, logged at `Verbose` when healthy,
 
 ## OpenAPI and Scalar
 
-Outside Production (Development, Testing, and any other non-Production environment) the host serves the OpenAPI document at `/openapi/v1.json` and the Scalar reference at `/scalar/v1`. Production maps neither. The document is pinned by `OpenApiSnapshotTests` (ADR 0011): an intended API change is accepted by replacing the committed `.verified.json` with the `.received.json` the failing test writes.
+Outside Production (Development, Testing, and any other non-Production environment) the host serves the OpenAPI document at `/openapi/v1.json` and the Scalar reference at `/scalar/v1`. Production maps neither. The document declares the `Bearer` scheme (`http`, `bearer`, `JWT`) and marks every operation whose endpoint carries authorization data (`RequirePermission`, `RequireAuthorization`) and no `.AllowAnonymous()` with it, so Scalar can send an access token. The document is pinned by `OpenApiSnapshotTests` (ADR 0011): an intended API change is accepted by replacing the committed `.verified.json` with the `.received.json` the failing test writes.
 
 ## Environments
 

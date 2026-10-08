@@ -10,6 +10,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- OpenApiSecurityTests call AddOpenApi; the package's build targets enable the interceptors its source generator emits. -->
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.Logging" />

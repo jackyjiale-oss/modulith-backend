@@ -15,6 +15,12 @@ public sealed class ListLeaveRequestsTests(IntegrationTestWebAppFactory factory)
 {
     private const string BaseRoute = "/api/v1/sample/leave-requests";
 
+    public override async ValueTask InitializeAsync()
+    {
+        await base.InitializeAsync();
+        await SignInAsync("sample.leave_request.view", "sample.leave_request.create");
+    }
+
     [Fact]
     public async Task First_page_returns_items_and_next_cursor()
     {
