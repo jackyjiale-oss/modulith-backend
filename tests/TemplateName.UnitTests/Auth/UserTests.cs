@@ -279,6 +279,20 @@ public sealed class UserTests
         user.TimeZone.ShouldBe("Asia/Kuala_Lumpur");
     }
 
+    [Theory]
+    [InlineData("", "en", "UTC")]
+    [InlineData("Alice", " ", "UTC")]
+    [InlineData("Alice", "en", "")]
+    public void UpdateProfile_refuses_a_blank_value_and_changes_nothing(string displayName, string locale, string timeZone)
+    {
+        var user = NewUser();
+        var before = (user.DisplayName, user.Locale, user.TimeZone);
+
+        Should.Throw<ArgumentException>(() => user.UpdateProfile(displayName, locale, timeZone));
+
+        (user.DisplayName, user.Locale, user.TimeZone).ShouldBe(before);
+    }
+
     [Fact]
     public void AssignRole_twice_is_idempotent()
     {

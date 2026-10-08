@@ -3,17 +3,21 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using TemplateName.Application.Common.Messaging;
+using TemplateName.Application.Common.Pagination;
 using TemplateName.Modules.Auth.Application.Authentication.Login;
 using TemplateName.Modules.Auth.Application.Authentication.Logout;
 using TemplateName.Modules.Auth.Application.Authentication.LogoutAll;
 using TemplateName.Modules.Auth.Application.Authentication.Refresh;
 using TemplateName.Modules.Auth.Application.Me.GetMe;
+using TemplateName.Modules.Auth.Application.Me.Update;
 using TemplateName.Modules.Auth.Application.Passwords.Change;
 using TemplateName.Modules.Auth.Application.Passwords.Forgot;
 using TemplateName.Modules.Auth.Application.Passwords.Reset;
 using TemplateName.Modules.Auth.Application.Registration.ConfirmEmail;
 using TemplateName.Modules.Auth.Application.Registration.Register;
 using TemplateName.Modules.Auth.Application.Registration.ResendConfirmation;
+using TemplateName.Modules.Auth.Application.Sessions.List;
+using TemplateName.Modules.Auth.Application.Sessions.Revoke;
 using TemplateName.SharedKernel;
 using TemplateName.Web.Common.Results;
 using TemplateName.Web.Common.Security;
@@ -93,6 +97,27 @@ internal static class AuthEndpoints
             .RequireAuthorization()
             .Produces<MeResponse>()
             .ProducesProblem(StatusCodes.Status401Unauthorized);
+
+        group.MapPut("me", UpdateProfileAsync)
+            .WithName("UpdateProfile")
+            .RequireAuthorization()
+            .Produces<MeResponse>()
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status401Unauthorized);
+
+        group.MapGet("sessions", ListSessionsAsync)
+            .WithName("ListSessions")
+            .RequireAuthorization()
+            .Produces<CursorPage<SessionResponse>>()
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status401Unauthorized);
+
+        group.MapDelete("sessions/{id:guid}", RevokeSessionAsync)
+            .WithName("RevokeSession")
+            .RequireAuthorization()
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapPost("logout", LogoutAsync)
             .WithName("Logout")
@@ -206,6 +231,51 @@ internal static class AuthEndpoints
         var result = await handler.HandleAsync(new GetMeQuery(), cancellationToken);
 
         return result.IsSuccess ? TypedResults.Ok(result.Value) : TypedResults.Unauthorized();
+    }
+
+    // 200 with the updated profile as GET me returns it; a token whose user is gone or suspended gets the body-less 401 of a request
+    // without a valid token, as GET me does. The new language reaches the access token with the next refresh.
+    private static async Task<IResult> UpdateProfileAsync(
+        UpdateProfileRequest request,
+        ICommandHandler<UpdateProfileCommand, MeResponse> handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new UpdateProfileCommand(request.DisplayName, request.Locale, request.TimeZone), cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            return TypedResults.Ok(result.Value);
+        }
+
+        return result.Error.Type == ErrorType.NotFound ? TypedResults.Unauthorized() : result.ToProblem();
+    }
+
+    // The caller's own active sessions, newest activity first by default (sort lastSeenAt or createdAt, ascending or with a leading -).
+    private static async Task<IResult> ListSessionsAsync(
+        [AsParameters] ListSessionsRequest request,
+        IQueryHandler<ListSessionsQuery, CursorPage<SessionResponse>> handler,
+        CancellationToken cancellationToken)
+    {
+        var page = new CursorPageRequest(
+            request.PageSize ?? CursorPageRequest.DefaultPageSize,
+            request.Cursor,
+            request.Sort,
+            request.IncludeTotalCount ?? false);
+        var result = await handler.HandleAsync(new ListSessionsQuery(page), cancellationToken);
+
+        return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
+    }
+
+    // 204, also when the caller's session had already ended; 404 auth.session_not_found for an unknown id and for another user's
+    // session alike (never 403), so ids cannot be probed.
+    private static async Task<IResult> RevokeSessionAsync(
+        Guid id,
+        ICommandHandler<RevokeSessionCommand> handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new RevokeSessionCommand(id), cancellationToken);
+
+        return result.IsSuccess ? TypedResults.NoContent() : result.ToProblem();
     }
 
     // 202 with no body for a new and for a known address alike: the answer must not tell them apart.

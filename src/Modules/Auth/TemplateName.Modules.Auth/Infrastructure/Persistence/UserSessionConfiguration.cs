@@ -28,6 +28,11 @@ internal sealed class UserSessionConfiguration : IEntityTypeConfiguration<UserSe
         builder.HasMany(session => session.RefreshTokens).WithOne().HasForeignKey(token => token.SessionId).OnDelete(DeleteBehavior.Cascade);
         builder.Navigation(session => session.RefreshTokens).HasField("_refreshTokens").UsePropertyAccessMode(PropertyAccessMode.Field);
 
+        // One index per sort of the session list, which always filters on the owner (review P7); the leading UserId also serves the
+        // foreign key and the revoke-all lookups.
+        builder.HasIndex(session => new { session.UserId, session.LastSeenAt, session.Id });
+        builder.HasIndex(session => new { session.UserId, session.CreatedAt, session.Id });
+
         builder.Ignore(session => session.DomainEvents);
     }
 }

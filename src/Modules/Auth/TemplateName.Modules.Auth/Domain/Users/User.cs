@@ -241,8 +241,16 @@ internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
         return Result.Success();
     }
 
+    /// <summary>
+    /// Replaces the display name, language and time zone. The values are validated by the caller (the use case's validator); this only
+    /// refuses blank ones, which would leave the profile unusable.
+    /// </summary>
     public void UpdateProfile(string displayName, string locale, string timeZone)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(locale);
+        ArgumentException.ThrowIfNullOrWhiteSpace(timeZone);
+
         DisplayName = displayName;
         Locale = locale;
         TimeZone = timeZone;
