@@ -18,10 +18,9 @@ namespace TemplateName.IntegrationTests.Auth;
 /// The user administration routes <c>/api/v1/admin/auth/users/...</c> through the running host. The list is read through Dapper, which
 /// bypasses the EF Core filters, so these tests also prove its SQL leaves soft-deleted users out.
 /// </summary>
-public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)
+public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : AdminTestBase(factory)
 {
     private const string UsersRoute = "/api/v1/admin/auth/users";
-    private const string LoginRoute = "/api/v1/auth/login";
     private const string RefreshRoute = "/api/v1/auth/token/refresh";
     private const string ResetRoute = "/api/v1/auth/password/reset";
     private const string Password = AuthTestHarness.Password;
@@ -526,14 +525,6 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Integ
 
     private static List<Guid> Ids(JsonElement page) => [.. page.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("id").GetGuid())];
 
-    private static async Task AssertProblemAsync(HttpResponseMessage response, HttpStatusCode status, string code)
-    {
-        response.StatusCode.ShouldBe(status);
-        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
-        body.GetProperty("code").GetString().ShouldBe(code);
-    }
-
     private async Task<User> CreateUserLaterAsync(string email, bool suspended = false)
     {
         Factory.Time.Advance(TimeSpan.FromSeconds(1));
@@ -547,38 +538,6 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Integ
         return await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
     }
 
-    private async Task<HttpResponseMessage> SendAsync(string method, string path, string? body)
-    {
-        using var request = new HttpRequestMessage(new HttpMethod(method), path);
-        if (body is not null)
-        {
-            request.Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
-        }
-
-        return await Client.SendAsync(request, Ct);
-    }
-
-    private async Task<HttpResponseMessage> PostAnonymousAsync(string route, object body)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Post, route) { Content = JsonContent.Create(body) };
-        using var anonymous = Factory.CreateClient();
-        return await anonymous.SendAsync(request, Ct);
-    }
-
-    private async Task<HttpResponseMessage> GetAsAsync(string accessToken, string route)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Get, route).WithBearer(accessToken);
-        return await Client.SendAsync(request, Ct);
-    }
-
-    private async Task<Tokens> LoginAsync(string email, string password)
-    {
-        using var response = await PostAnonymousAsync(LoginRoute, new { email, password });
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
-        return new Tokens(body.GetProperty("accessToken").GetString()!, body.GetProperty("refreshToken").GetString()!, body.GetProperty("sessionId").GetGuid());
-    }
-
     private async Task DispatchOutboxAsync()
     {
         var dispatcher = Factory.Services.GetRequiredService<OutboxDispatcher<AuthDbContext>>();
@@ -588,15 +547,6 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Integ
             claimed = await dispatcher.ProcessBatchAsync(Ct);
         }
         while (claimed > 0);
-    }
-
-    private Task<Guid> RoleIdAsync(string name)
-        => QueryAsync(context => context.Set<Role>().Where(role => role.NormalizedName == Role.NormalizeName(name)).Select(role => role.Id).SingleAsync(Ct));
-
-    private async Task GrantRoleAsync(Guid userId, string roleName)
-    {
-        var roleId = await RoleIdAsync(roleName);
-        await ChangeUserAsync(userId, (_, user) => user.AssignRole(roleId, assignedBy: null, Factory.Time.GetUtcNow()));
     }
 
     private async Task<Guid> CreateDeletedRoleAsync()
@@ -611,15 +561,6 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Integ
         return role.Id;
     }
 
-    private async Task ChangeUserAsync(Guid userId, Action<AuthDbContext, User> change)
-    {
-        await using var scope = Factory.Services.CreateAsyncScope();
-        var context = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-        var user = await context.Set<User>().Include(candidate => candidate.Roles).SingleAsync(candidate => candidate.Id == userId, Ct);
-        change(context, user);
-        await context.SaveChangesAsync(Ct);
-    }
-
     private Task<User> FindUserAsync(string email)
         => QueryAsync(context => context.Set<User>().SingleAsync(user => user.NormalizedEmail == User.NormalizeEmail(email), Ct));
 
@@ -628,12 +569,4 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Integ
             .Where(entry => entry.EventType.StartsWith("auth.admin_"))
             .OrderBy(entry => entry.Id)
             .ToListAsync(Ct));
-
-    private async Task<T> QueryAsync<T>(Func<AuthDbContext, Task<T>> query)
-    {
-        await using var scope = Factory.Services.CreateAsyncScope();
-        return await query(scope.ServiceProvider.GetRequiredService<AuthDbContext>());
-    }
-
-    private sealed record Tokens(string AccessToken, string RefreshToken, Guid SessionId);
 }

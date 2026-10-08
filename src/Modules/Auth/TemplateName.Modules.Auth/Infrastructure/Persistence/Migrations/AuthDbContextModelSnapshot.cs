@@ -156,14 +156,14 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EventType", "OccurredAt")
-                        .IsDescending(false, true);
-
                     b.HasIndex("IpAddress", "OccurredAt")
                         .IsDescending(false, true);
 
-                    b.HasIndex("UserId", "OccurredAt")
-                        .IsDescending(false, true);
+                    b.HasIndex("OccurredAt", "Id");
+
+                    b.HasIndex("EventType", "OccurredAt", "Id");
+
+                    b.HasIndex("UserId", "OccurredAt", "Id");
 
                     b.ToTable("AuthAuditLogs", "auth");
                 });
@@ -261,6 +261,10 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("NormalizedName")
                         .IsUnique()
+                        .HasDatabaseName("IX_Roles_NormalizedName")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("CreatedAt", "Id")
                         .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("Roles", "auth");

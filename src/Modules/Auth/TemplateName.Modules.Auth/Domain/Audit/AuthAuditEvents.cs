@@ -1,3 +1,5 @@
+using System.Reflection;
+
 namespace TemplateName.Modules.Auth.Domain.Audit;
 
 /// <summary>The event types written to the auth audit log. The values are stored, so they are never renamed.</summary>
@@ -33,4 +35,13 @@ internal static class AuthAuditEvents
     public const string RoleUpdated = "auth.role_updated";
     public const string RoleDeleted = "auth.role_deleted";
     public const string RolePermissionsChanged = "auth.role_permissions_changed";
+
+    /// <summary>Every event type above, for the audit log's <c>eventType</c> filter.</summary>
+    public static IReadOnlyCollection<string> All { get; } =
+    [
+        .. typeof(AuthAuditEvents)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(field => field.IsLiteral)
+            .Select(field => (string)field.GetRawConstantValue()!),
+    ];
 }

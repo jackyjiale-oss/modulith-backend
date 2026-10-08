@@ -14,7 +14,6 @@ using TemplateName.Modules.Auth.Application.Admin.Users.List;
 using TemplateName.Modules.Auth.Application.Admin.Users.Lock;
 using TemplateName.Modules.Auth.Application.Admin.Users.RevokeSessions;
 using TemplateName.Modules.Auth.Application.Admin.Users.Unlock;
-using TemplateName.SharedKernel;
 using TemplateName.Web.Common.Results;
 using TemplateName.Web.Common.Security;
 
@@ -150,10 +149,10 @@ internal static class AdminUserEndpoints
 
     // 204, also for an account that is already locked; 400 auth.cannot_lock_self; 409 auth.last_super_admin.
     private static Task<IResult> LockAsync(Guid id, ICurrentUser currentUser, ICommandHandler<LockUserCommand> handler, CancellationToken cancellationToken)
-        => SendAsync(currentUser, actorId => handler.HandleAsync(new LockUserCommand(actorId, id), cancellationToken), TypedResults.NoContent());
+        => AdminActor.RunAsync(currentUser, actorId => handler.HandleAsync(new LockUserCommand(actorId, id), cancellationToken), TypedResults.NoContent());
 
     private static Task<IResult> UnlockAsync(Guid id, ICurrentUser currentUser, ICommandHandler<UnlockUserCommand> handler, CancellationToken cancellationToken)
-        => SendAsync(currentUser, actorId => handler.HandleAsync(new UnlockUserCommand(actorId, id), cancellationToken), TypedResults.NoContent());
+        => AdminActor.RunAsync(currentUser, actorId => handler.HandleAsync(new UnlockUserCommand(actorId, id), cancellationToken), TypedResults.NoContent());
 
     // 202 with no body: the link goes out through the outbox. 403 auth.account_inactive for a suspended account.
     private static Task<IResult> ForcePasswordResetAsync(
@@ -161,7 +160,7 @@ internal static class AdminUserEndpoints
         ICurrentUser currentUser,
         ICommandHandler<ForcePasswordResetCommand> handler,
         CancellationToken cancellationToken)
-        => SendAsync(
+        => AdminActor.RunAsync(
             currentUser,
             actorId => handler.HandleAsync(new ForcePasswordResetCommand(actorId, id), cancellationToken),
             TypedResults.Accepted((string?)null));
@@ -171,7 +170,7 @@ internal static class AdminUserEndpoints
         ICurrentUser currentUser,
         ICommandHandler<RevokeUserSessionsCommand> handler,
         CancellationToken cancellationToken)
-        => SendAsync(currentUser, actorId => handler.HandleAsync(new RevokeUserSessionsCommand(actorId, id), cancellationToken), TypedResults.NoContent());
+        => AdminActor.RunAsync(currentUser, actorId => handler.HandleAsync(new RevokeUserSessionsCommand(actorId, id), cancellationToken), TypedResults.NoContent());
 
     // 204; 404 auth.user_not_found or auth.role_not_found; 409 auth.last_super_admin.
     private static Task<IResult> AssignRolesAsync(
@@ -180,24 +179,8 @@ internal static class AdminUserEndpoints
         ICurrentUser currentUser,
         ICommandHandler<AssignRolesCommand> handler,
         CancellationToken cancellationToken)
-        => SendAsync(
+        => AdminActor.RunAsync(
             currentUser,
             actorId => handler.HandleAsync(new AssignRolesCommand(actorId, id, request.RoleIds), cancellationToken),
             TypedResults.NoContent());
-
-    // Every action names the acting administrator. The permission policy only lets a signed-in user with an id through; without one,
-    // fail closed with the body-less 401 (UseStatusCodePages turns it into the http.401 problem) rather than act as nobody, every
-    // SuperAdmin rule included. On success, answer with the route's status; otherwise the error's problem (403
-    // auth.cannot_manage_super_admin, 404 auth.user_not_found, ...).
-    private static async Task<IResult> SendAsync(ICurrentUser currentUser, Func<Guid, Task<Result>> send, IResult success)
-    {
-        if (currentUser.UserId is not { } actorId)
-        {
-            return TypedResults.Unauthorized();
-        }
-
-        var result = await send(actorId);
-
-        return result.IsSuccess ? success : result.ToProblem();
-    }
 }

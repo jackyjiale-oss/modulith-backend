@@ -11,7 +11,11 @@ internal static class RoleErrors
 
     public static readonly Error PermissionNotFound = Error.Validation(
         "auth.permission_not_found",
-        "One or more of the permissions do not exist.");
+        "One or more of the permissions do not exist or can no longer be granted.");
+
+    public static readonly Error PermissionGrantNotAllowed = Error.Forbidden(
+        "auth.permission_grant_not_allowed",
+        "You cannot grant a permission you do not hold yourself.");
 
     public static Error NotFound(Guid id) =>
         Error.NotFound("auth.role_not_found", $"Role '{id}' was not found.")

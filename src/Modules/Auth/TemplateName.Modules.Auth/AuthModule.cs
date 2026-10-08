@@ -16,6 +16,7 @@ using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Auth.Application;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Application.Admin.Roles;
 using TemplateName.Modules.Auth.Application.Admin.Users;
 using TemplateName.Modules.Auth.Application.Authentication;
 using TemplateName.Modules.Auth.Application.Passwords;
@@ -39,7 +40,7 @@ public static class AuthModule
 
     /// <summary>
     /// Registers the module's context (schema <c>auth</c>), outbox, handlers and validators, repositories, audit writer, the user
-    /// administration's SuperAdmin rules and reset-link issuer, error messages
+    /// administration's SuperAdmin rules and reset-link issuer, the role administration's cache invalidator, error messages
     /// (<c>AuthErrorMessages</c>), the SMTP email sender with <c>Auth:Links</c> and <c>Auth:Verification</c>, the sign-in settings
     /// <c>Auth:RefreshToken</c> and <c>Auth:Lockout</c>, the counters of the <c>TemplateName.Auth</c> meter (added to OpenTelemetry), the
     /// access tokens with the JWT bearer handler as the default authentication scheme, the permission checker with its cache, the
@@ -63,6 +64,7 @@ public static class AuthModule
         services.AddScoped<IAuthAuditWriter, AuthAuditWriter>();
         services.AddScoped<IUnitOfWork>(serviceProvider => serviceProvider.GetRequiredService<AuthDbContext>());
         services.AddScoped<SuperAdminRules>();
+        services.AddScoped<RolePermissionCacheInvalidator>();
         services.AddScoped<PasswordResetLinkIssuer>();
 
         services.AddHttpContextAccessor();
@@ -140,12 +142,16 @@ public static class AuthModule
     /// <c>POST auth/password/forgot</c>, <c>POST auth/password/reset</c> and <c>POST auth/password/change</c>. The user administration
     /// routes live in its <c>admin/auth/users</c> group, each behind its permission: <c>GET</c> (list) and <c>POST</c> (create) on the
     /// group, <c>GET admin/auth/users/{id}</c>, <c>POST .../{id}/lock</c>, <c>/unlock</c>, <c>/force-password-reset</c>,
-    /// <c>/revoke-sessions</c> and <c>PUT .../{id}/roles</c>.
+    /// <c>/revoke-sessions</c> and <c>PUT .../{id}/roles</c>. The role administration lives in <c>admin/auth/roles</c> (<c>GET</c> list and
+    /// <c>POST</c> on the group, <c>GET</c>, <c>PUT</c> and <c>DELETE .../{id}</c>, <c>PUT .../{id}/permissions</c>), the permission list in
+    /// <c>GET admin/auth/permissions</c> and the audit log in <c>GET admin/auth/audit-logs</c>, each behind its permission.
     /// </summary>
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapSelfServiceEndpoints();
-        return app.MapAdminUserEndpoints();
+        app.MapAdminUserEndpoints();
+        app.MapAdminRoleEndpoints();
+        return app.MapAdminAuditLogEndpoints();
     }
 
     /// <summary>Maps the module's endpoints that live at fixed root paths, outside <c>/api/v1</c>: <c>GET /.well-known/jwks.json</c>.</summary>

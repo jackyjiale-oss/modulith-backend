@@ -25,9 +25,11 @@ internal sealed class AuthAuditLogConfiguration : IEntityTypeConfiguration<AuthA
         builder.Property(entry => entry.TraceId).HasMaxLength(AuthAuditLog.MaxTraceIdLength);
 
         // No foreign key to Users: the log outlives what it describes and also records attempts for unknown users.
-        // One index per audit filter, newest first.
-        builder.HasIndex(entry => new { entry.UserId, entry.OccurredAt }).IsDescending(false, true);
-        builder.HasIndex(entry => new { entry.EventType, entry.OccurredAt }).IsDescending(false, true);
+        // One index per filter of the audit list, ending in (OccurredAt, Id) like its sort (review P7): ascending, because SQL Server reads
+        // an index backwards just as well, which serves "-occurredAt" and "occurredAt" alike. The unfiltered list uses (OccurredAt, Id).
+        builder.HasIndex(entry => new { entry.OccurredAt, entry.Id });
+        builder.HasIndex(entry => new { entry.UserId, entry.OccurredAt, entry.Id });
+        builder.HasIndex(entry => new { entry.EventType, entry.OccurredAt, entry.Id });
         builder.HasIndex(entry => new { entry.IpAddress, entry.OccurredAt }).IsDescending(false, true);
     }
 }

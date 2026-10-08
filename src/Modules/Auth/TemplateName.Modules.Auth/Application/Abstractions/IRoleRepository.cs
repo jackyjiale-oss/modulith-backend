@@ -20,4 +20,7 @@ internal interface IRoleRepository
     Task<IReadOnlyList<Guid>> GetUserIdsInRoleAsync(Guid roleId, CancellationToken cancellationToken);
 
     void Add(Role role);
+
+    /// <summary>Marks the role as deleted; the save turns that into the soft delete (see <see cref="Role.MarkDeleted"/>).</summary>
+    void Remove(Role role);
 }

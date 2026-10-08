@@ -18,4 +18,11 @@ internal interface IUnitOfWork
     /// a race with a simultaneous create, such as an administrator creating an account (the unique email index decides).
     /// </summary>
     Task<bool> SaveChangesUnlessDuplicateAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Like <see cref="SaveChangesUnlessDuplicateAsync(CancellationToken)"/>, but answers false only when the refused unique index is
+    /// <paramref name="uniqueIndexName"/> (see <see cref="UniqueIndexNames"/>); a violation of any other unique index is still thrown,
+    /// so it cannot be mistaken for the caller's meaning (for example "this role name is taken"). Nothing is saved on false either.
+    /// </summary>
+    Task<bool> SaveChangesUnlessDuplicateAsync(string uniqueIndexName, CancellationToken cancellationToken);
 }

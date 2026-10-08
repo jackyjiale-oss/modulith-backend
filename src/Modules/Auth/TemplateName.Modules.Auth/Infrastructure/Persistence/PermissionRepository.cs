@@ -9,11 +9,11 @@ internal sealed class PermissionRepository(AuthDbContext context) : IPermissionR
     public async Task<IReadOnlyList<Permission>> ListAsync(CancellationToken cancellationToken)
         => await context.Set<Permission>().ToListAsync(cancellationToken);
 
-    public Task<int> CountExistingAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<Permission>> GetByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken)
     {
         var distinctIds = ids.Distinct().ToList();
 
-        return context.Set<Permission>().CountAsync(permission => distinctIds.Contains(permission.Id), cancellationToken);
+        return await context.Set<Permission>().Where(permission => distinctIds.Contains(permission.Id)).ToListAsync(cancellationToken);
     }
 
     public void Add(Permission permission) => context.Set<Permission>().Add(permission);

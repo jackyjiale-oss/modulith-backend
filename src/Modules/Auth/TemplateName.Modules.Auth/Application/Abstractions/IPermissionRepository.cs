@@ -8,8 +8,8 @@ internal interface IPermissionRepository
     /// <summary>Every permission, tracked, so the startup sync can change them and save.</summary>
     Task<IReadOnlyList<Permission>> ListAsync(CancellationToken cancellationToken);
 
-    /// <summary>How many of <paramref name="ids"/> name an existing permission (duplicates in the input count once).</summary>
-    Task<int> CountExistingAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken);
+    /// <summary>The permissions among <paramref name="ids"/> that exist, deprecated ones included; unknown ids are left out.</summary>
+    Task<IReadOnlyList<Permission>> GetByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken);
 
     void Add(Permission permission);
 }

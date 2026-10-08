@@ -8,6 +8,12 @@ namespace TemplateName.Modules.Auth.Domain.Roles;
 /// </summary>
 internal sealed class Role : AggregateRoot<Guid>, IAuditable, ISoftDeletable
 {
+    /// <summary>The column limit of <see cref="Name"/>.</summary>
+    public const int MaxNameLength = 100;
+
+    /// <summary>The column limit of <see cref="Description"/>.</summary>
+    public const int MaxDescriptionLength = 500;
+
     private readonly List<RolePermission> _permissions = [];
 
     // EF Core materializes the aggregate through this constructor; callers use Create or CreateSystem.
@@ -109,8 +115,22 @@ internal sealed class Role : AggregateRoot<Guid>, IAuditable, ISoftDeletable
         }
     }
 
-    /// <summary>Checks that the role may be deleted. The save interceptor turns the deletion into the soft-delete flags.</summary>
-    public Result MarkDeleted() => IsSystem ? Result.Failure(RoleErrors.SystemRoleProtected) : Result.Success();
+    /// <summary>
+    /// Checks that the role may be deleted and, when it may, drops its grants: a deleted role grants nothing, and a new role that takes
+    /// its freed name does not inherit them. The caller removes the role from its repository; the save interceptor turns that deletion
+    /// into the soft-delete flags (the grants themselves are deleted for good).
+    /// </summary>
+    public Result MarkDeleted()
+    {
+        if (IsSystem)
+        {
+            return Result.Failure(RoleErrors.SystemRoleProtected);
+        }
+
+        _permissions.Clear();
+
+        return Result.Success();
+    }
 
     private static Role Build(string name, string description, bool isSystem, DateTimeOffset now) => new()
     {

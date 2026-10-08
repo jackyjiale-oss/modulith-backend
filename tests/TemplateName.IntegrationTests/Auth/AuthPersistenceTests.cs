@@ -449,6 +449,35 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
     }
 
     [Fact]
+    public async Task Save_unless_duplicate_on_an_index_answers_false_only_for_that_index()
+    {
+        // Two administrators create a role with the same name at once: the unique name index lets one insert win.
+        await SaveAsync(Role.Create("Support", "First", Now).Value, NewUser("alice@example.com"));
+        var scope = NewScope();
+        scope.GetRequiredService<IRoleRepository>().Add(Role.Create(" SUPPORT", "Second", Now).Value);
+        scope.GetRequiredService<IAuthAuditWriter>().Record(AuthAuditLog.Create(AuthAuditEvents.RoleCreated, succeeded: true, Now));
+
+        (await scope.GetRequiredService<IUnitOfWork>().SaveChangesUnlessDuplicateAsync(UniqueIndexNames.RoleName, Ct)).ShouldBeFalse();
+
+        var context = NewScope().GetRequiredService<AuthDbContext>();
+        (await context.Set<Role>().CountAsync(role => role.NormalizedName == "SUPPORT", Ct)).ShouldBe(1);
+        (await context.Set<AuthAuditLog>().CountAsync(Ct)).ShouldBe(0);
+        scope.GetRequiredService<AuthDbContext>().ChangeTracker.Entries().ShouldBeEmpty();
+
+        // A different unique index (the email) is not this save's business: the exception is not swallowed as "name taken".
+        var other = NewScope();
+        other.GetRequiredService<IUserRepository>().Add(NewUser("ALICE@example.com", passwordHash: null));
+        var failure = await Should.ThrowAsync<DbUpdateException>(
+            () => other.GetRequiredService<IUnitOfWork>().SaveChangesUnlessDuplicateAsync(UniqueIndexNames.RoleName, Ct));
+        failure.InnerException.ShouldBeOfType<SqlException>().Number.ShouldBe(SqlUniqueIndexViolation);
+
+        // Without a name the same save answers false for any unique index.
+        var any = NewScope();
+        any.GetRequiredService<IUserRepository>().Add(NewUser("ALICE@example.com", passwordHash: null));
+        (await any.GetRequiredService<IUnitOfWork>().SaveChangesUnlessDuplicateAsync(Ct)).ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task Save_unless_duplicate_saves_like_save_changes_otherwise()
     {
         var scope = NewScope();

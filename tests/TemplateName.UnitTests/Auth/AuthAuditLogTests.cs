@@ -138,4 +138,17 @@ public sealed class AuthAuditLogTests
         values.ShouldAllBe(v => !string.IsNullOrWhiteSpace(v));
         values.Distinct().Count().ShouldBe(values.Count);
     }
+
+    [Fact]
+    public void All_lists_every_audit_event_name_once()
+    {
+        var constants = typeof(AuthAuditEvents)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f.IsLiteral)
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .ToList();
+
+        AuthAuditEvents.All.ShouldBe(constants, ignoreOrder: true);
+        AuthAuditEvents.All.ShouldContain(AuthAuditEvents.RolePermissionsChanged);
+    }
 }

@@ -44,7 +44,17 @@ internal sealed class AuthDbContext : DbContext, IUnitOfWork, IDataProtectionKey
         }
     }
 
-    public async Task<bool> SaveChangesUnlessDuplicateAsync(CancellationToken cancellationToken)
+    public Task<bool> SaveChangesUnlessDuplicateAsync(CancellationToken cancellationToken)
+        => SaveUnlessDuplicateAsync(uniqueIndexName: null, cancellationToken);
+
+    public Task<bool> SaveChangesUnlessDuplicateAsync(string uniqueIndexName, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(uniqueIndexName);
+
+        return SaveUnlessDuplicateAsync(uniqueIndexName, cancellationToken);
+    }
+
+    private async Task<bool> SaveUnlessDuplicateAsync(string? uniqueIndexName, CancellationToken cancellationToken)
     {
         try
         {
@@ -52,9 +62,11 @@ internal sealed class AuthDbContext : DbContext, IUnitOfWork, IDataProtectionKey
             return true;
         }
         catch (DbUpdateException exception)
-            when (exception.InnerException is SqlException { Number: SqlUniqueIndexViolation or SqlUniqueConstraintViolation })
+            when (exception.InnerException is SqlException { Number: SqlUniqueIndexViolation or SqlUniqueConstraintViolation } sqlException
+                && (uniqueIndexName is null || sqlException.Message.Contains($"'{uniqueIndexName}'", StringComparison.Ordinal)))
         {
-            // As for a concurrency conflict: the transaction was rolled back, so drop what was pending.
+            // As for a concurrency conflict: the transaction was rolled back, so drop what was pending. SQL Server puts the index name in
+            // quotes in its message, whatever the language of the server.
             ChangeTracker.Clear();
             return false;
         }

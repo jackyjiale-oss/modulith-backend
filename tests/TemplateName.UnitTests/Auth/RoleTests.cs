@@ -53,6 +53,29 @@ public sealed class RoleTests
     }
 
     [Fact]
+    public void Deleting_a_role_drops_its_grants_but_a_refused_deletion_keeps_them()
+    {
+        var custom = Role.Create("Support", "Tickets", Now).Value;
+        var admin = Role.CreateSystem(SystemRoles.Admin, "Administrators", Now);
+        var permissionId = Guid.NewGuid();
+        custom.SetPermissions([permissionId]);
+        admin.SetPermissions([permissionId]);
+
+        admin.MarkDeleted().Error.ShouldBe(RoleErrors.SystemRoleProtected);
+        admin.Permissions.Count.ShouldBe(1);
+
+        custom.MarkDeleted().IsSuccess.ShouldBeTrue();
+        custom.Permissions.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Name_and_description_limits_are_the_column_lengths()
+    {
+        Role.MaxNameLength.ShouldBe(100);
+        Role.MaxDescriptionLength.ShouldBe(500);
+    }
+
+    [Fact]
     public void SuperAdmin_permissions_cannot_be_set_by_hand()
     {
         var superAdmin = Role.CreateSystem(SystemRoles.SuperAdmin, "Everything", Now);

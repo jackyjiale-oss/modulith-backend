@@ -29,5 +29,7 @@ internal sealed class RoleRepository(AuthDbContext context) : IRoleRepository
 
     public void Add(Role role) => context.Set<Role>().Add(role);
 
+    public void Remove(Role role) => context.Set<Role>().Remove(role);
+
     private IQueryable<Role> Roles() => context.Set<Role>().Include(role => role.Permissions);
 }

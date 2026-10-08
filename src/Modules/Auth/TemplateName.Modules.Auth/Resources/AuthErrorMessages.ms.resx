@@ -70,7 +70,10 @@
     <value>Ini ialah peranan sistem dan tidak boleh diubah dengan cara ini.</value>
   </data>
   <data name="auth.permission_not_found" xml:space="preserve">
-    <value>Satu atau lebih kebenaran tidak wujud.</value>
+    <value>Satu atau lebih kebenaran tidak wujud atau tidak boleh diberikan lagi.</value>
+  </data>
+  <data name="auth.permission_grant_not_allowed" xml:space="preserve">
+    <value>Anda tidak boleh memberikan kebenaran yang anda sendiri tidak miliki.</value>
   </data>
   <data name="auth.invalid_refresh_token" xml:space="preserve">
     <value>Token penyegaran tidak sah.</value>
