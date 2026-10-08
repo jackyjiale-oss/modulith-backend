@@ -1,4 +1,3 @@
-using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Domain.Roles;
@@ -26,7 +25,7 @@ namespace TemplateName.Modules.Auth.Application.Admin.Roles.SetPermissions;
 internal sealed class SetRolePermissionsCommandHandler(
     IRoleRepository roles,
     IPermissionRepository permissions,
-    IPermissionChecker permissionChecker,
+    PermissionGrantRules grantRules,
     RolePermissionCacheInvalidator cacheInvalidator,
     IAuthAuditWriter auditWriter,
     IUnitOfWork unitOfWork,
@@ -51,12 +50,10 @@ internal sealed class SetRolePermissionsCommandHandler(
             return Result.Failure(RoleErrors.PermissionNotFound);
         }
 
-        foreach (var id in added)
+        var held = await grantRules.EnsureActorHoldsAsync(command.ActorId, added.Select(id => known[id].Code), cancellationToken);
+        if (held.IsFailure)
         {
-            if (!await permissionChecker.HasPermissionAsync(command.ActorId, known[id].Code, cancellationToken))
-            {
-                return Result.Failure(RoleErrors.PermissionGrantNotAllowed);
-            }
+            return held;
         }
 
         // The domain refuses SuperAdmin, also when the set would not change.

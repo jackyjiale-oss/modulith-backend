@@ -16,7 +16,7 @@ public sealed class SetRolePermissionsCommandHandlerTests : AdminRoleHandlerTest
 
     public SetRolePermissionsCommandHandlerTests()
     {
-        _sut = new SetRolePermissionsCommandHandler(Roles, Permissions, PermissionChecker, CacheInvalidator, AuditWriter, UnitOfWork, Time);
+        _sut = new SetRolePermissionsCommandHandler(Roles, Permissions, GrantRules, CacheInvalidator, AuditWriter, UnitOfWork, Time);
         _view = GivenPermission(AuthPermissions.UserView);
         _create = GivenPermission(AuthPermissions.UserCreate);
         _lock = GivenPermission(AuthPermissions.UserLock);

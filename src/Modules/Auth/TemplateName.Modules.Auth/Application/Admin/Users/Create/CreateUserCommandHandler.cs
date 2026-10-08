@@ -19,7 +19,8 @@ namespace TemplateName.Modules.Auth.Application.Admin.Users.Create;
 /// The address is normalized as at registration, so <c>Alice@Example.com </c> and <c>alice@example.com</c> are one account; an address
 /// in use answers <see cref="UserErrors.EmailTaken"/> (an administrator may learn that), also when a simultaneous create wins the race
 /// on the unique index. Without role ids the account gets the <c>User</c> role. Role ids need <c>auth.user.assign_roles</c>, because
-/// <c>Admin</c> may create users but not assign roles; each must exist and not be deleted, and only a SuperAdmin may grant SuperAdmin.
+/// <c>Admin</c> may create users but not assign roles; each must exist and not be deleted, only a SuperAdmin may grant SuperAdmin, and
+/// the actor must hold every permission the roles grant (<see cref="PermissionGrantRules"/>).
 /// </para>
 /// </summary>
 internal sealed class CreateUserCommandHandler(
@@ -27,6 +28,7 @@ internal sealed class CreateUserCommandHandler(
     IRoleRepository roles,
     IPermissionChecker permissionChecker,
     SuperAdminRules superAdminRules,
+    PermissionGrantRules grantRules,
     PasswordResetLinkIssuer linkIssuer,
     IAuthAuditWriter auditWriter,
     IUnitOfWork unitOfWork,
@@ -82,14 +84,18 @@ internal sealed class CreateUserCommandHandler(
         }
 
         var requested = command.RoleIds.Distinct().ToList();
-        var found = (await roles.GetByIdsAsync(requested, cancellationToken)).Select(role => role.Id).ToHashSet();
-        if (requested.Where(id => !found.Contains(id)).Select(id => (Guid?)id).FirstOrDefault() is { } unknownId)
+        var found = (await roles.GetByIdsAsync(requested, cancellationToken)).ToDictionary(role => role.Id);
+        if (requested.Where(id => !found.ContainsKey(id)).Select(id => (Guid?)id).FirstOrDefault() is { } unknownId)
         {
             return RoleErrors.NotFound(unknownId);
         }
 
         var scope = await superAdminRules.GetScopeAsync(command.ActorId, cancellationToken);
         var allowed = scope.EnsureCanGrant(requested);
+        if (allowed.IsSuccess)
+        {
+            allowed = await grantRules.EnsureActorHoldsRolesAsync(command.ActorId, requested.Select(id => found[id]), cancellationToken);
+        }
 
         return allowed.IsSuccess ? Result.Success<IReadOnlyList<Guid>>(requested) : Result.Failure<IReadOnlyList<Guid>>(allowed.Error);
     }

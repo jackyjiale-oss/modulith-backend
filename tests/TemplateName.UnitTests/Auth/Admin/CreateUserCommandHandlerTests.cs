@@ -15,7 +15,6 @@ public sealed class CreateUserCommandHandlerTests : AdminHandlerTestBase
 {
     private const string Email = "  New.Person@Example.com ";
 
-    private readonly IPermissionChecker _permissionChecker = Substitute.For<IPermissionChecker>();
     private readonly List<User> _added = [];
     private readonly CreateUserCommandHandler _sut;
 
@@ -23,7 +22,7 @@ public sealed class CreateUserCommandHandlerTests : AdminHandlerTestBase
     {
         Users.Add(Arg.Do<User>(_added.Add));
         UnitOfWork.SaveChangesUnlessDuplicateAsync(Arg.Any<CancellationToken>()).Returns(true);
-        _sut = new CreateUserCommandHandler(Users, Roles, _permissionChecker, Rules, LinkIssuer, AuditWriter, UnitOfWork, Time);
+        _sut = new CreateUserCommandHandler(Users, Roles, PermissionChecker, Rules, GrantRules, LinkIssuer, AuditWriter, UnitOfWork, Time);
     }
 
     [Fact]
@@ -104,6 +103,40 @@ public sealed class CreateUserCommandHandlerTests : AdminHandlerTestBase
     }
 
     [Fact]
+    public async Task Role_ids_with_a_permission_the_actor_lacks_return_permission_grant_not_allowed()
+    {
+        // assign_roles alone must not let its holder create accounts that hold more than they do.
+        var manage = GivenPermission("auth.role.manage");
+        var view = GivenPermission("auth.user.view");
+        var powerful = GivenRole("Powerful", manage, view);
+        GivenActorMayAssignRoles();
+        ActorHolds.Add("auth.user.view");
+
+        var result = await _sut.HandleAsync(Command([powerful.Id]), Ct);
+
+        result.Error.Code.ShouldBe("auth.permission_grant_not_allowed");
+        result.Error.Type.ShouldBe(ErrorType.Forbidden);
+        _added.ShouldBeEmpty();
+        IssuedCodes.ShouldBeEmpty();
+        AuditEntries.ShouldBeEmpty();
+        await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(Ct);
+    }
+
+    [Fact]
+    public async Task Role_ids_whose_permissions_the_actor_holds_are_assigned()
+    {
+        var view = GivenPermission("auth.user.view");
+        var support = GivenRole("Support", view);
+        GivenActorMayAssignRoles();
+        ActorHolds.Add("auth.user.view");
+
+        var result = await _sut.HandleAsync(Command([support.Id]), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        _added.ShouldHaveSingleItem().Roles.ShouldHaveSingleItem().RoleId.ShouldBe(support.Id);
+    }
+
+    [Fact]
     public async Task Role_ids_require_the_assign_roles_permission()
     {
         // Admin may create users but not assign roles; otherwise it could create accounts holding roles it cannot grant.
@@ -155,6 +188,5 @@ public sealed class CreateUserCommandHandlerTests : AdminHandlerTestBase
     private CreateUserCommand Command(IReadOnlyCollection<Guid>? roleIds = null)
         => new(ActorId, Email, " New Person ", "ms", roleIds);
 
-    private void GivenActorMayAssignRoles()
-        => _permissionChecker.HasPermissionAsync(ActorId, AuthPermissions.UserAssignRoles, Arg.Any<CancellationToken>()).Returns(true);
+    private void GivenActorMayAssignRoles() => ActorHolds.Add(AuthPermissions.UserAssignRoles);
 }

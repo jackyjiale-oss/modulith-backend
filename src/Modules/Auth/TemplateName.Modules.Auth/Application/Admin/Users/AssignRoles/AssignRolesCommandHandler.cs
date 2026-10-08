@@ -10,7 +10,9 @@ namespace TemplateName.Modules.Auth.Application.Admin.Users.AssignRoles;
 /// <summary>
 /// Replaces a user's roles with the requested set (duplicates ignored; an empty set removes every role). Every id must be a role that
 /// exists and is not deleted (<see cref="RoleErrors.NotFound"/> names the first one that is not). Only a SuperAdmin can change the roles
-/// of a SuperAdmin or grant SuperAdmin, to anyone including themselves, and the last active SuperAdmin cannot lose the role
+/// of a SuperAdmin or grant SuperAdmin, to anyone including themselves. A role the user does not hold yet can be given only by an actor
+/// who holds every permission it grants (<see cref="PermissionGrantRules"/>, <see cref="RoleErrors.PermissionGrantNotAllowed"/>), so
+/// <c>auth.user.assign_roles</c> cannot hand out more than its holder has. The last active SuperAdmin cannot lose the role
 /// (<see cref="UserErrors.LastSuperAdmin"/>). After the save the user's cached permissions are removed, so the change applies to their
 /// next request on this instance (ADR 0016; other instances within 30 seconds).
 /// </summary>
@@ -18,6 +20,7 @@ internal sealed class AssignRolesCommandHandler(
     IUserRepository users,
     IRoleRepository roles,
     SuperAdminRules superAdminRules,
+    PermissionGrantRules grantRules,
     IPermissionCache permissionCache,
     IAuthAuditWriter auditWriter,
     IUnitOfWork unitOfWork,
@@ -39,13 +42,21 @@ internal sealed class AssignRolesCommandHandler(
         }
 
         var requested = command.RoleIds.Distinct().ToList();
-        var found = (await roles.GetByIdsAsync(requested, cancellationToken)).Select(role => role.Id).ToHashSet();
-        if (requested.Where(id => !found.Contains(id)).Select(id => (Guid?)id).FirstOrDefault() is { } unknownId)
+        var found = (await roles.GetByIdsAsync(requested, cancellationToken)).ToDictionary(role => role.Id);
+        if (requested.Where(id => !found.ContainsKey(id)).Select(id => (Guid?)id).FirstOrDefault() is { } unknownId)
         {
             return Result.Failure(RoleErrors.NotFound(unknownId));
         }
 
         allowed = scope.EnsureCanGrant(requested);
+        if (allowed.IsSuccess)
+        {
+            // Only the roles the user does not hold yet grant anything new; keeping or removing a role escalates nothing.
+            var current = user.Roles.Select(assignment => assignment.RoleId).ToHashSet();
+            var newlyGranted = requested.Where(id => !current.Contains(id)).Select(id => found[id]);
+            allowed = await grantRules.EnsureActorHoldsRolesAsync(command.ActorId, newlyGranted, cancellationToken);
+        }
+
         if (allowed.IsSuccess && !requested.Contains(scope.RoleId))
         {
             allowed = await superAdminRules.EnsureNotLastActiveAsync(scope, user, cancellationToken);

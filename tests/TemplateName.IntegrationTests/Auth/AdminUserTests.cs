@@ -10,6 +10,7 @@ using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Roles;
 using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Users;
+using TemplateName.Modules.Auth.Infrastructure.Authorization;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
 
 namespace TemplateName.IntegrationTests.Auth;
@@ -385,7 +386,8 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
     [Fact]
     public async Task Assigning_a_role_grants_access_on_the_next_request()
     {
-        await SignInAsync(AuthPermissions.UserAssignRoles);
+        // The actor holds every permission of Admin, so it may grant the role (the grant rule).
+        await SignInAsync([AuthPermissions.UserAssignRoles, .. AuthSeeder.AdminDefaultPermissions], AuthTestHarness.DefaultLocale);
         var target = await CreateUserAsync("target@example.com");
         var tokens = await LoginAsync("target@example.com", Password);
 
@@ -416,6 +418,71 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
 
         using var afterRemoval = await GetAsAsync(tokens.AccessToken, UsersRoute);
         afterRemoval.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task Assign_roles_and_create_grant_only_roles_whose_permissions_the_actor_holds()
+    {
+        var actor = await SignInAsync([AuthPermissions.UserAssignRoles, AuthPermissions.UserCreate, AuthPermissions.UserView], AuthTestHarness.DefaultLocale);
+        var target = await CreateUserAsync("target@example.com");
+        var userRoleId = await RoleIdAsync(SystemRoles.User);
+        var powerfulId = await CreateRoleAsync("Powerful", AuthPermissions.RoleManage, AuthPermissions.UserView);
+        var viewerId = await CreateRoleAsync("Viewer", AuthPermissions.UserView);
+
+        // A role granting auth.role.manage, which the actor lacks: not to another user, not to themselves, not on a new account.
+        using (var toTarget = await Client.PutAsJsonAsync($"{UsersRoute}/{target.Id}/roles", new { roleIds = new[] { userRoleId, powerfulId } }, Ct))
+        {
+            await AssertProblemAsync(toTarget, HttpStatusCode.Forbidden, "auth.permission_grant_not_allowed");
+        }
+
+        using (var toSelf = await Client.PutAsJsonAsync($"{UsersRoute}/{actor.UserId}/roles", new { roleIds = new[] { powerfulId } }, Ct))
+        {
+            await AssertProblemAsync(toSelf, HttpStatusCode.Forbidden, "auth.permission_grant_not_allowed");
+        }
+
+        using (var created = await Client.PostAsJsonAsync(UsersRoute, new { email = "powerful@example.com", displayName = "P", roleIds = new[] { powerfulId } }, Ct))
+        {
+            await AssertProblemAsync(created, HttpStatusCode.Forbidden, "auth.permission_grant_not_allowed");
+        }
+
+        (await RoleIdsOfAsync(target.Id)).ShouldBe([userRoleId]);
+        (await RoleIdsOfAsync(actor.UserId)).ShouldNotContain(powerfulId);
+        (await QueryAsync(context => context.Set<User>().CountAsync(user => user.NormalizedEmail == "POWERFUL@EXAMPLE.COM", Ct))).ShouldBe(0);
+        (await AdminAuditRowsAsync()).ShouldBeEmpty();
+
+        // A role whose every permission the actor holds may be granted both ways.
+        using (var allowed = await Client.PutAsJsonAsync($"{UsersRoute}/{target.Id}/roles", new { roleIds = new[] { userRoleId, viewerId } }, Ct))
+        {
+            allowed.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        }
+
+        using (var createdViewer = await Client.PostAsJsonAsync(UsersRoute, new { email = "viewer@example.com", displayName = "V", roleIds = new[] { viewerId } }, Ct))
+        {
+            createdViewer.StatusCode.ShouldBe(HttpStatusCode.Created);
+        }
+
+        (await RoleIdsOfAsync(target.Id)).ShouldBe([userRoleId, viewerId], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task Super_admin_may_grant_any_role()
+    {
+        var actor = await SignInAsync(AuthPermissions.UserAssignRoles, AuthPermissions.UserCreate);
+        await GrantRoleAsync(actor.UserId, SystemRoles.SuperAdmin);
+        var target = await CreateUserAsync("target@example.com");
+        var powerfulId = await CreateRoleAsync("Powerful", AuthPermissions.RoleManage, AuthPermissions.AuditView);
+
+        using (var assigned = await Client.PutAsJsonAsync($"{UsersRoute}/{target.Id}/roles", new { roleIds = new[] { powerfulId } }, Ct))
+        {
+            assigned.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        }
+
+        using (var created = await Client.PostAsJsonAsync(UsersRoute, new { email = "powerful@example.com", displayName = "P", roleIds = new[] { powerfulId } }, Ct))
+        {
+            created.StatusCode.ShouldBe(HttpStatusCode.Created);
+        }
+
+        (await RoleIdsOfAsync(target.Id)).ShouldBe([powerfulId]);
     }
 
     [Fact]
@@ -560,6 +627,26 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
         await context.SaveChangesAsync(Ct);
         return role.Id;
     }
+
+    private async Task<Guid> CreateRoleAsync(string name, params string[] permissionCodes)
+    {
+        var permissionIds = new List<Guid>();
+        foreach (var code in permissionCodes)
+        {
+            permissionIds.Add(await PermissionIdAsync(code));
+        }
+
+        await using var scope = Factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        var role = Role.Create(name, $"The {name} role.", Factory.Time.GetUtcNow()).Value;
+        role.SetPermissions(permissionIds);
+        context.Add(role);
+        await context.SaveChangesAsync(Ct);
+        return role.Id;
+    }
+
+    private Task<List<Guid>> RoleIdsOfAsync(Guid userId)
+        => QueryAsync(context => context.Set<UserRole>().Where(role => role.UserId == userId).Select(role => role.RoleId).ToListAsync(Ct));
 
     private Task<User> FindUserAsync(string email)
         => QueryAsync(context => context.Set<User>().SingleAsync(user => user.NormalizedEmail == User.NormalizeEmail(email), Ct));

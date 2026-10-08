@@ -16,6 +16,7 @@ using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Auth.Application;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Application.Admin;
 using TemplateName.Modules.Auth.Application.Admin.Roles;
 using TemplateName.Modules.Auth.Application.Admin.Users;
 using TemplateName.Modules.Auth.Application.Authentication;
@@ -64,6 +65,7 @@ public static class AuthModule
         services.AddScoped<IAuthAuditWriter, AuthAuditWriter>();
         services.AddScoped<IUnitOfWork>(serviceProvider => serviceProvider.GetRequiredService<AuthDbContext>());
         services.AddScoped<SuperAdminRules>();
+        services.AddScoped<PermissionGrantRules>();
         services.AddScoped<RolePermissionCacheInvalidator>();
         services.AddScoped<PasswordResetLinkIssuer>();
 

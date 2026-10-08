@@ -11,7 +11,7 @@ public sealed class AssignRolesCommandHandlerTests : AdminHandlerTestBase
 
     public AssignRolesCommandHandlerTests()
     {
-        _sut = new AssignRolesCommandHandler(Users, Roles, Rules, PermissionCache, AuditWriter, UnitOfWork, Time);
+        _sut = new AssignRolesCommandHandler(Users, Roles, Rules, GrantRules, PermissionCache, AuditWriter, UnitOfWork, Time);
     }
 
     [Fact]
@@ -132,5 +132,72 @@ public sealed class AssignRolesCommandHandlerTests : AdminHandlerTestBase
 
         result.IsSuccess.ShouldBeTrue();
         target.Roles.Select(role => role.RoleId).ShouldBe([SuperAdminRole.Id]);
+    }
+
+    [Fact]
+    public async Task Actor_lacking_a_permission_of_a_new_role_gets_permission_grant_not_allowed_and_nothing_changes()
+    {
+        // assign_roles alone must not let its holder take (or hand out) a role that grants more than they hold.
+        var view = GivenPermission("auth.user.view");
+        var manage = GivenPermission("auth.role.manage");
+        var powerful = GivenRole("Powerful", view, manage);
+        ActorHolds.Add("auth.user.view");
+        var target = GivenUser(UserRole);
+
+        var result = await _sut.HandleAsync(new AssignRolesCommand(ActorId, target.Id, [UserRole.Id, powerful.Id]), Ct);
+
+        result.Error.Code.ShouldBe("auth.permission_grant_not_allowed");
+        result.Error.Type.ShouldBe(ErrorType.Forbidden);
+        target.Roles.Select(role => role.RoleId).ShouldBe([UserRole.Id]);
+        AuditEntries.ShouldBeEmpty();
+        await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesAsync(Ct);
+        await PermissionCache.DidNotReceiveWithAnyArgs().InvalidateUsersAsync(default!, Ct);
+    }
+
+    [Fact]
+    public async Task Actor_lacking_a_permission_cannot_give_the_role_to_themselves()
+    {
+        var manage = GivenPermission("auth.role.manage");
+        var powerful = GivenRole("Powerful", manage);
+        var actor = GivenUser(UserRole);
+        Users.GetByIdAsync(ActorId, Arg.Any<CancellationToken>()).Returns(actor);
+
+        var result = await _sut.HandleAsync(new AssignRolesCommand(ActorId, ActorId, [UserRole.Id, powerful.Id]), Ct);
+
+        result.Error.Code.ShouldBe("auth.permission_grant_not_allowed");
+        actor.Roles.Select(role => role.RoleId).ShouldBe([UserRole.Id]);
+    }
+
+    [Fact]
+    public async Task Actor_holding_every_permission_of_a_new_role_may_assign_it_and_deprecated_ones_are_not_required()
+    {
+        var view = GivenPermission("auth.user.view");
+        var withdrawn = GivenPermission("auth.user.withdrawn", deprecated: true);
+        var support = GivenRole("Support", view, withdrawn);
+        ActorHolds.Add("auth.user.view");
+        var target = GivenUser(UserRole);
+
+        var result = await _sut.HandleAsync(new AssignRolesCommand(ActorId, target.Id, [UserRole.Id, support.Id]), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        target.Roles.Select(role => role.RoleId).ShouldBe([UserRole.Id, support.Id], ignoreOrder: true);
+        await PermissionChecker.Received(1).HasPermissionAsync(ActorId, "auth.user.view", Arg.Any<CancellationToken>());
+        await PermissionChecker.DidNotReceive().HasPermissionAsync(ActorId, "auth.user.withdrawn", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Roles_the_user_already_holds_and_removed_roles_are_not_checked()
+    {
+        // Keeping or removing a role escalates nothing, so an actor who lacks its permissions may still edit the rest of the set.
+        var manage = GivenPermission("auth.role.manage");
+        var powerful = GivenRole("Powerful", manage);
+        var other = GivenRole("Other", manage);
+        var target = GivenUser(UserRole, powerful, other);
+
+        var result = await _sut.HandleAsync(new AssignRolesCommand(ActorId, target.Id, [powerful.Id]), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        target.Roles.Select(role => role.RoleId).ShouldBe([powerful.Id]);
+        await PermissionChecker.DidNotReceiveWithAnyArgs().HasPermissionAsync(default, default!, Ct);
     }
 }

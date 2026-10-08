@@ -2,7 +2,9 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
+using TemplateName.Application.Common.Identity;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Application.Admin;
 using TemplateName.Modules.Auth.Application.Admin.Users;
 using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Application.Verification;
@@ -15,9 +17,10 @@ using TemplateName.Modules.Auth.Domain.Verification;
 namespace TemplateName.UnitTests.Auth.Admin;
 
 /// <summary>
-/// The doubles the admin user handlers share: repositories, the permission cache, the audit writer and the unit of work as NSubstitute
-/// fakes, a seeded <c>SuperAdmin</c> role, the real <see cref="SuperAdminRules"/> and <see cref="PasswordResetLinkIssuer"/> over them,
-/// and an acting administrator who is not a SuperAdmin unless a test says so.
+/// The doubles the admin user handlers share: repositories, the permission checker and cache, the audit writer and the unit of work as
+/// NSubstitute fakes, a seeded <c>SuperAdmin</c> role, the real <see cref="SuperAdminRules"/>, <see cref="PermissionGrantRules"/> and
+/// <see cref="PasswordResetLinkIssuer"/> over them, and an acting administrator who is not a SuperAdmin and holds no permission unless a
+/// test says so.
 /// </summary>
 public abstract class AdminHandlerTestBase
 {
@@ -42,8 +45,13 @@ public abstract class AdminHandlerTestBase
         ClientContext.IpAddress.Returns("203.0.113.7");
         AuditWriter.Record(Arg.Do<AuthAuditLog>(AuditEntries.Add));
         VerificationCodes.Add(Arg.Do<VerificationCode>(IssuedCodes.Add));
+        Permissions.GetByIdsAsync(Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns(call => (IReadOnlyList<Permission>)[.. KnownPermissions.Where(permission => call.Arg<IReadOnlyCollection<Guid>>().Contains(permission.Id))]);
+        PermissionChecker.HasPermissionAsync(ActorId, Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call => ActorHolds.Contains(call.ArgAt<string>(1)));
 
         Rules = new SuperAdminRules(Roles, Users);
+        GrantRules = new PermissionGrantRules(Permissions, PermissionChecker);
         LinkIssuer = new PasswordResetLinkIssuer(
             VerificationCodes,
             TokenService,
@@ -63,6 +71,10 @@ public abstract class AdminHandlerTestBase
     internal IUserRepository Users { get; } = Substitute.For<IUserRepository>();
 
     internal IRoleRepository Roles { get; } = Substitute.For<IRoleRepository>();
+
+    internal IPermissionRepository Permissions { get; } = Substitute.For<IPermissionRepository>();
+
+    internal IPermissionChecker PermissionChecker { get; } = Substitute.For<IPermissionChecker>();
 
     internal ISessionRepository Sessions { get; } = Substitute.For<ISessionRepository>();
 
@@ -84,11 +96,18 @@ public abstract class AdminHandlerTestBase
 
     internal SuperAdminRules Rules { get; }
 
+    internal PermissionGrantRules GrantRules { get; }
+
     internal PasswordResetLinkIssuer LinkIssuer { get; }
 
     internal List<AuthAuditLog> AuditEntries { get; } = [];
 
     internal List<VerificationCode> IssuedCodes { get; } = [];
+
+    internal List<Permission> KnownPermissions { get; } = [];
+
+    /// <summary>The permission codes the acting administrator holds.</summary>
+    internal HashSet<string> ActorHolds { get; } = [];
 
     private protected static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -110,12 +129,22 @@ public abstract class AdminHandlerTestBase
         return user;
     }
 
-    /// <summary>A custom role the repository knows by id.</summary>
-    internal Role GivenRole(string name)
+    /// <summary>A custom role the repository knows by id, granting <paramref name="granted"/>.</summary>
+    internal Role GivenRole(string name, params Permission[] granted)
     {
         var role = Role.Create(name, $"The {name} role.", Now.AddDays(-5)).Value;
+        role.SetPermissions([.. granted.Select(permission => permission.Id)]);
         KnownRoles.Add(role);
         return role;
+    }
+
+    /// <summary>A declared (or, when <paramref name="deprecated"/>, a withdrawn) permission the repository knows.</summary>
+    internal Permission GivenPermission(string code, bool deprecated = false)
+    {
+        var permission = Permission.Create(code, code.Split('.')[0], code, $"Allows {code}.", Now.AddDays(-30));
+        permission.SetDeprecated(deprecated);
+        KnownPermissions.Add(permission);
+        return permission;
     }
 
     /// <summary>Active sessions of <paramref name="user"/> as <see cref="ISessionRepository.GetActiveByUserAsync"/> returns them.</summary>
