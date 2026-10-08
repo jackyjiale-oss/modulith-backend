@@ -9,6 +9,9 @@
   <Folder Name="/src/Modules/Sample/">
     <Project Path="src/Modules/Sample/TemplateName.Modules.Sample/TemplateName.Modules.Sample.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Auth/">
+    <Project Path="src/Modules/Auth/TemplateName.Modules.Auth/TemplateName.Modules.Auth.csproj" />
+  </Folder>
   <Folder Name="/src/Host/">
     <Project Path="src/Host/TemplateName.Api/TemplateName.Api.csproj" />
   </Folder>

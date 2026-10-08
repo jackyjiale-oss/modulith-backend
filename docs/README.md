@@ -26,6 +26,7 @@ Everything about how this service is built and run. Documents are part of the de
 
 | Document | Module |
 |---|---|
+| [`modules/auth.md`](modules/auth.md) | Auth: sign-in, tokens, sessions, roles and permissions (skeleton; built up over Plan 2) |
 | [`modules/sample.md`](modules/sample.md) | Sample: leave requests, the worked example of every pattern |
 | [`modules/_template.md`](modules/_template.md) | The required outline; copy it to `modules/{module}.md` when you add a module |
 
@@ -46,5 +47,9 @@ Everything about how this service is built and run. Documents are part of the de
 | [0011](adr/0011-in-repo-openapi-snapshot.md) | OpenAPI snapshot test with an in-repo comparer instead of a snapshot library |
 | [0012](adr/0012-sqlclient-native-runtime-licence-exemption.md) | Microsoft SqlClient native runtime components exempt from the licence allow-list |
 | [0013](adr/0013-prerelease-ef-core-opentelemetry-instrumentation.md) | Prerelease OpenTelemetry instrumentation for EF Core |
+| [0014](adr/0014-own-identity-model-with-identity-password-hasher.md) | Own identity model; ASP.NET Core Identity used only for password hashing |
+| [0015](adr/0015-es256-jwt-with-configured-signing-keys.md) | ES256 access tokens signed with keys from configuration |
+| [0016](adr/0016-server-side-permissions-with-per-user-cache.md) | Server-side permissions with a per-user cache |
+| [0017](adr/0017-outbox-secrets-protected-with-data-protection.md) | Single-use tokens in outbox events protected with Data Protection |
 
 A new decision gets the next number: `adr/NNNN-kebab-title.md`, in the same format, listed here and in the architecture overview.

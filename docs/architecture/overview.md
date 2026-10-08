@@ -9,6 +9,7 @@ flowchart TD
     Api["Host: TemplateName.Api<br/>pipeline, health, OpenAPI"]
 
     subgraph Modules["Business modules (internal by default)"]
+        Auth["TemplateName.Modules.Auth<br/>Domain · Application · Infrastructure · Endpoints"]
         Sample["TemplateName.Modules.Sample<br/>Domain · Application · Infrastructure · Endpoints"]
         Contracts["TemplateName.Modules.{Module}.Contracts<br/>integration events, public interfaces<br/>(none yet)"]
     end
@@ -20,11 +21,17 @@ flowchart TD
         Kernel["SharedKernel<br/>Result, Error, Entity, AggregateRoot"]
     end
 
+    Api --> Auth
     Api --> Sample
     Api --> Web
     Api --> Infra
     Api --> App
+    Auth -. "other modules only via" .-> Contracts
     Sample -. "other modules only via" .-> Contracts
+    Auth --> Web
+    Auth --> Infra
+    Auth --> App
+    Auth --> Kernel
     Sample --> Web
     Sample --> Infra
     Sample --> App
@@ -76,7 +83,7 @@ One SQL Server database, one schema per owner, each with its own `__EFMigrations
 
 ## Cross-module communication
 
-There is one module today, so nothing crosses a module boundary yet. The rules for when it does:
+There are two modules today (Sample and Auth), and neither uses the other, so nothing crosses a module boundary yet. The rules for when it does:
 
 - A module exposes integration events (`{Noun}{PastTenseVerb}IntegrationEvent`) and public interfaces only in its `.Contracts` project.
 - Domain events stay inside the module. A domain event handler that must tell another module publishes an integration event; the consumer records what it has processed (inbox, Plan 3). Cross-module effects are eventually consistent, never one transaction (ADR 0007).
@@ -98,3 +105,7 @@ There is one module today, so nothing crosses a module boundary yet. The rules f
 | [0011](../adr/0011-in-repo-openapi-snapshot.md) | OpenAPI snapshot test with an in-repo comparer instead of a snapshot library |
 | [0012](../adr/0012-sqlclient-native-runtime-licence-exemption.md) | Microsoft SqlClient native runtime components exempt from the licence allow-list |
 | [0013](../adr/0013-prerelease-ef-core-opentelemetry-instrumentation.md) | Prerelease OpenTelemetry instrumentation for EF Core |
+| [0014](../adr/0014-own-identity-model-with-identity-password-hasher.md) | Own identity model; ASP.NET Core Identity used only for password hashing |
+| [0015](../adr/0015-es256-jwt-with-configured-signing-keys.md) | ES256 access tokens signed with keys from configuration |
+| [0016](../adr/0016-server-side-permissions-with-per-user-cache.md) | Server-side permissions with a per-user cache |
+| [0017](../adr/0017-outbox-secrets-protected-with-data-protection.md) | Single-use tokens in outbox events protected with Data Protection |

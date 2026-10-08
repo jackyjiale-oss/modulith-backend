@@ -23,11 +23,13 @@ public sealed partial class TranslationTests
     public void Every_translation_has_the_same_keys_as_the_neutral_resource()
     {
         var failures = new List<string>();
+        var keyCount = 0;
 
         foreach (var resource in Assemblies.ErrorMessageResources)
         {
+            // A module that has defined no error codes yet may have empty resources; the translations must then be empty too.
             var neutralKeys = ErrorCatalog.Keys(resource, CultureInfo.InvariantCulture);
-            neutralKeys.ShouldNotBeEmpty(resource.Name);
+            keyCount += neutralKeys.Count;
 
             foreach (var culture in Translations)
             {
@@ -42,6 +44,7 @@ public sealed partial class TranslationTests
             }
         }
 
+        keyCount.ShouldBeGreaterThan(0);
         failures.ShouldBeEmpty(string.Join(Environment.NewLine, failures));
     }
 

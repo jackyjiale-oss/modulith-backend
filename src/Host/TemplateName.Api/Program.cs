@@ -7,6 +7,7 @@ using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common;
 using TemplateName.Infrastructure.Common.Idempotency;
 using TemplateName.Infrastructure.Common.Persistence;
+using TemplateName.Modules.Auth;
 using TemplateName.Modules.Sample;
 using TemplateName.Web.Common;
 using TemplateName.Web.Common.Localization;
@@ -26,6 +27,7 @@ builder.Services.AddOpenApi("v1");
 builder.Services.AddHealthChecks();
 builder.Services.AddHttpSecurity(builder.Configuration);
 // Module registrations
+builder.Services.AddAuthModule(builder.Configuration);
 builder.Services.AddSampleModule();
 
 // Kestrel binds only its endpoints from the "Kestrel" section; bind Limits (e.g. MaxRequestBodySize) lazily so test overrides apply.
@@ -84,6 +86,7 @@ if (!app.Environment.IsProduction())
 
 // Module endpoints map on `api`.
 var api = app.MapGroup("/api/v1");
+api.MapAuthEndpoints();
 api.MapSampleEndpoints();
 
 app.Run();
