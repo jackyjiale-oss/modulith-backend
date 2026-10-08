@@ -35,6 +35,7 @@ public sealed class RegisterCommandHandlerTests
     private readonly IAuthAuditWriter _auditWriter = Substitute.For<IAuthAuditWriter>();
     private readonly IClientContext _clientContext = Substitute.For<IClientContext>();
     private readonly IUnitOfWork _unitOfWork = Substitute.For<IUnitOfWork>();
+    private readonly IAuthMetrics _metrics = Substitute.For<IAuthMetrics>();
     private readonly Role _userRole = Role.CreateSystem(SystemRoles.User, "Every registered user", Now);
     private readonly List<AuthAuditLog> _auditEntries = [];
     private readonly RegisterCommandHandler _sut;
@@ -59,6 +60,7 @@ public sealed class RegisterCommandHandlerTests
             _auditWriter,
             _clientContext,
             _unitOfWork,
+            _metrics,
             Options.Create(new VerificationOptions()),
             new FakeTimeProvider(Now));
     }
@@ -97,6 +99,7 @@ public sealed class RegisterCommandHandlerTests
         await _users.DidNotReceiveWithAnyArgs().GetByNormalizedEmailAsync(default!, Ct);
         _users.DidNotReceiveWithAnyArgs().Add(default!);
         await _unitOfWork.DidNotReceiveWithAnyArgs().SaveChangesAsync(Ct);
+        _metrics.DidNotReceive().RecordRegistration();
     }
 
     [Fact]
@@ -120,6 +123,9 @@ public sealed class RegisterCommandHandlerTests
         audit.UserId.ShouldBe(existing.Id);
         audit.AttemptedIdentifier.ShouldBe("a****@EXAMPLE.com");
         await _unitOfWork.Received(1).SaveChangesAsync(Ct);
+
+        // Counted like a new account: the metric must not tell the two apart either.
+        _metrics.Received(1).RecordRegistration();
 
         // The hash is paid before the lookup, so the duplicate path costs the same as a new account.
         Received.InOrder(() =>
@@ -166,6 +172,7 @@ public sealed class RegisterCommandHandlerTests
         audit.Succeeded.ShouldBeTrue();
         audit.UserId.ShouldBe(added.Id);
         await _unitOfWork.Received(1).SaveChangesAsync(Ct);
+        _metrics.Received(1).RecordRegistration();
 
         Received.InOrder(() =>
         {

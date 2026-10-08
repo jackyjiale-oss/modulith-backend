@@ -306,6 +306,28 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
         (await context.DataProtectionKeys.SingleAsync(Ct)).Xml.ShouldNotBeNullOrEmpty();
     }
 
+    [Fact]
+    public async Task TrySaveChanges_answers_false_on_a_concurrency_conflict_and_saves_nothing()
+    {
+        var user = NewUser("alice@example.com");
+        await SaveAsync(user);
+        var firstScope = NewScope();
+        var first = (await firstScope.GetRequiredService<IUserRepository>().GetByIdAsync(user.Id, Ct)).ShouldNotBeNull();
+        var secondScope = NewScope();
+        var second = (await secondScope.GetRequiredService<IUserRepository>().GetByIdAsync(user.Id, Ct)).ShouldNotBeNull();
+
+        first.RecordFailedSignIn(Now, maxFailedAttempts: 5, TimeSpan.FromMinutes(15));
+        (await firstScope.GetRequiredService<IUnitOfWork>().TrySaveChangesAsync(Ct)).ShouldBeTrue();
+        second.RecordFailedSignIn(Now, maxFailedAttempts: 5, TimeSpan.FromMinutes(15));
+        secondScope.GetRequiredService<IAuthAuditWriter>().Record(AuthAuditLog.Create(AuthAuditEvents.LoginFailed, succeeded: false, Now, user.Id));
+
+        (await secondScope.GetRequiredService<IUnitOfWork>().TrySaveChangesAsync(Ct)).ShouldBeFalse();
+
+        var saved = (await NewScope().GetRequiredService<IUserRepository>().GetByIdAsync(user.Id, Ct)).ShouldNotBeNull();
+        saved.AccessFailedCount.ShouldBe(1);
+        (await NewScope().GetRequiredService<AuthDbContext>().Set<AuthAuditLog>().CountAsync(Ct)).ShouldBe(0);
+    }
+
     public override async ValueTask DisposeAsync()
     {
         foreach (var scope in _scopes)

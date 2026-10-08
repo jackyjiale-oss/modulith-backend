@@ -195,6 +195,23 @@ internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
         return Result.Success();
     }
 
+    /// <summary>
+    /// Stores a new hash of the <b>same</b> password, made after a successful verification whose hash used weaker parameters (a rehash).
+    /// Because the password itself did not change, the security stamp, the history, <see cref="PasswordChangedAt"/> and the sign-in state
+    /// stay as they are and no event is raised; <see cref="ChangePassword"/> is for a new password.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The user has no password to rehash.</exception>
+    public void UpgradePasswordHash(string passwordHash)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(passwordHash);
+        if (PasswordHash is null)
+        {
+            throw new InvalidOperationException("A user without a password has no hash to upgrade.");
+        }
+
+        PasswordHash = passwordHash;
+    }
+
     public Result Suspend(DateTimeOffset now)
     {
         if (Status == UserStatus.Suspended)

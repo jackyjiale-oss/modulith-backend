@@ -195,6 +195,35 @@ public sealed class UserTests
     }
 
     [Fact]
+    public void UpgradePasswordHash_replaces_the_hash_and_nothing_else()
+    {
+        var user = NewLockedOutUser();
+        user.ClearDomainEvents();
+        var stamp = user.SecurityStamp;
+        var changedAt = user.PasswordChangedAt;
+        var lockoutEnd = user.LockoutEnd;
+
+        user.UpgradePasswordHash("hash-1-stronger");
+
+        user.PasswordHash.ShouldBe("hash-1-stronger");
+        user.SecurityStamp.ShouldBe(stamp);
+        user.PasswordChangedAt.ShouldBe(changedAt);
+        user.LockoutEnd.ShouldBe(lockoutEnd);
+        user.PasswordHistory.ShouldHaveSingleItem().PasswordHash.ShouldBe("hash-1");
+        user.DomainEvents.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void UpgradePasswordHash_refuses_a_user_without_a_password_and_a_blank_hash()
+    {
+        var withoutPassword = User.Register("carol@example.com", "Carol", "en", null, Now).Value;
+
+        Should.Throw<InvalidOperationException>(() => withoutPassword.UpgradePasswordHash("hash-2"));
+        Should.Throw<ArgumentException>(() => NewUser().UpgradePasswordHash(" "));
+        withoutPassword.PasswordHash.ShouldBeNull();
+    }
+
+    [Fact]
     public void Suspend_rotates_stamp_and_is_idempotent()
     {
         var user = NewConfirmedUser();

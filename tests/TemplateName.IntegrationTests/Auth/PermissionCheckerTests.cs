@@ -143,12 +143,26 @@ public sealed class PermissionCheckerTests(IntegrationTestWebAppFactory factory)
     }
 
     [Fact]
-    public async Task Registered_checker_and_cache_are_the_permission_checker()
+    public async Task Reader_returns_the_sorted_set_from_the_entry_the_checker_uses()
+    {
+        var auditors = await CreateRoleAsync("Auditors", AuthPermissions.UserView, AuthPermissions.AuditView);
+        var user = await CreateUserAsync(auditors);
+        var (checker, connections) = CreateRecordingChecker();
+
+        (await checker.GetPermissionsAsync(user.Id, Ct)).ShouldBe([AuthPermissions.AuditView, AuthPermissions.UserView]);
+        (await checker.HasPermissionAsync(user.Id, AuthPermissions.AuditView, Ct)).ShouldBeTrue();
+        connections.OpenedCount.ShouldBe(1);
+        (await checker.GetPermissionsAsync(Guid.NewGuid(), Ct)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Registered_checker_reader_and_cache_are_the_permission_checker()
     {
         var scope = NewScope();
 
         scope.GetRequiredService<IPermissionChecker>().ShouldBeOfType<PermissionChecker>();
         scope.GetRequiredService<IPermissionCache>().ShouldBeSameAs(scope.GetRequiredService<IPermissionChecker>());
+        scope.GetRequiredService<IPermissionReader>().ShouldBeSameAs(scope.GetRequiredService<IPermissionChecker>());
     }
 
     public override async ValueTask DisposeAsync()

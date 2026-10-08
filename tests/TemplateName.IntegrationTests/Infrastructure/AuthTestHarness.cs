@@ -81,6 +81,45 @@ internal static class AuthTestHarness
     }
 
     /// <summary>
+    /// Creates a user who can sign in through <c>POST /api/v1/auth/login</c>: <paramref name="password"/> hashed by the host's real hasher
+    /// (null for an account an administrator created, which has no password yet), the seeded <c>User</c> role, a confirmed email unless
+    /// <paramref name="confirmed"/> is false, and suspended when <paramref name="suspended"/> is true. No session is created.
+    /// </summary>
+    internal static async Task<User> CreateUserAsync(
+        IServiceProvider services,
+        string email,
+        string? password,
+        bool confirmed,
+        bool suspended,
+        string locale,
+        CancellationToken cancellationToken)
+    {
+        await using var scope = services.CreateAsyncScope();
+        var provider = scope.ServiceProvider;
+        var context = provider.GetRequiredService<AuthDbContext>();
+        var now = provider.GetRequiredService<TimeProvider>().GetUtcNow();
+
+        var passwordHash = password is null ? null : provider.GetRequiredService<IPasswordHasher>().Hash(password);
+        var user = User.Register(email, "Test user", locale, passwordHash, now).Value;
+        if (confirmed)
+        {
+            user.ConfirmEmail(now);
+        }
+
+        if (suspended)
+        {
+            user.Suspend(now);
+        }
+
+        var userRole = await context.Set<Role>().SingleAsync(role => role.NormalizedName == Role.NormalizeName(SystemRoles.User), cancellationToken);
+        user.AssignRole(userRole.Id, assignedBy: null, now);
+        context.Add(user);
+        await context.SaveChangesAsync(cancellationToken);
+
+        return user;
+    }
+
+    /// <summary>
     /// A new access token for <paramref name="user"/>'s session, minted by the host behind <paramref name="services"/> on its clock. Use it
     /// after the test moved the clock past the token's lifetime, or for a host derived with <c>WithWebHostBuilder</c>: each host has its
     /// own signing key, and derived hosts share the database, so the user and session are found there.

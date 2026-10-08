@@ -1061,6 +1061,7 @@
           "Microsoft.AspNetCore.Authentication.JwtBearer": "[10.0.12, )",
           "Microsoft.AspNetCore.DataProtection.EntityFrameworkCore": "[10.0.12, )",
           "Microsoft.Extensions.Caching.Hybrid": "[10.10.0, )",
+          "OpenTelemetry.Extensions.Hosting": "[1.19.1, )",
           "TemplateName.Application.Common": "[0.0.0, )",
           "TemplateName.Infrastructure.Common": "[0.0.0, )",
           "TemplateName.SharedKernel": "[0.0.0, )",

@@ -140,6 +140,7 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.AddSingleton(FlakySwitch);
             services.AddSingleton(HandlerGate);
             services.AddSingleton<IStartupFilter, ProtectedTestEndpointStartupFilter>();
+            services.AddSingleton<IStartupFilter, TestClientAddressStartupFilter>();
         });
     }
 

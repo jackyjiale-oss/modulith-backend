@@ -27,6 +27,7 @@ internal sealed class RegisterCommandHandler(
     IAuthAuditWriter auditWriter,
     IClientContext clientContext,
     IUnitOfWork unitOfWork,
+    IAuthMetrics metrics,
     IOptions<VerificationOptions> verificationOptions,
     TimeProvider timeProvider) : ICommandHandler<RegisterCommand>
 {
@@ -53,6 +54,7 @@ internal sealed class RegisterCommandHandler(
                 userId: existing.Id,
                 attemptedIdentifier: AuthAuditLog.MaskIdentifier(command.Email)));
             await unitOfWork.SaveChangesAsync(cancellationToken);
+            metrics.RecordRegistration();
 
             return Result.Success();
         }
@@ -88,6 +90,9 @@ internal sealed class RegisterCommandHandler(
 
         // One save: the user, its role, the code, the audit entry and the outbox rows of both events commit together.
         await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // The same count for a new and an existing address: the metric tells them apart no more than the response does.
+        metrics.RecordRegistration();
 
         return Result.Success();
     }

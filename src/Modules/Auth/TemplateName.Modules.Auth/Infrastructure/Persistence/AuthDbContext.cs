@@ -25,6 +25,21 @@ internal sealed class AuthDbContext : DbContext, IUnitOfWork, IDataProtectionKey
     /// <summary>The Data Protection key ring (ADR 0017), written by <c>PersistKeysToDbContext</c>.</summary>
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
+    public async Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // The save ran in one transaction, which was rolled back; drop what was pending so a later save cannot repeat it.
+            ChangeTracker.Clear();
+            return false;
+        }
+    }
+
     // Password history, role assignments and grants are only read through their soft-deletable owner, whose filter already hides
     // them, so EF's warning about a filtered principal with an unfiltered required dependent does not apply.
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)

@@ -52,7 +52,7 @@ Error codes (messages in `Resources/CommonErrorMessages.resx`, `.ms.resx`, `.zh-
 ## Observability
 
 - Console: readable template in Development, compact JSON elsewhere.
-- OTLP (when `OTEL_EXPORTER_OTLP_ENDPOINT` is set): Serilog's OpenTelemetry sink for logs; traces from ASP.NET Core (without `/health`), `HttpClient`, SqlClient and EF Core; metrics from ASP.NET Core, `HttpClient` and the runtime. `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` switches from gRPC to HTTP. The endpoint is read once at registration, so tests cannot switch export on or off with configuration overrides.
+- OTLP (when `OTEL_EXPORTER_OTLP_ENDPOINT` is set): Serilog's OpenTelemetry sink for logs; traces from ASP.NET Core (without `/health`), `HttpClient`, SqlClient and EF Core; metrics from ASP.NET Core, `HttpClient` and the runtime, plus every meter a module adds with `ConfigureOpenTelemetryMeterProvider` (the Auth module's `TemplateName.Auth`, [auth.md](../modules/auth.md#observability)). `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` switches from gRPC to HTTP. The endpoint is read once at registration, so tests cannot switch export on or off with configuration overrides.
 - `RequestActivityBackgroundService` keeps an `ActivityListener` on the `Microsoft.AspNetCore` source, so every request has a real W3C trace id even when OpenTelemetry is off.
 - `OpenTelemetry.Instrumentation.EntityFrameworkCore` is the prerelease `1.19.1-beta.1`, the only prerelease dependency (no stable version exists; [ADR 0013](../adr/0013-prerelease-ef-core-opentelemetry-instrumentation.md)).
 - With export on, traces record request URLs, so query-string secrets would reach the trace store.

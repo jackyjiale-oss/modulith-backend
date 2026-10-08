@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using TemplateName.Application.Common.Messaging;
+using TemplateName.Modules.Auth.Application.Authentication.Login;
+using TemplateName.Modules.Auth.Application.Me.GetMe;
 using TemplateName.Modules.Auth.Application.Registration.ConfirmEmail;
 using TemplateName.Modules.Auth.Application.Registration.Register;
 using TemplateName.Modules.Auth.Application.Registration.ResendConfirmation;
@@ -43,7 +45,45 @@ internal static class AuthEndpoints
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
+        group.MapPost("login", LoginAsync)
+            .WithName("Login")
+            .AllowAnonymous()
+            .RequireRateLimiting(RateLimitPolicies.AuthStrict)
+            .Produces<LoginResponse>()
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        // Authenticated: said explicitly (not only through the fallback policy) so the OpenAPI document shows the bearer requirement.
+        group.MapGet("me", GetMeAsync)
+            .WithName("GetCurrentUser")
+            .RequireAuthorization()
+            .Produces<MeResponse>()
+            .ProducesProblem(StatusCodes.Status401Unauthorized);
+
         return app;
+    }
+
+    // 401 auth.invalid_credentials for every wrong combination (unknown email, wrong password, no password set, locked account);
+    // 403 only after a correct password.
+    private static async Task<IResult> LoginAsync(
+        LoginRequest request,
+        ICommandHandler<LoginCommand, LoginResponse> handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new LoginCommand(request.Email, request.Password, request.DeviceName), cancellationToken);
+
+        return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
+    }
+
+    // The handler fails only when the token's user can no longer sign in (unknown, soft-deleted or suspended). Fail closed with the same
+    // body-less 401 a request without a valid token gets; UseStatusCodePages turns it into the http.401 problem.
+    private static async Task<IResult> GetMeAsync(IQueryHandler<GetMeQuery, MeResponse> handler, CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new GetMeQuery(), cancellationToken);
+
+        return result.IsSuccess ? TypedResults.Ok(result.Value) : TypedResults.Unauthorized();
     }
 
     // 202 with no body for a new and for a known address alike: the answer must not tell them apart.

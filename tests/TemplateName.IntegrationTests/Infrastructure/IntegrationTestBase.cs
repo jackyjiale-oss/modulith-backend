@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using TemplateName.Modules.Auth;
+using TemplateName.Modules.Auth.Domain.Users;
 
 namespace TemplateName.IntegrationTests.Infrastructure;
 
@@ -57,6 +58,18 @@ public abstract class IntegrationTestBase(IntegrationTestWebAppFactory factory) 
         _signedInUser = user;
         return user;
     }
+
+    /// <summary>
+    /// Creates a user who signs in through the login endpoint with <paramref name="password"/> (<see cref="AuthTestHarness.Password"/>
+    /// by default; null for an administrator-created account without one). <see cref="Client"/> stays as it is.
+    /// </summary>
+    internal Task<User> CreateUserAsync(
+        string email,
+        string? password = AuthTestHarness.Password,
+        bool confirmed = true,
+        bool suspended = false,
+        string locale = AuthTestHarness.DefaultLocale)
+        => AuthTestHarness.CreateUserAsync(Factory.Services, email, password, confirmed, suspended, locale, Ct);
 
     /// <summary>Makes <see cref="Client"/> anonymous again; the user and session stay in the database.</summary>
     protected void SignOut()

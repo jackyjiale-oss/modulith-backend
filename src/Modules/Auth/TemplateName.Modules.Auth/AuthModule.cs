@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using OpenTelemetry.Metrics;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
@@ -15,11 +16,13 @@ using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Auth.Application;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Application.Authentication;
 using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Application.Verification;
 using TemplateName.Modules.Auth.Endpoints;
 using TemplateName.Modules.Auth.Infrastructure.Authorization;
 using TemplateName.Modules.Auth.Infrastructure.Email;
+using TemplateName.Modules.Auth.Infrastructure.Observability;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
 using TemplateName.Modules.Auth.Infrastructure.Security;
 using TemplateName.Modules.Auth.Infrastructure.Tokens;
@@ -35,9 +38,11 @@ public static class AuthModule
 
     /// <summary>
     /// Registers the module's context (schema <c>auth</c>), outbox, handlers and validators, repositories, audit writer, error messages
-    /// (<c>AuthErrorMessages</c>), the SMTP email sender with <c>Auth:Links</c> and <c>Auth:Verification</c>, the access tokens with the JWT bearer handler as the default authentication scheme,
-    /// the permission checker with its cache, the permission source and the seeder, and the Data Protection key ring stored in
-    /// <c>auth.DataProtectionKeys</c>. Call it after <c>AddInfrastructureCommon</c> and before <c>AddApplicationDecorators</c>.
+    /// (<c>AuthErrorMessages</c>), the SMTP email sender with <c>Auth:Links</c> and <c>Auth:Verification</c>, the sign-in settings
+    /// <c>Auth:RefreshToken</c> and <c>Auth:Lockout</c>, the counters of the <c>TemplateName.Auth</c> meter (added to OpenTelemetry), the
+    /// access tokens with the JWT bearer handler as the default authentication scheme, the permission checker with its cache, the
+    /// permission source and the seeder, and the Data Protection key ring stored in <c>auth.DataProtectionKeys</c>. Call it after
+    /// <c>AddInfrastructureCommon</c> and before <c>AddApplicationDecorators</c>.
     /// </summary>
     public static IServiceCollection AddAuthModule(this IServiceCollection services, IConfiguration configuration)
     {
@@ -82,6 +87,18 @@ public static class AuthModule
             .Bind(configuration.GetSection(VerificationOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+        services.AddOptions<RefreshTokenOptions>()
+            .Bind(configuration.GetSection(RefreshTokenOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddOptions<LockoutOptions>()
+            .Bind(configuration.GetSection(LockoutOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // The counters; the meter is added to OpenTelemetry, which exports it whenever the host exports metrics (OTLP configured).
+        services.AddSingleton<IAuthMetrics, AuthMetrics>();
+        services.ConfigureOpenTelemetryMeterProvider(metrics => metrics.AddMeter(AuthMetrics.MeterName));
 
         AddAccessTokens(services, configuration);
         AddPermissions(services, configuration);
@@ -114,7 +131,8 @@ public static class AuthModule
 
     /// <summary>
     /// Maps the module's endpoints; <paramref name="app"/> is the host's <c>/api/v1</c> group. The self-service routes live in its
-    /// <c>auth</c> group: <c>POST auth/register</c>, <c>POST auth/email/confirm</c> and <c>POST auth/email/resend-confirmation</c>.
+    /// <c>auth</c> group: <c>POST auth/register</c>, <c>POST auth/email/confirm</c>, <c>POST auth/email/resend-confirmation</c>,
+    /// <c>POST auth/login</c> and <c>GET auth/me</c>.
     /// </summary>
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
@@ -157,9 +175,9 @@ public static class AuthModule
     }
 
     /// <summary>
-    /// Registers the module's permission source (Ruling R2), the permission checker and cache (one singleton for
-    /// <c>IPermissionChecker</c> and <c>IPermissionCache</c>) on an in-memory <see cref="HybridCache"/> whose clock is the application's
-    /// <see cref="TimeProvider"/>, and the seeder with <c>Auth:Seed</c>.
+    /// Registers the module's permission source (Ruling R2), the permission checker, reader and cache (one singleton for
+    /// <c>IPermissionChecker</c>, <c>IPermissionReader</c> and <c>IPermissionCache</c>) on an in-memory <see cref="HybridCache"/> whose
+    /// clock is the application's <see cref="TimeProvider"/>, and the seeder with <c>Auth:Seed</c>.
     /// </summary>
     internal static void AddPermissions(IServiceCollection services, IConfiguration configuration)
     {
@@ -173,6 +191,7 @@ public static class AuthModule
         services.AddSingleton<PermissionChecker>();
         services.AddSingleton<IPermissionChecker>(serviceProvider => serviceProvider.GetRequiredService<PermissionChecker>());
         services.AddSingleton<IPermissionCache>(serviceProvider => serviceProvider.GetRequiredService<PermissionChecker>());
+        services.AddSingleton<IPermissionReader>(serviceProvider => serviceProvider.GetRequiredService<PermissionChecker>());
 
         services.AddOptions<SeedOptions>().Bind(configuration.GetSection(SeedOptions.SectionName));
         services.AddScoped<PermissionSynchronizer>();

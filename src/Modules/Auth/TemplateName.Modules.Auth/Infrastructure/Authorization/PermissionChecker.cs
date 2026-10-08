@@ -10,9 +10,11 @@ namespace TemplateName.Modules.Auth.Infrastructure.Authorization;
 /// <summary>
 /// Resolves a user's permission codes on the server (ADR 0016): one Dapper query on a cache miss, then the set from
 /// <see cref="HybridCache"/> under <c>perm:{userId}</c> for <see cref="PermissionCache.Lifetime"/>. An unknown, suspended or
-/// soft-deleted user has the empty set, which is cached like any other. Codes are compared exactly (ordinal).
+/// soft-deleted user has the empty set, which is cached like any other. Codes are compared exactly (ordinal). As the
+/// <see cref="IPermissionReader"/> it hands out the same cached set, so <c>GET /api/v1/auth/me</c> shows exactly what the checks allow.
 /// </summary>
-internal sealed class PermissionChecker(IDbConnectionFactory connectionFactory, HybridCache cache) : IPermissionChecker, IPermissionCache
+internal sealed class PermissionChecker(IDbConnectionFactory connectionFactory, HybridCache cache)
+    : IPermissionChecker, IPermissionCache, IPermissionReader
 {
     // Dapper bypasses the EF Core soft-delete filters, so the query repeats them for users and roles (ADR 0006). Assignments and grants
     // have no flags of their own: they are hidden through their owners. A deprecated permission is never granted, even by an old grant.
@@ -34,15 +36,18 @@ internal sealed class PermissionChecker(IDbConnectionFactory connectionFactory, 
     {
         ArgumentNullException.ThrowIfNull(permission);
 
-        var codes = await cache.GetOrCreateAsync(
-            PermissionCache.Key(userId),
-            (ConnectionFactory: connectionFactory, UserId: userId),
-            static (state, cancellationToken) => LoadAsync(state.ConnectionFactory, state.UserId, cancellationToken),
-            PermissionCache.EntryOptions,
-            cancellationToken: cancellationToken);
+        var codes = await GetCodesAsync(userId, cancellationToken);
 
         // The set is sorted ordinally when it is loaded, so membership is a binary search.
         return codes is not null && Array.BinarySearch(codes, permission, StringComparer.Ordinal) >= 0;
+    }
+
+    public async Task<IReadOnlyCollection<string>> GetPermissionsAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var codes = await GetCodesAsync(userId, cancellationToken);
+
+        // A read-only view, so no caller can change a set the cache may hand out again.
+        return codes is null ? [] : Array.AsReadOnly(codes);
     }
 
     public async Task InvalidateUsersAsync(IEnumerable<Guid> userIds, CancellationToken cancellationToken)
@@ -54,6 +59,14 @@ internal sealed class PermissionChecker(IDbConnectionFactory connectionFactory, 
             await cache.RemoveAsync(PermissionCache.Key(userId), cancellationToken);
         }
     }
+
+    private ValueTask<string[]> GetCodesAsync(Guid userId, CancellationToken cancellationToken)
+        => cache.GetOrCreateAsync(
+            PermissionCache.Key(userId),
+            (ConnectionFactory: connectionFactory, UserId: userId),
+            static (state, cancellationToken) => LoadAsync(state.ConnectionFactory, state.UserId, cancellationToken),
+            PermissionCache.EntryOptions,
+            cancellationToken: cancellationToken);
 
     // A string array, so HybridCache can serialize it when a distributed cache is added (Plan 5).
     private static async ValueTask<string[]> LoadAsync(IDbConnectionFactory connectionFactory, Guid userId, CancellationToken cancellationToken)
