@@ -7,7 +7,9 @@ using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+using TemplateName.Modules.Auth.Infrastructure.Security;
 using TemplateName.Modules.Auth.Resources;
 
 namespace TemplateName.Modules.Auth;
@@ -42,6 +44,16 @@ public static class AuthModule
 
         services.AddHttpContextAccessor();
         services.AddScoped<IClientContext, HttpClientContext>();
+
+        services.AddOptions<PasswordOptions>()
+            .Bind(configuration.GetSection(PasswordOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
+        services.AddSingleton<ISecureTokenService, SecureTokenService>();
+        services.AddSingleton<ISecretProtector, DataProtectionSecretProtector>();
+        services.AddHttpClient(HibpBreachedPasswordChecker.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(2));
+        services.AddSingleton<IBreachedPasswordChecker, HibpBreachedPasswordChecker>();
 
         // One key ring for every instance, so an outbox event protected by one instance can be read by another (ADR 0017).
         var applicationName = configuration["Auth:DataProtection:ApplicationName"] is { Length: > 0 } configuredName

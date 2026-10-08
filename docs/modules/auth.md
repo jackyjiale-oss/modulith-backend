@@ -6,14 +6,14 @@
 
 <!-- What the module owns, what it deliberately does not do, and which other modules it talks to (only through *.Contracts). -->
 
-The sign-in and authorization module: registration with email confirmation, login, refresh-token rotation, logout, password reset and change, session management, and role-based permissions with administration of users, roles and the audit log. It is built up over Plan 2 (auth core); this page describes what has landed so far (the domain model and its persistence).
+The sign-in and authorization module: registration with email confirmation, login, refresh-token rotation, logout, password reset and change, session management, and role-based permissions with administration of users, roles and the audit log. It is built up over Plan 2 (auth core); this page describes what has landed so far (the domain model, its persistence and the security services).
 
 - Owns: users, roles, permissions, sessions, verification codes, the auth audit log, the Data Protection key ring and the `auth` schema.
 - Does not: send localized emails (English only until Plan 3), check access tokens against session revocation on every request (ADR 0015), or support usernames, tenants or progressive lockout.
 - Talks to: no other module. It has no `TemplateName.Modules.Auth.Contracts` project yet, because nothing outside the module needs its data; Plan 3 adds the integration events.
 - Decisions: [ADR 0014](../adr/0014-own-identity-model-with-identity-password-hasher.md) (own identity model), [ADR 0015](../adr/0015-es256-jwt-with-configured-signing-keys.md) (ES256 tokens, configured keys), [ADR 0016](../adr/0016-server-side-permissions-with-per-user-cache.md) (permissions resolved server-side), [ADR 0017](../adr/0017-outbox-secrets-protected-with-data-protection.md) (outbox secrets protected with Data Protection).
 
-Code: `src/Modules/Auth/TemplateName.Modules.Auth/`. The host calls `AddAuthModule(configuration)` and maps `MapAuthEndpoints()` on the `/api/v1` group. Today the module registers its persistence (context, outbox, repositories, audit writer, Data Protection key ring; see [Data](#data)), its handlers and its error messages; `MapAuthEndpoints` maps nothing yet.
+Code: `src/Modules/Auth/TemplateName.Modules.Auth/`. The host calls `AddAuthModule(configuration)` and maps `MapAuthEndpoints()` on the `/api/v1` group. Today the module registers its persistence (context, outbox, repositories, audit writer, Data Protection key ring; see [Data](#data)), the security services (see [Security services](#security-services)), its handlers and its error messages; `MapAuthEndpoints` maps nothing yet.
 
 ## Endpoints
 
@@ -171,16 +171,35 @@ The user codes are declared in `Domain/Users/UserErrors.cs`, the role and permis
 
 The events are declared in `Domain/Users/Events/`, `Domain/Sessions/Events/` and `Domain/Verification/Events/`. Domain events are written to `auth.OutboxMessages` in the same save as the aggregate and dispatched by the module outbox (ADR 0007). The module publishes no integration events yet.
 
+## Security services
+
+<!-- The services that hash, generate, protect and check secrets. -->
+
+The abstractions are `internal` in `Application/Abstractions/` (the application layer does not depend on the infrastructure); the implementations are `internal sealed` in `Infrastructure/Security/`. All are registered as singletons by `AddAuthModule`.
+
+| Service | Implementation | What it does |
+|---|---|---|
+| `IPasswordHasher` | `Pbkdf2PasswordHasher` | `Hash` makes a PBKDF2 hash with a random salt through the Identity `PasswordHasher` (ADR 0014). `Verify` returns `PasswordVerification.Failed`, `Success` or `SuccessRehashNeeded` (the hash used a lower iteration count than today's, so the caller stores a new hash); a malformed hash is `Failed`, never an exception. `SpendVerificationCost` verifies against a dummy hash made once on first use, so the unknown-account path costs the same as a wrong password. |
+| `ISecureTokenService` | `SecureTokenService` | `Generate` returns a `GeneratedToken(Value, Hash)`: 32 bytes from `RandomNumberGenerator`, base64url without padding (43 characters), and its hash. `Hash` is the SHA-256 of the token's UTF-8 bytes (32 bytes), the form stored in `varbinary(32)` columns and used for lookups. |
+| `IBreachedPasswordChecker` | `HibpBreachedPasswordChecker` | `IsBreachedAsync` asks Have I Been Pwned with k-anonymity: it requests `https://api.pwnedpasswords.com/range/{first 5 hex characters of the uppercase SHA-1}` with `Add-Padding: true` and looks for the suffix itself; padding rows (count 0) are ignored. It uses the named client `hibp` with a 2 second timeout. It is **fail-open**: a non-success status, the timeout or any transport error logs a warning (status code or exception type only, never the password, hash or prefix) and answers `false`. A cancelled caller token is not a failure and propagates. With `Auth:Password:CheckBreached` off it makes no request. |
+| `ISecretProtector` | `DataProtectionSecretProtector` | `Protect` and `Unprotect` encrypt a secret that must leave the process, with the Data Protection purpose `TemplateName.Auth.Secrets.v1` (ADR 0017). The same value protected twice differs; a changed value throws `CryptographicException`. Changing the purpose makes existing values unreadable. |
+
 ## Configuration
 
 <!-- Configuration sections and keys the module reads, with defaults. -->
 
-`AddAuthModule` receives the `IConfiguration`; the rest of the `Auth` section (JWT, refresh token, verification, password, lockout) is bound as the tasks land.
+`AddAuthModule` receives the `IConfiguration`; the rest of the `Auth` section (JWT, refresh token, verification, lockout) is bound as the tasks land. `Auth:Password` is validated at start-up, so an out-of-range value stops the host.
 
 | Key | Default | Purpose |
 |---|---|---|
 | `ConnectionStrings:Database` | empty (user secrets or environment) | The database that holds the `auth` schema. |
 | `Auth:DataProtection:ApplicationName` | `TemplateName` | The Data Protection application name. Every instance that must read the others' protected values (outbox tokens, ADR 0017) uses the same name and the same database. |
+| `Auth:Password:MinLength` | `12` (8-128) | The shortest password accepted. There are no composition rules. |
+| `Auth:Password:MaxLength` | `128` (8-128) | The longest password accepted, checked before hashing. May not be below `MinLength`. |
+| `Auth:Password:HistoryCount` | `5` (1-24) | How many of the latest passwords may not be reused, the current one included. |
+| `Auth:Password:CheckBreached` | `true` | Whether a new password is checked against Have I Been Pwned. The check fails open; `false` makes no request at all. |
+
+The PBKDF2 iteration count has no setting of the module: it is Identity's default (`PasswordHasherOptions.IterationCount`, ADR 0014). Only the integration test factory lowers it, through `Configure<PasswordHasherOptions>`.
 
 ## Data
 
