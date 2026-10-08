@@ -59,7 +59,7 @@ public sealed class AuthFlowTests(IntegrationTestWebAppFactory factory) : Integr
             body.GetProperty("roles").EnumerateArray().Select(role => role.GetString()).ShouldBe(["User"]);
         }
 
-        // Refresh rotates the token inside the same session; the old one is used up.
+        // Refresh rotates the token inside the same session and returns a new pair (RefreshTests covers the old one being refused).
         var rotated = await RefreshAsync(first.RefreshToken);
         rotated.SessionId.ShouldBe(first.SessionId);
         rotated.RefreshToken.ShouldNotBe(first.RefreshToken);

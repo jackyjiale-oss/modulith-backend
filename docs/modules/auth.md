@@ -91,7 +91,7 @@ stateDiagram-v2
 
 ### Permissions
 
-Codes are `module.resource.action` in snake case. Each module declares its own through `IPermissionSource` (see [Application.Common](../building-blocks/application-common.md)), registered as a singleton; the Auth module declares these in `Application/AuthPermissions.cs` and `AuthPermissionSource` (module `auth`, English names), which `AddAuthModule` registers. The seeder syncs every registered source into `auth.Permissions` (see [Background processing](#background-processing)). Other modules declare theirs the same way without referencing this module: the Sample module's `sample.leave_request.view`, `.create` and `.approve` ([Sample module](sample.md#permissions)).
+Codes are `module.resource.action` in snake case. Each module declares its own through `IPermissionSource` (see [Application.Common](../building-blocks/application-common.md)), registered as a singleton; the Auth module declares these in `Application/AuthPermissions.cs` and `AuthPermissionSource` (module `auth`, English names), which `AddAuthModule` registers. The seeder syncs every registered source into `auth.Permissions` (see [Background processing](#background-processing)). A code no source declares any more is deprecated, never deleted, and its grants stay; declaring that code again in code clears `IsDeprecated` and so **reactivates every old grant** of it at once. Remove the grants (or pick a new code) before bringing a withdrawn code back. Other modules declare theirs the same way without referencing this module: the Sample module's `sample.leave_request.view`, `.create` and `.approve` ([Sample module](sample.md#permissions)).
 
 | Code | Allows |
 |---|---|
@@ -665,6 +665,7 @@ What the module deliberately leaves out, or only approximates. None of these is 
 - Resend and forgot do no hashing, but a known address costs a few more queries (and, for a new link, one Data Protection encryption) than an unknown one: a difference of milliseconds. A known account's failed login also runs one more `UPDATE` than an unknown one. See [Registration](#registration) and [Passwords](#passwords).
 - Two registrations (or administrator creates) of the same **new** address at the same moment: one wins and the others answer as for a known address (409 `auth.email_taken` for the administrator), but EF Core still logs each refused insert at Error level with the address inside SQL Server's message ([Data](#data)).
 - Two simultaneous forgots can leave two live reset links; a successful reset or change invalidates every pending one ([Passwords](#passwords)).
+- The registration-attempt notice (an email to the owner of an address someone tries to register again) has no per-account cooldown: only the per-address `auth-strict` limit bounds it, so requests from many addresses can send many notices to one account ([Registration](#registration)).
 - Changing the password with a wrong current password is not counted toward the login lockout; the per-address `auth-strict` limit bounds it instead ([Passwords](#passwords)).
 
 **Tokens and sessions**
@@ -673,6 +674,8 @@ What the module deliberately leaves out, or only approximates. None of these is 
 - An access token keeps working until it expires after logout, suspension or a password change, because it is not checked against the session per request (D9, ADR 0015): at most `Auth:Jwt:AccessTokenLifetime` plus the clock skew, 10 minutes 30 seconds by default. Permissions are the exception: they are resolved on the server, so a lost permission stops working at once on the instance that made the change and within 30 seconds on the others (ADR 0016).
 - The saved language is a claim of the access token (D7), so after `PUT /api/v1/auth/me` the token issued before keeps answering in the old language for up to 10 minutes, until the client refreshes ([Sessions and profile](#sessions-and-profile), Ruling R16).
 - A logout with a token that has no `sid`, or for a session that already ended, writes no audit entry.
+- A session's refresh-token chain grows by one row per refresh and is never pruned: a session refreshed often over its 90 days keeps every used token, and revoking it stamps them all. A retention job comes with Plan 5.
+- Refresh shares the per-address `auth-strict` budget with login and the other credential routes, so many users behind one NAT address can run out of it ([API host](../services/api.md#ratelimiting) explains the sizing).
 
 **Administration and concurrency**
 
@@ -686,6 +689,7 @@ What the module deliberately leaves out, or only approximates. None of these is 
 **Email and runtime**
 
 - Emails are English only until Plan 3 (D8). The outbox retries a failed send, so a link that was replaced in the meantime may still be emailed (it no longer works). `Auth:Email:UseTls=false` with a `Username` sends the credentials in clear: use it for Mailpit only.
+- The base `appsettings.json` has development defaults that every other environment must override: `Auth:Email:UseTls` is `false` (and the host `localhost`), and `Auth:Links:ConfirmEmailUrl` and `ResetPasswordUrl` point at `http://localhost:3000`, so links would lead nowhere ([Configuration](#configuration)). Nothing refuses to start with them.
 - Locales and time zones are validated with the runtime's culture and time-zone data, which needs **ICU** and, on Linux, **tzdata**. An image with `InvariantGlobalization` on, or without `tzdata`, rejects every locale and IANA time zone but the invariant ones and `UTC` (`PUT /api/v1/auth/me` then fails for everyone). The repository does not enable invariant globalization; Plan 6's image must carry ICU and `tzdata` ([Sessions and profile](#sessions-and-profile)).
 - The Data Protection key ring in `auth.DataProtectionKeys` is not encrypted at rest yet (Plan 6, ADR 0017).
 - The JWKS is not part of the OpenAPI document.

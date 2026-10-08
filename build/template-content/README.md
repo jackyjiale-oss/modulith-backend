@@ -22,6 +22,8 @@ dotnet user-secrets set "Auth:Seed:AdminPassword" "<value>" --project src/Host/T
 dotnet run --project src/Host/TemplateName.Api
 ```
 
+SQL Server needs several seconds on its first start: if the API stops at the migration step, wait until the container is ready (`docker compose logs sqlserver` shows `SQL Server is now ready for client connections`) and run it again. The connection string uses `127.0.0.1`, not `localhost`, because `localhost` can hang on some Windows setups.
+
 In Development the API applies the module migrations on startup and seeds the roles, the permissions and the first administrator, `admin@localhost.test`, with the password you set above (12 to 128 characters; choose your own and never commit it). Sign in as that administrator with `POST /api/v1/auth/login` in Scalar and send the returned `accessToken` as a bearer token. Remove `Auth:Seed:AdminPassword` from user secrets after the first start. Emails (account confirmation, password reset) are not delivered anywhere locally: Mailpit catches them, and its inbox is at <http://localhost:8025>.
 
 | What | URL |
