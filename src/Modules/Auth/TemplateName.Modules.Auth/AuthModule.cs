@@ -8,6 +8,8 @@ using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Application.Passwords;
+using TemplateName.Modules.Auth.Application.Verification;
+using TemplateName.Modules.Auth.Infrastructure.Email;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
 using TemplateName.Modules.Auth.Infrastructure.Security;
 using TemplateName.Modules.Auth.Resources;
@@ -22,7 +24,7 @@ public static class AuthModule
 
     /// <summary>
     /// Registers the module's context (schema <c>auth</c>), outbox, handlers and validators, repositories, audit writer, error messages
-    /// (<c>AuthErrorMessages</c>) and the Data Protection key ring stored in <c>auth.DataProtectionKeys</c>. Call it after
+    /// (<c>AuthErrorMessages</c>), the SMTP email sender and the Data Protection key ring stored in <c>auth.DataProtectionKeys</c>. Call it after
     /// <c>AddInfrastructureCommon</c> and before <c>AddApplicationDecorators</c>.
     /// </summary>
     public static IServiceCollection AddAuthModule(this IServiceCollection services, IConfiguration configuration)
@@ -54,6 +56,16 @@ public static class AuthModule
         services.AddSingleton<ISecretProtector, DataProtectionSecretProtector>();
         services.AddHttpClient(HibpBreachedPasswordChecker.HttpClientName, client => client.Timeout = HibpBreachedPasswordChecker.RequestBudget);
         services.AddSingleton<IBreachedPasswordChecker, HibpBreachedPasswordChecker>();
+
+        services.AddOptions<EmailOptions>()
+            .Bind(configuration.GetSection(EmailOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddOptions<LinksOptions>()
+            .Bind(configuration.GetSection(LinksOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddSingleton<IEmailSender, SmtpEmailSender>();
 
         // One key ring for every instance, so an outbox event protected by one instance can be read by another (ADR 0017).
         var applicationName = configuration["Auth:DataProtection:ApplicationName"] is { Length: > 0 } configuredName

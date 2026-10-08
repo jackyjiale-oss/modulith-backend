@@ -6,7 +6,7 @@
 
 <!-- What the module owns, what it deliberately does not do, and which other modules it talks to (only through *.Contracts). -->
 
-The sign-in and authorization module: registration with email confirmation, login, refresh-token rotation, logout, password reset and change, session management, and role-based permissions with administration of users, roles and the audit log. It is built up over Plan 2 (auth core); this page describes what has landed so far (the domain model, its persistence and the security services).
+The sign-in and authorization module: registration with email confirmation, login, refresh-token rotation, logout, password reset and change, session management, and role-based permissions with administration of users, roles and the audit log. It is built up over Plan 2 (auth core); this page describes what has landed so far (the domain model, its persistence, the security services and the email sender).
 
 - Owns: users, roles, permissions, sessions, verification codes, the auth audit log, the Data Protection key ring and the `auth` schema.
 - Does not: send localized emails (English only until Plan 3), check access tokens against session revocation on every request (ADR 0015), or support usernames, tenants or progressive lockout.
@@ -184,11 +184,19 @@ The abstractions are `internal` in `Application/Abstractions/` (the application 
 | `IBreachedPasswordChecker` | `HibpBreachedPasswordChecker` | `IsBreachedAsync` asks Have I Been Pwned with k-anonymity: it requests `https://api.pwnedpasswords.com/range/{first 5 hex characters of the uppercase SHA-1}` with `Add-Padding: true` and looks for the suffix itself; padding rows (count 0) are ignored. It uses the named client `hibp`. The whole lookup (request, headers and reading the body) has one budget of 2 seconds, also the client timeout (`HibpBreachedPasswordChecker.RequestBudget`), and the body is capped at 1 MB (a padded answer is some 40 KB). It is **fail-open**: a non-success status, the budget running out, a body over the cap or any transport error logs a warning (status code, exception type or the cap only, never the password, hash or prefix) and answers `false`. A cancelled caller token is not a failure and propagates. With `Auth:Password:CheckBreached` off it makes no request. |
 | `ISecretProtector` | `DataProtectionSecretProtector` | `Protect` and `Unprotect` encrypt a secret that must leave the process, with the Data Protection purpose `TemplateName.Auth.Secrets.v1` (ADR 0017). The same value protected twice differs; a changed value throws `CryptographicException`. Changing the purpose makes existing values unreadable. |
 
+### Email sending
+
+`IEmailSender` (`Application/Abstractions/`) is the seam every Auth email goes through: `SendAsync(EmailMessage, CancellationToken)`, where `EmailMessage(To, Subject, TextBody, HtmlBody?)` is a plain record. `SmtpEmailSender` (`Infrastructure/Email/`) implements it with MailKit's `SmtpClient`: a fresh connection per call (`SecureSocketOptions.StartTls` when `Auth:Email:UseTls` is on, otherwise none), authentication only when `Auth:Email:Username` is set, then send and disconnect. `Auth:Email:Timeout` bounds the connect and the send. It **throws** on any failure, so the outbox handler that called it fails and the event is retried; a failure while saying goodbye after the server accepted the message is ignored, so a retry cannot send the email twice. It logs one generic line (information when sent, warning with only the exception type when it failed): never the message and never the recipient, who is personal data.
+
+`AuthEmails` (`Application/Verification/`) builds the three messages, in English only until Plan 3 (decision D8): `ConfirmEmail(to, displayName, link)`, `ResetPassword(to, displayName, link)` and `RegistrationAttempted(to, displayName)` (no link: it tells the owner of an existing account that someone tried to register with their address). Each has a plain-text and an HTML body. The subjects are fixed text, so user input never reaches a header; the display name and the link are HTML-encoded in the HTML body (the link also in the `href`); and a link that is not an absolute `http` or `https` address is refused with `ArgumentException`, so a bad configuration cannot produce a `javascript:` link. The caller passes the already built link, because `Application` may not depend on `Infrastructure`: `LinksOptions` (`Application/Verification/`) turns the `Auth:Links` templates into links with `ConfirmEmailLink(token)` and `ResetPasswordLink(token)`, replacing `{token}` with the URL-encoded token.
+
+Locally, Mailpit from `docker-compose.yml` catches the mail: SMTP on `127.0.0.1:1025` and the inbox at <http://localhost:8025> (loopback only, no login).
+
 ## Configuration
 
 <!-- Configuration sections and keys the module reads, with defaults. -->
 
-`AddAuthModule` receives the `IConfiguration`; the rest of the `Auth` section (JWT, refresh token, verification, lockout) is bound as the tasks land. `Auth:Password` is validated at start-up, so an out-of-range value stops the host.
+`AddAuthModule` receives the `IConfiguration`; the rest of the `Auth` section (JWT, refresh token, verification, lockout) is bound as the tasks land. `Auth:Password`, `Auth:Email` and `Auth:Links` are validated at start-up, so an out-of-range value stops the host.
 
 | Key | Default | Purpose |
 |---|---|---|
@@ -198,6 +206,16 @@ The abstractions are `internal` in `Application/Abstractions/` (the application 
 | `Auth:Password:MaxLength` | `128` (8-128) | The longest password accepted, checked before hashing. May not be below `MinLength`. |
 | `Auth:Password:HistoryCount` | `5` (1-24) | How many of the latest passwords may not be reused, the current one included. |
 | `Auth:Password:CheckBreached` | `true` | Whether a new password is checked against Have I Been Pwned. The check fails open; `false` makes no request at all. |
+| `Auth:Email:Host` | `localhost` | The SMTP host. `appsettings.Development.json` points at Mailpit (`localhost:1025`, no TLS). |
+| `Auth:Email:Port` | `1025` (1-65535) | The SMTP port. |
+| `Auth:Email:UseTls` | `false` | Upgrade the connection with STARTTLS. Turn it on for every real server. |
+| `Auth:Email:Username` | empty (user secrets or environment) | The SMTP account. When empty the sender does not authenticate. Never set it in a file. |
+| `Auth:Email:Password` | empty (user secrets or environment) | The SMTP password. Never set it in a file. |
+| `Auth:Email:From` | `no-reply@localhost.test` | The sender address; it must be a valid email address. |
+| `Auth:Email:FromName` | `TemplateName` | The display name shown next to the sender address (up to 100 characters). |
+| `Auth:Email:Timeout` | `00:00:30` (1 second to 5 minutes) | How long connecting and sending may each take. |
+| `Auth:Links:ConfirmEmailUrl` | `http://localhost:3000/confirm-email?token={token}` | The front-end page the confirmation link opens. Must be absolute `http(s)` and hold `{token}`, which is replaced by the URL-encoded token. |
+| `Auth:Links:ResetPasswordUrl` | `http://localhost:3000/reset-password?token={token}` | The front-end page the reset link opens; same rules. |
 
 The PBKDF2 iteration count has no setting of the module: it is Identity's default (`PasswordHasherOptions.IterationCount`, ADR 0014). Only the integration test factory lowers it, through `Configure<PasswordHasherOptions>`.
 
@@ -250,7 +268,7 @@ dotnet ef migrations add {Verb}{What} \
 
 <!-- Hosted services, outbox handlers and scheduled jobs the module runs. -->
 
-None yet.
+No outbox handler exists yet. The ones that land with registration and password reset will send their emails through `IEmailSender`, so a failed send throws, the outbox keeps the message and retries it, and the email goes out once SMTP is back (see Email sending).
 
 ## Observability
 
@@ -262,7 +280,7 @@ None yet.
 
 <!-- Where the module's unit and integration tests live and what they cover. -->
 
-The module is covered by the architecture tests (`tests/TemplateName.ArchitectureTests`): layering, module boundaries, naming, documentation and translations all include `TemplateName.Modules.Auth`. Unit tests of the domain live under `tests/TemplateName.UnitTests/Auth/`. Integration tests live under `tests/TemplateName.IntegrationTests/Auth/`: `AuthPersistenceTests` covers aggregate round trips, the unique and filtered indexes, soft delete, UTC timestamps, the outbox row written with a new user, the concurrent refresh-token claim and the key ring in `auth.DataProtectionKeys`.
+The module is covered by the architecture tests (`tests/TemplateName.ArchitectureTests`): layering, module boundaries, naming, documentation and translations all include `TemplateName.Modules.Auth`. Unit tests of the domain live under `tests/TemplateName.UnitTests/Auth/`. Integration tests live under `tests/TemplateName.IntegrationTests/Auth/`: `AuthPersistenceTests` covers aggregate round trips, the unique and filtered indexes, soft delete, UTC timestamps, the outbox row written with a new user, the concurrent refresh-token claim and the key ring in `auth.DataProtectionKeys`. The email sender is covered by `AuthEmailsTests` and `EmailOptionsTests` (unit) and, against a real Mailpit container started by `MailpitFixture` (generic Testcontainers, image pinned to the tag in `docker-compose.yml`, which a test compares), by `SmtpEmailSenderTests`: text and HTML parts, sender and subject read back through Mailpit's REST API (`GET /api/v1/messages`, `GET /api/v1/message/{id}`), an unreachable server, a malformed address and a cancelled token. `RecordingEmailSender` (`tests/TemplateName.IntegrationTests/Infrastructure/`) is the test double that later API tests swap in for `IEmailSender`: it keeps the messages in `Sent`, `Clear()` empties it and `LastLinkToken(to)` returns the decoded `token=` value from the last message to an address.
 
 ## Changelog
 
