@@ -178,6 +178,27 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
     }
 
     [Fact]
+    public async Task Soft_deleted_seeded_admin_is_never_re_created()
+    {
+        await SeedWithSettingsAsync(("admin@localhost.test", AdminPassword));
+        var deleteContext = Context();
+        var admin = await deleteContext.Set<User>().SingleAsync(user => user.NormalizedEmail == "ADMIN@LOCALHOST.TEST", Ct);
+        deleteContext.Remove(admin);
+        await deleteContext.SaveChangesAsync(Ct);
+        var before = await SnapshotAsync();
+
+        await SeedWithSettingsAsync(("Admin@Localhost.Test", AdminPassword));
+
+        var users = await Context().Set<User>().IgnoreQueryFilters()
+            .Where(user => user.NormalizedEmail == "ADMIN@LOCALHOST.TEST")
+            .ToListAsync(Ct);
+        users.ShouldHaveSingleItem().Id.ShouldBe(admin.Id);
+        users[0].IsDeleted.ShouldBeTrue();
+        (await Context().Set<User>().CountAsync(Ct)).ShouldBe(0);
+        (await SnapshotAsync()).ShouldBe(before);
+    }
+
+    [Fact]
     public async Task Too_short_admin_password_fails_the_seed_without_echoing_it()
     {
         var exception = await Should.ThrowAsync<InvalidOperationException>(

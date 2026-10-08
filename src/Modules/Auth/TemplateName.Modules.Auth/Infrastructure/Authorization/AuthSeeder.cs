@@ -99,6 +99,10 @@ internal sealed partial class AuthSeeder(
         {
             LogAdministratorSeeded(logger, userId);
         }
+        else if (administrator is not null)
+        {
+            LogAdministratorExists(logger);
+        }
     }
 
     private (string Email, string Password)? ReadAdministratorSettings()
@@ -156,7 +160,9 @@ internal sealed partial class AuthSeeder(
 
     private async Task<Guid?> EnsureAdministratorAsync(string email, string password, Guid superAdminRoleId, DateTimeOffset now, CancellationToken cancellationToken)
     {
-        if (await users.GetByNormalizedEmailAsync(User.NormalizeEmail(email), cancellationToken) is not null)
+        // Soft-deleted accounts count: an administrator someone deliberately deleted must not come back on the next start just because
+        // the seed settings are still configured (the unique email index ignores deleted rows, so nothing else would stop it).
+        if (await users.ExistsByNormalizedEmailIncludingDeletedAsync(User.NormalizeEmail(email), cancellationToken))
         {
             return null;
         }
@@ -185,6 +191,11 @@ internal sealed partial class AuthSeeder(
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Seeded the administrator account {UserId}")]
     private static partial void LogAdministratorSeeded(ILogger logger, Guid userId);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "The configured seed administrator was not created: an account with that email already exists, possibly soft-deleted. Remove Auth:Seed:AdminPassword from the configuration")]
+    private static partial void LogAdministratorExists(ILogger logger);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "No administrator account seeded: Auth:Seed:AdminEmail and Auth:Seed:AdminPassword must both be set")]
     private static partial void LogAdministratorSkipped(ILogger logger);

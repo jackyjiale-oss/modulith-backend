@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Domain.Users;
 
@@ -11,6 +12,11 @@ internal sealed class UserRepository(AuthDbContext context) : IUserRepository
 
     public Task<User?> GetByNormalizedEmailAsync(string normalizedEmail, CancellationToken cancellationToken)
         => Users().SingleOrDefaultAsync(user => user.NormalizedEmail == normalizedEmail, cancellationToken);
+
+    public Task<bool> ExistsByNormalizedEmailIncludingDeletedAsync(string normalizedEmail, CancellationToken cancellationToken)
+        => context.Set<User>()
+            .IgnoreQueryFilters([ModelConventions.SoftDeleteFilterName])
+            .AnyAsync(user => user.NormalizedEmail == normalizedEmail, cancellationToken);
 
     public void Add(User user) => context.Set<User>().Add(user);
 

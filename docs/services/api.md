@@ -155,7 +155,7 @@ The endpoint decides which OpenTelemetry services are registered, so it is **rea
 |---|---|---|---|
 | `RunOnStartup` | `true` | none | Seed the Auth module after the migration step ([Start-up](#start-up)). The integration tests set `false` and seed from the harness. |
 | `AdminEmail` | empty (`admin@localhost.test` in `appsettings.Development.json`) | when seeding: a plain email address, up to 256 characters | The first administrator's email. |
-| `AdminPassword` | empty | when seeding: within `Auth:Password:MinLength`/`MaxLength` | The first administrator's password. **Never in a file**: `dotnet user-secrets set "Auth:Seed:AdminPassword" "…" --project src/Host/TemplateName.Api` or `Auth__Seed__AdminPassword`. Without it no administrator is seeded. |
+| `AdminPassword` | empty | when seeding: within `Auth:Password:MinLength`/`MaxLength` | The first administrator's password. **Never in a file**: `dotnet user-secrets set "Auth:Seed:AdminPassword" "…" --project src/Host/TemplateName.Api` or `Auth__Seed__AdminPassword`. Without it no administrator is seeded. **Remove it after the first start**: the account then exists, and an account with that email, even a soft-deleted one, is never re-created (each start logs a warning while the key is still set). |
 
 The other `Auth` keys (password rules, email, links, JWT) are listed in the [Auth module](../modules/auth.md#configuration) document.
 
