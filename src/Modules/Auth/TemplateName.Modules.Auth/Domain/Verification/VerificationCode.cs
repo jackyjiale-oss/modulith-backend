@@ -10,6 +10,9 @@ namespace TemplateName.Modules.Auth.Domain.Verification;
 /// </summary>
 internal sealed class VerificationCode : AggregateRoot<Guid>
 {
+    /// <summary>The column limit of <see cref="CreatedIp"/> (long enough for IPv6 with an IPv4 tail).</summary>
+    public const int MaxCreatedIpLength = 45;
+
     // EF Core materializes the aggregate through this constructor; callers use Issue.
     private VerificationCode()
     {
@@ -35,7 +38,10 @@ internal sealed class VerificationCode : AggregateRoot<Guid>
 
     public string? CreatedIp { get; private set; }
 
-    /// <summary>Issues a code and raises <see cref="VerificationCodeIssuedDomainEvent"/> carrying the protected token for the email.</summary>
+    /// <summary>
+    /// Issues a code and raises <see cref="VerificationCodeIssuedDomainEvent"/> carrying the protected token for the email. An address
+    /// longer than <see cref="MaxCreatedIpLength"/> is cut to it.
+    /// </summary>
     public static VerificationCode Issue(
         Guid userId,
         VerificationPurpose purpose,
@@ -57,7 +63,7 @@ internal sealed class VerificationCode : AggregateRoot<Guid>
             TokenHash = tokenHash,
             CreatedAt = now,
             ExpiresAt = now + lifetime,
-            CreatedIp = createdIp,
+            CreatedIp = createdIp is { Length: > MaxCreatedIpLength } ip ? ip[..MaxCreatedIpLength] : createdIp,
         };
 
         code.Raise(new VerificationCodeIssuedDomainEvent(code.Id, userId, purpose, target, protectedToken));

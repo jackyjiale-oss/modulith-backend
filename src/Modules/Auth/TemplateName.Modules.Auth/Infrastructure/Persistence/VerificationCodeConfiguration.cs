@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Domain.Verification;
 
@@ -16,7 +15,7 @@ internal sealed class VerificationCodeConfiguration : IEntityTypeConfiguration<V
 
         builder.Property(code => code.Target).HasMaxLength(UserConfiguration.EmailMaxLength);
         builder.Property(code => code.TokenHash).HasMaxLength(RefreshTokenConfiguration.TokenHashLength);
-        builder.Property(code => code.CreatedIp).HasMaxLength(AuthAuditLog.MaxIpAddressLength);
+        builder.Property(code => code.CreatedIp).HasMaxLength(VerificationCode.MaxCreatedIpLength);
 
         builder.HasOne<User>().WithMany().HasForeignKey(code => code.UserId).OnDelete(DeleteBehavior.Restrict);
 

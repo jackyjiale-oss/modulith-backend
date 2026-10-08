@@ -123,6 +123,21 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
     }
 
     [Fact]
+    public async Task Over_long_client_values_are_saved_cut_to_their_columns()
+    {
+        var user = NewUser("ivan@example.com");
+        var (session, _) = UserSession.Start(
+            user.Id, "pwd", "Device", new string('u', 600), new string('i', 100), user.SecurityStamp, TokenHash(1), SlidingLifetime, AbsoluteLifetime, Now);
+        await SaveAsync(user, session);
+
+        var saved = (await NewScope().GetRequiredService<ISessionRepository>().GetByIdAsync(session.Id, Ct)).ShouldNotBeNull();
+
+        // nvarchar(512) and nvarchar(45): a longer value would fail the save instead.
+        saved.UserAgent.ShouldBe(new string('u', 512));
+        saved.IpAddress.ShouldBe(new string('i', 45));
+    }
+
+    [Fact]
     public async Task Duplicate_normalized_email_violates_the_unique_index()
     {
         await SaveAsync(NewUser("bob@example.com"));

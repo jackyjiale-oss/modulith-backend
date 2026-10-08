@@ -128,4 +128,12 @@ public sealed class VerificationCodeTests
         VerificationErrors.InvalidToken.Code.ShouldBe("auth.invalid_token");
         VerificationErrors.InvalidToken.Type.ShouldBe(ErrorType.Validation);
     }
+
+    [Fact]
+    public void Issue_cuts_created_ip_to_its_column_length()
+    {
+        var code = Issue(createdIp: new string('i', 100));
+
+        code.CreatedIp.ShouldBe(new string('i', VerificationCode.MaxCreatedIpLength));
+    }
 }

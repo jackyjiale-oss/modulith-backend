@@ -229,4 +229,24 @@ public sealed class UserSessionTests
         notFound.Type.ShouldBe(ErrorType.NotFound);
         notFound.Parameters!["id"].ShouldBe(id);
     }
+
+    [Fact]
+    public void Start_cuts_device_name_user_agent_and_address_to_their_column_lengths()
+    {
+        var (session, _) = UserSession.Start(
+            Guid.NewGuid(), "pwd", new string('d', 300), new string('u', 600), new string('i', 100), Stamp, Hash(1), Sliding, Absolute, Now);
+
+        session.DeviceName.ShouldBe(new string('d', UserSession.MaxDeviceNameLength));
+        session.UserAgent.ShouldBe(new string('u', UserSession.MaxUserAgentLength));
+        session.IpAddress.ShouldBe(new string('i', UserSession.MaxIpAddressLength));
+    }
+
+    [Fact]
+    public void Start_keeps_missing_user_agent_and_address_null()
+    {
+        var (session, _) = UserSession.Start(Guid.NewGuid(), "pwd", "Pixel 9", null, null, Stamp, Hash(1), Sliding, Absolute, Now);
+
+        session.UserAgent.ShouldBeNull();
+        session.IpAddress.ShouldBeNull();
+    }
 }

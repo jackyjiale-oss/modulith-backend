@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
 using TemplateName.Modules.Auth.Domain.Sessions.Events;
@@ -12,6 +13,15 @@ namespace TemplateName.Modules.Auth.Domain.Sessions;
 /// </summary>
 internal sealed class UserSession : AggregateRoot<Guid>
 {
+    /// <summary>The column limit of <see cref="DeviceName"/>.</summary>
+    public const int MaxDeviceNameLength = 200;
+
+    /// <summary>The column limit of <see cref="UserAgent"/>.</summary>
+    public const int MaxUserAgentLength = 512;
+
+    /// <summary>The column limit of <see cref="IpAddress"/> (long enough for IPv6 with an IPv4 tail).</summary>
+    public const int MaxIpAddressLength = 45;
+
     private readonly List<RefreshToken> _refreshTokens = [];
 
     // EF Core materializes the aggregate through this constructor; callers use Start.
@@ -46,7 +56,10 @@ internal sealed class UserSession : AggregateRoot<Guid>
 
     public IReadOnlyCollection<RefreshToken> RefreshTokens => _refreshTokens.AsReadOnly();
 
-    /// <summary>Starts a session and its first refresh token (given as a hash). The session id is the future <c>sid</c> claim.</summary>
+    /// <summary>
+    /// Starts a session and its first refresh token (given as a hash). The session id is the future <c>sid</c> claim. A device name,
+    /// user agent or address longer than its column is cut to it.
+    /// </summary>
     public static (UserSession Session, RefreshToken FirstToken) Start(
         Guid userId,
         string authMethods,
@@ -67,9 +80,9 @@ internal sealed class UserSession : AggregateRoot<Guid>
             Id = SequentialGuid.Create(now),
             UserId = userId,
             AuthMethods = authMethods,
-            DeviceName = deviceName,
-            UserAgent = userAgent,
-            IpAddress = ipAddress,
+            DeviceName = Truncate(deviceName, MaxDeviceNameLength),
+            UserAgent = Truncate(userAgent, MaxUserAgentLength),
+            IpAddress = Truncate(ipAddress, MaxIpAddressLength),
             SecurityStamp = securityStamp,
             CreatedAt = now,
             LastSeenAt = now,
@@ -147,6 +160,11 @@ internal sealed class UserSession : AggregateRoot<Guid>
     }
 
     private static DateTimeOffset Min(DateTimeOffset left, DateTimeOffset right) => left <= right ? left : right;
+
+    // Client-supplied values (the User-Agent header, the device name) are cut to their columns rather than failing the save.
+    [return: NotNullIfNotNull(nameof(value))]
+    private static string? Truncate(string? value, int maxLength) =>
+        value is { } text && text.Length > maxLength ? text[..maxLength] : value;
 
     private RefreshToken IssueToken(byte[] tokenHash, TimeSpan slidingLifetime, DateTimeOffset now)
     {
