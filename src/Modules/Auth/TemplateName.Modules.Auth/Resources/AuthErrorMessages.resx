@@ -60,4 +60,16 @@
   <data name="auth.current_password_incorrect" xml:space="preserve">
     <value>The current password is incorrect.</value>
   </data>
+  <data name="auth.role_not_found" xml:space="preserve">
+    <value>Role '{id}' was not found.</value>
+  </data>
+  <data name="auth.role_name_taken" xml:space="preserve">
+    <value>A role named '{name}' already exists.</value>
+  </data>
+  <data name="auth.system_role_protected" xml:space="preserve">
+    <value>This is a system role and cannot be changed this way.</value>
+  </data>
+  <data name="auth.permission_not_found" xml:space="preserve">
+    <value>One or more of the permissions do not exist.</value>
+  </data>
 </root>

@@ -60,4 +60,16 @@
   <data name="auth.current_password_incorrect" xml:space="preserve">
     <value>Kata laluan semasa tidak betul.</value>
   </data>
+  <data name="auth.role_not_found" xml:space="preserve">
+    <value>Peranan '{id}' tidak dijumpai.</value>
+  </data>
+  <data name="auth.role_name_taken" xml:space="preserve">
+    <value>Peranan bernama '{name}' sudah wujud.</value>
+  </data>
+  <data name="auth.system_role_protected" xml:space="preserve">
+    <value>Ini ialah peranan sistem dan tidak boleh diubah dengan cara ini.</value>
+  </data>
+  <data name="auth.permission_not_found" xml:space="preserve">
+    <value>Satu atau lebih kebenaran tidak wujud.</value>
+  </data>
 </root>

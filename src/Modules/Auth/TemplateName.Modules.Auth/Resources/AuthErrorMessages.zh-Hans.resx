@@ -60,4 +60,16 @@
   <data name="auth.current_password_incorrect" xml:space="preserve">
     <value>当前密码不正确。</value>
   </data>
+  <data name="auth.role_not_found" xml:space="preserve">
+    <value>未找到角色“{id}”。</value>
+  </data>
+  <data name="auth.role_name_taken" xml:space="preserve">
+    <value>名为“{name}”的角色已存在。</value>
+  </data>
+  <data name="auth.system_role_protected" xml:space="preserve">
+    <value>这是系统角色，不能通过此方式修改。</value>
+  </data>
+  <data name="auth.permission_not_found" xml:space="preserve">
+    <value>一个或多个权限不存在。</value>
+  </data>
 </root>

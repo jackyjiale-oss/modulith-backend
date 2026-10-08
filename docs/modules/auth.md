@@ -29,7 +29,7 @@ None yet. The routes planned for this module are `/api/v1/auth/...` (self-servic
 
 <!-- Aggregates, their invariants and life cycle. Draw state machines as a Mermaid stateDiagram-v2. -->
 
-`User` (`Domain/Users/`) is the first aggregate; `Role`, `UserSession` and `VerificationCode` arrive in the following tasks. A user is identified by its email, kept trimmed (`Email`) and upper-case (`NormalizedEmail`, the form used for lookups and the unique index). It owns its password history (`PasswordHistoryEntry`) and its role assignments (`UserRole`), and it is audited and soft-deleted.
+`User` (`Domain/Users/`) is the first aggregate and `Role` (`Domain/Roles/`) the second; `UserSession` and `VerificationCode` arrive in the following tasks. A user is identified by its email, kept trimmed (`Email`) and upper-case (`NormalizedEmail`, the form used for lookups and the unique index). It owns its password history (`PasswordHistoryEntry`) and its role assignments (`UserRole`), and it is audited and soft-deleted.
 
 - **Registration:** `User.Register(email, displayName, locale, passwordHash, now)` creates an active, unconfirmed user with a new `SecurityStamp` and the time zone `UTC`. A user created by an administrator has no `PasswordHash` (valid; the history is then empty); a non-null hash is the first history entry.
 - **Email confirmation:** `ConfirmEmail` is idempotent; only the first call raises `EmailConfirmedDomainEvent`. `EnsureCanSignIn` refuses a suspended user (`auth.account_inactive`) and an unconfirmed one (`auth.email_not_verified`).
@@ -37,7 +37,7 @@ None yet. The routes planned for this module are `/api/v1/auth/...` (self-servic
 - **Password:** `ChangePassword` rotates `SecurityStamp`, appends the new hash to the history and keeps at most `historyCount` entries including the current one (the oldest are dropped). The reuse check itself runs in the application layer against the history.
 - **Suspension:** `Suspend` rotates `SecurityStamp` (so issued tokens stop matching) and is idempotent; `Reinstate` makes the account active again and is idempotent.
 - **Registration attempts:** `NoteRegistrationAttempt` raises `RegistrationAttemptedDomainEvent` and changes no state, so the registration answer stays the same for known and unknown addresses.
-- **Roles:** `AssignRole` and `RemoveRole` are idempotent. A role is referred to by id; the `Role` aggregate arrives in a later task.
+- **Roles:** `AssignRole` and `RemoveRole` are idempotent. A user refers to a role by id (`UserRole`); the `Role` aggregate is described below.
 
 `UserStatus` (`Domain/Users/`) is persisted by its numeric value, so a new state is appended and existing values are never renumbered.
 
@@ -48,7 +48,31 @@ stateDiagram-v2
     Suspended --> Active: reinstate
 ```
 
-The remaining aggregates (`Role`, `UserSession`, `VerificationCode`) arrive in the following tasks.
+`Role` (`Domain/Roles/`) is a named set of permissions, audited and soft-deleted, with a `RowVersion` for optimistic concurrency. `Permission` is a plain entity (`Code`, `Module`, `Name`, `Description`, `IsDeprecated`); `RolePermission(RoleId, PermissionId)` is a grant.
+
+- **Names:** `Role.Create(name, description, now)` trims the name and stores `NormalizedName` (upper-case, the form for the unique index); a blank name is a programming error (`ArgumentException`), because the application validator rejects it first.
+- **System roles:** `SystemRoles` names `SuperAdmin`, `Admin` and `User`. `Role.CreateSystem` builds them for the seeder. A system role cannot be renamed (`UpdateDetails`) or deleted (`MarkDeleted`): both answer `auth.system_role_protected`. `MarkDeleted` only checks the rule; the save interceptor performs the soft delete.
+- **Permission set:** `SetPermissions` replaces the set, ignores duplicates and is idempotent; it is refused for `SuperAdmin` (`auth.system_role_protected`), whose set the seeder keeps equal to every declared permission through `SyncPermissions` (same replacement, no protection, internal use only).
+- **Permissions:** a permission that is no longer declared is deprecated (`SetDeprecated`), never deleted, so existing grants stay readable.
+
+### Permissions
+
+Codes are `module.resource.action` in snake case. Each module declares its own through `IPermissionSource` (see [Application.Common](../building-blocks/application-common.md)); the Auth module declares these in `Application/AuthPermissions.cs` and `AuthPermissionSource` (module `auth`, English names). The source is registered, and the table synced, when the seeding task lands.
+
+| Code | Allows |
+|---|---|
+| `auth.user.view` | List users and read their details. |
+| `auth.user.create` | Create a user account on behalf of someone. |
+| `auth.user.lock` | Suspend and reinstate user accounts. |
+| `auth.user.reset_password` | Send a password reset to a user. |
+| `auth.user.revoke_sessions` | End the sessions of a user. |
+| `auth.user.assign_roles` | Add and remove the roles of a user. |
+| `auth.role.view` | List roles and read their permissions. |
+| `auth.role.manage` | Create, change and delete roles and set their permissions. |
+| `auth.permission.view` | List the permissions that modules declare. |
+| `auth.audit.view` | Read the authentication and administration audit log. |
+
+The remaining aggregates (`UserSession`, `VerificationCode`) arrive in the following tasks.
 
 ## Error codes
 
@@ -63,8 +87,12 @@ The remaining aggregates (`Role`, `UserSession`, `VerificationCode`) arrive in t
 | `auth.password_reused` | 400 | — | The password was used recently. Choose a different one. |
 | `auth.password_breached` | 400 | — | The password appears in a known data breach. Choose a different one. |
 | `auth.current_password_incorrect` | 400 | — | The current password is incorrect. |
+| `auth.role_not_found` | 404 | `id` | Role '{id}' was not found. |
+| `auth.role_name_taken` | 409 | `name` | A role named '{name}' already exists. |
+| `auth.system_role_protected` | 409 | — | This is a system role and cannot be changed this way. |
+| `auth.permission_not_found` | 400 | — | One or more of the permissions do not exist. |
 
-The user codes are declared in `Domain/Users/UserErrors.cs`. Their messages are in `Resources/AuthErrorMessages.resx` (English) with `AuthErrorMessages.ms.resx` and `AuthErrorMessages.zh-Hans.resx` (drafts awaiting native review); every further code is added to all three files in the same change that introduces it. A locked account answers with `auth.invalid_credentials`, never a distinct code (it would reveal that the email exists).
+The user codes are declared in `Domain/Users/UserErrors.cs` and the role and permission codes in `Domain/Roles/RoleErrors.cs`. Their messages are in `Resources/AuthErrorMessages.resx` (English) with `AuthErrorMessages.ms.resx` and `AuthErrorMessages.zh-Hans.resx` (drafts awaiting native review); every further code is added to all three files in the same change that introduces it. A locked account answers with `auth.invalid_credentials`, never a distinct code (it would reveal that the email exists).
 
 ## Events
 
