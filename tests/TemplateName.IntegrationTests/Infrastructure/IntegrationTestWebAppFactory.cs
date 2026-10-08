@@ -14,6 +14,7 @@ using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.IntegrationTests.Outbox;
 using TemplateName.IntegrationTests.Persistence;
+using TemplateName.Modules.Auth;
 using Testcontainers.MsSql;
 
 namespace TemplateName.IntegrationTests.Infrastructure;
@@ -40,6 +41,9 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     /// <summary>The user every host built by this factory sees; anonymous until a test sets <see cref="TestCurrentUser.UserId"/>.</summary>
     public TestCurrentUser CurrentUser { get; } = new();
 
+    /// <summary>A permission source tests change to declare or drop permissions before seeding again; empty at the start of every test.</summary>
+    public TestPermissionSource PermissionSource { get; } = new();
+
     /// <summary>The events the outbox test handlers have received.</summary>
     public EventRecorder EventRecorder { get; } = new();
 
@@ -65,8 +69,9 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
         _testsDatabase = new ResettableDatabase(ConnectionStringFor(TestsDatabaseName));
         _persistenceTestsDatabase = new ResettableDatabase(ConnectionStringFor(PersistenceTestsDatabaseName));
 
-        // Reading Services builds and starts the host.
+        // Reading Services builds and starts the host. The host does not seed on start (Auth:Seed:RunOnStartup is off), so seed here.
         await Services.MigrateModuleDatabasesAsync(cancellationToken);
+        await Services.SeedAuthModuleAsync(cancellationToken);
         await using var scope = Services.CreateAsyncScope();
         await scope.ServiceProvider.GetRequiredService<TestDbContext>().Database.EnsureCreatedAsync(cancellationToken);
     }
@@ -90,6 +95,7 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
 
         // Host settings, not an in-memory source, so tests can override them with UseSetting on a derived factory.
         builder.UseSetting("RateLimiting:GlobalPermitLimit", "100000");
+        builder.UseSetting("Auth:Seed:RunOnStartup", "false");
         builder.UseSetting("ConnectionStrings:Database", TestsDatabase.ConnectionString);
         builder.UseSetting($"ConnectionStrings:{PersistenceTestsConnectionStringName}", PersistenceTestsDatabase.ConnectionString);
         builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
@@ -110,6 +116,7 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.AddModuleDbContext<TestDbContext>(TestDbContext.Schema, PersistenceTestsConnectionStringName, includeInMigrations: false);
             services.AddApplicationHandlers(typeof(IntegrationTestWebAppFactory).Assembly);
             services.AddOutbox<TestDbContext>(typeof(IntegrationTestWebAppFactory).Assembly);
+            services.AddSingleton<IPermissionSource>(PermissionSource);
             services.AddSingleton(EventRecorder);
             services.AddSingleton(FlakySwitch);
             services.AddSingleton(HandlerGate);

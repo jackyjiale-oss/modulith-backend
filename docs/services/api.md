@@ -1,6 +1,6 @@
 # API host (`TemplateName.Api`)
 
-The one deployable process: `src/Host/TemplateName.Api`. `Program.cs` registers the building blocks and modules, builds the middleware pipeline, maps health checks, OpenAPI and the module endpoints under `/api/v1`, and (in Development) migrates the databases on start. This page lists what the host does and every setting it reads. Architecture: [`docs/architecture/overview.md`](../architecture/overview.md).
+The one deployable process: `src/Host/TemplateName.Api`. `Program.cs` registers the building blocks and modules, builds the middleware pipeline, maps health checks, OpenAPI and the module endpoints under `/api/v1`, (in Development) migrates the databases on start, and seeds the Auth module's roles and permissions. This page lists what the host does and every setting it reads. Architecture: [`docs/architecture/overview.md`](../architecture/overview.md).
 
 ## Service registration
 
@@ -16,9 +16,17 @@ Order matters; `Program.cs` marks it with comments.
 | 6 | `AddOpenApi("v1")` | The OpenAPI document `v1` |
 | 7 | `AddHealthChecks()` | Health checks; each module context adds its own `ready` check |
 | 8 | `AddHttpSecurity(configuration)` | CORS, the global rate limiter, forwarded headers |
-| 9 | `AddSampleModule()` (one line per module) | The module's context, outbox, handlers, validators and error messages |
+| — | *(Auth plan)* `AddPermissionAuthorization()` | The permission authorization handler behind `RequirePermission(code)` and the fallback policy: every endpoint requires an authenticated user unless it says `.AllowAnonymous()` ([web-common](../building-blocks/web-common.md)). Not called yet: it lands with `UseAuthentication`/`UseAuthorization` in the pipeline, because once authorization services are registered `WebApplication` adds `UseAuthorization` ahead of `UseRouting` by itself (unless the pipeline calls it), where the fallback policy would answer 401 to every request. |
+| 9 | `AddAuthModule(configuration)`, `AddSampleModule()` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme, the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)) |
 | 10 | `AddOptions<KestrelServerOptions>()…Bind("Kestrel")` | Binds the whole `Kestrel` section lazily, so `Kestrel:Limits:*` apply and test overrides work |
 | 11 | `AddApplicationDecorators()` | Validation and logging decorators around every handler registered above; always last |
+
+## Start-up
+
+Before the pipeline serves requests, the host runs two steps, in this order:
+
+1. **Migrations**, when `Database:ApplyMigrationsOnStartup` is on (Development; see [Migrations](#migrations)).
+2. **Auth seeding**, when `Auth:Seed:RunOnStartup` is on (the default in every environment): `SeedAuthModuleAsync` creates the system roles, syncs the permissions every module declares, keeps `SuperAdmin` on every permission and, when `Auth:Seed:AdminEmail` and `Auth:Seed:AdminPassword` are both set, creates the first administrator. It is idempotent and runs under a database lock, so several instances may start together. An invalid permission declaration or an invalid `Auth:Seed` value stops the host with a message naming it. The database must already be migrated: outside Development, run the `migrate` mode first (Plan 6) or turn the key off and seed from there. Details: [Auth module](../modules/auth.md#background-processing).
 
 ## Pipeline
 
@@ -141,6 +149,16 @@ The endpoint decides which OpenTelemetry services are registered, so it is **rea
 
 `Program.cs` binds the whole `Kestrel` section to `KestrelServerOptions` explicitly (Kestrel itself binds only endpoints from it), so any `Kestrel:Limits:*` key works.
 
+### `Auth:Seed`
+
+| Key | Default | Validation | Meaning |
+|---|---|---|---|
+| `RunOnStartup` | `true` | none | Seed the Auth module after the migration step ([Start-up](#start-up)). The integration tests set `false` and seed from the harness. |
+| `AdminEmail` | empty (`admin@localhost.test` in `appsettings.Development.json`) | when seeding: a plain email address, up to 256 characters | The first administrator's email. |
+| `AdminPassword` | empty | when seeding: within `Auth:Password:MinLength`/`MaxLength` | The first administrator's password. **Never in a file**: `dotnet user-secrets set "Auth:Seed:AdminPassword" "…" --project src/Host/TemplateName.Api` or `Auth__Seed__AdminPassword`. Without it no administrator is seeded. |
+
+The other `Auth` keys (password rules, email, links, JWT) are listed in the [Auth module](../modules/auth.md#configuration) document.
+
 ### Other keys
 
 | Key | Default | Meaning |
@@ -171,6 +189,7 @@ Outside Production (Development, Testing, and any other non-Production environme
 | HSTS + HTTPS redirection | no | yes | yes |
 | `exceptionDetails` in 500 responses | yes | no | no |
 | OpenAPI + Scalar | yes | yes | no |
+| Auth seeding on start | yes; the administrator `admin@localhost.test` once its password is in user secrets | no (the test harness seeds after each reset) | yes (roles and permissions; an administrator only when both settings are supplied) |
 | JWT signing key (`Auth:Jwt:SigningKeys`) | an ephemeral key when none is configured | an ephemeral key when none is configured | required: the host does not start without one ([Auth module](../modules/auth.md#access-tokens)) |
 
 Local URLs: `https://localhost:5001` and `http://localhost:5000`.

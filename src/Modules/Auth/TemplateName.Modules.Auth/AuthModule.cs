@@ -1,18 +1,24 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Caching.Hybrid;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
+using TemplateName.Modules.Auth.Application;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Application.Verification;
 using TemplateName.Modules.Auth.Endpoints;
+using TemplateName.Modules.Auth.Infrastructure.Authorization;
 using TemplateName.Modules.Auth.Infrastructure.Email;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
 using TemplateName.Modules.Auth.Infrastructure.Security;
@@ -30,8 +36,8 @@ public static class AuthModule
     /// <summary>
     /// Registers the module's context (schema <c>auth</c>), outbox, handlers and validators, repositories, audit writer, error messages
     /// (<c>AuthErrorMessages</c>), the SMTP email sender, the access tokens with the JWT bearer handler as the default authentication scheme,
-    /// and the Data Protection key ring stored in <c>auth.DataProtectionKeys</c>. Call it after <c>AddInfrastructureCommon</c> and before
-    /// <c>AddApplicationDecorators</c>.
+    /// the permission checker with its cache, the permission source and the seeder, and the Data Protection key ring stored in
+    /// <c>auth.DataProtectionKeys</c>. Call it after <c>AddInfrastructureCommon</c> and before <c>AddApplicationDecorators</c>.
     /// </summary>
     public static IServiceCollection AddAuthModule(this IServiceCollection services, IConfiguration configuration)
     {
@@ -74,6 +80,7 @@ public static class AuthModule
         services.AddSingleton<IEmailSender, SmtpEmailSender>();
 
         AddAccessTokens(services, configuration);
+        AddPermissions(services, configuration);
 
         // One key ring for every instance, so an outbox event protected by one instance can be read by another (ADR 0017).
         var applicationName = configuration["Auth:DataProtection:ApplicationName"] is { Length: > 0 } configuredName
@@ -84,6 +91,21 @@ public static class AuthModule
             .PersistKeysToDbContext<AuthDbContext>();
 
         return services;
+    }
+
+    /// <summary>
+    /// Seeds the module in one transaction: the system roles (<c>SuperAdmin</c>, <c>Admin</c>, <c>User</c>); the permissions every
+    /// registered <c>IPermissionSource</c> declares (new ones inserted, names and descriptions updated, undeclared ones deprecated, never
+    /// deleted; an invalid definition fails the run); every non-deprecated permission for <c>SuperAdmin</c> on each run; the default
+    /// permissions for <c>Admin</c> only when the role is created; and, when <c>Auth:Seed:AdminEmail</c> and <c>Auth:Seed:AdminPassword</c>
+    /// are both set and no user has that email, a confirmed <c>SuperAdmin</c> user. Idempotent. The host calls it after the migration
+    /// step when <c>Auth:Seed:RunOnStartup</c> is on; the test harness calls it after each database reset.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A permission definition or an <c>Auth:Seed</c> setting is invalid.</exception>
+    public static async Task SeedAuthModuleAsync(this IServiceProvider services, CancellationToken cancellationToken)
+    {
+        await using var scope = services.CreateAsyncScope();
+        await scope.ServiceProvider.GetRequiredService<AuthSeeder>().SeedAsync(cancellationToken);
     }
 
     /// <summary>Maps the module's endpoints; <paramref name="app"/> is the host's <c>/api/v1</c> group. Empty until the first endpoint lands.</summary>
@@ -125,5 +147,28 @@ public static class AuthModule
                 bearer.MapInboundClaims = false;
                 bearer.TokenValidationParameters = JwtValidation.CreateParameters(jwt.Value, keys, timeProvider);
             });
+    }
+
+    /// <summary>
+    /// Registers the module's permission source (Ruling R2), the permission checker and cache (one singleton for
+    /// <c>IPermissionChecker</c> and <c>IPermissionCache</c>) on an in-memory <see cref="HybridCache"/> whose clock is the application's
+    /// <see cref="TimeProvider"/>, and the seeder with <c>Auth:Seed</c>.
+    /// </summary>
+    internal static void AddPermissions(IServiceCollection services, IConfiguration configuration)
+    {
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IPermissionSource, AuthPermissionSource>());
+
+        // In memory only until Plan 5 adds a distributed cache. The local entries live in the shared IMemoryCache, which expires them
+        // by its own clock; give it the application's, so cache lifetimes follow TimeProvider like everything else (and tests can move it).
+        services.AddHybridCache();
+        services.AddOptions<MemoryCacheOptions>()
+            .Configure<TimeProvider>((options, timeProvider) => options.Clock = new TimeProviderCacheClock(timeProvider));
+        services.AddSingleton<PermissionChecker>();
+        services.AddSingleton<IPermissionChecker>(serviceProvider => serviceProvider.GetRequiredService<PermissionChecker>());
+        services.AddSingleton<IPermissionCache>(serviceProvider => serviceProvider.GetRequiredService<PermissionChecker>());
+
+        services.AddOptions<SeedOptions>().Bind(configuration.GetSection(SeedOptions.SectionName));
+        services.AddScoped<PermissionSynchronizer>();
+        services.AddScoped<AuthSeeder>();
     }
 }

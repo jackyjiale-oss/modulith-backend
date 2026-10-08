@@ -26,6 +26,9 @@ builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.C
 builder.Services.AddOpenApi("v1");
 builder.Services.AddHealthChecks();
 builder.Services.AddHttpSecurity(builder.Configuration);
+// AddPermissionAuthorization() (Auth plan) goes here, in the same change that adds UseAuthentication/UseAuthorization below: once
+// authorization services exist, WebApplication inserts UseAuthorization ahead of UseRouting by itself unless the pipeline calls it, and
+// the fallback policy would then answer 401 to every request, health checks included.
 // Module registrations
 builder.Services.AddAuthModule(builder.Configuration);
 builder.Services.AddSampleModule();
@@ -42,6 +45,12 @@ var app = builder.Build();
 if (app.Services.GetRequiredService<IOptions<DatabaseOptions>>().Value.ApplyMigrationsOnStartup)
 {
     await app.Services.MigrateModuleDatabasesAsync(app.Lifetime.ApplicationStopping);
+}
+
+// Seed the system roles, the declared permissions and, when configured, the first administrator (Auth:Seed:RunOnStartup, default on).
+if (app.Configuration.GetValue("Auth:Seed:RunOnStartup", defaultValue: true))
+{
+    await app.Services.SeedAuthModuleAsync(app.Lifetime.ApplicationStopping);
 }
 
 // Pipeline order matters; later tasks insert at the marked slots.

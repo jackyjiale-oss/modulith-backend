@@ -1,12 +1,16 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Web.Common;
 using TemplateName.Web.Common.Identity;
+using TemplateName.Web.Common.Security;
 
 namespace TemplateName.UnitTests.Web;
 
@@ -32,6 +36,20 @@ public sealed class WebCommonServiceCollectionExtensionsTests
 
         scope.ServiceProvider.GetRequiredService<ICurrentUser>().ShouldBeOfType<HttpContextCurrentUser>();
         provider.GetRequiredService<IOptions<RouteHandlerOptions>>().Value.ThrowOnBadRequest.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Permission_authorization_requires_an_authenticated_user_by_default_and_registers_the_handler()
+    {
+        var services = new ServiceCollection().AddLogging().AddWebCommon().AddPermissionAuthorization();
+        services.AddSingleton(Substitute.For<IPermissionChecker>());
+        await using var provider = services.BuildServiceProvider(validateScopes: true);
+        await using var scope = provider.CreateAsyncScope();
+
+        var fallbackPolicy = await provider.GetRequiredService<IAuthorizationPolicyProvider>().GetFallbackPolicyAsync();
+
+        fallbackPolicy.ShouldNotBeNull().Requirements.ShouldHaveSingleItem().ShouldBeOfType<DenyAnonymousAuthorizationRequirement>();
+        scope.ServiceProvider.GetServices<IAuthorizationHandler>().OfType<PermissionAuthorizationHandler>().ShouldHaveSingleItem();
     }
 
     private static ServiceProvider CreateProvider()

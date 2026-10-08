@@ -33,7 +33,7 @@ Code: `src/BuildingBlocks/TemplateName.Application.Common/`.
 |---|---|
 | `ICurrentUser` | `Guid? UserId`, `bool IsAuthenticated`. Web.Common implements it from the `sub` (or name identifier) claim. |
 | `PermissionDefinition` | `sealed record (Code, Module, Name, Description)`: one permission a module declares. `Code` is `module.resource.action` in snake case (`auth.user.view`); `Module` is its first segment; `Name` and `Description` are English text for administration screens. |
-| `IPermissionSource` | `IReadOnlyCollection<PermissionDefinition> Permissions`. Any module registers one as a singleton; the Auth module collects every registered source and syncs the definitions into its permission table at startup. |
+| `IPermissionSource` | `IReadOnlyCollection<PermissionDefinition> Permissions`. Any module registers one as a singleton; the Auth module collects every registered source and syncs the definitions into its permission table at startup. A definition that breaks the rules above (or a code declared twice, by any sources) stops the sync with a message naming the code and the source ([Auth module](../modules/auth.md#background-processing)). |
 | `IPermissionChecker` | `Task<bool> HasPermissionAsync(Guid userId, string permission, CancellationToken)`: whether the user holds the permission through any role. The Auth module implements it (cached per user, ADR 0016); other modules depend on the interface only. |
 | `IDbConnectionFactory` | `Task<DbConnection> OpenConnectionAsync(CancellationToken)`: an open connection for Dapper reads. Infrastructure.Common implements it. |
 

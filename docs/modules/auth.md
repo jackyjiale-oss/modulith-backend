@@ -6,14 +6,14 @@
 
 <!-- What the module owns, what it deliberately does not do, and which other modules it talks to (only through *.Contracts). -->
 
-The sign-in and authorization module: registration with email confirmation, login, refresh-token rotation, logout, password reset and change, session management, and role-based permissions with administration of users, roles and the audit log. It is built up over Plan 2 (auth core); this page describes what has landed so far (the domain model, its persistence, the security services, the email sender and the access tokens with their JWKS).
+The sign-in and authorization module: registration with email confirmation, login, refresh-token rotation, logout, password reset and change, session management, and role-based permissions with administration of users, roles and the audit log. It is built up over Plan 2 (auth core); this page describes what has landed so far (the domain model, its persistence, the security services, the email sender, the access tokens with their JWKS, and the permission checks with their cache and the seeding).
 
 - Owns: users, roles, permissions, sessions, verification codes, the auth audit log, the Data Protection key ring and the `auth` schema.
 - Does not: send localized emails (English only until Plan 3), check access tokens against session revocation on every request (ADR 0015), or support usernames, tenants or progressive lockout.
 - Talks to: no other module. It has no `TemplateName.Modules.Auth.Contracts` project yet, because nothing outside the module needs its data; Plan 3 adds the integration events.
 - Decisions: [ADR 0014](../adr/0014-own-identity-model-with-identity-password-hasher.md) (own identity model), [ADR 0015](../adr/0015-es256-jwt-with-configured-signing-keys.md) (ES256 tokens, configured keys), [ADR 0016](../adr/0016-server-side-permissions-with-per-user-cache.md) (permissions resolved server-side), [ADR 0017](../adr/0017-outbox-secrets-protected-with-data-protection.md) (outbox secrets protected with Data Protection).
 
-Code: `src/Modules/Auth/TemplateName.Modules.Auth/`. The host calls `AddAuthModule(configuration)`, maps `MapAuthEndpoints()` on the `/api/v1` group and `MapAuthWellKnownEndpoints()` on the application root (for `/.well-known/jwks.json`). Today the module registers its persistence (context, outbox, repositories, audit writer, Data Protection key ring; see [Data](#data)), the security services (see [Security services](#security-services)), the access tokens and the JWT bearer handler (see [Access tokens](#access-tokens)), its handlers and its error messages; `MapAuthEndpoints` maps nothing yet.
+Code: `src/Modules/Auth/TemplateName.Modules.Auth/`. The host calls `AddAuthModule(configuration)`, maps `MapAuthEndpoints()` on the `/api/v1` group and `MapAuthWellKnownEndpoints()` on the application root (for `/.well-known/jwks.json`). Today the module registers its persistence (context, outbox, repositories, audit writer, Data Protection key ring; see [Data](#data)), the security services (see [Security services](#security-services)), the access tokens and the JWT bearer handler (see [Access tokens](#access-tokens)), the permission checker, its cache and the seeder (see [Permission checks](#permission-checks)), its handlers and its error messages; `MapAuthEndpoints` maps nothing yet. The host also calls `SeedAuthModuleAsync(cancellationToken)` after the migration step (see [Background processing](#background-processing)).
 
 ## Endpoints
 
@@ -57,7 +57,7 @@ stateDiagram-v2
 
 ### Permissions
 
-Codes are `module.resource.action` in snake case. Each module declares its own through `IPermissionSource` (see [Application.Common](../building-blocks/application-common.md)); the Auth module declares these in `Application/AuthPermissions.cs` and `AuthPermissionSource` (module `auth`, English names). The source is registered, and the table synced, when the seeding task lands.
+Codes are `module.resource.action` in snake case. Each module declares its own through `IPermissionSource` (see [Application.Common](../building-blocks/application-common.md)), registered as a singleton; the Auth module declares these in `Application/AuthPermissions.cs` and `AuthPermissionSource` (module `auth`, English names), which `AddAuthModule` registers. The seeder syncs every registered source into `auth.Permissions` (see [Background processing](#background-processing)).
 
 | Code | Allows |
 |---|---|
@@ -71,6 +71,8 @@ Codes are `module.resource.action` in snake case. Each module declares its own t
 | `auth.role.manage` | Create, change and delete roles and set their permissions. |
 | `auth.permission.view` | List the permissions that modules declare. |
 | `auth.audit.view` | Read the authentication and administration audit log. |
+
+The seeded system roles hold: `SuperAdmin` every permission that is not deprecated, kept equal to that set on each seeding run; `Admin` the defaults `auth.user.view`, `auth.user.create`, `auth.user.lock`, `auth.user.reset_password`, `auth.user.revoke_sessions`, `auth.role.view`, `auth.permission.view` and `auth.audit.view`, given only when the role is first created (later changes by administrators are kept); `User` nothing.
 
 `UserSession` (`Domain/Sessions/`) is one sign-in on one device, and also the refresh-token family (decision D2: there is no `FamilyId`). Its id is the `sid` claim of the access tokens. It owns its `RefreshToken` chain; a token stores only the SHA-256 hash (`TokenHash`), never the token.
 
@@ -223,11 +225,26 @@ The output (`-----BEGIN PRIVATE KEY-----` ...) is the `PrivateKeyPem` of `Auth:J
 
 Locally, Mailpit from `docker-compose.yml` catches the mail: SMTP on `127.0.0.1:1025` and the inbox at <http://localhost:8025> (loopback only, no login).
 
+### Permission checks
+
+Permissions are resolved on the server for every request (ADR 0016); the access token carries none. An endpoint asks for one with `.RequirePermission(code)` ([Web.Common](../building-blocks/web-common.md)), whose handler calls `IPermissionChecker.HasPermissionAsync(userId, code, cancellationToken)`.
+
+- **Checker.** `PermissionChecker` (`Infrastructure/Authorization/`, one singleton registered as both `IPermissionChecker` and `IPermissionCache`) loads a user's effective codes with one Dapper query over `Users`, `UserRoles`, `Roles`, `RolePermissions` and `Permissions`: the user must be `Active` and not soft-deleted, the role not soft-deleted, and the permission not deprecated. Dapper bypasses the EF Core filters, so the query writes `IsDeleted = 0` itself (ADR 0006). The result is the union over all the user's roles. An unknown, suspended or soft-deleted user gets the empty set; a deprecated permission is never granted, even through an old grant. Codes are compared exactly (ordinal), so `AUTH.USER.VIEW` is not `auth.user.view`.
+- **Cache.** The set is a sorted `string[]` in `HybridCache` under `perm:{userId}`, with `Expiration` and `LocalCacheExpiration` both 30 seconds (`PermissionCache.Lifetime`); a check is a binary search in it. The empty set is cached too. No distributed cache is registered, so the cache is in memory per instance until Plan 5. `HybridCache` keeps its local entries in the shared `IMemoryCache`, whose clock `AddAuthModule` sets to the application's `TimeProvider` (`TimeProviderCacheClock`), so the 30 seconds follow the same clock as everything else (and a test clock moves them).
+- **Invalidation.** `IPermissionCache.InvalidateUsersAsync(userIds, cancellationToken)` removes each user's key (`HybridCache.RemoveAsync`), so the next check reloads. Every handler that changes a role's permissions or a user's role assignments must call it for the affected users after saving (`IRoleRepository.GetUserIdsInRoleAsync` lists a role's users). The seeder does not: it runs at start-up, before the instance serves requests, when its in-memory cache is empty.
+
+**Security notes.**
+
+- **Staleness across instances.** `RemoveAsync` reaches only the instance that runs it while the cache is in memory. Every other instance keeps using the set it loaded for up to 30 seconds: a removed role or permission can still be used there for that long, and a new one may not work there yet. Plan 5's distributed cache makes the removal reach every instance (ADR 0016). If 30 seconds is too long for a deployment, run one instance until then.
+- **A load racing a change.** A check that started reading before a change was saved can store the old set just after the invalidation removed the key; that set then lives until its 30 seconds run out. The window is the length of one query.
+- **Fail closed.** The handler grants nothing to an anonymous caller or a principal without a user id, and a database error while loading propagates (500) instead of granting. A deprecated permission, a soft-deleted role and a suspended or soft-deleted user grant nothing, whatever the grant rows say.
+- **No permissions in the token.** A stolen access token is limited to what the user may do now, not what they could do when it was issued; a revoked session's token still works until it expires (ADR 0015, D9).
+
 ## Configuration
 
 <!-- Configuration sections and keys the module reads, with defaults. -->
 
-`AddAuthModule` receives the `IConfiguration`; the rest of the `Auth` section (refresh token, verification, lockout) is bound as the tasks land. `Auth:Password`, `Auth:Email`, `Auth:Links` and `Auth:Jwt` are validated at start-up, so an out-of-range value or a bad signing key stops the host.
+`AddAuthModule` receives the `IConfiguration`; the rest of the `Auth` section (refresh token, verification, lockout) is bound as the tasks land. `Auth:Password`, `Auth:Email`, `Auth:Links` and `Auth:Jwt` are validated at start-up, so an out-of-range value or a bad signing key stops the host. `Auth:Seed` is checked when the seeder runs.
 
 | Key | Default | Purpose |
 |---|---|---|
@@ -252,6 +269,11 @@ Locally, Mailpit from `docker-compose.yml` catches the mail: SMTP on `127.0.0.1:
 | `Auth:Jwt:AccessTokenLifetime` | `00:10:00` (1 minute to 1 hour) | How long an access token is valid. |
 | `Auth:Jwt:ClockSkew` | `00:00:30` (0 to 5 minutes) | The tolerance for clock differences on `exp` and `nbf`. |
 | `Auth:Jwt:SigningKeys` | empty (user secrets, environment or a secret store) | The EC P-256 keys, each `{ KeyId, PrivateKeyPem?, PublicKeyPem? }`; the first with a private key signs, all validate and are published. Empty: an ephemeral key in Development and Testing, a start-up failure elsewhere. Never put a key in a file. See [Access tokens](#access-tokens). |
+| `Auth:Seed:RunOnStartup` | `true` | Seed after the migration step when the host starts (see [Background processing](#background-processing)). The integration tests turn it off and seed from the test harness. |
+| `Auth:Seed:AdminEmail` | empty (`admin@localhost.test` in `appsettings.Development.json`) | The email of the first administrator (`SuperAdmin`). Must be a plain address (no display name), up to 256 characters. |
+| `Auth:Seed:AdminPassword` | empty (user secrets or environment) | That administrator's password, within `Auth:Password:MinLength` and `MaxLength`. Never set it in a file. The account is seeded only when both keys are set. Locally: `dotnet user-secrets set "Auth:Seed:AdminPassword" "…" --project src/Host/TemplateName.Api`. |
+
+The permission cache lifetime is fixed at 30 seconds (`PermissionCache.Lifetime`, ADR 0016) and has no setting.
 
 The PBKDF2 iteration count has no setting of the module: it is Identity's default (`PasswordHasherOptions.IterationCount`, ADR 0014). Only the integration test factory lowers it, through `Configure<PasswordHasherOptions>`.
 
@@ -259,7 +281,7 @@ The PBKDF2 iteration count has no setting of the module: it is Identity's defaul
 
 <!-- The schema, its tables and indexes, and the migrations in order. -->
 
-Schema `auth`, owned by `AuthDbContext` (`Infrastructure/Persistence/`), which is also the module's `IUnitOfWork` and the Data Protection key store (`IDataProtectionKeyContext`). Writes go through EF Core and the repositories in `Application/Abstractions/` (`IUserRepository`, `IRoleRepository`, `IPermissionRepository`, `ISessionRepository`, `IVerificationCodeRepository`); later list queries read with Dapper and filter `IsDeleted = 0` themselves (ADR 0006). Keys are `SequentialGuid`s set by the domain (`ValueGeneratedNever`), except the audit log's `bigint` identity. Every timestamp, `DateTime` or `DateTimeOffset`, is `datetime2(3)` holding UTC (`ApplyDefaultConventions`); a `DateTimeOffset` comes back with offset zero. Hashes are `varbinary(32)` (SHA-256); enums are `int`.
+Schema `auth`, owned by `AuthDbContext` (`Infrastructure/Persistence/`), which is also the module's `IUnitOfWork` and the Data Protection key store (`IDataProtectionKeyContext`). Writes go through EF Core and the repositories in `Application/Abstractions/` (`IUserRepository`, `IRoleRepository`, `IPermissionRepository`, `ISessionRepository`, `IVerificationCodeRepository`); reads that bypass them use Dapper and filter `IsDeleted = 0` themselves (ADR 0006): today the permission query of `PermissionChecker` (see [Permission checks](#permission-checks)), later the list queries. Keys are `SequentialGuid`s set by the domain (`ValueGeneratedNever`), except the audit log's `bigint` identity. Every timestamp, `DateTime` or `DateTimeOffset`, is `datetime2(3)` holding UTC (`ApplyDefaultConventions`); a `DateTimeOffset` comes back with offset zero. Hashes are `varbinary(32)` (SHA-256); enums are `int`.
 
 | Table | Purpose | Indexes |
 |---|---|---|
@@ -284,6 +306,7 @@ Rules the repositories and the context keep:
 - **Claiming a refresh token.** `TryClaimRefreshTokenAsync` is one `UPDATE ... SET UsedAt = @now WHERE Id = @id AND UsedAt IS NULL AND RevokedAt IS NULL` (`ExecuteUpdateAsync`), true only for the caller whose statement changed the row. It bypasses the change tracker, so the refresh handler loads the session, claims, then rotates the instance it already holds; it never reloads after the claim.
 - **Soft delete keeps children.** Users and roles are soft-deleted by `SoftDeleteInterceptor`. The context cascades deletes at save time (`CascadeDeleteTiming = OnSaveChanges`), after the interceptor has turned the delete into an update, so a soft-deleted user keeps its history and assignments. Removing an item from a collection (`RemoveRole`, history trimming) still deletes that row.
 - **Column lengths.** Every client-supplied value is cut before it reaches a bounded column, so a long `User-Agent` or an IPv6 address with a zone id never fails a save: `HttpClientContext` cuts to the `AuthAuditLog` limits, and `UserSession.Start`, `VerificationCode.Issue` and `AuthAuditLog.SetClientInfo` cut again to their own. The configurations take the lengths from these domain constants.
+- **Seeded rows.** `auth.Roles` holds the three system roles (`IsSystem = 1`) and `auth.Permissions` one row per declared code, kept by the seeder (see [Background processing](#background-processing)). Permission rows are never deleted; a code no module declares any more has `IsDeprecated = 1`.
 - **Audit entries.** `IAuthAuditWriter.Record` fills `IpAddress`, `UserAgent` and `TraceId` from `IClientContext` (`HttpClientContext`: the address after the forwarded-headers middleware, the `User-Agent` header, and the trace id that `X-Trace-Id` also carries, each already cut to its audit column) and stages the entry; the handler's `SaveChangesAsync` saves it with the rest.
 
 Migrations (`Infrastructure/Persistence/Migrations/`), in order:
@@ -304,7 +327,14 @@ dotnet ef migrations add {Verb}{What} \
 
 <!-- Hosted services, outbox handlers and scheduled jobs the module runs. -->
 
-No outbox handler exists yet. The ones that land with registration and password reset will send their emails through `IEmailSender`, so a failed send throws, the outbox keeps the message and retries it, and the email goes out once SMTP is back (see Email sending).
+**Seeding.** `SeedAuthModuleAsync(cancellationToken)` (an extension of `IServiceProvider` on `AuthModule`; `AuthSeeder` in `Infrastructure/Authorization/`) brings the database to the declared state. The host calls it once at start, after the migration step, when `Auth:Seed:RunOnStartup` is on (the default); the integration test harness calls it after migrating and again after every database reset. It is idempotent, and one run is one transaction under an exclusive SQL Server application lock (`sp_getapplock` on `auth.seed`, 60-second wait), so instances that start together seed one after the other and a failed run leaves nothing half done. It is retried as a whole on transient SQL errors. In order:
+
+1. **Permissions.** `PermissionSynchronizer` validates every definition of every registered `IPermissionSource` and fails the run with an `InvalidOperationException` naming the code and the source when one is wrong: the code must match `^[a-z]+(\.[a-z_]+){2}\z`, the module must equal the code's first segment, the name must not be blank, code, name and description must fit their columns (128, 200, 500 characters), and no code may be declared twice, in one source or across sources. Then it inserts new codes, updates the name and description of known ones (and clears `IsDeprecated` if a code comes back), and deprecates every stored code that no source declares. It never deletes a permission.
+2. **System roles.** `SuperAdmin`, `Admin` and `User` are created when missing (`Role.CreateSystem`). A non-system role that already has one of these names stops the run, because it would otherwise receive the system role's grants without its protection.
+3. **Grants.** `SuperAdmin` is set to every non-deprecated permission on each run, so a newly declared permission reaches it at the next start and a deprecated one leaves it; this goes through `Role.SyncPermissions`, the seeder-only entry point (`SetPermissions` refuses `SuperAdmin`). `Admin` gets its defaults (see [Permissions](#permissions)) only in the run that creates the role; afterwards its set belongs to the administrators. `User` gets nothing.
+4. **First administrator.** When `Auth:Seed:AdminEmail` and `Auth:Seed:AdminPassword` are both set (a blank value counts as unset; exactly one set logs an information line and seeds no account) and no user has that normalized email, it registers a user with display name `Administrator`, locale `en`, the hashed password, a confirmed email and the `SuperAdmin` role. The settings are checked before the transaction: an address that is not a plain email, or a password outside the `Auth:Password` length limits, fails the run with a message that names the setting and never the password. An existing account with that email, in any spelling, is left exactly as it is. The registration raises the usual `UserRegisteredDomainEvent` and `EmailConfirmedDomainEvent`.
+
+**Outbox.** No outbox handler exists yet. The ones that land with registration and password reset will send their emails through `IEmailSender`, so a failed send throws, the outbox keeps the message and retries it, and the email goes out once SMTP is back (see Email sending).
 
 ## Observability
 
@@ -313,6 +343,7 @@ No outbox handler exists yet. The ones that land with registration and password 
 - `SigningKeyProvider` logs one warning at start when it generates an ephemeral key (Development and Testing with no configured key): the configuration path, the generated `kid` and the environment name. No key material is ever logged, and a validation message about a key names only its configuration path.
 - The JWT bearer handler logs failed authentications under ASP.NET Core's own `Microsoft.AspNetCore.Authentication` categories.
 - The breached-password checker and the email sender log the warnings described under [Security services](#security-services) and [Email sending](#email-sending).
+- `AuthSeeder` logs at information level: `Seeded the Auth module: system roles and {PermissionCount} permissions` after each run, `Seeded the administrator account {UserId}` when it creates the administrator (the id only: never the email or the password), and a line when only one of the two administrator settings is set.
 
 No metrics yet.
 
@@ -321,6 +352,8 @@ No metrics yet.
 <!-- Where the module's unit and integration tests live and what they cover. -->
 
 The module is covered by the architecture tests (`tests/TemplateName.ArchitectureTests`): layering, module boundaries, naming, documentation and translations all include `TemplateName.Modules.Auth`. Unit tests of the domain live under `tests/TemplateName.UnitTests/Auth/`. Integration tests live under `tests/TemplateName.IntegrationTests/Auth/`: `AuthPersistenceTests` covers aggregate round trips, the unique and filtered indexes, soft delete, UTC timestamps, the outbox row written with a new user, the concurrent refresh-token claim and the key ring in `auth.DataProtectionKeys`. The access tokens are covered by unit tests: `AccessTokenIssuerTests` (header, the exact claim set, expiry from `TimeProvider`, validation with only the published key), `JwtValidationTests` (Review Focus 4: `alg: none`, `HS256` signed with the public key's bytes, an unknown, missing or mislabelled `kid`, a tampered payload, a wrong audience or issuer, no `exp`, expiry and not-before inside and beyond the skew, a retired key) and `SigningKeyProviderTests` (other curves, malformed and mismatched PEMs, no echo of key material, missing keys outside Development and Testing, the ephemeral key and its warning, the JWKS members, the bearer registration); `JwksEndpointTests` (integration) reads the JWKS through the host. The email sender is covered by `AuthEmailsTests` and `EmailOptionsTests` (unit) and, against a real Mailpit container started by `MailpitFixture` (generic Testcontainers, image pinned to the tag in `docker-compose.yml`, which a test compares), by `SmtpEmailSenderTests`: text and HTML parts, sender and subject read back through Mailpit's REST API (`GET /api/v1/messages`, `GET /api/v1/message/{id}`), an unreachable server, a malformed address and a cancelled token. `RecordingEmailSender` (`tests/TemplateName.IntegrationTests/Infrastructure/`) is the test double that later API tests swap in for `IEmailSender`: it keeps the messages in `Sent`, `Clear()` empties it and `LastLinkToken(to)` returns the decoded `token=` value from the last message to an address.
+
+Permissions and seeding: `PermissionSynchronizerTests` (unit) covers every validation rule of a permission definition, including a trailing newline and a code declared by two sources. `PermissionCheckerTests` (integration) covers the union over roles, a soft-deleted role, a soft-deleted or suspended user, the cache (a second call within 30 seconds opens no connection, counted by `RecordingDbConnectionFactory`; `InvalidateUsersAsync` reloads only the named users; the entry expires at 30 seconds of `Factory.Time`, with no real waiting) and the registration. `AuthSeederTests` (integration) covers idempotency, `SuperAdmin` receiving new permissions, `Admin` defaults surviving manual changes, deprecation instead of deletion (and the way back), an invalid definition failing the run without changes, the administrator settings (both required, the normalized email, confirmation, the hash, no echo of a short password) and seeding on host start. The test harness turns `Auth:Seed:RunOnStartup` off and seeds after migrating and after every reset; `TestPermissionSource` (`Factory.PermissionSource`) lets a test declare or drop permissions between runs and starts empty in every test.
 
 ## Changelog
 

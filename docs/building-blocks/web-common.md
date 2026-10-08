@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The HTTP edge shared by the host and the module endpoints: `Result` to RFC 9457 ProblemDetails mapping with `code`, `traceId` and localized `detail` (ADR 0002, ADR 0009), the global exception handler, trace-id and security headers, CORS, rate limiting and forwarded headers, request localization, the current user, and observability (Serilog, OpenTelemetry). It depends on SharedKernel, Application.Common, ASP.NET Core, Serilog and OpenTelemetry.
+The HTTP edge shared by the host and the module endpoints: `Result` to RFC 9457 ProblemDetails mapping with `code`, `traceId` and localized `detail` (ADR 0002, ADR 0009), the global exception handler, trace-id and security headers, CORS, rate limiting and forwarded headers, request localization, the current user, permission-based authorization, and observability (Serilog, OpenTelemetry). It depends on SharedKernel, Application.Common, ASP.NET Core, Serilog and OpenTelemetry.
 
 Code: `src/BuildingBlocks/TemplateName.Web.Common/`.
 
@@ -11,6 +11,8 @@ Code: `src/BuildingBlocks/TemplateName.Web.Common/`.
 | Extension / type | Does |
 |---|---|
 | `services.AddWebCommon()` | ProblemDetails with `CustomizeProblemDetails` (below), `GlobalExceptionHandler`, `ICurrentUser` (`HttpContextCurrentUser`: the `sub` claim, else the name identifier, as a `Guid`), `CommonErrorMessages`, and `RouteHandlerOptions.ThrowOnBadRequest`, so malformed bodies reach the exception handler as 400 `request.malformed`. |
+| `services.AddPermissionAuthorization()` | Authorization with `PermissionAuthorizationHandler` (scoped) and a **fallback policy** that requires an authenticated user, so every endpoint without its own authorization metadata is protected and an anonymous endpoint must say `.AllowAnonymous()`. Needs `AddWebCommon` (`ICurrentUser`) and an `IPermissionChecker` (the Auth module registers it). Call it together with explicit `UseAuthentication` and `UseAuthorization` (after `UseRouting`): when authorization services exist and the pipeline does not call `UseAuthorization`, `WebApplication` adds it ahead of `UseRouting` by itself, where no endpoint is known yet and the fallback policy answers 401 to every request. The host does not call it yet; it lands with those middleware. |
+| `endpoint.RequirePermission(code)` | Requires an authenticated user who holds the permission `code` (`module.resource.action`, compared exactly): the endpoint gets its own policy, `RequireAuthenticatedUser()` plus one `PermissionRequirement`; there is no dynamic policy provider (decision D6, [ADR 0016](../adr/0016-server-side-permissions-with-per-user-cache.md)). The handler succeeds only when `ICurrentUser` is authenticated, has a user id and `IPermissionChecker.HasPermissionAsync` says yes; otherwise it fails closed (401 for an anonymous caller, 403 for a signed-in one), and a checker exception propagates instead of granting. Works on any `IEndpointConventionBuilder` (an endpoint or a group). |
 | `result.ToProblem()` | Maps a failed `Result` to a problem response: `ErrorType` → 400/404/409/401/403/500, `code` = `Error.Code`, `params` = `Error.Parameters` when there are any; a `ValidationError` becomes a validation problem with `errors`. Throws on a successful result. |
 | `app.UseTraceIdHeader()` | `X-Trace-Id` on every response, including errors (written in `Response.OnStarting`). |
 | `app.UseSecurityHeaders()` | The baseline security headers on every response, including errors ([list](../services/api.md#pipeline)). |
@@ -75,8 +77,15 @@ private static async Task<IResult> GetByIdAsync(
 }
 ```
 
+A protected endpoint names its permission; an anonymous one says so explicitly:
+
+```csharp
+group.MapPost("/{id:guid}/approve", ApproveAsync).RequirePermission(LeavePermissions.Approve);
+group.MapPost("/login", LoginAsync).AllowAnonymous();
+```
+
 Modules never write ProblemDetails, headers or translations themselves: they return an `Error` with a code (and parameters), and add the code's messages to their own `*ErrorMessages.resx` files.
 
 ## Tests
 
-Unit: `tests/TemplateName.UnitTests/Web/` (result mapping, exception handler, error pipeline, middleware, current user, observability, masking) and `Localization/`. Integration: `Host/HostTests`, `Host/HttpSecurityTests`, `Host/TraceIdTests`, `Localization/LocalizationTests`.
+Unit: `tests/TemplateName.UnitTests/Web/` (result mapping, exception handler, error pipeline, middleware, current user, permission handler and `RequirePermission`, the fallback policy, observability, masking) and `Localization/`. Integration: `Host/HostTests`, `Host/HttpSecurityTests`, `Host/TraceIdTests`, `Localization/LocalizationTests`.
