@@ -6,9 +6,9 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence;
 
 internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
 {
-    internal const int EmailMaxLength = 256;
-    internal const int DisplayNameMaxLength = 200;
-    internal const int LocaleMaxLength = 16;
+    internal const int EmailMaxLength = User.MaxEmailLength;
+    internal const int DisplayNameMaxLength = User.MaxDisplayNameLength;
+    internal const int LocaleMaxLength = User.MaxLocaleLength;
     internal const int TimeZoneMaxLength = 64;
     internal const int PasswordHashMaxLength = 256;
     internal const int SecurityStampMaxLength = 64;

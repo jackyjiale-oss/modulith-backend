@@ -107,6 +107,9 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
         builder.UseSetting("RateLimiting:GlobalPermitLimit", "100000");
         builder.UseSetting("RateLimiting:AuthStrictPermitLimit", "100000");
         builder.UseSetting("Auth:Seed:RunOnStartup", "false");
+
+        // No calls to the real Have I Been Pwned service from tests; HibpBreachedPasswordCheckerTests cover the checker.
+        builder.UseSetting("Auth:Password:CheckBreached", "false");
         builder.UseSetting("ConnectionStrings:Database", TestsDatabase.ConnectionString);
         builder.UseSetting($"ConnectionStrings:{PersistenceTestsConnectionStringName}", PersistenceTestsDatabase.ConnectionString);
         builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(

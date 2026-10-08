@@ -10,6 +10,15 @@ namespace TemplateName.Modules.Auth.Domain.Users;
 /// </summary>
 internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
 {
+    /// <summary>The column limit of <see cref="Email"/> and <see cref="NormalizedEmail"/>; the validators refuse longer addresses.</summary>
+    public const int MaxEmailLength = 256;
+
+    /// <summary>The column limit of <see cref="DisplayName"/>.</summary>
+    public const int MaxDisplayNameLength = 200;
+
+    /// <summary>The column limit of <see cref="Locale"/>.</summary>
+    public const int MaxLocaleLength = 16;
+
     private const string DefaultTimeZone = "UTC";
 
     private readonly List<PasswordHistoryEntry> _passwordHistory = [];

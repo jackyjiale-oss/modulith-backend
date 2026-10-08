@@ -35,7 +35,7 @@ public static class AuthModule
 
     /// <summary>
     /// Registers the module's context (schema <c>auth</c>), outbox, handlers and validators, repositories, audit writer, error messages
-    /// (<c>AuthErrorMessages</c>), the SMTP email sender, the access tokens with the JWT bearer handler as the default authentication scheme,
+    /// (<c>AuthErrorMessages</c>), the SMTP email sender with <c>Auth:Links</c> and <c>Auth:Verification</c>, the access tokens with the JWT bearer handler as the default authentication scheme,
     /// the permission checker with its cache, the permission source and the seeder, and the Data Protection key ring stored in
     /// <c>auth.DataProtectionKeys</c>. Call it after <c>AddInfrastructureCommon</c> and before <c>AddApplicationDecorators</c>.
     /// </summary>
@@ -78,6 +78,10 @@ public static class AuthModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddSingleton<IEmailSender, SmtpEmailSender>();
+        services.AddOptions<VerificationOptions>()
+            .Bind(configuration.GetSection(VerificationOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         AddAccessTokens(services, configuration);
         AddPermissions(services, configuration);
@@ -108,10 +112,13 @@ public static class AuthModule
         await scope.ServiceProvider.GetRequiredService<AuthSeeder>().SeedAsync(cancellationToken);
     }
 
-    /// <summary>Maps the module's endpoints; <paramref name="app"/> is the host's <c>/api/v1</c> group. Empty until the first endpoint lands.</summary>
+    /// <summary>
+    /// Maps the module's endpoints; <paramref name="app"/> is the host's <c>/api/v1</c> group. The self-service routes live in its
+    /// <c>auth</c> group: <c>POST auth/register</c>, <c>POST auth/email/confirm</c> and <c>POST auth/email/resend-confirmation</c>.
+    /// </summary>
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
-        return app;
+        return app.MapSelfServiceEndpoints();
     }
 
     /// <summary>Maps the module's endpoints that live at fixed root paths, outside <c>/api/v1</c>: <c>GET /.well-known/jwks.json</c>.</summary>

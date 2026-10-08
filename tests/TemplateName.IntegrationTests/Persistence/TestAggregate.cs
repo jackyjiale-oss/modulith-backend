@@ -33,4 +33,7 @@ internal sealed class TestAggregate : AggregateRoot<Guid>, IAuditable, ISoftDele
     }
 
     public void Rename(string name) => Name = name;
+
+    /// <summary>Raises an event without changing any state, like <c>User.NoteRegistrationAttempt</c>.</summary>
+    public void Note() => Raise(new TestAggregateNotedDomainEvent(Id));
 }
