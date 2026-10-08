@@ -16,12 +16,13 @@ Modulith is a `dotnet new` template for production-ready backends: an ASP.NET Co
 - Serilog with sensitive-data masking, OpenTelemetry traces and metrics, Aspire dashboard locally
 - Security headers, CORS, rate limiting, forwarded headers, request size limits and health checks
 - OpenAPI with Scalar and literal `/api/v1` routes
+- Auth module: registration with email confirmation, login with lockout, ES256 access tokens with a JWKS, rotating refresh tokens with reuse detection, sessions, password reset and change, role-based permissions, administration endpoints and an audit log (Mailpit catches the emails locally)
 - Architecture tests (NetArchTest), unit tests and Testcontainers integration tests; CI with an 80 % coverage gate and a template smoke test
 - Conventional Commits enforced by a git hook and CI
 
 ## Status
 
-Pre-release, implementing Plan 1 (foundation and core baseline). Expect breaking changes until the first release. The Malay and Simplified Chinese messages are drafts awaiting native review (release checklist in [`CONTRIBUTING.md`](CONTRIBUTING.md), Section 5).
+Pre-release: Plan 1 (foundation and core baseline) and Plan 2 (the Auth module) are implemented; notifications, MFA and delivery follow. Expect breaking changes until the first release. The Malay and Simplified Chinese messages are drafts awaiting native review (release checklist in [`CONTRIBUTING.md`](CONTRIBUTING.md), Section 5).
 
 ## Prerequisites
 
@@ -47,6 +48,22 @@ cd Acme.Hr
 ```
 
 From here the generated project's own `README.md` takes over. `dotnet new uninstall .` (from the repository folder) removes the template again.
+
+## Run the backend
+
+The repository itself runs as a project named `TemplateName`: this is how to try the Auth module before generating your own. A generated project's `README.md` has the same steps with its own name.
+
+```bash
+cp .env.example .env                 # then set your own SQL_SA_PASSWORD
+docker compose up -d                 # SQL Server, the Aspire dashboard and Mailpit
+dotnet user-secrets set "ConnectionStrings:Database" \
+  "Server=127.0.0.1,1433;Database=TemplateName;User Id=sa;Password=<from .env>;TrustServerCertificate=True" \
+  --project src/Host/TemplateName.Api
+dotnet user-secrets set "Auth:Seed:AdminPassword" "<value>" --project src/Host/TemplateName.Api
+dotnet run --project src/Host/TemplateName.Api
+```
+
+In Development the API applies the migrations and seeds the roles, the permissions and the first administrator, `admin@localhost.test`, with the password you put in user secrets (12 to 128 characters; choose your own, never commit it). Sign in as that administrator with `POST /api/v1/auth/login` in Scalar (<https://localhost:5001/scalar/v1>) and send the `accessToken` as a bearer token. Register a user the same way: the confirmation email is not sent anywhere; **Mailpit** catches it, and its inbox is at <http://localhost:8025>. Remove `Auth:Seed:AdminPassword` from user secrets after the first start. Health is at <https://localhost:5001/health/ready>.
 
 ## Repository layout
 
@@ -108,7 +125,7 @@ These ship with every generated project (index: [`docs/README.md`](docs/README.m
 - [`docs/services/api.md`](docs/services/api.md): the host's pipeline, every configuration section, health, environments, migrations
 - [`docs/building-blocks/`](docs/building-blocks/): SharedKernel, Application.Common, Infrastructure.Common, Web.Common
 - [`docs/modules/`](docs/modules/): one page per module, from [`_template.md`](docs/modules/_template.md)
-- [`docs/adr/`](docs/adr/): architecture decision records 0001 to 0013
+- [`docs/adr/`](docs/adr/): architecture decision records 0001 to 0017
 - [`docs/coding-conventions.md`](docs/coding-conventions.md): naming, files and code style
 - [`CONTRIBUTING.md`](CONTRIBUTING.md): branches, Conventional Commits, pull requests, releases and licences
 

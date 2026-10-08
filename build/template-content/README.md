@@ -7,32 +7,35 @@
 - [.NET SDK](https://dotnet.microsoft.com/download) 10.0.401 or a later 10.0 feature band (pinned in `global.json`)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (local SQL Server, the Aspire dashboard and the integration tests)
 
-## Quick start
+## Run the backend
 
 ```bash
 cp .env.example .env                 # then set your own SQL_SA_PASSWORD
-docker compose up -d                 # SQL Server and the Aspire dashboard
+docker compose up -d                 # SQL Server, the Aspire dashboard and Mailpit
 git init                             # skip if this folder is already a repository
 git config core.hooksPath .githooks  # commit-message check (CONTRIBUTING.md)
 chmod +x .githooks/commit-msg        # the hook must be executable (harmless on Windows)
 dotnet user-secrets set "ConnectionStrings:Database" \
-  "Server=localhost,1433;Database=TemplateName;User Id=sa;Password=<from .env>;TrustServerCertificate=True" \
+  "Server=127.0.0.1,1433;Database=TemplateName;User Id=sa;Password=<from .env>;TrustServerCertificate=True" \
   --project src/Host/TemplateName.Api
+dotnet user-secrets set "Auth:Seed:AdminPassword" "<value>" --project src/Host/TemplateName.Api
 dotnet run --project src/Host/TemplateName.Api
 ```
 
-In Development the API applies the module migrations on startup.
+In Development the API applies the module migrations on startup and seeds the roles, the permissions and the first administrator, `admin@localhost.test`, with the password you set above (12 to 128 characters; choose your own and never commit it). Sign in as that administrator with `POST /api/v1/auth/login` in Scalar and send the returned `accessToken` as a bearer token. Remove `Auth:Seed:AdminPassword` from user secrets after the first start. Emails (account confirmation, password reset) are not delivered anywhere locally: Mailpit catches them, and its inbox is at <http://localhost:8025>.
 
 | What | URL |
 |---|---|
 | API reference (Scalar) | <https://localhost:5001/scalar/v1> |
 | Health (readiness) | <https://localhost:5001/health/ready> |
 | Aspire dashboard (logs, traces, metrics) | <http://localhost:18888> |
+| Mailpit inbox (emails the API sends) | <http://localhost:8025> |
 
 ## Modules
 
 | Module | Document |
 |---|---|
+| Auth (sign-in, tokens, sessions, roles, permissions, audit log) | [`docs/modules/auth.md`](docs/modules/auth.md) |
 | Sample (leave requests) | [`docs/modules/sample.md`](docs/modules/sample.md) |
 
 A new module gets its own page, copied from [`docs/modules/_template.md`](docs/modules/_template.md).
