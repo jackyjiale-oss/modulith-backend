@@ -24,4 +24,11 @@ internal interface ISessionRepository
     /// loads the session first, claims, then rotates the instance it already holds.
     /// </summary>
     Task<bool> TryClaimRefreshTokenAsync(Guid refreshTokenId, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The token's <c>UsedAt</c> and <c>RevokedAt</c> as stored now, read without tracking, so a session the context already holds keeps
+    /// its in-memory state; null when no such token exists. After a failed claim it tells a token used by another request (reuse) from
+    /// one whose session was revoked meanwhile (an ended session).
+    /// </summary>
+    Task<RefreshTokenState?> GetRefreshTokenStateAsync(Guid refreshTokenId, CancellationToken cancellationToken);
 }

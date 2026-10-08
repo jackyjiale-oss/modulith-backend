@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.IntegrationTests.Infrastructure;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Application.Authentication.Refresh;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Roles;
 using TemplateName.Modules.Auth.Domain.Sessions;
@@ -390,6 +391,47 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
     }
 
     [Fact]
+    public async Task Refresh_that_loses_its_claim_to_a_logout_keeps_the_logout_and_reports_no_reuse()
+    {
+        var user = NewUser("olivia@example.com");
+        var refreshToken = Factory.Services.GetRequiredService<ISecureTokenService>().Generate();
+        var (session, first) = UserSession.Start(
+            user.Id, "pwd", "Device", null, null, user.SecurityStamp, refreshToken.Hash, SlidingLifetime, AbsoluteLifetime, Now);
+        await SaveAsync(user, session);
+        Factory.Time.Advance(TimeSpan.FromSeconds(5));
+        var loggedOutAt = Now.AddSeconds(-1);
+
+        // The real handler, whose repository lets a logout in another request revoke the session between its load and its claim.
+        var scope = NewScope();
+        var sessions = new RevokedBeforeClaimSessionRepository(scope.GetRequiredService<ISessionRepository>(), async () =>
+        {
+            var logoutScope = NewScope();
+            var loggedOut = (await logoutScope.GetRequiredService<ISessionRepository>().GetByIdAsync(session.Id, Ct)).ShouldNotBeNull();
+            loggedOut.Revoke(SessionRevokedReason.Logout, loggedOutAt);
+            await logoutScope.GetRequiredService<IUnitOfWork>().SaveChangesAsync(Ct);
+        });
+        var handler = ActivatorUtilities.CreateInstance<RefreshTokenCommandHandler>(scope, sessions);
+
+        var result = await handler.HandleAsync(new RefreshTokenCommand(refreshToken.Value), Ct);
+
+        result.Error.ShouldBe(SessionErrors.InvalidRefreshToken);
+        var stored = (await NewScope().GetRequiredService<ISessionRepository>().GetByIdAsync(session.Id, Ct)).ShouldNotBeNull();
+        stored.RevokedReason.ShouldBe(SessionRevokedReason.Logout);
+        stored.RevokedAt.ShouldBe(loggedOutAt);
+        var storedToken = stored.RefreshTokens.ShouldHaveSingleItem();
+        storedToken.Id.ShouldBe(first.Id);
+        storedToken.RevokedAt.ShouldBe(loggedOutAt);
+        storedToken.UsedAt.ShouldBeNull();
+        var context = NewScope().GetRequiredService<AuthDbContext>();
+        (await context.Set<OutboxMessage>()
+            .CountAsync(message => message.Type == typeof(RefreshTokenReuseDetectedDomainEvent).FullName, Ct)).ShouldBe(0);
+        var audit = await context.Set<AuthAuditLog>().SingleAsync(Ct);
+        audit.EventType.ShouldBe(AuthAuditEvents.RefreshFailed);
+        audit.FailureReason.ShouldBe(SessionErrors.InvalidRefreshToken.Code);
+        audit.SessionId.ShouldBe(session.Id);
+    }
+
+    [Fact]
     public async Task Data_protection_key_ring_is_stored_in_the_auth_schema()
     {
         var keyManager = Factory.Services.GetRequiredService<IKeyManager>();
@@ -654,5 +696,29 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
         var context = NewScope().GetRequiredService<AuthDbContext>();
         context.AddRange(entities);
         await context.SaveChangesAsync(Ct);
+    }
+
+    /// <summary>Delegates to the real repository, but runs <paramref name="beforeClaim"/> just before the claim.</summary>
+    private sealed class RevokedBeforeClaimSessionRepository(ISessionRepository inner, Func<Task> beforeClaim) : ISessionRepository
+    {
+        public Task<UserSession?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+            => inner.GetByIdAsync(id, cancellationToken);
+
+        public Task<UserSession?> GetByRefreshTokenHashAsync(byte[] tokenHash, CancellationToken cancellationToken)
+            => inner.GetByRefreshTokenHashAsync(tokenHash, cancellationToken);
+
+        public Task<IReadOnlyList<UserSession>> GetActiveByUserAsync(Guid userId, DateTimeOffset now, CancellationToken cancellationToken)
+            => inner.GetActiveByUserAsync(userId, now, cancellationToken);
+
+        public void Add(UserSession session) => inner.Add(session);
+
+        public async Task<bool> TryClaimRefreshTokenAsync(Guid refreshTokenId, DateTimeOffset now, CancellationToken cancellationToken)
+        {
+            await beforeClaim();
+            return await inner.TryClaimRefreshTokenAsync(refreshTokenId, now, cancellationToken);
+        }
+
+        public Task<RefreshTokenState?> GetRefreshTokenStateAsync(Guid refreshTokenId, CancellationToken cancellationToken)
+            => inner.GetRefreshTokenStateAsync(refreshTokenId, cancellationToken);
     }
 }

@@ -34,5 +34,13 @@ internal sealed class SessionRepository(AuthDbContext context) : ISessionReposit
         return claimed == 1;
     }
 
+    // A projection, so nothing is tracked and the loaded session (with this token in its chain) is not refreshed from the database.
+    public Task<RefreshTokenState?> GetRefreshTokenStateAsync(Guid refreshTokenId, CancellationToken cancellationToken)
+        => context.Set<RefreshToken>()
+            .AsNoTracking()
+            .Where(token => token.Id == refreshTokenId)
+            .Select(token => new RefreshTokenState(token.UsedAt, token.RevokedAt))
+            .SingleOrDefaultAsync(cancellationToken);
+
     private IQueryable<UserSession> Sessions() => context.Set<UserSession>().Include(session => session.RefreshTokens);
 }

@@ -119,7 +119,9 @@ public sealed class RefreshTokenCommandHandlerTests
     [Fact]
     public async Task Claim_failure_is_handled_as_reuse()
     {
+        // A simultaneous refresh with the same token claimed it first: the row says used.
         _sessions.TryClaimRefreshTokenAsync(_presented.Id, Now, Arg.Any<CancellationToken>()).Returns(false);
+        _sessions.GetRefreshTokenStateAsync(_presented.Id, CancellationToken.None).Returns(new RefreshTokenState(UsedAt: Now, RevokedAt: null));
 
         var result = await _sut.HandleAsync(Command(), Ct);
 
@@ -135,6 +137,33 @@ public sealed class RefreshTokenCommandHandlerTests
         await _unitOfWork.Received(1).SaveChangesAsync(CancellationToken.None);
         _tokenService.DidNotReceive().Generate();
         _accessTokenIssuer.DidNotReceiveWithAnyArgs().Issue(default!);
+    }
+
+    [Fact]
+    public async Task Claim_lost_to_a_revocation_fails_as_invalid_and_is_not_called_reuse()
+    {
+        // A logout (or logout-all, lock, password change) revoked the session between our load and the claim: the row is revoked
+        // but was never used, so this is an ended session, not a token presented twice.
+        _sessions.TryClaimRefreshTokenAsync(_presented.Id, Now, Arg.Any<CancellationToken>()).Returns(false);
+        _sessions.GetRefreshTokenStateAsync(_presented.Id, CancellationToken.None)
+            .Returns(new RefreshTokenState(UsedAt: null, RevokedAt: Now.AddSeconds(-1)));
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        AssertClaimLossFailedAsInvalid(result.Error);
+        await _unitOfWork.Received(1).SaveChangesAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Claim_lost_to_a_deleted_token_fails_as_invalid_and_is_not_called_reuse()
+    {
+        _sessions.TryClaimRefreshTokenAsync(_presented.Id, Now, Arg.Any<CancellationToken>()).Returns(false);
+        _sessions.GetRefreshTokenStateAsync(_presented.Id, CancellationToken.None).Returns((RefreshTokenState?)null);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        AssertClaimLossFailedAsInvalid(result.Error);
+        await _unitOfWork.Received(1).SaveChangesAsync(CancellationToken.None);
     }
 
     [Fact]
@@ -271,6 +300,27 @@ public sealed class RefreshTokenCommandHandlerTests
         audit.SessionId.ShouldBe(_session.Id);
         await _unitOfWork.Received(1).SaveChangesAsync(CancellationToken.None);
         await _sessions.DidNotReceiveWithAnyArgs().TryClaimRefreshTokenAsync(default, default, Ct);
+        _accessTokenIssuer.DidNotReceiveWithAnyArgs().Issue(default!);
+    }
+
+    private void AssertClaimLossFailedAsInvalid(Error error)
+    {
+        error.ShouldBe(SessionErrors.InvalidRefreshToken);
+
+        // The stale copy is left alone, so the save cannot overwrite the revocation's time and reason.
+        _session.RevokedAt.ShouldBeNull();
+        _session.RevokedReason.ShouldBeNull();
+        _presented.RevokedAt.ShouldBeNull();
+        _presented.UsedAt.ShouldBeNull();
+        _session.DomainEvents.ShouldBeEmpty();
+        var audit = _auditEntries.ShouldHaveSingleItem();
+        audit.EventType.ShouldBe(AuthAuditEvents.RefreshFailed);
+        audit.Succeeded.ShouldBeFalse();
+        audit.FailureReason.ShouldBe("auth.invalid_refresh_token");
+        audit.UserId.ShouldBe(_user.Id);
+        audit.SessionId.ShouldBe(_session.Id);
+        _metrics.DidNotReceive().RecordTokenReuse();
+        _tokenService.DidNotReceive().Generate();
         _accessTokenIssuer.DidNotReceiveWithAnyArgs().Issue(default!);
     }
 

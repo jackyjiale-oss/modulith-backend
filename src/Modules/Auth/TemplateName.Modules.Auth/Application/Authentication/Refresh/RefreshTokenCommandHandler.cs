@@ -13,7 +13,8 @@ namespace TemplateName.Modules.Auth.Application.Authentication.Refresh;
 /// Rotates a refresh token. The order is fixed (Ruling R7): load the session with its whole chain, load the user and check the session
 /// (<see cref="UserSession.ValidateRefresh"/>: revoked, stamp, reuse, expiry), claim the token in the database, then rotate the instance
 /// already loaded; it is never reloaded after the claim, which would show the token used and look like reuse. Of two requests with the
-/// same token only one claim succeeds; the other is treated as reuse and revokes the session. Every outcome is audited and saved, and
+/// same token only one claim succeeds; the other is treated as reuse and revokes the session. A claim lost to a revocation that ran
+/// meanwhile (the stored token is revoked but unused) is an ended session, not reuse. Every outcome is audited and saved, and
 /// every save ignores the request's cancellation, so a client that disconnects cannot stop a revocation (or a claimed rotation) from
 /// being stored.
 /// </summary>
@@ -64,9 +65,7 @@ internal sealed class RefreshTokenCommandHandler(
         // From here on the token may be spent in the database, so the outcome must be stored whatever the client does.
         if (!await sessions.TryClaimRefreshTokenAsync(validated.Value.Id, now, CancellationToken.None))
         {
-            // Another request claimed the token between our read and this statement: a used token presented again.
-            session.ReportTokenReuse(now);
-            return await RejectAsync(session, SessionErrors.RefreshTokenReused, revokedNow: true, now);
+            return await RejectLostClaimAsync(session, validated.Value.Id, now);
         }
 
         var refreshToken = tokenService.Generate();
@@ -88,6 +87,22 @@ internal sealed class RefreshTokenCommandHandler(
         await unitOfWork.SaveChangesAsync(CancellationToken.None);
 
         return new LoginResponse(accessToken.Value, accessToken.ExpiresAt, refreshToken.Value, rotated.Value.ExpiresAt, session.Id);
+    }
+
+    // The claim failed, so the row changed after the session was loaded. The loaded copy is stale, so the stored row decides: a token
+    // another request used is reuse (a double submit or a stolen copy); a token whose session was revoked meanwhile (logout, logout-all,
+    // lock, password change) or that no longer exists is an ended session. The latter leaves the session alone, so the save cannot
+    // overwrite that revocation's time and reason, and answers like any other ended session.
+    private async Task<Result<LoginResponse>> RejectLostClaimAsync(UserSession session, Guid refreshTokenId, DateTimeOffset now)
+    {
+        var state = await sessions.GetRefreshTokenStateAsync(refreshTokenId, CancellationToken.None);
+        if (state?.UsedAt is null)
+        {
+            return await FailAsync(session, SessionErrors.InvalidRefreshToken, SessionErrors.InvalidRefreshToken.Code, now);
+        }
+
+        session.ReportTokenReuse(now);
+        return await RejectAsync(session, SessionErrors.RefreshTokenReused, revokedNow: true, now);
     }
 
     private async Task<Result<LoginResponse>> RejectAsync(UserSession session, Error error, bool revokedNow, DateTimeOffset now)
