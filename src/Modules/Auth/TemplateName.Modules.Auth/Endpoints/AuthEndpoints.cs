@@ -4,6 +4,9 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Auth.Application.Authentication.Login;
+using TemplateName.Modules.Auth.Application.Authentication.Logout;
+using TemplateName.Modules.Auth.Application.Authentication.LogoutAll;
+using TemplateName.Modules.Auth.Application.Authentication.Refresh;
 using TemplateName.Modules.Auth.Application.Me.GetMe;
 using TemplateName.Modules.Auth.Application.Registration.ConfirmEmail;
 using TemplateName.Modules.Auth.Application.Registration.Register;
@@ -55,6 +58,15 @@ internal static class AuthEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
+        group.MapPost("token/refresh", RefreshTokenAsync)
+            .WithName("RefreshToken")
+            .AllowAnonymous()
+            .RequireRateLimiting(RateLimitPolicies.AuthStrict)
+            .Produces<LoginResponse>()
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
         // Authenticated: said explicitly (not only through the fallback policy) so the OpenAPI document shows the bearer requirement.
         group.MapGet("me", GetMeAsync)
             .WithName("GetCurrentUser")
@@ -62,7 +74,46 @@ internal static class AuthEndpoints
             .Produces<MeResponse>()
             .ProducesProblem(StatusCodes.Status401Unauthorized);
 
+        group.MapPost("logout", LogoutAsync)
+            .WithName("Logout")
+            .RequireAuthorization()
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized);
+
+        group.MapPost("logout-all", LogoutAllAsync)
+            .WithName("LogoutAll")
+            .RequireAuthorization()
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized);
+
         return app;
+    }
+
+    // 200 with the next token pair of the same session; 401 auth.invalid_refresh_token (unknown token or ended session, alike),
+    // auth.refresh_token_expired or auth.refresh_token_reused (the session is revoked).
+    private static async Task<IResult> RefreshTokenAsync(
+        RefreshTokenRequest request,
+        ICommandHandler<RefreshTokenCommand, LoginResponse> handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new RefreshTokenCommand(request.RefreshToken), cancellationToken);
+
+        return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
+    }
+
+    // 204 also when the session was already ended: logging out twice is not an error.
+    private static async Task<IResult> LogoutAsync(ICommandHandler<LogoutCommand> handler, CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new LogoutCommand(), cancellationToken);
+
+        return result.IsSuccess ? TypedResults.NoContent() : result.ToProblem();
+    }
+
+    private static async Task<IResult> LogoutAllAsync(ICommandHandler<LogoutAllCommand> handler, CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new LogoutAllCommand(), cancellationToken);
+
+        return result.IsSuccess ? TypedResults.NoContent() : result.ToProblem();
     }
 
     // 401 auth.invalid_credentials for every wrong combination (unknown email, wrong password, no password set, locked account);

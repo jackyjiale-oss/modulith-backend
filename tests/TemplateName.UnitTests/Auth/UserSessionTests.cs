@@ -198,6 +198,91 @@ public sealed class UserSessionTests
     }
 
     [Fact]
+    public void ValidateRefresh_accepts_a_valid_token_and_changes_nothing()
+    {
+        var (session, first) = StartSession();
+        var later = Now.AddMinutes(30);
+
+        var result = session.ValidateRefresh(Hash(1), Stamp, later);
+
+        result.Value.ShouldBeSameAs(first);
+        session.RefreshTokens.ShouldHaveSingleItem().ShouldBe(first);
+        first.UsedAt.ShouldBeNull();
+        first.ReplacedByTokenId.ShouldBeNull();
+        first.RevokedAt.ShouldBeNull();
+        session.LastSeenAt.ShouldBe(Now);
+        session.RevokedAt.ShouldBeNull();
+        session.DomainEvents.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void ValidateRefresh_applies_the_rules_of_Rotate_in_the_same_order()
+    {
+        // Unknown hash and revoked session: invalid, nothing changes.
+        var (unknown, _) = StartSession();
+        unknown.ValidateRefresh(Hash(9), Stamp, Now).Error.ShouldBe(SessionErrors.InvalidRefreshToken);
+        unknown.RevokedAt.ShouldBeNull();
+
+        var (revoked, _) = StartSession();
+        revoked.Revoke(SessionRevokedReason.Logout, Now);
+        revoked.ValidateRefresh(Hash(1), Stamp, Now.AddMinutes(1)).Error.ShouldBe(SessionErrors.InvalidRefreshToken);
+        revoked.RevokedReason.ShouldBe(SessionRevokedReason.Logout);
+
+        // A changed stamp revokes as PasswordChanged, before the reuse check.
+        var (stamped, _) = StartSession();
+        stamped.Rotate(Hash(1), Hash(2), Stamp, Sliding, Now.AddMinutes(1));
+        stamped.ValidateRefresh(Hash(1), "stamp-2", Now.AddMinutes(2)).Error.ShouldBe(SessionErrors.InvalidRefreshToken);
+        stamped.RevokedReason.ShouldBe(SessionRevokedReason.PasswordChanged);
+        stamped.DomainEvents.ShouldBeEmpty();
+
+        // A used token revokes as TokenReuse and raises the event.
+        var (reused, _) = StartSession();
+        var replacement = reused.Rotate(Hash(1), Hash(2), Stamp, Sliding, Now.AddMinutes(1)).Value;
+        reused.ValidateRefresh(Hash(1), Stamp, Now.AddMinutes(2)).Error.ShouldBe(SessionErrors.RefreshTokenReused);
+        reused.RevokedReason.ShouldBe(SessionRevokedReason.TokenReuse);
+        replacement.RevokedAt.ShouldBe(Now.AddMinutes(2));
+        reused.DomainEvents.OfType<RefreshTokenReuseDetectedDomainEvent>().ShouldHaveSingleItem();
+
+        // An expired token fails as expired and changes nothing, so presenting it again is not reuse.
+        var (expired, first) = StartSession();
+        expired.ValidateRefresh(Hash(1), Stamp, Now + Sliding).Error.ShouldBe(SessionErrors.RefreshTokenExpired);
+        expired.ValidateRefresh(Hash(1), Stamp, Now + Sliding).Error.ShouldBe(SessionErrors.RefreshTokenExpired);
+        first.UsedAt.ShouldBeNull();
+        expired.RevokedAt.ShouldBeNull();
+    }
+
+    [Fact]
+    public void ReportTokenReuse_revokes_every_token_and_raises_the_event_once()
+    {
+        var (session, first) = StartSession();
+        var replacement = session.Rotate(Hash(1), Hash(2), Stamp, Sliding, Now.AddMinutes(1)).Value;
+        var later = Now.AddMinutes(2);
+
+        session.ReportTokenReuse(later);
+        session.ReportTokenReuse(later.AddMinutes(1));
+
+        session.RevokedAt.ShouldBe(later);
+        session.RevokedReason.ShouldBe(SessionRevokedReason.TokenReuse);
+        first.RevokedAt.ShouldBe(later);
+        replacement.RevokedAt.ShouldBe(later);
+        session.DomainEvents.OfType<RefreshTokenReuseDetectedDomainEvent>().ShouldHaveSingleItem()
+            .ShouldBe(new RefreshTokenReuseDetectedDomainEvent(session.UserId, session.Id));
+    }
+
+    [Fact]
+    public void ReportTokenReuse_on_a_revoked_session_keeps_its_reason_and_raises_nothing()
+    {
+        var (session, _) = StartSession();
+        session.Revoke(SessionRevokedReason.Logout, Now.AddMinutes(1));
+
+        session.ReportTokenReuse(Now.AddMinutes(2));
+
+        session.RevokedAt.ShouldBe(Now.AddMinutes(1));
+        session.RevokedReason.ShouldBe(SessionRevokedReason.Logout);
+        session.DomainEvents.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Revoke_is_idempotent_and_keeps_the_first_reason()
     {
         var (session, _) = StartSession();

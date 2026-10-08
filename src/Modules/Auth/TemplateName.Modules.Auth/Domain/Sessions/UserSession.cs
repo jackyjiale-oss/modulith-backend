@@ -110,6 +110,28 @@ internal sealed class UserSession : AggregateRoot<Guid>
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(slidingLifetime, TimeSpan.Zero);
 
+        var validated = ValidateRefresh(presentedTokenHash, currentSecurityStamp, now);
+        if (validated.IsFailure)
+        {
+            return validated;
+        }
+
+        var presented = validated.Value;
+        var replacement = IssueToken(newTokenHash, slidingLifetime, now);
+        presented.MarkUsed(replacement.Id, now);
+        LastSeenAt = now;
+
+        return replacement;
+    }
+
+    /// <summary>
+    /// Applies the checks of <see cref="Rotate"/>, in the same order and with the same effects on failure (a stamp mismatch or a reused
+    /// token revokes the session), without exchanging the token. On success it returns the presented token and changes nothing, so the
+    /// caller can claim that token in the database before it rotates this same instance (Ruling R7). An expired token changes nothing,
+    /// so presenting it again is still "expired", never reuse.
+    /// </summary>
+    public Result<RefreshToken> ValidateRefresh(byte[] presentedTokenHash, string currentSecurityStamp, DateTimeOffset now)
+    {
         var presented = FindByHash(presentedTokenHash);
         if (presented is null || RevokedAt is not null)
         {
@@ -125,8 +147,7 @@ internal sealed class UserSession : AggregateRoot<Guid>
 
         if (presented.UsedAt is not null || presented.RevokedAt is not null)
         {
-            Revoke(SessionRevokedReason.TokenReuse, now);
-            Raise(new RefreshTokenReuseDetectedDomainEvent(UserId, Id));
+            ReportTokenReuse(now);
 
             return Result.Failure<RefreshToken>(SessionErrors.RefreshTokenReused);
         }
@@ -136,11 +157,23 @@ internal sealed class UserSession : AggregateRoot<Guid>
             return Result.Failure<RefreshToken>(SessionErrors.RefreshTokenExpired);
         }
 
-        var replacement = IssueToken(newTokenHash, slidingLifetime, now);
-        presented.MarkUsed(replacement.Id, now);
-        LastSeenAt = now;
+        return presented;
+    }
 
-        return replacement;
+    /// <summary>
+    /// A refresh token of this session was presented again after it was used: revokes the session with
+    /// <see cref="SessionRevokedReason.TokenReuse"/> and raises <see cref="RefreshTokenReuseDetectedDomainEvent"/>. Also for reuse found
+    /// outside the aggregate, such as a lost database claim. A session that is already revoked keeps its reason and raises nothing.
+    /// </summary>
+    public void ReportTokenReuse(DateTimeOffset now)
+    {
+        if (RevokedAt is not null)
+        {
+            return;
+        }
+
+        Revoke(SessionRevokedReason.TokenReuse, now);
+        Raise(new RefreshTokenReuseDetectedDomainEvent(UserId, Id));
     }
 
     /// <summary>Ends the session and every token it still holds. Idempotent: a second call keeps the first time and reason.</summary>

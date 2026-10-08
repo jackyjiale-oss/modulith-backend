@@ -9,6 +9,7 @@ using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Roles;
 using TemplateName.Modules.Auth.Domain.Sessions;
+using TemplateName.Modules.Auth.Domain.Sessions.Events;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Domain.Users.Events;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
@@ -289,6 +290,51 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
         var saved = (await NewScope().GetRequiredService<ISessionRepository>().GetByIdAsync(session.Id, Ct)).ShouldNotBeNull();
         saved.RefreshTokens.Count.ShouldBe(2);
         saved.RevokedAt.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Winning_rotation_and_losing_reuse_revocation_both_persist_in_either_save_order(bool winnerSavesFirst)
+    {
+        var user = NewUser("ivan@example.com");
+        var (session, first) = UserSession.Start(
+            user.Id, "pwd", "Device", null, null, user.SecurityStamp, TokenHash(1), SlidingLifetime, AbsoluteLifetime, Now);
+        await SaveAsync(user, session);
+        Factory.Time.Advance(TimeSpan.FromSeconds(5));
+
+        // Two refreshes with the same token, interleaved as the handler can be: both load, both pass the checks, one claim wins.
+        var winnerScope = NewScope();
+        var loserScope = NewScope();
+        var winner = (await winnerScope.GetRequiredService<ISessionRepository>().GetByRefreshTokenHashAsync(TokenHash(1), Ct)).ShouldNotBeNull();
+        var loser = (await loserScope.GetRequiredService<ISessionRepository>().GetByRefreshTokenHashAsync(TokenHash(1), Ct)).ShouldNotBeNull();
+        winner.ValidateRefresh(TokenHash(1), user.SecurityStamp, Now).IsSuccess.ShouldBeTrue();
+        loser.ValidateRefresh(TokenHash(1), user.SecurityStamp, Now).IsSuccess.ShouldBeTrue();
+        (await winnerScope.GetRequiredService<ISessionRepository>().TryClaimRefreshTokenAsync(first.Id, Now, Ct)).ShouldBeTrue();
+        (await loserScope.GetRequiredService<ISessionRepository>().TryClaimRefreshTokenAsync(first.Id, Now, Ct)).ShouldBeFalse();
+        winner.Rotate(TokenHash(1), TokenHash(2), user.SecurityStamp, SlidingLifetime, Now).IsSuccess.ShouldBeTrue();
+        loser.ReportTokenReuse(Now);
+
+        // Neither save may throw (no 500) or undo the other: the session has no concurrency token and each writes its own columns.
+        var saves = winnerSavesFirst ? new[] { winnerScope, loserScope } : [loserScope, winnerScope];
+        foreach (var scope in saves)
+        {
+            await scope.GetRequiredService<IUnitOfWork>().SaveChangesAsync(Ct);
+        }
+
+        var stored = (await NewScope().GetRequiredService<ISessionRepository>().GetByIdAsync(session.Id, Ct)).ShouldNotBeNull();
+        stored.RevokedAt.ShouldBe(Now);
+        stored.RevokedReason.ShouldBe(SessionRevokedReason.TokenReuse);
+        stored.LastSeenAt.ShouldBe(Now);
+        stored.RefreshTokens.Count.ShouldBe(2);
+        var storedFirst = stored.RefreshTokens.Single(token => token.Id == first.Id);
+        storedFirst.UsedAt.ShouldBe(Now);
+        storedFirst.RevokedAt.ShouldBe(Now);
+
+        // The winner's new token is dead with its session, whether or not its own row was revoked.
+        stored.ValidateRefresh(TokenHash(2), user.SecurityStamp, Now).Error.ShouldBe(SessionErrors.InvalidRefreshToken);
+        (await NewScope().GetRequiredService<AuthDbContext>().Set<OutboxMessage>()
+            .CountAsync(message => message.Type == typeof(RefreshTokenReuseDetectedDomainEvent).FullName, Ct)).ShouldBe(1);
     }
 
     [Fact]
