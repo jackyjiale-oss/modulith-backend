@@ -19,8 +19,8 @@ public sealed class HttpSecurityTests(IntegrationTestWebAppFactory factory) : In
     private const string UntrustedPeer = "198.51.100.7";
     private const string TestUserHeader = "X-Test-User";
 
-    // An anonymous endpoint the global limiter covers. An anonymous request to an unknown route stops at the fallback policy (401),
-    // which runs before the rate limiter (pipeline slot 9a), so it would never be counted.
+    // An anonymous endpoint the global limiter covers, so the limit tests expect 200 until the limit is reached. (An unknown route would
+    // do for counting too, but it answers 401 from the fallback policy; RateLimitOrderTests covers that.)
     private const string LimitedRoute = "/.well-known/jwks.json";
 
     [Fact]

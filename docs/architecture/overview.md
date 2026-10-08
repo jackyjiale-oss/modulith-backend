@@ -57,8 +57,8 @@ A request passes the middleware in the order `Program.cs` registers it ([`docs/s
 flowchart LR
     Client --> FH["1 Forwarded headers"] --> AuthN["1a Authentication"] --> Loc["1b Localization"] --> EH["2 Exception handler"]
     EH --> SCP["3 Status code pages"] --> Trace["4 X-Trace-Id"] --> Sec["5 Security headers"] --> Https["6 HSTS + HTTPS redirect<br/>(not in Development)"]
-    Https --> Log["7 Request logging"] --> Route["8 Routing"] --> Cors["9 CORS"] --> AuthZ["9a Authorization"] --> RL["10 Rate limiter"]
-    RL --> Idem["11 Idempotency-Key"] --> EP["12 Endpoint"]
+    Https --> Log["7 Request logging"] --> Route["8 Routing"] --> Cors["9 CORS"] --> RL["9a Rate limiter"] --> AuthZ["10 Authorization"]
+    AuthZ --> Idem["11 Idempotency-Key"] --> EP["12 Endpoint"]
 ```
 
 Inside an endpoint (the Sample module's `LeaveRequestEndpoints` is the worked example):

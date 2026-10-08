@@ -58,7 +58,7 @@ if (app.Configuration.GetValue("Auth:Seed:RunOnStartup", defaultValue: true))
 // 1. UseForwardedHeaders
 app.UseForwardedHeaders();
 // 1a. UseAuthentication - before localization, so the signed-in user's saved locale claim wins over Accept-Language (decision D7).
-//     It only reads the bearer token; a missing or invalid token leaves the request anonymous, and 9a decides whether that is allowed.
+//     It only reads the bearer token; a missing or invalid token leaves the request anonymous, and 10 decides whether that is allowed.
 app.UseAuthentication();
 // 1b. UseApiLocalization - must precede UseExceptionHandler, so error responses come back in the caller's language (ADR 0009)
 app.UseApiLocalization();
@@ -82,11 +82,14 @@ app.UseRequestLogging();
 app.UseRouting();
 // 9. UseCors - before authorization, so a CORS preflight (which carries no token) is answered without a 401
 app.UseCors();
-// 9a. UseAuthorization - after UseRouting, so it sees the endpoint's metadata; the fallback policy protects every endpoint without
-//     .AllowAnonymous() or a policy of its own, and an unknown route (no endpoint) too. Anonymous callers get 401 here, before the limiter.
-app.UseAuthorization();
-// 10. UseRateLimiter - after authentication, so its user:{sub} partition sees the signed-in user
+// 9a. UseRateLimiter - after UseRouting and UseAuthentication, so the endpoint's RequireRateLimiting metadata and the signed-in user
+//     (the user:{sub} partition) are known; before UseAuthorization, so the 401 and 403 responses authorization short-circuits with
+//     (anonymous callers, a missing permission, unknown routes) are counted too.
 app.UseRateLimiter();
+// 10. UseAuthorization - after UseRouting, so it sees the endpoint's metadata; the fallback policy protects every endpoint without
+//     .AllowAnonymous() or a policy of its own, and an unknown route (no endpoint) too. Anonymous callers get 401 here, a signed-in
+//     caller without the permission 403.
+app.UseAuthorization();
 // 11. UseIdempotency - after UseRouting, because it acts only on endpoints marked WithIdempotency()
 app.UseIdempotency();
 // 12. endpoints (health endpoints are anonymous and exempt from rate limiting)
