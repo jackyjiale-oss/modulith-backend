@@ -163,6 +163,28 @@ public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : Integr
     }
 
     [Fact]
+    public async Task Reset_to_a_recent_password_uses_up_the_link()
+    {
+        // The reuse check runs after the code is consumed: a link cannot be used to test candidate passwords for free.
+        await CreateUserAsync(Email);
+        var token = await ForgotAndReadTokenAsync(Email);
+
+        using (var reused = await ResetAsync(token, OldPassword))
+        {
+            await AssertProblemAsync(reused, HttpStatusCode.BadRequest, "auth.password_reused");
+        }
+
+        using (var retry = await ResetAsync(token, NewPassword))
+        {
+            await AssertProblemAsync(retry, HttpStatusCode.BadRequest, "auth.invalid_token");
+        }
+
+        (await QueryAsync(context => context.Set<VerificationCode>().SingleAsync(Ct))).ConsumedAt.ShouldNotBeNull();
+        using var withOld = await LoginAsync(Email, OldPassword);
+        withOld.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
     public async Task Reset_with_expired_token_fails()
     {
         await CreateUserAsync(Email);

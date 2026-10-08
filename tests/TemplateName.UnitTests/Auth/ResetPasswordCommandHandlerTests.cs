@@ -212,18 +212,28 @@ public sealed class ResetPasswordCommandHandlerTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Current_password_again_returns_auth_password_reused(bool needsRehash)
+    public async Task Current_password_again_returns_auth_password_reused_and_uses_up_the_link(bool needsRehash)
     {
         var code = IssueCode(VerificationPurpose.PasswordReset);
         _passwordHasher.Verify(OldHash, NewPassword).Returns(needsRehash ? PasswordVerification.SuccessRehashNeeded : PasswordVerification.Success);
 
         var result = await _sut.HandleAsync(Command(), Ct);
 
+        // The reuse check runs only after the link is used up, so it can never be a free oracle for the account's passwords.
         result.Error.ShouldBe(UserErrors.PasswordReused);
-        code.ConsumedAt.ShouldBeNull();
+        await _verificationCodes.Received(1).TryConsumeAsync(code.Id, VerificationPurpose.PasswordReset, Now, CancellationToken.None);
+        code.ConsumedAt.ShouldBe(Now);
         _user.PasswordHash.ShouldBe(OldHash);
         _passwordHasher.DidNotReceiveWithAnyArgs().Hash(default!);
         _auditEntries.ShouldHaveSingleItem().FailureReason.ShouldBe(UserErrors.PasswordReused.Code);
+
+        // A second attempt with the same link, even with an acceptable password, is refused like a used token.
+        _passwordHasher.Verify(OldHash, NewPassword).Returns(PasswordVerification.Failed);
+        var retry = await _sut.HandleAsync(Command(), Ct);
+
+        retry.Error.ShouldBe(VerificationErrors.InvalidToken);
+        _user.PasswordHash.ShouldBe(OldHash);
+        await _verificationCodes.Received(1).TryConsumeAsync(code.Id, VerificationPurpose.PasswordReset, Now, Arg.Any<CancellationToken>());
     }
 
     [Theory]

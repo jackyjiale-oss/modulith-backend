@@ -14,9 +14,9 @@ namespace TemplateName.Modules.Auth.Application.Passwords.Reset;
 /// Sets a new password with a password-reset code. The token proves control of the mailbox, so the reset also confirms the email address
 /// (this is how an account an administrator created gets its first password) and ends any lockout; every session of the user is revoked.
 /// An unknown, used, replaced, expired or wrong-purpose token, and one whose account is gone or suspended, all give
-/// <see cref="VerificationErrors.InvalidToken"/>. The code is consumed by one conditional statement in the database, after the password
-/// passed the breach and reuse checks (so a refused password leaves the link usable), and of two simultaneous resets with one token
-/// exactly one succeeds.
+/// <see cref="VerificationErrors.InvalidToken"/>. The code is consumed by one conditional statement in the database, so of two
+/// simultaneous resets with one token exactly one succeeds. The breach check runs before that (it depends on the password alone); the
+/// reuse check runs after it, so a reused password uses up the link and the link can never be a free oracle for the account's passwords.
 /// </summary>
 internal sealed class ResetPasswordCommandHandler(
     IUserRepository users,
@@ -51,13 +51,6 @@ internal sealed class ResetPasswordCommandHandler(
             return await FailAsync(UserErrors.PasswordBreached, user.Id, now, cancellationToken);
         }
 
-        // Before the code is consumed, so the owner can choose another password with the same link. Whoever holds the link could set a
-        // password and then probe the history through the change endpoint anyway, so checking first tells them nothing more.
-        if (passwordHasher.IsRecentPassword(user, command.NewPassword))
-        {
-            return await FailAsync(UserErrors.PasswordReused, user.Id, now, cancellationToken);
-        }
-
         // The database decides which of two simultaneous resets with this token wins; the loser answers like a used token. The claim
         // commits on its own, so from here on nothing is cancelled with the request.
         if (!await verificationCodes.TryConsumeAsync(code.Id, VerificationPurpose.PasswordReset, now, CancellationToken.None))
@@ -66,6 +59,15 @@ internal sealed class ResetPasswordCommandHandler(
         }
 
         code.Consume(VerificationPurpose.PasswordReset, now);
+
+        // Only after the link is used up: the history holds the current hash, so checking before the claim would let whoever holds the
+        // link test candidate passwords for free and silently (the owner sees nothing until the link is used). A reused password now
+        // costs the link, and the owner asks for a new one.
+        if (passwordHasher.IsRecentPassword(user, command.NewPassword))
+        {
+            return await FailAsync(UserErrors.PasswordReused, user.Id, now, CancellationToken.None);
+        }
+
         user.ChangePassword(passwordHasher.Hash(command.NewPassword), passwordOptions.Value.HistoryCount, now);
         user.ConfirmEmail(now);
 
