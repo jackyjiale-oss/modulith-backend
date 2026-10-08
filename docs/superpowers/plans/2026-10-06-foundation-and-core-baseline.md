@@ -1,20 +1,28 @@
-# Modulith: Foundation & Core Baseline Implementation Plan
+# Modulith Backend: Action Plan (Plan 1: Foundation & Core Baseline)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A buildable, tested, `dotnet new`-installable ASP.NET Core 10 modular-monolith skeleton with every cross-cutting concern from the blueprint's core baseline, proven end-to-end by a small Sample (leave request) module.
+**This is the single action plan for the project.** Read it in order:
+- **Part A:** owner actions that must happen before or alongside implementation (things only the repo owner can do).
+- **Part B:** implementation Tasks 1–17.
+- **Part C:** follow-up actions after the tasks merge, up to the `v0.1.0` release.
+- **Part D:** the roadmap of later plans.
+- **Part E:** traceability from every decision in the spec to the task that delivers it.
+
+**Goal:** A buildable, tested, `dotnet new`-installable ASP.NET Core 10 modular-monolith skeleton with every cross-cutting concern from the blueprint's core baseline, proven end-to-end by a small Sample (leave request) module, published from <https://github.com/jackyjiale-oss/modulith-backend> with CI, docs, changelog automation and licence checks.
 
 **Architecture:** Building-block libraries (SharedKernel, Application.Common, Infrastructure.Common, Web.Common) plus one host (`TemplateName.Api`). Each module is **two projects**: `Modules.X` (folders `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/`, `internal` by default) and `Modules.X.Contracts` (created only when a module first exposes something; not needed in this plan). Handlers are injected directly into Minimal API endpoints and wrapped by Scrutor decorators. Each module has its own `DbContext`, schema and outbox.
 
 **Tech Stack:** .NET 10 / C# latest, ASP.NET Core Minimal APIs, EF Core 10 (SQL Server), Dapper, FluentValidation, Scrutor, Serilog, OpenTelemetry, Microsoft.AspNetCore.OpenApi + Scalar, Microsoft.Extensions.Localization (`.resx`), xUnit v3, Shouldly, NSubstitute, NetArchTest.Rules, Testcontainers.MsSql, Respawn, Microsoft.Extensions.TimeProvider.Testing.
 
-**Spec:** `BACKEND_TEMPLATE_BLUEPRINT.md` as amended by `docs/blueprint-review.md`. The review wins where they disagree. This plan covers row 1 of the review's roadmap (Section 6).
+**Spec:** `BACKEND_TEMPLATE_BLUEPRINT.md` as amended by `docs/blueprint-review.md`; the review wins where they disagree. Working agreements: `docs/coding-conventions.md`, `CONTRIBUTING.md`, `docs/repository-management.md`. This plan covers row 1 of the review's roadmap (Section 6).
 
 ## Global Constraints
 
 - **Repository:** <https://github.com/jackyjiale-oss/modulith-backend> (public). Its settings and branch-protection phases are in `docs/repository-management.md`. The repo is already initialised locally with remote `origin` and a repo-local noreply commit identity; the bootstrap commit with the docs is on `main`.
 - **Workflow per task:** branch `feature/task-NN-<kebab-title>` from an up-to-date `main` → implement → push → open a PR whose title is the task's commit header (`gh pr create`). Squash-merge when CI is green (once CI exists, from Task 14). Never push directly to `main`. If `gh` isn't available, push the branch and give the user the compare URL `https://github.com/jackyjiale-oss/modulith-backend/compare/<branch>?expand=1`.
-- **Prerequisites:** .NET SDK `10.0.401` (installed). **Docker Desktop must be installed and running before Task 8.** It isn't installed on the dev machine yet, and Testcontainers needs it.
+- **Prerequisites:** .NET SDK `10.0.401` (installed). **Docker Desktop must be running before Task 8** (Part A1); Testcontainers needs it. The GitHub CLI (Part A2) is needed for `gh pr create`.
+- **Agent-made commits** end with the trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (after a blank line). The header rules are unchanged; the hook checks only the header.
 - `global.json`: `{ "sdk": { "version": "10.0.401", "rollForward": "latestFeature" } }`.
 - Every project targets `net10.0` with `Nullable` enabled, `ImplicitUsings` enabled, `LangVersion` latest and `TreatWarningsAsErrors` in Release, all set in `Directory.Build.props` and never in a csproj.
 - Central Package Management: every version lives in `Directory.Packages.props`. Use the latest **stable** version at implementation time. Prerelease is allowed only for OpenTelemetry EF Core/SqlClient instrumentation, and must be noted in the ADR.
@@ -52,6 +60,20 @@
 
 ---
 
+## Part A: Owner actions (before and alongside Task 1)
+
+Only the repository owner can do these: installs, sign-ins and GitHub settings. The agent never enters credentials. Run the `gh`-based steps only with the owner's explicit approval.
+
+- [x] **A0: Repository bootstrapped.** <https://github.com/jackyjiale-oss/modulith-backend> is public, and `main` holds the bootstrap commit `ac150fa` (docs, conventions, licence, plan). The local repo uses the noreply identity `jackyjiale-oss <272155658+jackyjiale-oss@users.noreply.github.com>`, and remote `origin` is `https://jackyjiale-oss@github.com/jackyjiale-oss/modulith-backend.git`.
+- [ ] **A1: Install Docker Desktop** (WSL 2 backend, Linux containers) and start it. Verify with `docker run --rm hello-world`. Needed from Task 8.
+- [ ] **A2: Install and sign in to the GitHub CLI.** Run `winget install --id GitHub.cli`, then `gh auth login` and choose the **jackyjiale-oss** account. Verify that `gh auth status` shows that account.
+- [ ] **A3: Apply the repository settings (phase 0).** The agent runs `bash build/scripts/configure-github-repo.sh --dry-run`, the owner reviews the output, and then the agent runs it without `--dry-run`. This sets squash-only merging with PR titles as commit messages, branch protection without required checks, Dependabot and secret scanning.
+- [ ] **A4: Protect your email on github.com.** As jackyjiale-oss: Settings → Emails → tick "Keep my email addresses private" and "Block command line pushes that expose my email".
+- [ ] **A5: Create a release token** (needed before Task 17 merges). Create a fine-grained personal access token limited to this repository, with *Contents: read/write* and *Pull requests: read/write*. Save it as the repository secret `RELEASE_PLEASE_TOKEN`. Why: PRs opened with the default `GITHUB_TOKEN` don't trigger workflows, so release PRs would never get the required CI checks.
+- [ ] **A6: Choose the execution method:** Subagent-driven (recommended) or Native.
+
+---
+
 ## File Structure
 
 ```
@@ -63,7 +85,11 @@
 ├─ CONTRIBUTING.md, docs/coding-conventions.md, LICENSE   already written (conventions spec; MIT licence)
 ├─ CLAUDE.md                                 Task 1  (template-maintainer guide; imports build/template-content/CLAUDE.md)
 ├─ CHANGELOG.md                              Task 1  (release-please output; never hand-edited)
-├─ build/template-content/{README.md, CHANGELOG.md, CLAUDE.md, .release-please-manifest.json}   Tasks 1,17 (generated-project versions)
+├─ build/template-content/CLAUDE.md          Task 1   (generated-project version)
+├─ build/template-content/{README.md, CHANGELOG.md}   Task 14 (generated-project versions)
+├─ build/template-content/.release-please-manifest.json   Task 17
+├─ SECURITY.md, docs/repository-management.md, build/scripts/configure-github-repo.sh   already written (template repo only)
+├─ .github/ISSUE_TEMPLATE/{bug_report.yml, feature_request.yml, config.yml}   Task 14
 ├─ release-please-config.json, .release-please-manifest.json   Task 17
 ├─ build/licenses/allowed-licenses.json      Task 17
 ├─ docs/README.md, docs/architecture/overview.md, docs/services/api.md, docs/building-blocks/*.md   Task 17
@@ -102,10 +128,35 @@
 
 ---
 
+## Part B: Implementation tasks
+
+| # | Task | Needs | Commit header |
+|---|---|---|---|
+| 1 | Repository foundation + Result/Error | A0 | `chore: set up repository foundation and Result/Error types` |
+| 2 | Domain primitives and sequential IDs | 1 | `feat(shared-kernel): add domain primitives and sequential GUIDs` |
+| 3 | Messaging contracts and decorators | 2 | `feat(application): add handler contracts and decorators` |
+| 4 | ProblemDetails, exceptions, headers | 3 | `feat(web): map results to problem details and add security headers` |
+| 5 | API host + test harness | 4 | `feat(host): add API host with health checks and OpenAPI` |
+| 6 | Observability | 5 | `feat(observability): add Serilog masking and OpenTelemetry` |
+| 7 | HTTP security | 5 | `feat(security): add CORS, rate limiting and forwarded headers` |
+| 8 | Persistence foundation | 5, **A1 Docker** | `feat(persistence): add module DbContext conventions and interceptors` |
+| 9 | Per-module outbox | 8 | `feat(outbox): add per-module outbox with leased dispatch` |
+| 10 | Sample: domain + application | 3 | `feat(sample): add leave request domain and handlers` |
+| 11 | Sample: persistence + endpoints | 9, 10 | `feat(sample): add leave request persistence and endpoints` |
+| 12 | Idempotency | 11 | `feat(idempotency): add Idempotency-Key handling` |
+| 13 | Architecture tests | 12 | `test(architecture): enforce layering, boundaries and naming` |
+| 14 | Dev environment, CI, template packaging | 13 | `chore: add local environment, CI and template smoke test` |
+| 15 | i18n | 14 | `feat(i18n): localize problem details in en, ms and zh-Hans` |
+| 16 | Cursor pagination | 15 | `feat(sample): add cursor-paginated leave request list` |
+| 17 | Docs, API snapshot, release + licence automation | 16, A5 | `docs: add service, module and architecture docs with release automation` |
+
+Tasks run in order on one branch each (Global Constraints, "Workflow per task").
+
 ### Task 1: Repository foundation + Result/Error
 
 **Files:**
-- Create: `global.json`, `Directory.Build.props`, `Directory.Packages.props`, `src/Directory.Build.props`, `tests/Directory.Build.props`, `.editorconfig`, `tests/.editorconfig`, `.gitattributes`, `.gitignore`, `.config/dotnet-tools.json`, `TemplateName.slnx`, `.githooks/commit-msg`, `build/scripts/check-commit-msg.sh`, `CLAUDE.md`
+- Create: `global.json`, `Directory.Build.props`, `Directory.Packages.props`, `src/Directory.Build.props`, `tests/Directory.Build.props`, `.editorconfig`, `tests/.editorconfig`, `.gitignore`, `.config/dotnet-tools.json`, `TemplateName.slnx`, `.githooks/commit-msg`, `build/scripts/check-commit-msg.sh`, `CLAUDE.md`
+- Keep: `.gitattributes` (already committed: `* text=auto eol=lf`, `*.sh text eol=lf`, `*.ps1 text eol=crlf`, binary images)
 - Create: `CHANGELOG.md` (header + `## [Unreleased]`, with a note that release-please maintains it), `build/template-content/CLAUDE.md`
 - Keep: `CONTRIBUTING.md`, `docs/coding-conventions.md` (already written; the rules every task follows), `LICENSE` (MIT, already written)
 - Create: `src/BuildingBlocks/TemplateName.SharedKernel/{ErrorType.cs, Error.cs, ValidationError.cs, Result.cs, ResultOfT.cs}`
@@ -123,7 +174,6 @@
 - [ ] **Step 1: Initialise the repo and tooling**
 
 The repository already exists (bootstrap commit on `main`). Start the task branch `feature/task-01-repository-foundation`, then create `global.json` (value in Global Constraints) and `.gitignore` (`dotnet new gitignore`, plus `.env`, `TestResults/`, `coverage/`).
-`.gitattributes`: `* text=auto eol=lf`, `*.sh text eol=lf`, `*.ps1 text eol=crlf`.
 `.editorconfig` (`root = true`):
 - Formatting: `end_of_line = lf`, `insert_final_newline = true`, 4-space indent for `*.cs`, 2-space for `*.json`, `*.yml`, `*.xml`, `*.props` and `*.resx`.
 - Style:
@@ -212,7 +262,7 @@ dotnet_naming_rule.locals_and_parameters_are_camel_case.severity = warning
 5. **Hard rules**: no secrets in files; no `DateTime.Now`/`UtcNow` (use `TimeProvider`); no access to another module's tables; no new package without CPM and an allowed licence; never `--no-verify`; never edit an applied migration.
 6. **Read before editing**: links to `docs/coding-conventions.md`, `CONTRIBUTING.md`, `docs/architecture/overview.md`, `docs/adr/`.
 
-Root `CLAUDE.md` (template repo only; excluded from output in Task 17) is `@build/template-content/CLAUDE.md` followed by a short **"Maintaining the template"** section:
+Root `CLAUDE.md` (template repo only; excluded from output by `template.json` in Task 14) is `@build/template-content/CLAUDE.md` followed by a short **"Maintaining the template"** section:
 - `TemplateName` is the placeholder; never hard-code a concrete project name.
 - Files under `build/template-content/` replace their root counterparts in generated output.
 - Run `bash build/scripts/template-smoke.sh` after changing anything that ships.
@@ -508,6 +558,8 @@ public void Maps_error_type_to_status_and_code(ErrorType type, int status)
 - [ ] **Step 1: Create the projects**
 
 `dotnet new web -o src/Host/TemplateName.Api`; create `tests/TemplateName.IntegrationTests` as a classlib referencing the Api and `Microsoft.AspNetCore.Mvc.Testing`; add both to the slnx. Add packages `Microsoft.AspNetCore.OpenApi` and `Scalar.AspNetCore`. `appsettings.json` includes `"Kestrel": { "Limits": { "MaxRequestBodySize": 10485760 } }`.
+- Run `dotnet user-secrets init --project src/Host/TemplateName.Api`. Record the generated `UserSecretsId` GUID: Task 14 lists it in `template.json` `guids`, so every generated project gets its own secrets store.
+- `launchSettings.json` profile `https`: `applicationUrl` `https://localhost:5001;http://localhost:5000`, `launchUrl` `scalar/v1`, `ASPNETCORE_ENVIRONMENT=Development`. These are the URLs the docs use.
 
 - [ ] **Step 2: Write the failing tests** (`HostTests : IntegrationTestBase`)
 
@@ -969,41 +1021,84 @@ Expected: the migration creates `sample.LeaveRequests`, `sample.OutboxMessages`,
 ### Task 14: Dev environment, CI and template smoke test
 
 **Files:**
-- Create: `docker-compose.yml`, `.env.example`, `README.md`, `coverage.runsettings`
-- Create: `.github/workflows/ci.yml`, `.github/dependabot.yml`, `.github/pull_request_template.md`
+- Create: `docker-compose.yml`, `.env.example`, `coverage.runsettings`
+- Create: `README.md` (template repo), `build/template-content/README.md` and `build/template-content/CHANGELOG.md` (generated project)
+- Create: `.github/workflows/ci.yml`, `.github/dependabot.yml`, `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/{bug_report.yml, feature_request.yml, config.yml}`
 - Create: `.template.config/template.json`, `build/scripts/template-smoke.sh`
 
-**Interfaces:** none (delivery and configuration only).
+**Interfaces:** none (delivery and configuration only). Task 17 adds the docs index to both READMEs, plus release-please and the licence job.
 
 - [ ] **Step 1: Local environment.** `docker-compose.yml` services:
   - `sqlserver`: `mcr.microsoft.com/mssql/server:2022-latest`, `ACCEPT_EULA=Y`, `MSSQL_SA_PASSWORD=${SQL_SA_PASSWORD:?set in .env}`, port 1433, named volume
   - `aspire-dashboard`: `mcr.microsoft.com/dotnet/aspire-dashboard:latest`, `DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS=true`, ports `18888:18888`, `4317:18889`
 
   `.env.example` contains `SQL_SA_PASSWORD=ChangeMe_LocalOnly_1`.
-  The README quick start: copy `.env.example` to `.env` → `docker compose up -d` → `dotnet user-secrets set "ConnectionStrings:Database" "Server=localhost,1433;Database=TemplateName;User Id=sa;Password=<from .env>;TrustServerCertificate=True" --project src/Host/TemplateName.Api` → `dotnet run --project src/Host/TemplateName.Api` → Scalar at `/scalar/v1`, dashboard at `http://localhost:18888`. Also document prerequisites, the GitHub branch-protection settings from blueprint 6 (PR required, CI green, one approval, no force push), and links to the blueprint and review.
-  Verify: `docker compose config` exits 0, then `docker compose up -d`, run the API, and `curl -f http://localhost:<port>/health/ready` returns 200.
+  Verify: `docker compose config` exits 0, then `docker compose up -d`, run the API, and `curl -fk https://localhost:5001/health/ready` returns 200.
+
+- [ ] **Step 1b: READMEs.**
+  - **Template repo `README.md`** sections:
+    - badges: CI (`https://github.com/jackyjiale-oss/modulith-backend/actions/workflows/ci.yml/badge.svg`) and MIT licence
+    - what Modulith is: one paragraph and a feature list
+    - status: "pre-release, implementing Plan 1"
+    - clone URL `https://github.com/jackyjiale-oss/modulith-backend.git`
+    - prerequisites
+    - using the template: `dotnet new install` from the repo folder now, or the package `Modulith.Backend.Templates` once Plan 7 publishes it; then `dotnet new modulith-backend -n Acme.Hr`, after which the generated README takes over
+    - repository layout
+    - links to the blueprint, review, conventions, CONTRIBUTING, `docs/repository-management.md` and `SECURITY.md`
+    - licence
+  - **Generated `build/template-content/README.md`** (uses `TemplateName`; never links to the Modulith repo except the attribution line):
+    - `# TemplateName` + `> Describe what TemplateName does.`
+    - prerequisites (.NET SDK, Docker Desktop)
+    - quick start: `cp .env.example .env` → `docker compose up -d` → `git config core.hooksPath .githooks` → `dotnet user-secrets set "ConnectionStrings:Database" "Server=localhost,1433;Database=TemplateName;User Id=sa;Password=<from .env>;TrustServerCertificate=True" --project src/Host/TemplateName.Api` → `dotnet run --project src/Host/TemplateName.Api`
+    - URLs: Scalar `https://localhost:5001/scalar/v1`, Aspire dashboard `http://localhost:18888`
+    - modules table linking `docs/modules/*.md`
+    - testing commands; conventions (`docs/coding-conventions.md`, `CONTRIBUTING.md`)
+    - "Generated from [Modulith Backend](https://github.com/jackyjiale-oss/modulith-backend)."
+    - licence ("Add a LICENSE file for this project.")
+  - **`build/template-content/CHANGELOG.md`**: Keep a Changelog header + `## [Unreleased]`.
 
 - [ ] **Step 2: Coverage settings.** `coverage.runsettings` (coverlet collector, `Format=cobertura`) with `Include = [TemplateName.SharedKernel]*,[TemplateName.Application.Common]*,[TemplateName.Modules.*]TemplateName.Modules.*.Domain.*,[TemplateName.Modules.*]TemplateName.Modules.*.Application.*`.
 
-- [ ] **Step 3: Template definition.** `.template.config/template.json`: `identity` `Modulith.Backend.Templates`, `name` `Modulith Backend`, `shortName` `modulith-backend`, `author` = the owning team or organization (no personal names), `classifications` `["Web", "API", "Modular Monolith", "Clean Architecture"]`, `sourceName` `TemplateName`, `preferNameDirectory` true, `tags` `{ language: C#, type: solution }`, **no switches yet**. Exclude `**/bin/**`, `**/obj/**`, `.git/**`, `.vs/**`, `**/*.user`, `**/TestResults/**`, `coverage/**`, `.env`, `docs/superpowers/**`, `BACKEND_TEMPLATE_BLUEPRINT.md`, `docs/blueprint-review.md`.
+- [ ] **Step 3: Template definition.** `.template.config/template.json`: `identity` `Modulith.Backend.Templates`, `name` `Modulith Backend`, `shortName` `modulith-backend`, `author` = the owning team or organization (no personal names), `classifications` `["Web", "API", "Modular Monolith", "Clean Architecture"]`, `sourceName` `TemplateName`, `preferNameDirectory` true, `tags` `{ language: C#, type: solution }`, **no switches yet**.
+  - `guids`: the `UserSecretsId` GUID from Task 5, so each generated project gets a fresh one.
+  - `sources[0]` (repo root) excludes:
+    - build output and local files: `**/bin/**`, `**/obj/**`, `.git/**`, `.vs/**`, `**/*.user`, `**/TestResults/**`, `coverage/**`, `.env`
+    - the spec: `docs/superpowers/**`, `BACKEND_TEMPLATE_BLUEPRINT.md`, `docs/blueprint-review.md`
+    - files that point at the Modulith repo: `LICENSE`, `SECURITY.md`, `docs/repository-management.md`, `build/scripts/configure-github-repo.sh`
+    - files replaced by the generated versions: `README.md`, `CHANGELOG.md`, `CLAUDE.md`, `.release-please-manifest.json`, `build/template-content/**`
+  - `sources[1]`: `{ "source": "./build/template-content/", "target": "./" }`, so the generated versions land at the root.
 
 - [ ] **Step 4: Smoke script.** `build/scripts/template-smoke.sh` (`set -euo pipefail`) does the following in order:
   1. `dotnet new install . --force`
   2. generates `dotnet new modulith-backend -n Acme.Smoke -o "$tmp/Acme.Smoke"`
   3. fails if `grep -rI "TemplateName" "$tmp/Acme.Smoke" --exclude-dir={bin,obj}` finds anything
-  4. `dotnet build "$tmp/Acme.Smoke" -c Release`
-  5. `dotnet test` on the generated unit and architecture projects
-  6. `dotnet new uninstall .` in a `trap`
+  4. checks the generated files:
+     - must exist: `README.md` (starting `# Acme.Smoke`), `CHANGELOG.md` (with `## [Unreleased]`), `CLAUDE.md`
+     - must not exist: `LICENSE`, `SECURITY.md`, `BACKEND_TEMPLATE_BLUEPRINT.md`, `docs/blueprint-review.md`, `docs/repository-management.md`, `docs/superpowers/`, `build/template-content/`, `build/scripts/configure-github-repo.sh`
+     - no line in `CLAUDE.md` contains "Maintaining the template"
+     - the generated Api csproj `UserSecretsId` differs from the template's
+  5. `dotnet build "$tmp/Acme.Smoke" -c Release`
+  6. `dotnet test` on the generated unit and architecture projects
+  7. `dotnet new uninstall .` in a `trap`
 
   Run: `bash build/scripts/template-smoke.sh` → exits 0.
 
 - [ ] **Step 5: CI.** `.github/workflows/ci.yml`: triggers `pull_request` and `push` on `main` plus `workflow_dispatch`; `concurrency` cancels in-progress runs; `permissions: contents: read, pull-requests: write, checks: write`.
   - Job `build-test` (ubuntu-latest, 30 min): checkout → setup-dotnet (`global-json-file`, NuGet cache on `**/packages.lock.json`) → `dotnet restore --locked-mode` (NuGet Audit fails here) → `dotnet format --verify-no-changes --no-restore` → `dotnet build --no-restore -c Release` → `dotnet test --no-build -c Release --settings coverage.runsettings --logger trx --results-directory TestResults` (unit, architecture, integration; Docker is available on the runner) → ReportGenerator → coverage gate **80 % line** → sticky PR comment → `dorny/test-reporter` (if `always()`).
   - Job `template-smoke` runs `bash build/scripts/template-smoke.sh`.
-  - Job `commit-lint` (only on `pull_request`; trigger types `opened`, `edited`, `synchronize`) runs `bash build/scripts/check-commit-msg.sh --message "$PR_TITLE"` with `env: PR_TITLE: ${{ github.event.pull_request.title }}`. **Pass the title through `env`, never inline `${{ }}` in `run:`**, because an inline expression lets a crafted PR title inject shell commands.
+  - Job `commit-lint` (only on `pull_request`; trigger types `opened`, `edited`, `synchronize`, `reopened`) runs `bash build/scripts/check-commit-msg.sh --message "$PR_TITLE"` with `env: PR_TITLE: ${{ github.event.pull_request.title }}`. **Pass the title through `env`, never inline `${{ }}` in `run:`**, because an inline expression lets a crafted PR title inject shell commands. Skip the job when `github.event.pull_request.user.login == 'dependabot[bot]'`: Dependabot titles for long package names exceed 72 characters, and a skipped job still satisfies a required check.
   - Use the latest major tag of each action (Dependabot updates them). Add a comment noting that production forks should pin full SHAs.
 
-  `dependabot.yml`: `nuget` (minor/patch grouped) and `github-actions`, weekly. `pull_request_template.md`: the checklist from blueprint 13.4 plus "Names, files and commits follow `docs/coding-conventions.md` / `CONTRIBUTING.md`". The README links both documents and lists `git config core.hooksPath .githooks` in the quick start.
+  `dependabot.yml`: weekly updates.
+  - `nuget`: minor/patch grouped as `minor-and-patch`; `commit-message: { prefix: "chore", include: "scope" }` gives `chore(deps): bump …`
+  - `github-actions`: `commit-message: { prefix: "ci", include: "scope" }`
+
+  `pull_request_template.md`: the checklist from blueprint 13.4, plus "Names, files and commits follow `docs/coding-conventions.md` / `CONTRIBUTING.md`" and "Docs updated (CONTRIBUTING Section 4)".
+
+  Issue forms (generic; they ship with the template):
+  - `bug_report.yml`: version, steps, expected, actual, logs with `traceId`
+  - `feature_request.yml`: problem, proposal, alternatives
+  - `config.yml`: `blank_issues_enabled: false`
 
 - [ ] **Step 6: Final verification**
 
@@ -1011,13 +1106,13 @@ Run: `dotnet format --verify-no-changes`, then `dotnet build -c Release`, then `
 Expected: 0 warnings, all tests pass, and coverage on the included namespaces is ≥ 80 %. Then `bash build/scripts/template-smoke.sh` exits 0.
 
 - [ ] **Step 7: Commit** → `git commit -m "chore: add local environment, CI and template smoke test"`
-- [ ] **Step 8: Tighten branch protection (phase 1)** after this task's PR is merged and CI has run once on `main`: with the user's approval, run `bash build/scripts/configure-github-repo.sh --checks build-test,template-smoke,commit-lint`. Confirm in the PR settings that the three checks show as required.
+- [ ] **Step 8: Branch protection phase 1** (Part C1) after this task merges and CI has run once on `main`.
 
 ---
 
 ### Task 15: Internationalization (i18n)
 
-Implements review Section 8 (I1–I10). It comes last because it changes the shared error contract after every code path that produces errors exists, and its tests then cover all of them.
+Implements review Section 8 (I1–I10). It comes after the Sample module, idempotency and CI, because it changes the shared error contract only once every code path that produces errors exists, so its tests cover all of them. Task 16 adds its own keys on top.
 
 **Files:**
 - Modify: `src/BuildingBlocks/TemplateName.SharedKernel/Error.cs` (add `Parameters`)
@@ -1085,7 +1180,8 @@ Update `GlobalExceptionHandlerTests.Development_includes_exception_detail` to as
 - [ ] **Step 2: Write the failing architecture tests** (`TranslationTests`; `Assemblies.ErrorMessageResources = [typeof(CommonErrorMessages), typeof(InfrastructureErrorMessages), typeof(SampleErrorMessages)]`; read with `new ResourceManager(type.FullName!, type.Assembly).GetResourceSet(culture, createIfNotExists: true, tryParents: false)`)
   - `Every_translation_has_the_same_keys_as_the_neutral_resource`: for `ms` and `zh-Hans`, the key set equals the neutral key set; the failure message lists missing and extra keys per resource
   - `Translations_use_the_same_placeholders`: the `{name}` set of every translated value equals the neutral value's set
-  - `Every_module_error_code_has_a_neutral_message`: for each module assembly, collect `Error` codes from static fields and properties of classes named `*Errors`, plus static methods returning `Error` (invoked with `default` arguments); each code must be a key in that assembly's `*ErrorMessages` neutral resource
+  - `Every_module_error_code_has_a_neutral_message`: for each module assembly, collect `Error` codes from static fields and properties of classes named `*Errors`, plus static methods returning `Error` (invoked with `default` arguments). Each code must be a key in that assembly's `*ErrorMessages` neutral resource. Put the collector in a shared `ErrorCatalog` helper; Task 17 reuses it.
+  - `Every_building_block_error_code_has_a_neutral_message`: the same collection over the building-block assemblies (it picks up `PaginationErrors` in Task 16). Each code must be a key in at least one resource in `Assemblies.ErrorMessageResources`.
 
 - [ ] **Step 3: Write the failing integration tests** (`LocalizationTests : IntegrationTestBase`; `Get(url, lang)` sends `Accept-Language`)
 ```csharp
@@ -1108,7 +1204,7 @@ Update `GlobalExceptionHandlerTests.Development_includes_exception_detail` to as
 
 - [ ] **Step 6: Run all tests** → pass. Also confirm `dotnet build -c Release` emits satellite assemblies `ms/` and `zh-Hans/` next to the Api output.
 
-- [ ] **Step 7: Write ADR 0009** (review Section 8). Add a README section, "Adding a language / adding an error message": add the resx key in all languages, and the architecture tests enforce it. Add a release-checklist line saying `ms`/`zh-Hans` strings need native review. Re-run `bash build/scripts/template-smoke.sh` → exits 0 (satellite resources survive renaming).
+- [ ] **Step 7: Write ADR 0009** (review Section 8). Add a "Recipes → Adding an error message or a language" section to `build/template-content/README.md`: add the resx key in all languages, and the architecture tests enforce it. Add a release-checklist line saying `ms`/`zh-Hans` strings need native review. Re-run `bash build/scripts/template-smoke.sh` → exits 0 (satellite resources survive renaming).
 
 - [ ] **Step 8: Commit** → `git commit -m "feat(i18n): localize problem details in en, ms and zh-Hans"`
 
@@ -1194,56 +1290,43 @@ Implements review Section 9.3 (P1–P8) and adds a paged list endpoint to the Sa
 - [ ] **Step 3: Run to verify failure.**
 - [ ] **Step 4: Implement the building blocks, then the Sample query, endpoint and indexes.** Generate the migration: `dotnet ef migrations add AddLeaveRequestListIndexes --project src/Modules/Sample/TemplateName.Modules.Sample --startup-project src/Host/TemplateName.Api --context SampleDbContext --output-dir Infrastructure/Persistence/Migrations`. Add the three `pagination.*` keys to `CommonErrorMessages` in all three languages (the Task 15 translation tests must stay green).
 - [ ] **Step 5: Run all tests** → pass. In Scalar, confirm the list endpoint documents `pageSize`, `cursor`, `sort` and `includeTotalCount`.
-- [ ] **Step 6: Write ADR 0010** (review Section 9: why not offset, why not DAB, the optional DAB reporting sidecar, index rule P7). Update the README with an "Adding a paged list endpoint" recipe: allow-list fields → indexes → handler using `KeysetSqlBuilder` and `CursorPageBuilder`.
+- [ ] **Step 6: Write ADR 0010** (review Section 9: why not offset, why not DAB, the optional DAB reporting sidecar, index rule P7). Add a "Recipes → Adding a paged list endpoint" section to `build/template-content/README.md`: allow-list fields → indexes → handler using `KeysetSqlBuilder` and `CursorPageBuilder`. Update `docs/modules/sample.md` (new endpoint, indexes, migration `AddLeaveRequestListIndexes`).
 - [ ] **Step 7: Commit** → `git commit -m "feat(sample): add cursor-paginated leave request list"`
 
 ---
 
-### Task 17: Documentation set, changelog automation, licence compliance and generated-project files
+### Task 17: Documentation set, API snapshot, changelog automation and licence compliance
 
 Implements review Section 11. It comes last so the documents describe the finished baseline, and its tests stop them drifting from then on.
 
 **Files:**
 - Create: `docs/README.md`, `docs/architecture/overview.md`, `docs/services/api.md`, `docs/building-blocks/{shared-kernel.md, application-common.md, infrastructure-common.md, web-common.md}`
-- Create: `build/template-content/{README.md, CHANGELOG.md, .release-please-manifest.json}` (`CLAUDE.md` exists from Task 1)
-- Create: `release-please-config.json`, `.release-please-manifest.json`, `.github/workflows/release.yml`, `build/licenses/allowed-licenses.json`
-- Modify: `README.md` (template repo version, final), `Directory.Build.props` (`<Version>0.1.0</Version> <!-- x-release-please-version -->`), `.template.config/template.json` (exclusions + content overrides), `.github/workflows/ci.yml` (licence job), `build/scripts/template-smoke.sh` (extra assertions)
-- Test: `tests/TemplateName.ArchitectureTests/DocumentationTests.cs`, `tests/TemplateName.IntegrationTests/Documentation/EndpointDocumentationTests.cs`
+- Create: `build/template-content/.release-please-manifest.json` (`{ ".": "0.0.0" }`). `README.md`, `CHANGELOG.md` and `CLAUDE.md` overrides already exist from Tasks 1 and 14.
+- Create: `release-please-config.json`, `.release-please-manifest.json` (`{ ".": "0.0.0" }`), `.github/workflows/release.yml`, `build/licenses/allowed-licenses.json`
+- Modify:
+  - both READMEs: add the docs index. The generated README links only docs that ship; template-only docs are linked only from the root README.
+  - `Directory.Build.props`: add `<Version>0.0.0</Version>`, which release-please's xml updater rewrites
+  - `.github/workflows/ci.yml`: add the `licenses` job
+  - `build/scripts/template-smoke.sh`: assert the generated `.release-please-manifest.json` is `0.0.0`
+  - `docs/modules/sample.md`: make sure it covers Tasks 12, 15 and 16
+- Test: `tests/TemplateName.ArchitectureTests/DocumentationTests.cs`, `tests/TemplateName.IntegrationTests/Documentation/{EndpointDocumentationTests.cs, OpenApiSnapshotTests.cs, OpenApiSnapshotTests.OpenApi_document_matches_snapshot.verified.json}`
+- Modify: `.gitattributes` (add `*.verified.* text eol=lf`), `tests/Directory.Build.props` (add `Verify.XunitV3`; MIT licence)
 
 **Interfaces:**
 - Consumes: module assemblies and error-code reflection helper (Tasks 13, 15); `EndpointDataSource` from the running host (Task 5)
 - Produces:
   - `static class RepositoryPaths { public static string Root { get; } }` (ArchitectureTests; IntegrationTests links the same file): walks up from `AppContext.BaseDirectory` to the directory containing `*.slnx`
-  - **Template repo `README.md`** sections:
-    - badges: CI (`https://github.com/jackyjiale-oss/modulith-backend/actions/workflows/ci.yml/badge.svg`) and MIT licence
-    - what Modulith is: one paragraph and a feature list, linking review Sections 6–11
-    - clone URL `https://github.com/jackyjiale-oss/modulith-backend.git`, plus links to `docs/repository-management.md` and `SECURITY.md`
-    - prerequisites
-    - quick start: `dotnet new install Modulith.Backend.Templates`, `dotnet new modulith-backend -n Acme.Hr`, then the generated README takes over
-    - template options (none yet)
-    - repository layout
-    - docs index
-    - contributing (CONTRIBUTING.md, commit hook)
-    - licence (MIT badge + link)
-  - **Generated `build/template-content/README.md`** (uses `TemplateName`) sections:
-    - service overview placeholder (`> Describe what TemplateName does.`)
-    - prerequisites
-    - quick start (`.env`, `docker compose up -d`, user-secrets, `git config core.hooksPath .githooks`, `dotnet run`)
-    - URLs (Scalar, Aspire dashboard)
-    - modules table linking `docs/modules/*.md`
-    - docs index, testing, conventions
-    - "Generated from [Modulith Backend](https://github.com/jackyjiale-oss/modulith-backend) `<version>`" line
-    - licence ("Add a LICENSE file for this project.")
-  - **`build/template-content/CHANGELOG.md`**: header + `## [Unreleased]`. **`build/template-content/.release-please-manifest.json`**: `{ ".": "0.1.0" }`.
-  - **`template.json` additions**:
-    - exclude `LICENSE`, `CHANGELOG.md`, `README.md`, `CLAUDE.md`, `.release-please-manifest.json`, `build/template-content/**`, `SECURITY.md`, `docs/repository-management.md` and `build/scripts/configure-github-repo.sh` from the main source (these point at the Modulith repo)
-    - add a second source `{ "source": "./build/template-content/", "target": "./" }` so the overrides land at the generated root
   - **`release-please-config.json`**:
     - `"release-type": "simple"`, `"include-component-in-tag": false`
+    - `"bump-minor-pre-major": true`, so the first release from `0.0.0` with a `feat` is `0.1.0` and breaking changes before 1.0 bump the minor version. release-please may also maintain a `version.txt`; keep it.
     - `"pull-request-title-pattern": "chore(release): release${component} ${version}"` (passes commit-lint via the `release` scope)
     - `extra-files`: `[{ "type": "xml", "path": "Directory.Build.props", "xpath": "//Project/PropertyGroup/Version" }]`
     - `changelog-sections`: `feat`→`Added`, `fix`→`Fixed`, `perf`→`Changed`, `revert`→`Reverted`, `deps`→`Dependencies`; `refactor`, `test`, `ci`, `build`, `chore`, `style` and `docs` hidden
-  - **`.github/workflows/release.yml`**: on push to `main`, `googleapis/release-please-action` (latest major) with `permissions: contents: write, pull-requests: write`. When a release is created, it runs `dotnet pack` for the template package (Plan 7 publishes it) and generates `THIRD-PARTY-NOTICES.md` as a release asset with the licence tool.
+  - **`.github/workflows/release.yml`**:
+    - runs on push to `main` with `googleapis/release-please-action` (latest major), `token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}` (Part A5; the fallback keeps generated projects working before they add the secret) and `permissions: contents: write, pull-requests: write`
+    - the token is needed because PRs opened with `GITHUB_TOKEN` don't trigger CI, so the release PR would never get its required checks
+    - when a release is created, a second job generates `THIRD-PARTY-NOTICES.md` with the licence tool and uploads it to the GitHub Release (`gh release upload`)
+    - packing and publishing the template package belongs to Plan 7, not here
   - **Licence check**: CI job `licenses` runs the licence tool (install the `nuget-license` .NET tool via the tool manifest) over the solution with `--allowed-license-types build/licenses/allowed-licenses.json` (`["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause"]`). Packages that declare only a licence URL go in a mapping file next to it, each with a comment naming the licence verified.
   - **Docs content:**
     - `docs/architecture/overview.md`: a Mermaid flowchart of Host → modules → building blocks, the request lifecycle following the pipeline order (Task 5), data ownership per schema, and links to ADRs 0001–0010
@@ -1267,7 +1350,9 @@ Implements review Section 11. It comes last so the documents describe the finish
 { /* shared-kernel, application-common, infrastructure-common, web-common exist under docs/building-blocks */ }
 
 [Fact] public void Generated_project_files_exist()
-{ /* build/template-content/{README.md, CHANGELOG.md, CLAUDE.md, .release-please-manifest.json} exist; README and CLAUDE.md contain "TemplateName" */ }
+{ /* Assert.SkipUnless(Directory.Exists(Root/.template.config), "only meaningful in the template repository")
+     — generated projects have neither .template.config nor build/template-content;
+     build/template-content/{README.md, CHANGELOG.md, CLAUDE.md, .release-please-manifest.json} exist; README and CLAUDE.md contain "TemplateName" */ }
 ```
 `EndpointDocumentationTests` (IntegrationTests):
 ```csharp
@@ -1275,19 +1360,97 @@ Implements review Section 11. It comes last so the documents describe the finish
 { /* Factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>()
      where RoutePattern.RawText starts with "/api/v1/{module}/" → module doc contains "{HTTP METHOD} {raw route}" */ }
 ```
+`OpenApiSnapshotTests` (IntegrationTests; blueprint 12.1 "Contract / API snapshot"):
+```csharp
+[Fact] public async Task OpenApi_document_matches_snapshot()
+{ /* GET /openapi/v1.json → await VerifyJson(body).ScrubMember("servers"); an accidental API change fails the PR,
+     and an intended one is accepted by committing the new .verified.json */ }
+```
 
 - [ ] **Step 2: Run to verify failure** → missing files.
 - [ ] **Step 3: Write the documents, generated-project overrides, release-please files and licence allow-list listed above.**
-- [ ] **Step 4: Extend the template smoke test.** The generated project must:
-  - contain `README.md`, `CHANGELOG.md` (with `## [Unreleased]`), `CLAUDE.md` and `.release-please-manifest.json` with `0.1.0`
-  - **not** contain `LICENSE`, `BACKEND_TEMPLATE_BLUEPRINT.md`, `docs/blueprint-review.md`, `docs/superpowers/` or `build/template-content/`
-  - have no `CLAUDE.md` line containing "Maintaining the template"
+- [ ] **Step 4: Extend the template smoke test.** On top of the Task 14 checks, assert that the generated `.release-please-manifest.json` is `{ ".": "0.0.0" }` and that `docs/README.md` contains no link to `repository-management.md`.
 - [ ] **Step 5: Run everything**: `dotnet test`, `bash build/scripts/template-smoke.sh` (exits 0), the licence tool locally (exits 0), and `npx --yes @action-validator/cli .github/workflows/release.yml` if Node is available (optional).
 - [ ] **Step 6: Commit** → `git commit -m "docs: add service, module and architecture docs with release automation"`
-- [ ] **Step 7: Branch protection phase 2** after merge and the first CI run: with the user's approval, run `bash build/scripts/configure-github-repo.sh --checks build-test,template-smoke,commit-lint,licenses`.
+- [ ] **Step 7: Branch protection phase 2** (Part C2) after merge and the first CI run.
 
 ---
 
-## Out of scope for this plan (next plans, per `docs/blueprint-review.md` Section 6)
+## Part C: Follow-up actions after the tasks (through `v0.1.0`)
 
-Auth (Plan 2) replaces `ApproverId`-in-body with `ICurrentUser`, adds the fallback authenticated policy, and adds the saved-`locale` culture provider ahead of `Accept-Language`. Notifications (Plan 3) render templates in the recipient's language (review Section 8.2). Redis/HybridCache, Hangfire, resilience and the audit trail come in Plan 5. Dockerfile, CD and `migrate` mode come in Plan 6. Template switches and the `modulith-module` item template come in Plan 7.
+- [ ] **C1: Branch protection phase 1**, right after Task 14 merges and CI has run once on `main`. With owner approval: `bash build/scripts/configure-github-repo.sh --checks build-test,template-smoke,commit-lint`.
+- [ ] **C2: Branch protection phase 2**, after Task 17 merges. With owner approval: `bash build/scripts/configure-github-repo.sh --checks build-test,template-smoke,commit-lint,licenses`.
+- [ ] **C3: Translation review.** A native Malay speaker and a native Simplified-Chinese speaker review the `.ms.resx` / `.zh-Hans.resx` files and remove the "Draft – needs native review" comments. Commit header: `fix(i18n): apply native review of ms and zh-Hans messages`.
+- [ ] **C4: Whole-repository review.** A final reviewer checks all 17 merged tasks against Part E and the Review Focus list. Findings become `fix(…)` PRs.
+- [ ] **C5: First release.** Merge the release-please PR `chore(release): release 0.1.0`. Check that:
+  - tag `v0.1.0` exists, `CHANGELOG.md` lists the `feat`/`fix` entries, and `Directory.Build.props` says `0.1.0`
+  - the GitHub Release has `THIRD-PARTY-NOTICES.md` attached
+  - a fresh clone at the tag passes `bash build/scripts/template-smoke.sh`
+- [ ] **C6: Close Plan 1.** Mark row 1 of `docs/blueprint-review.md` Section 6 as done, then start Plan 2 with the writing-plans skill.
+
+---
+
+## Part D: Roadmap after this plan
+
+Each later plan gets its own plan document (written with the writing-plans skill), follows the same workflow, and keeps every rule above. Detailed scope lives in `docs/blueprint-review.md` Sections 6 and 8.2.
+
+| Plan | Delivers | Already decided |
+|---|---|---|
+| 2. Auth core | Identity in `auth`, register/verify/login/forgot/reset/change password, ES256 JWT + JWKS, refresh rotation with reuse detection, sessions, RBAC + `.RequirePermission()`, auth audit log, admin users/roles, `IEmailSender` + Mailpit, fallback authenticated policy, OpenAPI bearer scheme, dev admin seed. Sample `ApproverId` moves to `ICurrentUser`. | review 2.7 (permission cache), 2.8 (email), 8.2 (saved `locale`), `auth-strict` rate limit |
+| 3. Notifications | Integration events + inbox, Scriban templates per language, email + in-app (SignalR) channels, delivery worker, preferences, quiet hours, security notifications | review 2.2, 2.10, 8.2 (recipient's language, IANA time zones) |
+| 4. MFA | TOTP + recovery codes, MFA challenge, step-up, trusted devices | blueprint 9.9 |
+| 5. Platform services | HybridCache + Redis (keys vary by UI culture), Hangfire with dashboard off by default, cleanup jobs, HttpClient resilience, audit trail via outbox, Redis-backed rate limiting ADR | review 2.3, 2.9, 2.11, 8.2 |
+| 6. Delivery | Dockerfile (non-root, ICU), `cd.yml` gated on CI, `migrate` mode, IIS script, CodeQL, gitleaks, environments with OIDC, runbooks, dashboards/alerts | review 2.13, 4 (`migrate`), 8.2 |
+| 7. Packaging → **v1.0** | Template switches (`notifications`, `includeSample`, `caching`), matrix generation CI, `dotnet new modulith-module`, template `.csproj` with `PackageProjectUrl`/`RepositoryUrl` = the GitHub repo, pack + publish `Modulith.Backend.Templates`, reserve the `Modulith.Backend.*` prefix | review 5, 10 |
+
+**Backlog (post-v1):** OTP / magic link, passkeys, social login, API keys, impersonation, SMS / push / webhook channels, digest, optional read-only DAB sidecar over reporting views, file storage, exports, feature flags, multi-tenancy + tenant SSO, OpenIddict, BFF, RabbitMQ (MassTransit v8 or an alternative), PostgreSQL, Aspire AppHost, k6 / ZAP, external-IdP auth switch, learning-track repo.
+
+---
+
+## Part E: Traceability (spec → where it's delivered)
+
+| Spec item | Delivered by |
+|---|---|
+| Review D1: two projects per module | Tasks 10–11 (Sample), 13 (layering tests), ADR 0001 (Task 1) |
+| Review D2: SQL Server only | Task 8; ADR 0003 (Task 1) |
+| Review D3: lean MVP | Part D |
+| Review 2.1–2.2: per-module outbox | Task 9; ADR 0007 |
+| Review 2.3: audit trail via outbox | Plan 5 |
+| Review 2.4: SQL Server-ordered GUIDs | Task 2; ADR 0004 |
+| Review 2.5: no `TransactionDecorator` | Task 3; ADR 0005 |
+| Review 2.6: Dapper must filter soft-deleted rows | Tasks 11 and 16 (`Soft_deleted_*` tests) |
+| Review 2.7, 2.8 | Plan 2 |
+| Review 2.9, 2.11 (Redis limiter) | Plan 5 |
+| Review 2.10 | Plan 3 |
+| Review 2.11: forwarded headers, IP partition | Task 7 |
+| Review 2.12: idempotency race | Task 12 |
+| Review 2.13: unsealed `Error`, coverage scope | Tasks 1, 14; CD fixes in Plan 6 |
+| Review 3: licences | Global Constraints; Task 17 licence job |
+| Review 4: simplifications | decorators Task 3; `/api/v1` Task 5 (ADR 0008); trace id Tasks 4 and 6; Aspire dashboard Task 14; NuGet Audit Task 1; opt-in idempotency Task 12; `migrate` mode and switches in Plans 6–7 |
+| Review 5: additions | template-ready from day one Task 14; forwarded headers / 409 Tasks 7–8; `modulith-module` Plan 7 |
+| Review 8: i18n | Task 15 (+ Plans 2, 3, 5, 6 per 8.2) |
+| Review 9: cursor pagination, no DAB | Task 16; ADR 0010 |
+| Review 10: name / identity | Task 14 (`template.json`); Plan 7 (package metadata) |
+| Review 11: docs, changelog, CLAUDE.md, licence | Tasks 1, 11, 14, 17 |
+| Coding conventions | Task 1 (`.editorconfig`), Task 13 (naming tests), Task 14 (commit-lint) |
+| CONTRIBUTING (commits, PRs, docs) | Task 1 (hook), Task 14 (CI, PR template), Task 17 (release-please, doc tests) |
+| Repository management | Parts A and C; `build/scripts/configure-github-repo.sh` |
+| Blueprint 7.1 configuration | Tasks 5, 8 (options validation, lazy connection string) |
+| Blueprint 7.2–7.3 logging, tracing, metrics | Task 6 (custom meters per module arrive with the first module that needs them, Plan 2) |
+| Blueprint 7.4 exception handling | Task 4 |
+| Blueprint 7.5 CQRS + decorators | Task 3 |
+| Blueprint 7.6–7.7 persistence, base types | Tasks 2, 8 |
+| Blueprint 7.8 outbox / inbox | Task 9 (inbox for integration events: Plan 3) |
+| Blueprint 7.9 idempotency | Task 12 |
+| Blueprint 7.10 rate limiting | Task 7 (`global`); other policies in Plans 2 and 5 |
+| Blueprint 7.11 health | Tasks 5, 8 |
+| Blueprint 7.12 API docs | Task 5 (bearer scheme: Plan 2); OpenAPI snapshot Task 17 |
+| Blueprint 7.13 HTTP security | Tasks 4, 7 (antiforgery with BFF: backlog) |
+| Blueprint 7.14 localization | Task 15 |
+| Blueprint 7.15 current user / time | Tasks 3, 4, 8 |
+| Blueprint 12 testing (unit, architecture, integration, API snapshot, coverage gate) | Tasks 1–17; Task 14 (gate); Task 17 (snapshot); load/ZAP: backlog |
+| Blueprint 13 CI/CD | Task 14 (CI, Dependabot, PR template), Task 17 (release notes); CD/CodeQL: Plan 6 |
+| Blueprint 14 local environment | Task 14 (SQL Server + Aspire dashboard; Mailpit Plan 2; Redis Plan 5) |
+| Blueprint 15 packaging | Task 14 (`template.json`, smoke test); matrix + publish: Plan 7 |
+| Blueprint 16–18 deployment, security checklist, operations | Task 4 (`X-Trace-Id`), Task 7; the rest in Plans 2 and 6 |
+| Blueprint 21 definition of done | Global Constraints (docs, tests, conventions, ADRs) |

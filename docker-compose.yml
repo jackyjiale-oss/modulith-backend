@@ -1,0 +1,23 @@
+# Local development dependencies. Copy .env.example to .env first: `docker compose up -d`.
+# Ports are published on loopback only: the SA password is a local default and the dashboard allows anonymous access.
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${SQL_SA_PASSWORD:?set in .env}"
+    ports:
+      - "127.0.0.1:1433:1433"
+    volumes:
+      - sqldata:/var/opt/mssql
+
+  aspire-dashboard:
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:latest
+    environment:
+      DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
+    ports:
+      - "127.0.0.1:18888:18888" # dashboard UI
+      - "127.0.0.1:4317:18889" # OTLP gRPC receiver (OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317)
+
+volumes:
+  sqldata:

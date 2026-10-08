@@ -1,0 +1,9 @@
+{
+  "platformOptions": {
+    "Coverlet": {
+      "include": "[TemplateName.SharedKernel]*,[TemplateName.Application.Common]*,[TemplateName.Modules.*]TemplateName.Modules.*.Domain.*,[TemplateName.Modules.*]TemplateName.Modules.*.Application.*",
+      "excludeByAttribute": "GeneratedCodeAttribute,CompilerGeneratedAttribute,ExcludeFromCodeCoverageAttribute",
+      "format": "cobertura"
+    }
+  }
+}

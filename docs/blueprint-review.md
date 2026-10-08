@@ -113,7 +113,7 @@ Each plan produces working, tested software on its own.
 
 | Plan | Contents | Blueprint sections |
 |---|---|---|
-| **1. Foundation & core baseline** | Repo, SharedKernel, handlers + decorators, ProblemDetails, observability, HTTP security, persistence + interceptors, per-module outbox, idempotency, Sample module (proves the pipeline), architecture tests, CI, template smoke, **i18n (en / ms / zh-Hans, see Section 8)** | 4–7, 7.14, 11.1, 11.4, 12, 13.2, 14, Phase 0–1 |
+| **1. Foundation & core baseline** | Repo, SharedKernel, handlers + decorators, ProblemDetails, observability, HTTP security, persistence + interceptors, per-module outbox, idempotency, Sample module (proves the pipeline), architecture tests, CI, template smoke, **i18n (Section 8), cursor pagination (Section 9), docs + changelog + licence checks (Section 11)**. Action plan: `docs/superpowers/plans/2026-10-06-foundation-and-core-baseline.md` | 4–7, 7.14, 11.1, 11.4, 12, 13.2, 14, Phase 0–1 |
 | 2. Auth core | Identity in `auth` schema, register / verify email / login / forgot / reset / change password, JWT ES256 + JWKS (key from config), refresh rotation + reuse detection, sessions, logout(-all), RBAC + `.RequirePermission()`, permission cache, auth audit log, admin users/roles, minimal SMTP `IEmailSender`, Mailpit | 9 (core), Phase 2 |
 | 3. Notifications | Integration events + inbox, types, Scriban templates, email + in-app (SignalR) channels, delivery worker with retries / dead-letter, preferences, quiet hours, security notifications wired to auth events | 10 (email + in-app), Phase 4 (part) |
 | 4. MFA | TOTP + recovery codes, MFA challenge flow, step-up, trusted devices | 9 (MFA), Phase 5 (part) |
@@ -245,7 +245,7 @@ The blueprint mentions `docs/modules/`, a `CHANGELOG.md` and a README, but not h
 | `LICENSE` | MIT, "Modulith contributors" | **Not copied.** A client's project is the client's code; it must not inherit our licence by accident. | excluded in `template.json` |
 | `README.md` | What Modulith is, install, `dotnet new` options, contributing | What *this service* is, quick start, modules, docs index | `build/template-content/README.md` → `README.md` |
 | `CHANGELOG.md` | Modulith's own release history | Fresh file starting at `Unreleased` | `build/template-content/CHANGELOG.md` → `CHANGELOG.md` |
-| `.release-please-manifest.json` | current template version | `{ ".": "0.1.0" }` | `build/template-content/` override |
+| `.release-please-manifest.json` | current template version (starts at `0.0.0`) | `{ ".": "0.0.0" }` | `build/template-content/` override |
 | `CLAUDE.md` | `@build/template-content/CLAUDE.md` import, plus template-maintainer rules (placeholders, smoke test, exclusions) | Project guide for agents | `build/template-content/CLAUDE.md` → `CLAUDE.md` |
 | `CONTRIBUTING.md`, `docs/coding-conventions.md`, `docs/adr/*` | yes | yes (with `TemplateName` replaced) | copied as-is |
 | `docs/architecture`, `docs/services`, `docs/building-blocks`, `docs/modules` | yes | yes | copied as-is |

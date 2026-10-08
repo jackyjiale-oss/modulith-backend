@@ -1,0 +1,20 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/BuildingBlocks/">
+    <Project Path="src/BuildingBlocks/TemplateName.SharedKernel/TemplateName.SharedKernel.csproj" />
+    <Project Path="src/BuildingBlocks/TemplateName.Application.Common/TemplateName.Application.Common.csproj" />
+    <Project Path="src/BuildingBlocks/TemplateName.Infrastructure.Common/TemplateName.Infrastructure.Common.csproj" />
+    <Project Path="src/BuildingBlocks/TemplateName.Web.Common/TemplateName.Web.Common.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Sample/">
+    <Project Path="src/Modules/Sample/TemplateName.Modules.Sample/TemplateName.Modules.Sample.csproj" />
+  </Folder>
+  <Folder Name="/src/Host/">
+    <Project Path="src/Host/TemplateName.Api/TemplateName.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TemplateName.ArchitectureTests/TemplateName.ArchitectureTests.csproj" />
+    <Project Path="tests/TemplateName.UnitTests/TemplateName.UnitTests.csproj" />
+    <Project Path="tests/TemplateName.IntegrationTests/TemplateName.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

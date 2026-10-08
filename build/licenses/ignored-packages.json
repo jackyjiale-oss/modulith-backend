@@ -1,0 +1,4 @@
+[
+  "Microsoft.Data.SqlClient.SNI.runtime",
+  "Microsoft.Identity.Client.NativeInterop"
+]

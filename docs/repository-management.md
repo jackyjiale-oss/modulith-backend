@@ -49,13 +49,15 @@ Required status checks must already exist (have run at least once), or GitHub bl
 | 2 | after plan Task 17 is merged | `… --checks build-test,template-smoke,commit-lint,licenses` | licence check |
 | 3 | when a second maintainer joins | `… --checks … --approvals 1`, plus a `.github/CODEOWNERS` file | human review |
 
+The check names are job names: `build-test`, `template-smoke` and `licenses` run in `.github/workflows/ci.yml`; `commit-lint` (the PR-title check) runs in `.github/workflows/pr-title.yml`, so that editing a PR title re-runs only it.
+
 `enforce_admins` stays **off** so the owner can repair a broken `main` in an emergency. Use it only for that.
 
 ## 4. Day-to-day workflow
 
 - Every change goes through a branch and a PR ([CONTRIBUTING.md](../CONTRIBUTING.md)). Plan execution works **one task = one branch = one PR**. Branches are named after the task, e.g. `feature/task-01-repository-foundation`. The PR title is the task's commit header, and it's squash-merged when CI is green.
-- Releases: release-please keeps a `chore(release): release x.y.z` PR open. Merging it tags `vx.y.z`, writes `CHANGELOG.md` and creates the GitHub Release (plan Task 17).
-- Dependabot PRs: let CI run, check the changelog for breaking changes, and squash-merge with the Dependabot title (`chore(deps): …`).
+- Releases: release-please keeps a `chore(release): release x.y.z` PR open. Merging it tags `vx.y.z`, writes `CHANGELOG.md` and creates the GitHub Release (plan Task 17). It runs with the repository secret `RELEASE_PLEASE_TOKEN`, a fine-grained PAT for this repo only with Contents + Pull requests read/write: PRs opened with the default `GITHUB_TOKEN` do not trigger CI, so the release PR could never get its required checks.
+- Dependabot PRs: titles are `chore(deps): bump …` (NuGet) and `ci(deps): bump …` (actions), configured in `.github/dependabot.yml`. The `commit-lint` job skips Dependabot because long package names exceed 72 characters. Let CI run, check the changelog for breaking changes, and squash-merge.
 
 ## 5. Later (Plan 6)
 

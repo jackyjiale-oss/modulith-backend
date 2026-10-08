@@ -1,0 +1,5 @@
+# Test methods are sentences with underscores and may be async without the Async suffix:
+# async Task Approve_twice_fails_with_not_pending()
+[*.cs]
+dotnet_naming_rule.async_methods_end_with_async.severity = none
+dotnet_naming_rule.members_are_pascal_case.severity = none

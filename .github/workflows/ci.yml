@@ -1,0 +1,146 @@
+name: CI
+
+# Actions use their latest major tag so Dependabot can update them.
+# Production forks should pin each action to a full commit SHA (with the tag in a comment).
+
+# The pull request title check (commit-lint) lives in pr-title.yml, so editing a title does not re-run this pipeline.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-test:
+    name: build-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The coverage comment and the test-report check run need write access; no other job gets it.
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+
+      - name: Restore (locked mode; NuGet Audit fails here)
+        run: dotnet restore --locked-mode
+
+      - name: Check formatting
+        run: dotnet format --verify-no-changes --no-restore
+
+      - name: Build
+        run: dotnet build --no-restore -c Release
+
+      # Unit, architecture and integration tests (Testcontainers uses the runner's Docker).
+      # Coverage scope lives in coverage.testconfig.json; TRX reports feed the test reporter.
+      - name: Test
+        run: >-
+          dotnet test --no-build -c Release
+          --config-file coverage.testconfig.json --coverlet
+          --report-xunit-trx
+          --results-directory TestResults
+
+      - name: Coverage report
+        run: |
+          dotnet tool restore
+          dotnet reportgenerator "-reports:TestResults/**/*.cobertura.*.xml" "-targetdir:coverage" "-reporttypes:MarkdownSummaryGithub;JsonSummary"
+          cat coverage/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Coverage gate (80 % line)
+        run: |
+          line="$(jq -r '.summary.linecoverage' coverage/Summary.json)"
+          echo "Line coverage on the gated namespaces: ${line} %"
+          if ! awk -v value="$line" 'BEGIN { exit !(value + 0 >= 80) }'; then
+            echo "::error title=Coverage gate::Line coverage ${line} % is below 80 %"
+            exit 1
+          fi
+
+      # Fork and Dependabot pull requests get a read-only token, so the comment and check run are skipped for them.
+      - name: Coverage comment
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && hashFiles('coverage/SummaryGithub.md') != '' }}
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: coverage
+          path: coverage/SummaryGithub.md
+
+      - name: Test report
+        if: ${{ always() && github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        uses: dorny/test-reporter@v3
+        with:
+          name: Test results
+          path: TestResults/**/*.trx
+          reporter: dotnet-trx
+          fail-on-empty: false
+
+  template-smoke:
+    name: template-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+
+      # Projects generated from the template have no .template.config, so the step is skipped there.
+      - name: Template smoke test
+        if: ${{ hashFiles('.template.config/template.json') != '' }}
+        run: bash build/scripts/template-smoke.sh
+
+  # Every NuGet package, transitive ones included, must have an allowed licence (build/licenses/README.md).
+  licenses:
+    name: licenses
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+
+      # The licence tool reads the restored package graph (project.assets.json), so restore first.
+      - name: Restore (locked mode)
+        run: |
+          dotnet restore --locked-mode
+          dotnet tool restore
+
+      - name: Check dependency licences
+        run: >-
+          dotnet nuget-license -i TemplateName.slnx -t
+          -a build/licenses/allowed-licenses.json
+          -mapping build/licenses/license-url-mappings.json
+          -override build/licenses/package-overrides.json
+          -ignore build/licenses/ignored-packages.json
+          -err

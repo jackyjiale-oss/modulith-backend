@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec bash build/scripts/check-commit-msg.sh --allow-autosquash "$1"

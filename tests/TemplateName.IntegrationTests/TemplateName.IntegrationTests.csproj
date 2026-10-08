@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Host\TemplateName.Api\TemplateName.Api.csproj" />
+    <ProjectReference Include="..\..\src\BuildingBlocks\TemplateName.Infrastructure.Common\TemplateName.Infrastructure.Common.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <PackageReference Include="Respawn" />
+    <PackageReference Include="Testcontainers.MsSql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- One repository-root locator and one document-path derivation for both test projects. -->
+    <Compile Include="..\TemplateName.ArchitectureTests\RepositoryPaths.cs" Link="Documentation\RepositoryPaths.cs" />
+    <Compile Include="..\TemplateName.ArchitectureTests\DocumentPaths.cs" Link="Documentation\DocumentPaths.cs" />
+  </ItemGroup>
+
+</Project>

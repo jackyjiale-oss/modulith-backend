@@ -1,0 +1,84 @@
+name: Release
+
+# release-please keeps a "chore(release): release x.y.z" pull request up to date from the Conventional Commits on main.
+# Merging it tags vx.y.z, writes CHANGELOG.md, bumps <Version> in Version.props and creates the GitHub Release;
+# the second job then attaches THIRD-PARTY-NOTICES.md to that release.
+# Actions use their latest major tag so Dependabot can update them.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  release-please:
+    name: release-please
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      # Pull requests opened with GITHUB_TOKEN do not trigger CI, so the release PR would never get its required checks.
+      # RELEASE_PLEASE_TOKEN (a fine-grained token: Contents and Pull requests read/write on this repository) avoids that;
+      # without it the workflow still runs on github.token.
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  third-party-notices:
+    name: third-party-notices
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      # Nothing is pushed: the notices are uploaded with gh and GH_TOKEN.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+
+      - name: Restore (locked mode)
+        run: |
+          dotnet restore --locked-mode
+          dotnet tool restore
+
+      - name: Generate THIRD-PARTY-NOTICES.md
+        run: >-
+          dotnet nuget-license -i TemplateName.slnx -t
+          -a build/licenses/allowed-licenses.json
+          -mapping build/licenses/license-url-mappings.json
+          -override build/licenses/package-overrides.json
+          -ignore build/licenses/ignored-packages.json
+          -include-ignored
+          -o Markdown
+          -fo THIRD-PARTY-NOTICES.md
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        run: gh release upload "$TAG_NAME" THIRD-PARTY-NOTICES.md --clobber

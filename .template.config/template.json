@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Modulith contributors",
+  "classifications": ["Web", "API", "Modular Monolith", "Clean Architecture"],
+  "identity": "Modulith.Backend.Templates",
+  "name": "Modulith Backend",
+  "shortName": "modulith-backend",
+  "description": "ASP.NET Core 10 modular-monolith backend on SQL Server: module boundaries, outbox, idempotency, observability and architecture tests.",
+  "sourceName": "TemplateName",
+  "preferNameDirectory": true,
+  "tags": {
+    "language": "C#",
+    "type": "solution"
+  },
+  "guids": [
+    "98fe211a-0cbf-4e56-bc38-acafb05bfb77"
+  ],
+  "sources": [
+    {
+      "source": "./",
+      "target": "./",
+      "exclude": [
+        ".template.config/**",
+        "**/bin/**",
+        "**/obj/**",
+        ".git",
+        ".git/**",
+        ".vs/**",
+        "**/*.user",
+        "**/TestResults/**",
+        "coverage/**",
+        ".env",
+        ".superpowers/**",
+        ".claude/**",
+        "docs/superpowers/**",
+        "BACKEND_TEMPLATE_BLUEPRINT.md",
+        "docs/blueprint-review.md",
+        "LICENSE",
+        "SECURITY.md",
+        "docs/repository-management.md",
+        "build/scripts/configure-github-repo.sh",
+        "build/scripts/template-smoke.sh",
+        "README.md",
+        "CHANGELOG.md",
+        "CLAUDE.md",
+        ".release-please-manifest.json",
+        "Version.props",
+        "**/*.received.*",
+        "build/template-content/**"
+      ]
+    },
+    {
+      "source": "./build/template-content/",
+      "target": "./"
+    }
+  ]
+}
