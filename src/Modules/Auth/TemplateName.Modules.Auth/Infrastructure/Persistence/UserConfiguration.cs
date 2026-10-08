@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Domain.Users;
 
 namespace TemplateName.Modules.Auth.Infrastructure.Persistence;
@@ -28,8 +29,9 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(user => user.TimeZone).HasMaxLength(TimeZoneMaxLength);
         builder.Property(user => user.RowVersion).IsRowVersion();
 
-        // A soft-deleted user frees the address for a new account.
-        builder.HasIndex(user => user.NormalizedEmail).IsUnique().HasFilter("[IsDeleted] = 0");
+        // A soft-deleted user frees the address for a new account. The name is the one handlers turn a refusal of into "taken"
+        // (UniqueIndexNames.UserEmail, also EF's default name, so the schema does not change).
+        builder.HasIndex(user => user.NormalizedEmail).IsUnique().HasFilter("[IsDeleted] = 0").HasDatabaseName(UniqueIndexNames.UserEmail);
 
         // The user list (review P7): its email sort and prefix search use the index above, its createdAt sort this one. Both are
         // filtered like the list, which never shows soft-deleted users.

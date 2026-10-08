@@ -48,6 +48,7 @@ public sealed class RegisterCommandHandlerTests
         _roles.GetByNormalizedNameAsync(Role.NormalizeName(SystemRoles.User), Arg.Any<CancellationToken>()).Returns(_userRole);
         _clientContext.IpAddress.Returns("203.0.113.7");
         _auditWriter.Record(Arg.Do<AuthAuditLog>(_auditEntries.Add));
+        _unitOfWork.SaveChangesUnlessDuplicateAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(true);
 
         _sut = new RegisterCommandHandler(
             _users,
@@ -171,7 +172,10 @@ public sealed class RegisterCommandHandlerTests
         audit.EventType.ShouldBe(AuthAuditEvents.Registered);
         audit.Succeeded.ShouldBeTrue();
         audit.UserId.ShouldBe(added.Id);
-        await _unitOfWork.Received(1).SaveChangesAsync(Ct);
+
+        // Narrowed to the email index: only losing the race for this address is a duplicate, any other refusal still throws.
+        await _unitOfWork.Received(1).SaveChangesUnlessDuplicateAsync(UniqueIndexNames.UserEmail, Ct);
+        await _unitOfWork.DidNotReceiveWithAnyArgs().SaveChangesAsync(Ct);
         _metrics.Received(1).RecordRegistration();
 
         Received.InOrder(() =>
@@ -180,6 +184,28 @@ public sealed class RegisterCommandHandlerTests
             _passwordHasher.Hash(Password);
             _users.GetByNormalizedEmailAsync("ALICE@EXAMPLE.COM", Arg.Any<CancellationToken>());
         });
+    }
+
+    [Fact]
+    public async Task Registration_that_loses_the_email_race_answers_like_a_known_address()
+    {
+        // Both requests passed the lookup; the unique index refused this insert because a simultaneous registration won.
+        var winner = User.Register("alice@example.com", "Alice", "en", "winner-hash", Now).Value;
+        winner.ClearDomainEvents();
+        _users.GetByNormalizedEmailAsync("ALICE@EXAMPLE.COM", Arg.Any<CancellationToken>()).Returns(null, winner);
+        _unitOfWork.SaveChangesUnlessDuplicateAsync(UniqueIndexNames.UserEmail, Arg.Any<CancellationToken>()).Returns(false);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        // The same answer as for a known address: success (202), the attempt noted on the winner, audited as a duplicate and saved.
+        result.IsSuccess.ShouldBeTrue();
+        winner.DomainEvents.ShouldHaveSingleItem().ShouldBe(new RegistrationAttemptedDomainEvent(winner.Id, "alice@example.com", "en"));
+        var duplicate = _auditEntries[^1];
+        duplicate.EventType.ShouldBe(AuthAuditEvents.RegisterDuplicate);
+        duplicate.UserId.ShouldBe(winner.Id);
+        duplicate.AttemptedIdentifier.ShouldBe("a****@example.com");
+        await _unitOfWork.Received(1).SaveChangesAsync(Ct);
+        _metrics.Received(1).RecordRegistration();
     }
 
     [Fact]

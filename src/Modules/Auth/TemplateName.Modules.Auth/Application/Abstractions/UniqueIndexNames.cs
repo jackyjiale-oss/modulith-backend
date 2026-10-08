@@ -8,4 +8,7 @@ internal static class UniqueIndexNames
 {
     /// <summary>The unique index on <c>auth.Roles.NormalizedName</c> (filtered to roles that are not deleted).</summary>
     public const string RoleName = "IX_Roles_NormalizedName";
+
+    /// <summary>The unique index on <c>auth.Users.NormalizedEmail</c> (filtered to users that are not deleted).</summary>
+    public const string UserEmail = "IX_Users_NormalizedEmail";
 }

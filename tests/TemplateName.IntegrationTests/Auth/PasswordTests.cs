@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.IntegrationTests.Infrastructure;
+using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Users;
@@ -237,6 +238,44 @@ public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : Integr
 
         using var withSecond = await ResetAsync(second, NewPassword);
         withSecond.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+    }
+
+    [Fact]
+    public async Task Reset_kills_every_other_pending_reset_link()
+    {
+        // Two forgots at the same moment can leave two live links; a reset through one of them ends the other.
+        var user = await CreateUserAsync(Email);
+        var first = await ForgotAndReadTokenAsync(Email);
+        var second = await IssuePendingResetLinkAsync(user.Id);
+
+        using (var reset = await ResetAsync(first, NewPassword))
+        {
+            reset.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        }
+
+        using var withSecond = await ResetAsync(second, "yet another passphrase");
+        await AssertProblemAsync(withSecond, HttpStatusCode.BadRequest, "auth.invalid_token");
+        using var withNew = await LoginAsync(Email, NewPassword);
+        withNew.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Change_kills_pending_reset_links()
+    {
+        // A link emailed before the change (or leaked) must not outlive the password it was meant to replace.
+        await CreateUserAsync(Email);
+        var link = await ForgotAndReadTokenAsync(Email);
+        var signedIn = await ReadTokensAsync(await LoginAsync(Email, OldPassword));
+
+        using (var change = await ChangeAsync(signedIn.AccessToken, OldPassword, NewPassword))
+        {
+            change.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        }
+
+        using var reset = await ResetAsync(link, "yet another passphrase");
+        await AssertProblemAsync(reset, HttpStatusCode.BadRequest, "auth.invalid_token");
+        using var withNew = await LoginAsync(Email, NewPassword);
+        withNew.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
     [Fact]
@@ -547,6 +586,25 @@ public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : Integr
         await AssertForgotAcceptedAsync(email);
         await DispatchOutboxAsync();
         return Factory.EmailSender.LastLinkToken(email);
+    }
+
+    /// <summary>A second pending reset link next to the one forgot issued, as two simultaneous forgots can leave.</summary>
+    private async Task<string> IssuePendingResetLinkAsync(Guid userId)
+    {
+        await using var scope = Factory.Services.CreateAsyncScope();
+        var token = scope.ServiceProvider.GetRequiredService<ISecureTokenService>().Generate();
+        var context = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        context.Add(VerificationCode.Issue(
+            userId,
+            VerificationPurpose.PasswordReset,
+            User.NormalizeEmail(Email),
+            token.Hash,
+            scope.ServiceProvider.GetRequiredService<ISecretProtector>().Protect(token.Value),
+            TimeSpan.FromMinutes(30),
+            null,
+            Factory.Time.GetUtcNow()));
+        await context.SaveChangesAsync(Ct);
+        return token.Value;
     }
 
     private async Task DispatchOutboxAsync()

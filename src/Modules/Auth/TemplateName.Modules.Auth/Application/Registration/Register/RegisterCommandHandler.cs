@@ -14,7 +14,8 @@ namespace TemplateName.Modules.Auth.Application.Registration.Register;
 /// <summary>
 /// Registers an account without revealing whether the address is taken: the caller gets the same answer either way, and the password
 /// is hashed before the address is looked up, so both paths pay the hashing cost. A new account gets the <c>User</c> role and an
-/// email-confirmation code; an existing one only records the attempt, whose event emails its owner.
+/// email-confirmation code; an existing one only records the attempt, whose event emails its owner. Two registrations of one new address
+/// at the same moment both pass the lookup; the unique email index lets one insert win and the other is answered as for a known address.
 /// </summary>
 internal sealed class RegisterCommandHandler(
     IUserRepository users,
@@ -43,20 +44,11 @@ internal sealed class RegisterCommandHandler(
         var passwordHash = passwordHasher.Hash(command.Password);
         var now = timeProvider.GetUtcNow();
 
-        var existing = await users.GetByNormalizedEmailAsync(User.NormalizeEmail(command.Email), cancellationToken);
+        var normalizedEmail = User.NormalizeEmail(command.Email);
+        var existing = await users.GetByNormalizedEmailAsync(normalizedEmail, cancellationToken);
         if (existing is not null)
         {
-            existing.NoteRegistrationAttempt();
-            auditWriter.Record(AuthAuditLog.Create(
-                AuthAuditEvents.RegisterDuplicate,
-                succeeded: false,
-                now,
-                userId: existing.Id,
-                attemptedIdentifier: AuthAuditLog.MaskIdentifier(command.Email)));
-            await unitOfWork.SaveChangesAsync(cancellationToken);
-            metrics.RecordRegistration();
-
-            return Result.Success();
+            return await RecordAttemptOnKnownAddressAsync(existing, command.Email, now, cancellationToken);
         }
 
         var userRole = await roles.GetByNormalizedNameAsync(Role.NormalizeName(SystemRoles.User), cancellationToken)
@@ -88,10 +80,32 @@ internal sealed class RegisterCommandHandler(
 
         auditWriter.Record(AuthAuditLog.Create(AuthAuditEvents.Registered, succeeded: true, now, userId: user.Id));
 
-        // One save: the user, its role, the code, the audit entry and the outbox rows of both events commit together.
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+        // One save: the user, its role, the code, the audit entry and the outbox rows of both events commit together. A refusal by
+        // the email index means a simultaneous registration created the address after the lookup above: nothing of ours was saved,
+        // and the request is answered exactly as for a known address (enumeration rule), never with a 500.
+        if (!await unitOfWork.SaveChangesUnlessDuplicateAsync(UniqueIndexNames.UserEmail, cancellationToken)
+            && await users.GetByNormalizedEmailAsync(normalizedEmail, cancellationToken) is { } winner)
+        {
+            return await RecordAttemptOnKnownAddressAsync(winner, command.Email, now, cancellationToken);
+        }
 
         // The same count for a new and an existing address: the metric tells them apart no more than the response does.
+        metrics.RecordRegistration();
+
+        return Result.Success();
+    }
+
+    // The existing account is left as it is; only the attempt is noted, so its owner gets a notice and the caller the usual answer.
+    private async Task<Result> RecordAttemptOnKnownAddressAsync(User existing, string attemptedEmail, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        existing.NoteRegistrationAttempt();
+        auditWriter.Record(AuthAuditLog.Create(
+            AuthAuditEvents.RegisterDuplicate,
+            succeeded: false,
+            now,
+            userId: existing.Id,
+            attemptedIdentifier: AuthAuditLog.MaskIdentifier(attemptedEmail)));
+        await unitOfWork.SaveChangesAsync(cancellationToken);
         metrics.RecordRegistration();
 
         return Result.Success();

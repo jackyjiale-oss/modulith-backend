@@ -206,6 +206,36 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
     }
 
     [Fact]
+    public async Task Concurrent_registrations_of_one_new_address_create_one_account_and_never_a_500()
+    {
+        // The requests pass the lookup at about the same moment; the unique email index lets one insert win, and every other one
+        // answers exactly as for a known address (202, and the attempt is recorded), never a 500.
+        var responses = await Task.WhenAll(
+            Enumerable.Range(1, 6).Select(index => RegisterFromAsync("alice@example.com", $"198.51.100.{index}")));
+
+        try
+        {
+            responses.Select(response => response.StatusCode).ShouldAllBe(status => status == HttpStatusCode.Accepted);
+            foreach (var response in responses)
+            {
+                (await response.Content.ReadAsByteArrayAsync(Ct)).ShouldBeEmpty();
+            }
+
+            (await QueryAsync(context => context.Set<User>().CountAsync(user => user.NormalizedEmail == "ALICE@EXAMPLE.COM", Ct))).ShouldBe(1);
+            var events = await AuditEventsAsync();
+            events.Count(type => type == AuthAuditEvents.Registered).ShouldBe(1);
+            events.Count(type => type == AuthAuditEvents.RegisterDuplicate).ShouldBe(5);
+        }
+        finally
+        {
+            foreach (var response in responses)
+            {
+                response.Dispose();
+            }
+        }
+    }
+
+    [Fact]
     public async Task Register_response_is_identical_for_new_and_existing_email()
     {
         using var forNewEmail = await RegisterAsync("alice@example.com");
@@ -408,6 +438,17 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
 
     private Task<HttpResponseMessage> RegisterAsync(string email, string password = Password, string displayName = "Alice", string locale = "en")
         => Client.PostAsJsonAsync(RegisterRoute, new { email, password, displayName, locale }, Ct);
+
+    /// <summary>A registration from its own client address, so the per-address limit never decides the outcome.</summary>
+    private async Task<HttpResponseMessage> RegisterFromAsync(string email, string clientAddress)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, RegisterRoute)
+        {
+            Content = JsonContent.Create(new { email, password = Password, displayName = "Alice", locale = "en" }),
+        };
+        request.Headers.Add(TestClientAddressStartupFilter.HeaderName, clientAddress);
+        return await Client.SendAsync(request, Ct);
+    }
 
     private Task<HttpResponseMessage> ConfirmAsync(string token) => Client.PostAsJsonAsync(ConfirmRoute, new { token }, Ct);
 

@@ -478,7 +478,8 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
         scope.GetRequiredService<IUserRepository>().Add(NewUser(" ALICE@example.com", passwordHash: null));
         scope.GetRequiredService<IAuthAuditWriter>().Record(AuthAuditLog.Create(AuthAuditEvents.AdminUserCreated, succeeded: true, Now));
 
-        (await scope.GetRequiredService<IUnitOfWork>().SaveChangesUnlessDuplicateAsync(Ct)).ShouldBeFalse();
+        // SQL Server names the refused index in its message, so this also proves the index has the name the handlers rely on.
+        (await scope.GetRequiredService<IUnitOfWork>().SaveChangesUnlessDuplicateAsync(UniqueIndexNames.UserEmail, Ct)).ShouldBeFalse();
 
         var context = NewScope().GetRequiredService<AuthDbContext>();
         (await context.Set<User>().CountAsync(Ct)).ShouldBe(1);
@@ -487,7 +488,7 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
 
         // The context dropped the refused changes, so a later save does not try them again.
         scope.GetRequiredService<AuthDbContext>().ChangeTracker.Entries().ShouldBeEmpty();
-        (await scope.GetRequiredService<IUnitOfWork>().SaveChangesUnlessDuplicateAsync(Ct)).ShouldBeTrue();
+        (await scope.GetRequiredService<IUnitOfWork>().SaveChangesUnlessDuplicateAsync(UniqueIndexNames.UserEmail, Ct)).ShouldBeTrue();
     }
 
     [Fact]
@@ -513,10 +514,10 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
             () => other.GetRequiredService<IUnitOfWork>().SaveChangesUnlessDuplicateAsync(UniqueIndexNames.RoleName, Ct));
         failure.InnerException.ShouldBeOfType<SqlException>().Number.ShouldBe(SqlUniqueIndexViolation);
 
-        // Without a name the same save answers false for any unique index.
-        var any = NewScope();
-        any.GetRequiredService<IUserRepository>().Add(NewUser("ALICE@example.com", passwordHash: null));
-        (await any.GetRequiredService<IUnitOfWork>().SaveChangesUnlessDuplicateAsync(Ct)).ShouldBeFalse();
+        // Named after the email index, the same save answers false.
+        var email = NewScope();
+        email.GetRequiredService<IUserRepository>().Add(NewUser("ALICE@example.com", passwordHash: null));
+        (await email.GetRequiredService<IUnitOfWork>().SaveChangesUnlessDuplicateAsync(UniqueIndexNames.UserEmail, Ct)).ShouldBeFalse();
     }
 
     [Fact]
@@ -525,7 +526,7 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
         var scope = NewScope();
         scope.GetRequiredService<IUserRepository>().Add(NewUser("bob@example.com", passwordHash: null));
 
-        (await scope.GetRequiredService<IUnitOfWork>().SaveChangesUnlessDuplicateAsync(Ct)).ShouldBeTrue();
+        (await scope.GetRequiredService<IUnitOfWork>().SaveChangesUnlessDuplicateAsync(UniqueIndexNames.UserEmail, Ct)).ShouldBeTrue();
 
         (await NewScope().GetRequiredService<AuthDbContext>().Set<User>().CountAsync(Ct)).ShouldBe(1);
     }

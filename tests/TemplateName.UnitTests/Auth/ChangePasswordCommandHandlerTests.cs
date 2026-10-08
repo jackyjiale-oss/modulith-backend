@@ -9,6 +9,7 @@ using TemplateName.Modules.Auth.Application.Passwords.Change;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Users;
+using TemplateName.Modules.Auth.Domain.Verification;
 using TemplateName.SharedKernel;
 
 namespace TemplateName.UnitTests.Auth;
@@ -24,6 +25,7 @@ public sealed class ChangePasswordCommandHandlerTests
 
     private readonly IUserRepository _users = Substitute.For<IUserRepository>();
     private readonly ISessionRepository _sessions = Substitute.For<ISessionRepository>();
+    private readonly IVerificationCodeRepository _verificationCodes = Substitute.For<IVerificationCodeRepository>();
     private readonly IPasswordHasher _passwordHasher = Substitute.For<IPasswordHasher>();
     private readonly IBreachedPasswordChecker _breachedPasswordChecker = Substitute.For<IBreachedPasswordChecker>();
     private readonly ICurrentUser _currentUser = Substitute.For<ICurrentUser>();
@@ -52,9 +54,11 @@ public sealed class ChangePasswordCommandHandlerTests
         _passwordHasher.Hash(NewPassword).Returns(NewHash);
         _auditWriter.Record(Arg.Do<AuthAuditLog>(_auditEntries.Add));
         _sessions.GetActiveByUserAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([]);
+        _verificationCodes.GetPendingAsync(_user.Id, VerificationPurpose.PasswordReset, Now, Arg.Any<CancellationToken>()).Returns([]);
         _sut = new ChangePasswordCommandHandler(
             _users,
             _sessions,
+            _verificationCodes,
             _passwordHasher,
             _breachedPasswordChecker,
             _currentUser,
@@ -92,6 +96,34 @@ public sealed class ChangePasswordCommandHandlerTests
         audit.SessionId.ShouldBe(current.Id);
         audit.Details.ShouldBe("""{"revokedSessionCount":2}""");
         await _unitOfWork.Received(1).SaveChangesAsync(Ct);
+    }
+
+    [Fact]
+    public async Task Change_invalidates_every_pending_reset_link()
+    {
+        // A reset link emailed earlier (or leaked) must not outlive the password it was meant to replace.
+        var pending = IssueResetCode();
+        var another = IssueResetCode();
+        _verificationCodes.GetPendingAsync(_user.Id, VerificationPurpose.PasswordReset, Now, Arg.Any<CancellationToken>()).Returns([pending, another]);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        pending.InvalidatedAt.ShouldBe(Now);
+        another.InvalidatedAt.ShouldBe(Now);
+        await _unitOfWork.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Failed_change_leaves_pending_reset_links_alone()
+    {
+        var pending = IssueResetCode();
+        _verificationCodes.GetPendingAsync(_user.Id, VerificationPurpose.PasswordReset, Now, Arg.Any<CancellationToken>()).Returns([pending]);
+
+        var result = await _sut.HandleAsync(Command() with { CurrentPassword = "a wrong passphrase" }, Ct);
+
+        result.Error.ShouldBe(UserErrors.CurrentPasswordIncorrect);
+        pending.InvalidatedAt.ShouldBeNull();
     }
 
     [Fact]
@@ -235,6 +267,17 @@ public sealed class ChangePasswordCommandHandlerTests
     }
 
     private static ChangePasswordCommand Command() => new(CurrentPassword, NewPassword);
+
+    private VerificationCode IssueResetCode()
+        => VerificationCode.Issue(
+            _user.Id,
+            VerificationPurpose.PasswordReset,
+            _user.NormalizedEmail,
+            [.. Guid.NewGuid().ToByteArray(), .. Guid.NewGuid().ToByteArray()],
+            "protected",
+            TimeSpan.FromMinutes(30),
+            null,
+            Now.AddMinutes(-5));
 
     private UserSession StartSession()
         => UserSession.Start(_user.Id, "pwd", "Device", null, null, _user.SecurityStamp, new byte[32], TimeSpan.FromDays(14), TimeSpan.FromDays(90), Now.AddHours(-1)).Session;

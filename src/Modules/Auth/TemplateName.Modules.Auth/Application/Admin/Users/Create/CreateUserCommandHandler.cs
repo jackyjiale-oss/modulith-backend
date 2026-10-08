@@ -59,9 +59,9 @@ internal sealed class CreateUserCommandHandler(
         await linkIssuer.IssueAsync(user, now, cancellationToken);
         auditWriter.Record(AdminAudit.Succeeded(AuthAuditEvents.AdminUserCreated, user.Id, command.ActorId, now));
 
-        // One save: the user, its roles, the reset code, the audit entry and the outbox rows. A unique-index refusal means another
-        // request created the address after the lookup above.
-        if (!await unitOfWork.SaveChangesUnlessDuplicateAsync(cancellationToken))
+        // One save: the user, its roles, the reset code, the audit entry and the outbox rows. A refusal by the email index means another
+        // request created the address after the lookup above; any other unique violation is not "taken" and still throws.
+        if (!await unitOfWork.SaveChangesUnlessDuplicateAsync(UniqueIndexNames.UserEmail, cancellationToken))
         {
             return UserErrors.EmailTaken;
         }

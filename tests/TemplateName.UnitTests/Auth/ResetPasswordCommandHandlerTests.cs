@@ -46,6 +46,7 @@ public sealed class ResetPasswordCommandHandlerTests
         _verificationCodes.TryConsumeAsync(Arg.Any<Guid>(), Arg.Any<VerificationPurpose>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(true);
         _sessions.GetActiveByUserAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([]);
+        _verificationCodes.GetPendingAsync(_user.Id, VerificationPurpose.PasswordReset, Now, Arg.Any<CancellationToken>()).Returns([]);
         _sut = new ResetPasswordCommandHandler(
             _users,
             _verificationCodes,
@@ -81,6 +82,39 @@ public sealed class ResetPasswordCommandHandlerTests
         audit.Succeeded.ShouldBeTrue();
         audit.UserId.ShouldBe(_user.Id);
         await _unitOfWork.Received(1).SaveChangesAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Reset_invalidates_every_other_pending_reset_link()
+    {
+        // A second link (two forgots, or a leaked one) must not outlive the reset.
+        var code = IssueCode(VerificationPurpose.PasswordReset);
+        var other = OtherPendingResetCode();
+        _verificationCodes.GetPendingAsync(_user.Id, VerificationPurpose.PasswordReset, Now, Arg.Any<CancellationToken>()).Returns([other]);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        other.InvalidatedAt.ShouldBe(Now);
+        code.ConsumedAt.ShouldBe(Now);
+        code.InvalidatedAt.ShouldBeNull();
+        await _verificationCodes.Received(1).GetPendingAsync(_user.Id, VerificationPurpose.PasswordReset, Now, CancellationToken.None);
+        await _unitOfWork.Received(1).SaveChangesAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Failed_reset_leaves_the_other_pending_reset_links_alone()
+    {
+        // A reused password spends the presented link, but the reset did not happen, so other links keep working.
+        IssueCode(VerificationPurpose.PasswordReset);
+        var other = OtherPendingResetCode();
+        _verificationCodes.GetPendingAsync(_user.Id, VerificationPurpose.PasswordReset, Now, Arg.Any<CancellationToken>()).Returns([other]);
+        _passwordHasher.Verify(OldHash, NewPassword).Returns(PasswordVerification.Success);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        result.Error.ShouldBe(UserErrors.PasswordReused);
+        other.InvalidatedAt.ShouldBeNull();
     }
 
     [Fact]
@@ -278,6 +312,17 @@ public sealed class ResetPasswordCommandHandlerTests
         audit.FailureReason.ShouldBe(VerificationErrors.InvalidToken.Code);
         await _unitOfWork.ReceivedWithAnyArgs(1).SaveChangesAsync(Ct);
     }
+
+    private VerificationCode OtherPendingResetCode()
+        => VerificationCode.Issue(
+            _user.Id,
+            VerificationPurpose.PasswordReset,
+            _user.NormalizedEmail,
+            [.. Enumerable.Repeat((byte)9, 32)],
+            "protected",
+            TimeSpan.FromMinutes(30),
+            null,
+            Now.AddMinutes(-2));
 
     private VerificationCode IssueCode(VerificationPurpose purpose, Guid? userId = null, DateTimeOffset? issuedAt = null)
     {

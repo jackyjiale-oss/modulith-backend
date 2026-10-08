@@ -294,6 +294,34 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
     }
 
     [Fact]
+    public async Task Concurrent_creates_of_one_address_yield_one_account_and_never_a_500()
+    {
+        await SignInAsync(AuthPermissions.UserCreate);
+
+        var responses = await Task.WhenAll(Enumerable.Range(0, 6).Select(
+            _ => Client.PostAsJsonAsync(UsersRoute, new { email = "same@example.com", displayName = "Same" }, Ct)));
+
+        try
+        {
+            // One insert wins the unique email index; every other request answers 409 auth.email_taken, from the lookup or the index.
+            responses.Select(response => (int)response.StatusCode).Order().ShouldBe([201, 409, 409, 409, 409, 409]);
+            foreach (var conflict in responses.Where(response => response.StatusCode == HttpStatusCode.Conflict))
+            {
+                await AssertProblemAsync(conflict, HttpStatusCode.Conflict, "auth.email_taken");
+            }
+
+            (await QueryAsync(context => context.Set<User>().CountAsync(user => user.NormalizedEmail == "SAME@EXAMPLE.COM", Ct))).ShouldBe(1);
+        }
+        finally
+        {
+            foreach (var response in responses)
+            {
+                response.Dispose();
+            }
+        }
+    }
+
+    [Fact]
     public async Task Create_validates_the_body_and_the_role_ids()
     {
         await SignInAsync(AuthPermissions.UserCreate, AuthPermissions.UserAssignRoles);

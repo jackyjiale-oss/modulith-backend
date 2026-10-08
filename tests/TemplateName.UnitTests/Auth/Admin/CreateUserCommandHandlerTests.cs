@@ -1,6 +1,7 @@
 using NSubstitute;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Modules.Auth.Application;
+using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Application.Admin.Users.Create;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Users;
@@ -21,7 +22,7 @@ public sealed class CreateUserCommandHandlerTests : AdminHandlerTestBase
     public CreateUserCommandHandlerTests()
     {
         Users.Add(Arg.Do<User>(_added.Add));
-        UnitOfWork.SaveChangesUnlessDuplicateAsync(Arg.Any<CancellationToken>()).Returns(true);
+        UnitOfWork.SaveChangesUnlessDuplicateAsync(UniqueIndexNames.UserEmail, Arg.Any<CancellationToken>()).Returns(true);
         _sut = new CreateUserCommandHandler(Users, Roles, PermissionChecker, Rules, GrantRules, LinkIssuer, AuditWriter, UnitOfWork, Time);
     }
 
@@ -38,14 +39,14 @@ public sealed class CreateUserCommandHandlerTests : AdminHandlerTestBase
         result.Error.Type.ShouldBe(ErrorType.Conflict);
         _added.ShouldBeEmpty();
         IssuedCodes.ShouldBeEmpty();
-        await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(Ct);
+        await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(default!, Ct);
     }
 
     [Fact]
     public async Task Email_taken_by_a_simultaneous_create_is_reported_as_email_taken()
     {
         // Both requests passed the lookup; the unique index on NormalizedEmail refused the second insert.
-        UnitOfWork.SaveChangesUnlessDuplicateAsync(Arg.Any<CancellationToken>()).Returns(false);
+        UnitOfWork.SaveChangesUnlessDuplicateAsync(UniqueIndexNames.UserEmail, Arg.Any<CancellationToken>()).Returns(false);
 
         var result = await _sut.HandleAsync(Command(), Ct);
 
@@ -87,7 +88,7 @@ public sealed class CreateUserCommandHandlerTests : AdminHandlerTestBase
         audit.UserId.ShouldBe(user.Id);
         ActorOf(audit).ShouldBe(ActorId);
         audit.Details.ShouldNotBeNull().ShouldNotContain(TokenValue);
-        await UnitOfWork.Received(1).SaveChangesUnlessDuplicateAsync(Arg.Any<CancellationToken>());
+        await UnitOfWork.Received(1).SaveChangesUnlessDuplicateAsync(UniqueIndexNames.UserEmail, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -119,7 +120,7 @@ public sealed class CreateUserCommandHandlerTests : AdminHandlerTestBase
         _added.ShouldBeEmpty();
         IssuedCodes.ShouldBeEmpty();
         AuditEntries.ShouldBeEmpty();
-        await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(Ct);
+        await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(default!, Ct);
     }
 
     [Fact]

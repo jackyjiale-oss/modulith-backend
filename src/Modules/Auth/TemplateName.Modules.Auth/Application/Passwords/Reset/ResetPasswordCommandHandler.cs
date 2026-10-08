@@ -17,6 +17,7 @@ namespace TemplateName.Modules.Auth.Application.Passwords.Reset;
 /// <see cref="VerificationErrors.InvalidToken"/>. The code is consumed by one conditional statement in the database, so of two
 /// simultaneous resets with one token exactly one succeeds. The breach check runs before that (it depends on the password alone); the
 /// reuse check runs after it, so a reused password uses up the link and the link can never be a free oracle for the account's passwords.
+/// A successful reset also invalidates every other pending reset link of the user.
 /// </summary>
 internal sealed class ResetPasswordCommandHandler(
     IUserRepository users,
@@ -71,6 +72,12 @@ internal sealed class ResetPasswordCommandHandler(
         user.ChangePassword(passwordHasher.Hash(command.NewPassword), passwordOptions.Value.HistoryCount, now);
         user.ConfirmEmail(now);
 
+        // Every other reset link (a second forgot, or a leaked one) dies with this reset. The one just used is already consumed.
+        foreach (var pending in await verificationCodes.GetPendingAsync(user.Id, VerificationPurpose.PasswordReset, now, CancellationToken.None))
+        {
+            pending.Invalidate(now);
+        }
+
         var activeSessions = await sessions.GetActiveByUserAsync(user.Id, now, CancellationToken.None);
         foreach (var session in activeSessions)
         {
@@ -84,7 +91,8 @@ internal sealed class ResetPasswordCommandHandler(
             userId: user.Id,
             details: JsonSerializer.Serialize(new { revokedSessionCount = activeSessions.Count })));
 
-        // One save: the password, the confirmation, the consumed code, the revocations, the audit entry and the outbox rows.
+        // One save: the password, the confirmation, the consumed and invalidated codes, the revocations, the audit entry and the outbox
+        // rows.
         await unitOfWork.SaveChangesAsync(CancellationToken.None);
 
         return Result.Success();

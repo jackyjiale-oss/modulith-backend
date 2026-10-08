@@ -504,6 +504,7 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("NormalizedEmail")
                         .IsUnique()
+                        .HasDatabaseName("IX_Users_NormalizedEmail")
                         .HasFilter("[IsDeleted] = 0");
 
                     b.HasIndex("CreatedAt", "Id")
