@@ -72,4 +72,16 @@
   <data name="auth.permission_not_found" xml:space="preserve">
     <value>一个或多个权限不存在。</value>
   </data>
+  <data name="auth.invalid_refresh_token" xml:space="preserve">
+    <value>刷新令牌无效。</value>
+  </data>
+  <data name="auth.refresh_token_expired" xml:space="preserve">
+    <value>刷新令牌已过期，请重新登录。</value>
+  </data>
+  <data name="auth.refresh_token_reused" xml:space="preserve">
+    <value>刷新令牌已被使用过，会话已终止，请重新登录。</value>
+  </data>
+  <data name="auth.session_not_found" xml:space="preserve">
+    <value>未找到会话“{id}”。</value>
+  </data>
 </root>

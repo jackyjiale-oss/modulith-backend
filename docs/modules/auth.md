@@ -29,7 +29,7 @@ None yet. The routes planned for this module are `/api/v1/auth/...` (self-servic
 
 <!-- Aggregates, their invariants and life cycle. Draw state machines as a Mermaid stateDiagram-v2. -->
 
-`User` (`Domain/Users/`) is the first aggregate and `Role` (`Domain/Roles/`) the second; `UserSession` and `VerificationCode` arrive in the following tasks. A user is identified by its email, kept trimmed (`Email`) and upper-case (`NormalizedEmail`, the form used for lookups and the unique index). It owns its password history (`PasswordHistoryEntry`) and its role assignments (`UserRole`), and it is audited and soft-deleted.
+`User` (`Domain/Users/`) is the first aggregate and `Role` (`Domain/Roles/`) the second; `UserSession` (`Domain/Sessions/`) the third; `VerificationCode` arrives in a following task. A user is identified by its email, kept trimmed (`Email`) and upper-case (`NormalizedEmail`, the form used for lookups and the unique index). It owns its password history (`PasswordHistoryEntry`) and its role assignments (`UserRole`), and it is audited and soft-deleted.
 
 - **Registration:** `User.Register(email, displayName, locale, passwordHash, now)` creates an active, unconfirmed user with a new `SecurityStamp` and the time zone `UTC`. A user created by an administrator has no `PasswordHash` (valid; the history is then empty); a non-null hash is the first history entry.
 - **Email confirmation:** `ConfirmEmail` is idempotent; only the first call raises `EmailConfirmedDomainEvent`. `EnsureCanSignIn` refuses a suspended user (`auth.account_inactive`) and an unconfirmed one (`auth.email_not_verified`).
@@ -72,7 +72,35 @@ Codes are `module.resource.action` in snake case. Each module declares its own t
 | `auth.permission.view` | List the permissions that modules declare. |
 | `auth.audit.view` | Read the authentication and administration audit log. |
 
-The remaining aggregates (`UserSession`, `VerificationCode`) arrive in the following tasks.
+`UserSession` (`Domain/Sessions/`) is one sign-in on one device, and also the refresh-token family (decision D2: there is no `FamilyId`). Its id is the `sid` claim of the access tokens. It owns its `RefreshToken` chain; a token stores only the SHA-256 hash (`TokenHash`), never the token.
+
+- **Start:** `UserSession.Start(userId, authMethods, deviceName, userAgent, ipAddress, securityStamp, firstTokenHash, slidingLifetime, absoluteLifetime, now)` creates the session and its first token. `SecurityStamp` is a **snapshot** of the user's stamp at sign-in; `ExpiresAt` is absolute (`now + absoluteLifetime`) and sliding refresh never moves it. Tokens expire at `min(now + slidingLifetime, session.ExpiresAt)`, so no token outlives the session. `IsActive(now)` is true while the session is not revoked and `now < ExpiresAt`.
+- **Rotate:** `Rotate(presentedTokenHash, newTokenHash, currentSecurityStamp, slidingLifetime, now)` is checked in this order. The caller saves the aggregate on every outcome, because some failures revoke the session.
+
+  | Presented token | Result | Effect on the session |
+  |---|---|---|
+  | Hash matches no token, or the session is already revoked | `auth.invalid_refresh_token` | None. |
+  | Current security stamp differs from the snapshot | `auth.invalid_refresh_token` | Revoked with `PasswordChanged`. |
+  | Token already used or revoked | `auth.refresh_token_reused` | Revoked with `TokenReuse` (every token revoked), `RefreshTokenReuseDetectedDomainEvent` raised. |
+  | Token or session expired | `auth.refresh_token_expired` | None. |
+  | Valid | The new `RefreshToken` | Old token gets `UsedAt` and `ReplacedByTokenId`, `LastSeenAt` moves to `now`. |
+
+  Hashes are compared with `CryptographicOperations.FixedTimeEquals` against every token of the session (no early exit), so timing does not tell which token matched. An unknown token, a token of a revoked session and a stamp mismatch all give `auth.invalid_refresh_token`.
+- **Revoke:** `Revoke(reason, now)` ends the session and revokes every token that is not yet revoked. It is idempotent: a second call keeps the first time and reason.
+
+`SessionRevokedReason` is persisted by its numeric value (`Logout`, `LogoutAll`, `PasswordChanged`, `AdminRevoked`, `TokenReuse`, `Expired`), so a new reason is appended and existing values are never renumbered.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active: start
+    Active --> Active: rotate
+    Active --> Revoked: logout, logout all, password changed, admin revoked, token reuse
+    Active --> Expired: absolute expiry reached
+    Revoked --> [*]
+    Expired --> [*]
+```
+
+The remaining aggregate (`VerificationCode`) arrives in a following task.
 
 ## Error codes
 
@@ -91,8 +119,12 @@ The remaining aggregates (`UserSession`, `VerificationCode`) arrive in the follo
 | `auth.role_name_taken` | 409 | `name` | A role named '{name}' already exists. |
 | `auth.system_role_protected` | 409 | — | This is a system role and cannot be changed this way. |
 | `auth.permission_not_found` | 400 | — | One or more of the permissions do not exist. |
+| `auth.invalid_refresh_token` | 401 | — | The refresh token is not valid. |
+| `auth.refresh_token_expired` | 401 | — | The refresh token has expired. Sign in again. |
+| `auth.refresh_token_reused` | 401 | — | The refresh token was already used. The session has been ended; sign in again. |
+| `auth.session_not_found` | 404 | `id` | Session '{id}' was not found. |
 
-The user codes are declared in `Domain/Users/UserErrors.cs` and the role and permission codes in `Domain/Roles/RoleErrors.cs`. Their messages are in `Resources/AuthErrorMessages.resx` (English) with `AuthErrorMessages.ms.resx` and `AuthErrorMessages.zh-Hans.resx` (drafts awaiting native review); every further code is added to all three files in the same change that introduces it. A locked account answers with `auth.invalid_credentials`, never a distinct code (it would reveal that the email exists).
+The user codes are declared in `Domain/Users/UserErrors.cs`, the role and permission codes in `Domain/Roles/RoleErrors.cs` and the session codes in `Domain/Sessions/SessionErrors.cs`. Their messages are in `Resources/AuthErrorMessages.resx` (English) with `AuthErrorMessages.ms.resx` and `AuthErrorMessages.zh-Hans.resx` (drafts awaiting native review); every further code is added to all three files in the same change that introduces it. A locked account answers with `auth.invalid_credentials`, never a distinct code (it would reveal that the email exists).
 
 ## Events
 
@@ -105,8 +137,9 @@ The user codes are declared in `Domain/Users/UserErrors.cs` and the role and per
 | `PasswordChangedDomainEvent(UserId, Email, Locale)` | Domain | A password is changed or reset | None yet |
 | `UserLockedOutDomainEvent(UserId, LockoutEnd)` | Domain | A failed sign-in reaches the lockout threshold | None yet |
 | `RegistrationAttemptedDomainEvent(UserId, Email, Locale)` | Domain | Someone registers an address that already has an account | None yet |
+| `RefreshTokenReuseDetectedDomainEvent(UserId, SessionId)` | Domain | A used or revoked refresh token is presented again and the session is revoked | None yet |
 
-The events are declared in `Domain/Users/Events/`. Domain events are written to the module outbox in the same save as the aggregate (once the persistence task lands) and dispatched by the outbox (ADR 0007). The module publishes no integration events yet.
+The events are declared in `Domain/Users/Events/` and `Domain/Sessions/Events/`. Domain events are written to the module outbox in the same save as the aggregate (once the persistence task lands) and dispatched by the outbox (ADR 0007). The module publishes no integration events yet.
 
 ## Configuration
 
