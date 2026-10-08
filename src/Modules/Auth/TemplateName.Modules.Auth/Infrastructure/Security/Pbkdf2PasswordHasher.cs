@@ -13,12 +13,18 @@ internal sealed class Pbkdf2PasswordHasher : IPasswordHasher
 {
     private static readonly HashSubject Subject = new();
 
-    private readonly PasswordHasher<HashSubject> _inner;
+    private readonly IPasswordHasher<HashSubject> _inner;
     private readonly Lazy<string> _dummyHash;
 
     public Pbkdf2PasswordHasher(IOptions<PasswordHasherOptions> options)
+        : this(new PasswordHasher<HashSubject>(options))
     {
-        _inner = new PasswordHasher<HashSubject>(options);
+    }
+
+    /// <summary>Takes the Identity hasher directly so a test can watch the work it does.</summary>
+    internal Pbkdf2PasswordHasher(IPasswordHasher<HashSubject> inner)
+    {
+        _inner = inner;
         _dummyHash = new Lazy<string>(
             () => _inner.HashPassword(Subject, Guid.NewGuid().ToString("N")),
             LazyThreadSafetyMode.ExecutionAndPublication);
@@ -30,6 +36,8 @@ internal sealed class Pbkdf2PasswordHasher : IPasswordHasher
     {
         if (string.IsNullOrEmpty(hash))
         {
+            // An account without a password (created by an administrator) must cost what a wrong password costs.
+            SpendVerificationCost(password);
             return PasswordVerification.Failed;
         }
 
@@ -44,13 +52,15 @@ internal sealed class Pbkdf2PasswordHasher : IPasswordHasher
         }
         catch (FormatException)
         {
-            // The stored value is not base64, so it is not a hash this hasher made.
+            // The stored value is not base64, so it is not a hash this hasher made. It fails before any key derivation, so
+            // the same work is done against the dummy hash to keep the time the same.
+            SpendVerificationCost(password);
             return PasswordVerification.Failed;
         }
     }
 
-    public void SpendVerificationCost(string password) => _ = Verify(_dummyHash.Value, password);
+    public void SpendVerificationCost(string password) => _ = _inner.VerifyHashedPassword(Subject, _dummyHash.Value, password);
 
     /// <summary>The Identity hasher takes a user object it never reads; this is that stand-in.</summary>
-    private sealed class HashSubject;
+    internal sealed class HashSubject;
 }

@@ -107,6 +107,48 @@ public sealed class HibpBreachedPasswordCheckerTests
     }
 
     [Fact]
+    public async Task A_body_that_stalls_after_the_headers_fails_open_within_the_budget_and_logs_a_warning()
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StallingStream()) });
+        var logger = new CapturingLogger<HibpBreachedPasswordChecker>();
+        var budget = TimeSpan.FromMilliseconds(200);
+
+        var started = TimeProvider.System.GetTimestamp();
+        var breached = await CheckerFor(handler, logger: logger, budget: budget).IsBreachedAsync(Password, TestContext.Current.CancellationToken);
+        var elapsed = TimeProvider.System.GetElapsedTime(started);
+
+        breached.ShouldBeFalse();
+        elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
+        logger.Entries.ShouldHaveSingleItem().Level.ShouldBe(LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task A_body_without_line_breaks_stops_at_the_size_cap_and_fails_open()
+    {
+        const int Cap = 1024;
+        var body = new EndlessStream(Cap * 100);
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body) });
+        var logger = new CapturingLogger<HibpBreachedPasswordChecker>();
+
+        var breached = await CheckerFor(handler, logger: logger, maxBodyBytes: Cap).IsBreachedAsync(Password, TestContext.Current.CancellationToken);
+
+        breached.ShouldBeFalse();
+        body.BytesServed.ShouldBeLessThanOrEqualTo(Cap + (16 * 1024));
+        logger.Entries.ShouldHaveSingleItem().Level.ShouldBe(LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task A_caller_cancelled_during_the_body_read_still_propagates()
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StallingStream()) });
+        using var cancellation = new CancellationTokenSource();
+        var check = CheckerFor(handler, budget: TimeSpan.FromSeconds(30)).IsBreachedAsync(Password, cancellation.Token);
+        await cancellation.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(() => check);
+    }
+
+    [Fact]
     public async Task Skips_the_request_when_CheckBreached_is_false()
     {
         var handler = RespondingWith($"{Suffix}:42");
@@ -123,11 +165,15 @@ public sealed class HibpBreachedPasswordCheckerTests
     private static HibpBreachedPasswordChecker CheckerFor(
         StubHandler handler,
         bool checkBreached = true,
-        CapturingLogger<HibpBreachedPasswordChecker>? logger = null) =>
+        CapturingLogger<HibpBreachedPasswordChecker>? logger = null,
+        TimeSpan? budget = null,
+        int? maxBodyBytes = null) =>
         new(
             new StubHttpClientFactory(new HttpClient(handler)),
             Options.Create(new PasswordOptions { CheckBreached = checkBreached }),
-            logger ?? new CapturingLogger<HibpBreachedPasswordChecker>());
+            logger ?? new CapturingLogger<HibpBreachedPasswordChecker>(),
+            budget ?? HibpBreachedPasswordChecker.RequestBudget,
+            maxBodyBytes ?? HibpBreachedPasswordChecker.MaxBodyBytes);
 
     private sealed record RecordedRequest(HttpMethod Method, Uri Uri, Dictionary<string, string> Headers);
 
@@ -157,6 +203,82 @@ public sealed class HibpBreachedPasswordCheckerTests
             name.ShouldBe(HibpBreachedPasswordChecker.HttpClientName);
             return client;
         }
+    }
+
+    /// <summary>A body whose headers have arrived but whose bytes never do; it ends only when the read is cancelled.</summary>
+    private sealed class StallingStream : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    /// <summary>Serves 'A' without any line break, up to <c>total</c> bytes, and counts what was read.</summary>
+    private sealed class EndlessStream(int total) : Stream
+    {
+        public int BytesServed { get; private set; }
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var count = Math.Min(buffer.Length, total - BytesServed);
+            buffer.Span[..count].Fill((byte)'A');
+            BytesServed += count;
+            return ValueTask.FromResult(count);
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed record LogEntry(LogLevel Level, string Message);

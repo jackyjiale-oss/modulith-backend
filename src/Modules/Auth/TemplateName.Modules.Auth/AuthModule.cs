@@ -52,7 +52,7 @@ public static class AuthModule
         services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
         services.AddSingleton<ISecureTokenService, SecureTokenService>();
         services.AddSingleton<ISecretProtector, DataProtectionSecretProtector>();
-        services.AddHttpClient(HibpBreachedPasswordChecker.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(2));
+        services.AddHttpClient(HibpBreachedPasswordChecker.HttpClientName, client => client.Timeout = HibpBreachedPasswordChecker.RequestBudget);
         services.AddSingleton<IBreachedPasswordChecker, HibpBreachedPasswordChecker>();
 
         // One key ring for every instance, so an outbox event protected by one instance can be read by another (ADR 0017).

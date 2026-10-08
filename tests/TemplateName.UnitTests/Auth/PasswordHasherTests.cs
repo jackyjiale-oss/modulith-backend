@@ -70,4 +70,49 @@ public sealed class PasswordHasherTests
         Should.NotThrow(() => hasher.SpendVerificationCost(Password));
         Should.NotThrow(() => hasher.SpendVerificationCost(string.Empty));
     }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-base64!")]
+    public void Unusable_stored_hash_still_costs_one_full_verification(string hash)
+    {
+        var inner = new SpyingInnerHasher(new PasswordHasherOptions { IterationCount = 10_000 });
+        var hasher = new Pbkdf2PasswordHasher(inner);
+
+        hasher.Verify(hash, Password).ShouldBe(PasswordVerification.Failed);
+
+        // Exactly one verification ran to completion, and it was against a real (dummy) hash, not the unusable one.
+        var completed = inner.CompletedVerifications.ShouldHaveSingleItem();
+        completed.ShouldNotBe(hash);
+        completed.ShouldNotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public void A_usable_stored_hash_costs_one_verification()
+    {
+        var inner = new SpyingInnerHasher(new PasswordHasherOptions { IterationCount = 10_000 });
+        var hasher = new Pbkdf2PasswordHasher(inner);
+        var hash = hasher.Hash(Password);
+
+        hasher.Verify(hash, "not the password").ShouldBe(PasswordVerification.Failed);
+
+        inner.CompletedVerifications.ShouldHaveSingleItem().ShouldBe(hash);
+    }
+
+    private sealed class SpyingInnerHasher(PasswordHasherOptions hasherOptions)
+        : PasswordHasher<Pbkdf2PasswordHasher.HashSubject>(Options.Create(hasherOptions))
+    {
+        /// <summary>The stored hashes whose verification ran to the end (a hash that is not base64 throws before any work).</summary>
+        public List<string> CompletedVerifications { get; } = [];
+
+        public override PasswordVerificationResult VerifyHashedPassword(
+            Pbkdf2PasswordHasher.HashSubject user,
+            string hashedPassword,
+            string providedPassword)
+        {
+            var result = base.VerifyHashedPassword(user, hashedPassword, providedPassword);
+            CompletedVerifications.Add(hashedPassword);
+            return result;
+        }
+    }
 }
