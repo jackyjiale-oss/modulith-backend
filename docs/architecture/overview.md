@@ -55,9 +55,9 @@ A request passes the middleware in the order `Program.cs` registers it ([`docs/s
 
 ```mermaid
 flowchart LR
-    Client --> FH["1 Forwarded headers"] --> Loc["1a Localization"] --> EH["2 Exception handler"] --> SCP["3 Status code pages"]
-    SCP --> Trace["4 X-Trace-Id"] --> Sec["5 Security headers"] --> Https["6 HSTS + HTTPS redirect<br/>(not in Development)"]
-    Https --> Log["7 Request logging"] --> Route["8 Routing"] --> Cors["9 CORS"] --> RL["10 Rate limiter"]
+    Client --> FH["1 Forwarded headers"] --> AuthN["1a Authentication"] --> Loc["1b Localization"] --> EH["2 Exception handler"]
+    EH --> SCP["3 Status code pages"] --> Trace["4 X-Trace-Id"] --> Sec["5 Security headers"] --> Https["6 HSTS + HTTPS redirect<br/>(not in Development)"]
+    Https --> Log["7 Request logging"] --> Route["8 Routing"] --> Cors["9 CORS"] --> AuthZ["9a Authorization"] --> RL["10 Rate limiter"]
     RL --> Idem["11 Idempotency-Key"] --> EP["12 Endpoint"]
 ```
 
@@ -67,7 +67,7 @@ Inside an endpoint (the Sample module's `LeaveRequestEndpoints` is the worked ex
 2. The handler is wrapped by the decorators: logging (outermost) then validation. Validation failures return `400 validation.failed` with camel-cased field `errors` without reaching the handler (ADR 0005).
 3. A command handler loads the aggregate through its repository, calls a domain method that returns a `Result` and raises domain events, and saves through the module's unit of work. In that one `SaveChanges` the interceptors stamp audit columns, turn deletes into soft deletes and write the domain events to the module's `OutboxMessages` table (ADR 0006, ADR 0007).
 4. A query handler reads with Dapper through `IDbConnectionFactory` and filters `IsDeleted = 0` itself; list queries page by cursor (ADR 0010).
-5. The endpoint maps the `Result`: success to `200`/`201`/`204`, failure to RFC 9457 ProblemDetails via `ToProblem()` (ADR 0002). Every problem response carries `code`, `traceId` (equal to the `X-Trace-Id` header) and, when the error has parameters, `params`; `detail` is localized from `Accept-Language` (ADR 0009).
+5. The endpoint maps the `Result`: success to `200`/`201`/`204`, failure to RFC 9457 ProblemDetails via `ToProblem()` (ADR 0002). Every problem response carries `code`, `traceId` (equal to the `X-Trace-Id` header) and, when the error has parameters, `params`; `detail` is localized from the signed-in user's saved `locale` claim, else from `Accept-Language` (ADR 0009).
 6. After the response, the module's outbox background service dispatches the saved domain events to their `IDomainEventHandler<>`s, at least once per handler (ADR 0007).
 
 ## Data ownership

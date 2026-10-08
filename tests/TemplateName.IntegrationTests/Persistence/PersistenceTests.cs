@@ -109,7 +109,8 @@ public sealed class PersistenceTests(IntegrationTestWebAppFactory factory) : Int
             services => services.AddSingleton<IStartupFilter, ConflictingEndpointStartupFilter>()));
         using var client = conflicting.CreateClient();
 
-        using var response = await client.GetAsync("/conflict", Ct);
+        // Signed in: the branch runs after the host's pipeline, whose fallback policy answers an anonymous caller with 401.
+        using var response = await client.GetSignedInAsync(conflicting.Services, "/conflict", Ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
         response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");

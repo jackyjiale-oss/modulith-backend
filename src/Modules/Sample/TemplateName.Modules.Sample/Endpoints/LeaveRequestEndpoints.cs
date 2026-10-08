@@ -19,7 +19,10 @@ internal static class LeaveRequestEndpoints
 
     internal static IEndpointRouteBuilder MapLeaveRequestEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("sample/leave-requests").WithTags("Sample");
+        var group = app.MapGroup("sample/leave-requests")
+            .WithTags("Sample")
+            // TEMPORARY: removed in Task 12, which adds RequirePermission per route and the sign-in test harness.
+            .AllowAnonymous();
 
         group.MapPost("/", SubmitAsync)
             .WithName("SubmitLeaveRequest")

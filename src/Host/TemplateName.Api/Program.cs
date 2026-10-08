@@ -26,9 +26,10 @@ builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.C
 builder.Services.AddOpenApi("v1");
 builder.Services.AddHealthChecks();
 builder.Services.AddHttpSecurity(builder.Configuration);
-// AddPermissionAuthorization() (Auth plan) goes here, in the same change that adds UseAuthentication/UseAuthorization below: once
-// authorization services exist, WebApplication inserts UseAuthorization ahead of UseRouting by itself unless the pipeline calls it, and
-// the fallback policy would then answer 401 to every request, health checks included.
+// The fallback policy requires an authenticated user everywhere an endpoint does not say otherwise. It needs the explicit
+// UseAuthentication and UseAuthorization below: without them WebApplication would add UseAuthorization ahead of UseRouting, where no
+// endpoint is known and every request, health checks included, gets 401.
+builder.Services.AddPermissionAuthorization();
 // Module registrations
 builder.Services.AddAuthModule(builder.Configuration);
 builder.Services.AddSampleModule();
@@ -56,7 +57,10 @@ if (app.Configuration.GetValue("Auth:Seed:RunOnStartup", defaultValue: true))
 // Pipeline order matters; later tasks insert at the marked slots.
 // 1. UseForwardedHeaders
 app.UseForwardedHeaders();
-// 1a. UseApiLocalization - must precede UseExceptionHandler, so error responses come back in the caller's language (ADR 0009)
+// 1a. UseAuthentication - before localization, so the signed-in user's saved locale claim wins over Accept-Language (decision D7).
+//     It only reads the bearer token; a missing or invalid token leaves the request anonymous, and 9a decides whether that is allowed.
+app.UseAuthentication();
+// 1b. UseApiLocalization - must precede UseExceptionHandler, so error responses come back in the caller's language (ADR 0009)
 app.UseApiLocalization();
 // 2. UseExceptionHandler
 app.UseExceptionHandler();
@@ -76,24 +80,29 @@ if (!app.Environment.IsDevelopment())
 app.UseRequestLogging();
 // 8. UseRouting
 app.UseRouting();
-// 9. UseCors
+// 9. UseCors - before authorization, so a CORS preflight (which carries no token) is answered without a 401
 app.UseCors();
-// UseAuthentication/UseAuthorization (Auth plan) go here, between slots 9 and 10, so the limiter's user:{sub} partition sees the signed-in user.
-// 10. UseRateLimiter
+// 9a. UseAuthorization - after UseRouting, so it sees the endpoint's metadata; the fallback policy protects every endpoint without
+//     .AllowAnonymous() or a policy of its own, and an unknown route (no endpoint) too. Anonymous callers get 401 here, before the limiter.
+app.UseAuthorization();
+// 10. UseRateLimiter - after authentication, so its user:{sub} partition sees the signed-in user
 app.UseRateLimiter();
 // 11. UseIdempotency - after UseRouting, because it acts only on endpoints marked WithIdempotency()
 app.UseIdempotency();
-// 12. endpoints (health endpoints are exempt from rate limiting)
-app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false }).DisableRateLimiting();
-app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = registration => registration.Tags.Contains("ready") }).DisableRateLimiting();
+// 12. endpoints (health endpoints are anonymous and exempt from rate limiting)
+app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false }).DisableRateLimiting().AllowAnonymous();
+app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = registration => registration.Tags.Contains("ready") })
+    .DisableRateLimiting()
+    .AllowAnonymous();
 
 if (!app.Environment.IsProduction())
 {
-    app.MapOpenApi();
-    app.MapScalarApiReference();
+    app.MapOpenApi().AllowAnonymous();
+    app.MapScalarApiReference().AllowAnonymous();
 }
 
-// Module endpoints map on `api`; well-known documents (the JWKS) map at the root.
+// Module endpoints map on `api`; well-known documents (the JWKS, anonymous) map at the root. Everything else is protected by the
+// fallback policy unless it says .AllowAnonymous().
 var api = app.MapGroup("/api/v1");
 api.MapAuthEndpoints();
 app.MapAuthWellKnownEndpoints();

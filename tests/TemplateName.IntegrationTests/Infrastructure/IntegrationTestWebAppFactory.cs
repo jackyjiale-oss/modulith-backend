@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.SqlClient;
@@ -38,8 +39,11 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     /// <summary>The clock every host built by this factory uses; it starts at 2026-01-01T00:00:00Z and moves only when a test moves it.</summary>
     public FakeTimeProvider Time { get; } = new(StartTime);
 
-    /// <summary>The user every host built by this factory sees; anonymous until a test sets <see cref="TestCurrentUser.UserId"/>.</summary>
-    public TestCurrentUser CurrentUser { get; } = new();
+    /// <summary>
+    /// The user every host built by this factory sees: the user a test forces with <see cref="TestCurrentUser.UserId"/>, else the caller
+    /// the request's access token names, else anonymous.
+    /// </summary>
+    public TestCurrentUser CurrentUser { get; } = new(new HttpContextAccessor());
 
     /// <summary>A permission source tests change to declare or drop permissions before seeding again; empty at the start of every test.</summary>
     public TestPermissionSource PermissionSource { get; } = new();
@@ -95,6 +99,7 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
 
         // Host settings, not an in-memory source, so tests can override them with UseSetting on a derived factory.
         builder.UseSetting("RateLimiting:GlobalPermitLimit", "100000");
+        builder.UseSetting("RateLimiting:AuthStrictPermitLimit", "100000");
         builder.UseSetting("Auth:Seed:RunOnStartup", "false");
         builder.UseSetting("ConnectionStrings:Database", TestsDatabase.ConnectionString);
         builder.UseSetting($"ConnectionStrings:{PersistenceTestsConnectionStringName}", PersistenceTestsDatabase.ConnectionString);
@@ -120,6 +125,7 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.AddSingleton(EventRecorder);
             services.AddSingleton(FlakySwitch);
             services.AddSingleton(HandlerGate);
+            services.AddSingleton<IStartupFilter, ProtectedTestEndpointStartupFilter>();
         });
     }
 

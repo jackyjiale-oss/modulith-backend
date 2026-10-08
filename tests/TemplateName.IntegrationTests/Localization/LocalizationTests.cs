@@ -119,9 +119,12 @@ public sealed class LocalizationTests(IntegrationTestWebAppFactory factory) : In
     {
         await using var limited = Factory.WithWebHostBuilder(builder => builder.UseSetting("RateLimiting:GlobalPermitLimit", "1"));
         using var client = limited.CreateClient();
+        // Signed in: for an anonymous caller the fallback policy answers 401 before the limiter counts the request. The token's saved
+        // locale wins over Accept-Language (decision D7), so it carries the same language.
+        var token = TestAccessTokens.Issue(limited.Services, locale: "zh-Hans").Value;
 
-        using var allowed = await GetAsync(client, "/api/v1/does-not-exist", "zh-Hans");
-        using var response = await GetAsync(client, "/api/v1/does-not-exist", "zh-Hans");
+        using var allowed = await GetAsync(client, "/api/v1/does-not-exist", "zh-Hans", token);
+        using var response = await GetAsync(client, "/api/v1/does-not-exist", "zh-Hans", token);
 
         allowed.StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await allowed.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("detail").GetString()
@@ -164,10 +167,15 @@ public sealed class LocalizationTests(IntegrationTestWebAppFactory factory) : In
 
     private Task<HttpResponseMessage> GetAsync(string url, string language) => GetAsync(Client, url, language);
 
-    private static async Task<HttpResponseMessage> GetAsync(HttpClient client, string url, string language)
+    private static async Task<HttpResponseMessage> GetAsync(HttpClient client, string url, string language, string? accessToken = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.TryAddWithoutValidation("Accept-Language", language);
+        if (accessToken is not null)
+        {
+            request.WithBearer(accessToken);
+        }
+
         return await client.SendAsync(request, Ct);
     }
 

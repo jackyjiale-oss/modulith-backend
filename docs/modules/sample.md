@@ -18,7 +18,7 @@ Code: `src/Modules/Sample/TemplateName.Modules.Sample/`. The host calls `AddSamp
 
 <!-- Every endpoint, written as METHOD + full route (e.g. GET /api/v1/{module}/{resources}/{id:guid}), with its success status and error codes. -->
 
-All endpoints carry the OpenAPI tag `Sample`.
+All endpoints carry the OpenAPI tag `Sample`. For now the group is marked `.AllowAnonymous()`, so the host's fallback policy (every other endpoint needs a signed-in user) does not apply to it; this is temporary, and the Auth plan's next step replaces it with a `RequirePermission` per route.
 
 | Method | Route | Purpose | Success | Errors |
 |---|---|---|---|---|

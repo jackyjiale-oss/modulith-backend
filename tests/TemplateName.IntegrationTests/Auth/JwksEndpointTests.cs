@@ -29,7 +29,8 @@ public sealed class JwksEndpointTests(IntegrationTestWebAppFactory factory) : In
     [Fact]
     public async Task Jwks_is_not_under_the_api_group()
     {
-        using var response = await Client.GetAsync("/api/v1/.well-known/jwks.json", Ct);
+        // Signed in: for an anonymous caller the fallback policy answers 401 before the missing route shows.
+        using var response = await Client.GetSignedInAsync(Factory.Services, "/api/v1/.well-known/jwks.json", Ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }

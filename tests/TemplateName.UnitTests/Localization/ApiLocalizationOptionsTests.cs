@@ -17,7 +17,10 @@ public sealed class ApiLocalizationOptionsTests
         options.DefaultRequestCulture.UICulture.Name.ShouldBe("en");
         options.SupportedCultures!.Select(culture => culture.Name).ShouldBe(["en"]);
         options.SupportedUICultures!.Select(culture => culture.Name).ShouldBe(["en", "ms", "zh-Hans"]);
-        options.RequestCultureProviders.Single().ShouldBeOfType<AcceptLanguageHeaderRequestCultureProvider>();
+        // The saved locale claim first, so it wins over Accept-Language (decision D7); no query-string or cookie provider.
+        options.RequestCultureProviders.Count.ShouldBe(2);
+        options.RequestCultureProviders[0].ShouldBeOfType<UserLocaleClaimCultureProvider>();
+        options.RequestCultureProviders[1].ShouldBeOfType<AcceptLanguageHeaderRequestCultureProvider>();
         options.FallBackToParentUICultures.ShouldBeTrue();
         options.ApplyCurrentCultureToResponseHeaders.ShouldBeTrue();
     }

@@ -19,6 +19,10 @@ public sealed class HttpSecurityTests(IntegrationTestWebAppFactory factory) : In
     private const string UntrustedPeer = "198.51.100.7";
     private const string TestUserHeader = "X-Test-User";
 
+    // An anonymous endpoint the global limiter covers. An anonymous request to an unknown route stops at the fallback policy (401),
+    // which runs before the rate limiter (pipeline slot 9a), so it would never be counted.
+    private const string LimitedRoute = "/.well-known/jwks.json";
+
     [Fact]
     public async Task Allowed_origin_gets_cors_headers()
     {
@@ -101,11 +105,11 @@ public sealed class HttpSecurityTests(IntegrationTestWebAppFactory factory) : In
 
         for (var attempt = 0; attempt < 2; attempt++)
         {
-            using var allowed = await client.GetAsync("/api/v1/does-not-exist", Ct);
-            allowed.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+            using var allowed = await client.GetAsync(LimitedRoute, Ct);
+            allowed.StatusCode.ShouldBe(HttpStatusCode.OK);
         }
 
-        using var response = await client.GetAsync("/api/v1/does-not-exist", Ct);
+        using var response = await client.GetAsync(LimitedRoute, Ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
         response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
@@ -145,7 +149,7 @@ public sealed class HttpSecurityTests(IntegrationTestWebAppFactory factory) : In
 
         var statuses = await GetStatusesAsync(client, ("X-Forwarded-For", ["203.0.113.1", "203.0.113.2", "203.0.113.3"]));
 
-        statuses.ShouldBe([HttpStatusCode.NotFound, HttpStatusCode.NotFound, HttpStatusCode.TooManyRequests]);
+        statuses.ShouldBe([HttpStatusCode.OK, HttpStatusCode.OK, HttpStatusCode.TooManyRequests]);
     }
 
     [Fact]
@@ -156,7 +160,7 @@ public sealed class HttpSecurityTests(IntegrationTestWebAppFactory factory) : In
 
         var statuses = await GetStatusesAsync(client, ("X-Forwarded-For", ["203.0.113.1", "203.0.113.2", "203.0.113.1"]));
 
-        statuses.ShouldBe([HttpStatusCode.NotFound, HttpStatusCode.NotFound, HttpStatusCode.TooManyRequests]);
+        statuses.ShouldBe([HttpStatusCode.OK, HttpStatusCode.OK, HttpStatusCode.TooManyRequests]);
     }
 
     [Fact]
@@ -167,7 +171,7 @@ public sealed class HttpSecurityTests(IntegrationTestWebAppFactory factory) : In
 
         var statuses = await GetStatusesAsync(client, (TestUserHeader, ["user-a", "user-b", "user-a"]));
 
-        statuses.ShouldBe([HttpStatusCode.NotFound, HttpStatusCode.NotFound, HttpStatusCode.TooManyRequests]);
+        statuses.ShouldBe([HttpStatusCode.OK, HttpStatusCode.OK, HttpStatusCode.TooManyRequests]);
     }
 
     private async Task<List<HttpStatusCode>> GetStatusesAsync(HttpClient client, (string Header, string[] Values) requests)
@@ -175,7 +179,7 @@ public sealed class HttpSecurityTests(IntegrationTestWebAppFactory factory) : In
         var statuses = new List<HttpStatusCode>();
         foreach (var value in requests.Values)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/does-not-exist");
+            using var request = new HttpRequestMessage(HttpMethod.Get, LimitedRoute);
             request.Headers.Add(requests.Header, value);
             using var response = await client.SendAsync(request, Ct);
             statuses.Add(response.StatusCode);

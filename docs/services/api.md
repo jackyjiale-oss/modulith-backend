@@ -15,11 +15,11 @@ Order matters; `Program.cs` marks it with comments.
 | 5 | `ConfigureHttpJsonOptions` | `JsonStringEnumConverter`: enums are strings in JSON (`"Pending"`) |
 | 6 | `AddOpenApi("v1")` | The OpenAPI document `v1` |
 | 7 | `AddHealthChecks()` | Health checks; each module context adds its own `ready` check |
-| 8 | `AddHttpSecurity(configuration)` | CORS, the global rate limiter, forwarded headers |
-| — | *(Auth plan)* `AddPermissionAuthorization()` | The permission authorization handler behind `RequirePermission(code)` and the fallback policy: every endpoint requires an authenticated user unless it says `.AllowAnonymous()` ([web-common](../building-blocks/web-common.md)). Not called yet: it lands with `UseAuthentication`/`UseAuthorization` in the pipeline, because once authorization services are registered `WebApplication` adds `UseAuthorization` ahead of `UseRouting` by itself (unless the pipeline calls it), where the fallback policy would answer 401 to every request. |
-| 9 | `AddAuthModule(configuration)`, `AddSampleModule()` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme, the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)) |
-| 10 | `AddOptions<KestrelServerOptions>()…Bind("Kestrel")` | Binds the whole `Kestrel` section lazily, so `Kestrel:Limits:*` apply and test overrides work |
-| 11 | `AddApplicationDecorators()` | Validation and logging decorators around every handler registered above; always last |
+| 8 | `AddHttpSecurity(configuration)` | CORS, the global rate limiter, the `auth-strict` rate-limit policy, forwarded headers |
+| 9 | `AddPermissionAuthorization()` | The permission authorization handler behind `RequirePermission(code)` and the **fallback policy**: every endpoint requires an authenticated user unless it says `.AllowAnonymous()` ([web-common](../building-blocks/web-common.md)). It needs the explicit `UseAuthentication` and `UseAuthorization` of the pipeline (slots 1a and 9a): without them `WebApplication` adds `UseAuthorization` ahead of `UseRouting` by itself, where no endpoint is known and the fallback policy answers 401 to every request. |
+| 10 | `AddAuthModule(configuration)`, `AddSampleModule()` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme (the default authentication scheme), the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)) |
+| 11 | `AddOptions<KestrelServerOptions>()…Bind("Kestrel")` | Binds the whole `Kestrel` section lazily, so `Kestrel:Limits:*` apply and test overrides work |
+| 12 | `AddApplicationDecorators()` | Validation and logging decorators around every handler registered above; always last |
 
 ## Start-up
 
@@ -33,19 +33,20 @@ Before the pipeline serves requests, the host runs two steps, in this order:
 | Slot | Middleware | Notes |
 |---|---|---|
 | 1 | `UseForwardedHeaders` | Honors `X-Forwarded-For` / `X-Forwarded-Proto` from trusted proxies only (`ForwardedHeaders` section). First, so everything after sees the client's address and scheme. |
-| 1a | `UseApiLocalization` | Picks the UI culture from `Accept-Language`. Before the exception handler, because culture is async-local: set later, 500 and malformed-body responses would come back in English (ADR 0009). Also sets the default thread cultures for background work. |
+| 1a | `UseAuthentication` | Validates the `Authorization: Bearer` access token (ES256 JWT, [Auth module](../modules/auth.md#access-tokens)) and sets the request's user. It never rejects: a missing, malformed, forged or expired token leaves the request anonymous, and slot 9a decides whether that is allowed. Before localization, so the signed-in user's saved `locale` claim is visible to it (decision D7). |
+| 1b | `UseApiLocalization` | Picks the UI culture from the signed-in user's `locale` claim, else from `Accept-Language` (an unsupported claim falls through to the header). Before the exception handler, because culture is async-local: set later, 500 and malformed-body responses would come back in English (ADR 0009). Also sets the default thread cultures for background work. |
 | 2 | `UseExceptionHandler` | `ConcurrencyExceptionHandler` (409 `concurrency.conflict`), then `GlobalExceptionHandler` (400 `request.malformed` for bad bodies, else 500 `server.unexpected_error`). |
-| 3 | `UseStatusCodePages` | Body-less 4xx/5xx responses (unknown route, wrong method) become ProblemDetails with `code` `http.{status}`. |
+| 3 | `UseStatusCodePages` | Body-less 4xx/5xx responses (401 from slot 9a, unknown route, wrong method) become ProblemDetails with `code` `http.{status}`. |
 | 4 | `UseTraceIdHeader` | `X-Trace-Id` = the W3C trace id, also the `traceId` of every problem response. |
 | 5 | `UseSecurityHeaders` | `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`. |
 | 6 | `UseHsts` + `UseHttpsRedirection` | Every environment except Development. |
 | 7 | `UseRequestLogging` | One Serilog event per request with `UserId`; health checks at `Verbose`, failures (exception or 5xx) at `Error`. |
 | 8 | `UseRouting` | |
-| 9 | `UseCors` | Default policy from `Cors:AllowedOrigins`. |
-| — | *(Auth plan)* `UseAuthentication` / `UseAuthorization` | Go between slots 9 and 10, so the rate limiter's `user:{sub}` partition sees the signed-in user. |
-| 10 | `UseRateLimiter` | Global fixed-window limiter; 429 `rate_limit.exceeded` with `Retry-After`. |
+| 9 | `UseCors` | Default policy from `Cors:AllowedOrigins`. Before authorization, so a preflight (which carries no token) is answered without a 401. |
+| 9a | `UseAuthorization` | After routing, so it reads the endpoint's metadata. An endpoint with `.AllowAnonymous()` passes; one with `RequirePermission(code)` needs that permission (403 for a signed-in caller without it); every other endpoint, and a request that matched no endpoint, falls under the fallback policy and needs an authenticated user. An anonymous caller gets 401 `http.401` (localized, with `traceId` and `WWW-Authenticate: Bearer`). |
+| 10 | `UseRateLimiter` | Global fixed-window limiter, plus the `auth-strict` policy on the endpoints that ask for it; 429 `rate_limit.exceeded` with `Retry-After`. After authentication, so the `user:{sub}` partition sees the signed-in user. |
 | 11 | `UseIdempotency` | `Idempotency-Key` on endpoints marked `WithIdempotency()`; after routing because it reads endpoint metadata. |
-| 12 | Endpoints | `/health/live`, `/health/ready` (both exempt from rate limiting), OpenAPI and Scalar outside Production, then the `/api/v1` group with every module's endpoints, and the Auth module's `GET /.well-known/jwks.json` at the root (`MapAuthWellKnownEndpoints`). |
+| 12 | Endpoints | `/health/live`, `/health/ready` (both anonymous and exempt from rate limiting), OpenAPI and Scalar outside Production (anonymous), then the `/api/v1` group with every module's endpoints, and the Auth module's anonymous `GET /.well-known/jwks.json` at the root (`MapAuthWellKnownEndpoints`). Everything else is protected by the fallback policy. |
 
 Slots 4 and 5 register their headers with `Response.OnStarting` before the rest of the pipeline runs, so they are written when the response starts and survive the exception handler clearing the response headers. `Content-Language` is the exception: responses written by the exception handler (500, malformed body, concurrency conflict) do not carry it, although their `detail` is still localized (ADR 0009).
 
@@ -102,8 +103,10 @@ The policy exposes `X-Trace-Id`, `Location`, `Retry-After` and `Idempotency-Repl
 |---|---|---|---|
 | `GlobalPermitLimit` | `300` | 1 or more | Requests per partition per window. |
 | `GlobalWindow` | `00:01:00` | `00:00:01` to `1.00:00:00` | Fixed window length. |
+| `AuthStrictPermitLimit` | `10` | 1 or more | Requests per client address per window on an endpoint with the `auth-strict` policy (`RequireRateLimiting(RateLimitPolicies.AuthStrict)`): every anonymous credential endpoint. |
+| `AuthStrictWindow` | `00:01:00` | `00:00:01` to `1.00:00:00` | The `auth-strict` fixed window length. |
 
-The partition is `user:{sub}` for an authenticated caller, else `ip:{remote address}` as left by the forwarded-headers middleware, so a spoofed `X-Forwarded-For` cannot choose a partition. Requests over the limit are rejected at once (no queue).
+The global partition is `user:{sub}` for an authenticated caller, else `ip:{remote address}`; the `auth-strict` partition is always `ip:{remote address}`. The address is the one left by the forwarded-headers middleware, so a spoofed `X-Forwarded-For` cannot choose a partition. An `auth-strict` endpoint is also under the global limiter. Requests over a limit are rejected at once (no queue).
 
 ### `ForwardedHeaders`
 
@@ -119,7 +122,7 @@ With both lists empty only loopback proxies are trusted (the ASP.NET Core defaul
 | Key | Default | Validation (on start) | Meaning |
 |---|---|---|---|
 | `DefaultCulture` | `en` | required; must be in `SupportedUICultures` | Fallback UI culture, and the formatting culture of every request and of background work. |
-| `SupportedUICultures` | `["en", "ms", "zh-Hans"]` | at least one; each a culture the runtime knows (needs ICU, `InvariantGlobalization` off) | Languages a client may ask for with `Accept-Language`. A configured list replaces the default list. |
+| `SupportedUICultures` | `["en", "ms", "zh-Hans"]` | at least one; each a culture the runtime knows (needs ICU, `InvariantGlobalization` off) | Languages a response can use, chosen from the signed-in user's saved `locale` claim, else from `Accept-Language`. A configured list replaces the default list. |
 
 ### `Serilog`
 
@@ -172,7 +175,7 @@ The other `Auth` keys (password rules, email, links, JWT) are listed in the [Aut
 | `GET /health/live` | none: 200 while the process serves requests | Liveness probe |
 | `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `auth`, `sample`, plus one per added module) | Readiness probe, load balancer |
 
-Both are exempt from rate limiting, logged at `Verbose` when healthy, and left out of traces.
+Both are anonymous, exempt from rate limiting, logged at `Verbose` when healthy, and left out of traces.
 
 ## OpenAPI and Scalar
 
@@ -207,7 +210,8 @@ Local URLs: `https://localhost:5001` and `http://localhost:5000`.
 HTTP security:
 - When the connection has no remote IP address (a Unix domain socket), the forwarded-headers middleware accepts `X-Forwarded-For` from it whatever the trusted lists say. Do not listen on a socket that untrusted clients can reach.
 - Behind a TLS-terminating proxy that does not send `X-Forwarded-Proto`, HTTPS redirection cannot work out the port; set `HTTPS_PORT` (or `https_port`) or forward the scheme.
-- CORS preflight requests are answered before the rate limiter, so they are not counted.
+- CORS preflight requests are answered before the rate limiter, so they are not counted. Nor are anonymous requests to protected endpoints: authorization (slot 9a) answers them with 401 before the limiter (slot 10) runs.
+- An anonymous request to a route that does not exist gets 401, not 404: the fallback policy also covers requests that matched no endpoint, so anonymous callers cannot probe which routes exist. A signed-in caller gets 404.
 - IPv6 and IPv4-mapped addresses are partition keys as plain strings, so one client can appear as two addresses.
 - The limiter keeps its counters in memory per instance: with N instances a client gets up to N × `GlobalPermitLimit` (a Redis-backed limiter is Plan 5).
 - A bare `Accept-Language: zh` gets English, because `zh` is not a supported culture and `zh-Hans` is its child, not its parent.
