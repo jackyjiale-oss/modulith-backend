@@ -26,6 +26,7 @@ public sealed class LoginTests(IntegrationTestWebAppFactory factory) : Integrati
 {
     private const string LoginRoute = "/api/v1/auth/login";
     private const string MeRoute = "/api/v1/auth/me";
+    private const string RefreshRoute = "/api/v1/auth/token/refresh";
     private const string Email = "alice@example.com";
     private const string Password = AuthTestHarness.Password;
     private const string WrongPassword = "not-the-right-password";
@@ -34,6 +35,33 @@ public sealed class LoginTests(IntegrationTestWebAppFactory factory) : Integrati
 
     private static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
     private static readonly string[] VolatileHeaders = ["X-Trace-Id", "Date"];
+
+    [Fact]
+    public async Task Token_responses_and_me_are_marked_no_store()
+    {
+        // Login and refresh return tokens and /me personal data: no browser or intermediary cache may keep them.
+        await CreateUserAsync(Email);
+
+        using var login = await LoginAsync(Email, Password);
+        login.StatusCode.ShouldBe(HttpStatusCode.OK);
+        AssertNoStore(login);
+        var tokens = await login.Content.ReadFromJsonAsync<JsonElement>(Ct);
+
+        using var refresh = await Client.PostAsJsonAsync(
+            RefreshRoute, new { refreshToken = tokens.GetProperty("refreshToken").GetString() }, Ct);
+        refresh.StatusCode.ShouldBe(HttpStatusCode.OK);
+        AssertNoStore(refresh);
+
+        using var meRequest = new HttpRequestMessage(HttpMethod.Get, MeRoute).WithBearer(tokens.GetProperty("accessToken").GetString()!);
+        using var me = await Client.SendAsync(meRequest, Ct);
+        me.StatusCode.ShouldBe(HttpStatusCode.OK);
+        AssertNoStore(me);
+
+        // A refused attempt carries it too, so the header says nothing about the outcome.
+        using var failed = await LoginAsync(Email, WrongPassword);
+        failed.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        AssertNoStore(failed);
+    }
 
     [Fact]
     public async Task Login_succeeds_and_the_access_token_authenticates_get_me()
@@ -392,6 +420,12 @@ public sealed class LoginTests(IntegrationTestWebAppFactory factory) : Integrati
 
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         (await response.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("errors").TryGetProperty("deviceName", out _).ShouldBeTrue();
+    }
+
+    private static void AssertNoStore(HttpResponseMessage response)
+    {
+        response.Headers.CacheControl.ShouldNotBeNull().NoStore.ShouldBeTrue();
+        response.Headers.Pragma.ToString().ShouldBe("no-cache");
     }
 
     private static string TraceId(HttpResponseMessage response) => response.Headers.GetValues("X-Trace-Id").Single();

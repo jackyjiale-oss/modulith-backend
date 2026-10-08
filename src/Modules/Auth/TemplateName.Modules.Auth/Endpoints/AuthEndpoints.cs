@@ -60,6 +60,7 @@ internal static class AuthEndpoints
             .WithName("Login")
             .AllowAnonymous()
             .RequireRateLimiting(RateLimitPolicies.AuthStrict)
+            .WithNoStore()
             .Produces<LoginResponse>()
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -70,6 +71,7 @@ internal static class AuthEndpoints
             .WithName("RefreshToken")
             .AllowAnonymous()
             .RequireRateLimiting(RateLimitPolicies.AuthStrict)
+            .WithNoStore()
             .Produces<LoginResponse>()
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -95,6 +97,7 @@ internal static class AuthEndpoints
         group.MapGet("me", GetMeAsync)
             .WithName("GetCurrentUser")
             .RequireAuthorization()
+            .WithNoStore()
             .Produces<MeResponse>()
             .ProducesProblem(StatusCodes.Status401Unauthorized);
 
