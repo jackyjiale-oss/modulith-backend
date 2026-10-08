@@ -10,6 +10,8 @@ git config core.hooksPath .githooks
 
 This turns on the `commit-msg` hook, which rejects commit messages that break the rules below before they're created. CI runs the same check (`build/scripts/check-commit-msg.sh`) on every pull-request title: the `commit-lint` job in `.github/workflows/pr-title.yml`, which re-runs when the title is edited, without re-running the main CI pipeline.
 
+On Windows, keep the repository in a short folder (for example `C:\src\{project}`) or enable long paths once: the build writes files whose paths pass 259 characters from a root of about 90 characters, and a failing check stops it with error `TN0001` before that happens. The remedies (enable long paths, a shorter folder, `-p:SkipPathLengthCheck=true`) are in the "Windows: long paths" section of [`README.md`](README.md).
+
 ---
 
 ## 1. Branches
