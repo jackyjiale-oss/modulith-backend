@@ -39,4 +39,25 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
+  <data name="auth.invalid_credentials" xml:space="preserve">
+    <value>E-mel atau kata laluan tidak betul.</value>
+  </data>
+  <data name="auth.email_not_verified" xml:space="preserve">
+    <value>Alamat e-mel belum disahkan.</value>
+  </data>
+  <data name="auth.account_inactive" xml:space="preserve">
+    <value>Akaun ini tidak aktif.</value>
+  </data>
+  <data name="auth.user_not_found" xml:space="preserve">
+    <value>Pengguna '{id}' tidak dijumpai.</value>
+  </data>
+  <data name="auth.password_reused" xml:space="preserve">
+    <value>Kata laluan ini telah digunakan baru-baru ini. Pilih kata laluan yang lain.</value>
+  </data>
+  <data name="auth.password_breached" xml:space="preserve">
+    <value>Kata laluan ini terdapat dalam pelanggaran data yang diketahui. Pilih kata laluan yang lain.</value>
+  </data>
+  <data name="auth.current_password_incorrect" xml:space="preserve">
+    <value>Kata laluan semasa tidak betul.</value>
+  </data>
 </root>

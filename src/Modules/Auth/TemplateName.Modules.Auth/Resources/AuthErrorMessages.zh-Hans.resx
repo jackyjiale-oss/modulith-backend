@@ -39,4 +39,25 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
+  <data name="auth.invalid_credentials" xml:space="preserve">
+    <value>邮箱或密码不正确。</value>
+  </data>
+  <data name="auth.email_not_verified" xml:space="preserve">
+    <value>邮箱地址尚未验证。</value>
+  </data>
+  <data name="auth.account_inactive" xml:space="preserve">
+    <value>该账户未启用。</value>
+  </data>
+  <data name="auth.user_not_found" xml:space="preserve">
+    <value>未找到用户“{id}”。</value>
+  </data>
+  <data name="auth.password_reused" xml:space="preserve">
+    <value>该密码最近使用过，请选择其他密码。</value>
+  </data>
+  <data name="auth.password_breached" xml:space="preserve">
+    <value>该密码出现在已知的数据泄露中，请选择其他密码。</value>
+  </data>
+  <data name="auth.current_password_incorrect" xml:space="preserve">
+    <value>当前密码不正确。</value>
+  </data>
 </root>

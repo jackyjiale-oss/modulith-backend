@@ -29,36 +29,56 @@ None yet. The routes planned for this module are `/api/v1/auth/...` (self-servic
 
 <!-- Aggregates, their invariants and life cycle. Draw state machines as a Mermaid stateDiagram-v2. -->
 
-Only the user status exists so far. `UserStatus` (`Domain/Users/`) is persisted by its numeric value, so a new state is appended and existing values are never renumbered.
+`User` (`Domain/Users/`) is the first aggregate; `Role`, `UserSession` and `VerificationCode` arrive in the following tasks. A user is identified by its email, kept trimmed (`Email`) and upper-case (`NormalizedEmail`, the form used for lookups and the unique index). It owns its password history (`PasswordHistoryEntry`) and its role assignments (`UserRole`), and it is audited and soft-deleted.
+
+- **Registration:** `User.Register(email, displayName, locale, passwordHash, now)` creates an active, unconfirmed user with a new `SecurityStamp` and the time zone `UTC`. A user created by an administrator has no `PasswordHash` (valid; the history is then empty); a non-null hash is the first history entry.
+- **Email confirmation:** `ConfirmEmail` is idempotent; only the first call raises `EmailConfirmedDomainEvent`. `EnsureCanSignIn` refuses a suspended user (`auth.account_inactive`) and an unconfirmed one (`auth.email_not_verified`).
+- **Lockout:** `RecordFailedSignIn` counts failures; at the configured threshold it sets `LockoutEnd` to `now + duration` and raises `UserLockedOutDomainEvent`. The account is locked while `now < LockoutEnd`, so it is open again exactly at `LockoutEnd`. A failure after the lockout expired starts a new count; a failure while locked changes nothing. A successful sign-in, a password change and `Reinstate` clear the failures and the lockout.
+- **Password:** `ChangePassword` rotates `SecurityStamp`, appends the new hash to the history and keeps at most `historyCount` entries including the current one (the oldest are dropped). The reuse check itself runs in the application layer against the history.
+- **Suspension:** `Suspend` rotates `SecurityStamp` (so issued tokens stop matching) and is idempotent; `Reinstate` makes the account active again and is idempotent.
+- **Registration attempts:** `NoteRegistrationAttempt` raises `RegistrationAttemptedDomainEvent` and changes no state, so the registration answer stays the same for known and unknown addresses.
+- **Roles:** `AssignRole` and `RemoveRole` are idempotent. A role is referred to by id; the `Role` aggregate arrives in a later task.
+
+`UserStatus` (`Domain/Users/`) is persisted by its numeric value, so a new state is appended and existing values are never renumbered.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Active: register
     Active --> Suspended: suspend
-    Suspended --> Active: reactivate
+    Suspended --> Active: reinstate
 ```
 
-The aggregates (`User`, `Role`, `UserSession`, `VerificationCode`) arrive in the following tasks.
+The remaining aggregates (`Role`, `UserSession`, `VerificationCode`) arrive in the following tasks.
 
 ## Error codes
 
 <!-- Every error code the module returns ({module}.snake_case), its HTTP status, its params and its English message. Messages live in Resources/{Module}ErrorMessages.resx with .ms.resx and .zh-Hans.resx (ADR 0009). -->
 
-None yet. `Resources/AuthErrorMessages.resx` and its `.ms` and `.zh-Hans` translations exist and are empty; every code is added to all three files in the same change that introduces it.
-
 | Code | HTTP | `params` | Message (en) |
 |---|---|---|---|
-| | | | None yet. |
+| `auth.invalid_credentials` | 401 | — | The email or password is incorrect. |
+| `auth.email_not_verified` | 403 | — | The email address has not been verified. |
+| `auth.account_inactive` | 403 | — | The account is not active. |
+| `auth.user_not_found` | 404 | `id` | User '{id}' was not found. |
+| `auth.password_reused` | 400 | — | The password was used recently. Choose a different one. |
+| `auth.password_breached` | 400 | — | The password appears in a known data breach. Choose a different one. |
+| `auth.current_password_incorrect` | 400 | — | The current password is incorrect. |
+
+The user codes are declared in `Domain/Users/UserErrors.cs`. Their messages are in `Resources/AuthErrorMessages.resx` (English) with `AuthErrorMessages.ms.resx` and `AuthErrorMessages.zh-Hans.resx` (drafts awaiting native review); every further code is added to all three files in the same change that introduces it. A locked account answers with `auth.invalid_credentials`, never a distinct code (it would reveal that the email exists).
 
 ## Events
 
 <!-- Domain events (internal, dispatched through the module outbox) and integration events (published in *.Contracts), with their handlers. -->
 
-None yet.
-
 | Event | Kind | Raised when | Handlers |
 |---|---|---|---|
-| | | | None yet. |
+| `UserRegisteredDomainEvent(UserId, Email, Locale)` | Domain | A user registers | None yet |
+| `EmailConfirmedDomainEvent(UserId, Email)` | Domain | A user confirms their email address for the first time | None yet |
+| `PasswordChangedDomainEvent(UserId, Email, Locale)` | Domain | A password is changed or reset | None yet |
+| `UserLockedOutDomainEvent(UserId, LockoutEnd)` | Domain | A failed sign-in reaches the lockout threshold | None yet |
+| `RegistrationAttemptedDomainEvent(UserId, Email, Locale)` | Domain | Someone registers an address that already has an account | None yet |
+
+The events are declared in `Domain/Users/Events/`. Domain events are written to the module outbox in the same save as the aggregate (once the persistence task lands) and dispatched by the outbox (ADR 0007). The module publishes no integration events yet.
 
 ## Configuration
 
