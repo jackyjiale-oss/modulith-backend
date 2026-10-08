@@ -71,6 +71,32 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
     }
 
     [Fact]
+    public async Task Concurrent_confirm_with_same_token_succeeds_once()
+    {
+        var token = await RegisterAndReadTokenAsync("alice@example.com");
+
+        var responses = await Task.WhenAll(ConfirmAsync(token), ConfirmAsync(token));
+
+        try
+        {
+            // The code is consumed by one conditional UPDATE, so the loser gets the ordinary invalid-token answer, never a 409 or 500.
+            responses.Select(response => (int)response.StatusCode).Order().ShouldBe([204, 400]);
+            await AssertInvalidTokenAsync(responses.Single(response => response.StatusCode == HttpStatusCode.BadRequest));
+            (await FindUserAsync("alice@example.com")).EmailConfirmed.ShouldBeTrue();
+            var events = await AuditEventsAsync();
+            events.Count(type => type == AuthAuditEvents.EmailConfirmed).ShouldBe(1);
+            events.Count(type => type == AuthAuditEvents.EmailConfirmFailed).ShouldBe(1);
+        }
+        finally
+        {
+            foreach (var response in responses)
+            {
+                response.Dispose();
+            }
+        }
+    }
+
+    [Fact]
     public async Task Confirm_with_expired_token_fails()
     {
         var token = await RegisterAndReadTokenAsync("alice@example.com");

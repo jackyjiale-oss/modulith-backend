@@ -123,6 +123,24 @@ public sealed class VerificationCodeTests
     }
 
     [Fact]
+    public void CanConsume_answers_like_Consume_without_changing_the_code()
+    {
+        var code = Issue();
+
+        code.CanConsume(VerificationPurpose.EmailVerify, Now).ShouldBeTrue();
+        code.CanConsume(VerificationPurpose.PasswordReset, Now).ShouldBeFalse();
+        code.CanConsume(VerificationPurpose.EmailVerify, Now + Lifetime).ShouldBeFalse();
+        code.ConsumedAt.ShouldBeNull();
+
+        code.Consume(VerificationPurpose.EmailVerify, Now).IsSuccess.ShouldBeTrue();
+        code.CanConsume(VerificationPurpose.EmailVerify, Now).ShouldBeFalse();
+
+        var invalidated = Issue();
+        invalidated.Invalidate(Now);
+        invalidated.CanConsume(VerificationPurpose.EmailVerify, Now).ShouldBeFalse();
+    }
+
+    [Fact]
     public void Invalid_token_is_a_validation_error_with_the_expected_code()
     {
         VerificationErrors.InvalidToken.Code.ShouldBe("auth.invalid_token");

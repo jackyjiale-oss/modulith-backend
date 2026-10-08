@@ -30,6 +30,8 @@ public sealed class ConfirmEmailCommandHandlerTests
         _tokenService.Hash(Token).Returns(TokenHash);
         _auditWriter.Record(Arg.Do<AuthAuditLog>(_auditEntries.Add));
         _users.GetByIdAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_user);
+        _verificationCodes.TryConsumeAsync(Arg.Any<Guid>(), Arg.Any<VerificationPurpose>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(true);
         _sut = new ConfirmEmailCommandHandler(_users, _verificationCodes, _tokenService, _auditWriter, _unitOfWork, _timeProvider);
     }
 
@@ -62,11 +64,30 @@ public sealed class ConfirmEmailCommandHandlerTests
         result.IsSuccess.ShouldBeTrue();
         _user.EmailConfirmed.ShouldBeTrue();
         code.ConsumedAt.ShouldBe(Now);
+        await _verificationCodes.Received(1).TryConsumeAsync(code.Id, VerificationPurpose.EmailVerify, Now, CancellationToken.None);
         var audit = _auditEntries.ShouldHaveSingleItem();
         audit.EventType.ShouldBe(AuthAuditEvents.EmailConfirmed);
         audit.Succeeded.ShouldBeTrue();
         audit.UserId.ShouldBe(_user.Id);
-        await _unitOfWork.Received(1).SaveChangesAsync(Ct);
+
+        // The claim has committed, so the confirmation is saved even when the client goes away.
+        await _unitOfWork.Received(1).SaveChangesAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Claim_lost_to_a_simultaneous_confirm_returns_invalid_token()
+    {
+        var code = IssueCode(VerificationPurpose.EmailVerify, Now.AddMinutes(-1));
+        _verificationCodes.TryConsumeAsync(code.Id, VerificationPurpose.EmailVerify, Now, Arg.Any<CancellationToken>()).Returns(false);
+
+        var result = await _sut.HandleAsync(new ConfirmEmailCommand(Token), Ct);
+
+        result.Error.ShouldBe(VerificationErrors.InvalidToken);
+        code.ConsumedAt.ShouldBeNull();
+        _user.EmailConfirmed.ShouldBeFalse();
+        var audit = _auditEntries.ShouldHaveSingleItem();
+        audit.EventType.ShouldBe(AuthAuditEvents.EmailConfirmFailed);
+        audit.UserId.ShouldBe(_user.Id);
     }
 
     [Fact]
@@ -80,6 +101,7 @@ public sealed class ConfirmEmailCommandHandlerTests
         code.ConsumedAt.ShouldBeNull();
         _user.EmailConfirmed.ShouldBeFalse();
         await _users.DidNotReceiveWithAnyArgs().GetByIdAsync(default, Ct);
+        await _verificationCodes.DidNotReceiveWithAnyArgs().TryConsumeAsync(default, default, default, Ct);
         var audit = _auditEntries.ShouldHaveSingleItem();
         audit.EventType.ShouldBe(AuthAuditEvents.EmailConfirmFailed);
         audit.UserId.ShouldBe(_user.Id);

@@ -18,5 +18,14 @@ internal interface IVerificationCodeRepository
     /// <summary>When the user's latest code for <paramref name="purpose"/> was issued (UTC), for the resend cooldown; null if none.</summary>
     Task<DateTime?> GetLastIssuedAtAsync(Guid userId, VerificationPurpose purpose, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Consumes the code in one atomic statement, outside the change tracker, by the rule of <see cref="VerificationCode.CanConsume"/>:
+    /// true only for the one caller whose statement set <c>ConsumedAt</c>; false when the code is unknown, of another purpose, already
+    /// consumed, invalidated or expired at <paramref name="now"/>. Two requests with the same token can therefore never both succeed. A
+    /// tracked instance keeps its old values: the caller checks the code, claims it here, then calls
+    /// <see cref="VerificationCode.Consume"/> on the instance it holds.
+    /// </summary>
+    Task<bool> TryConsumeAsync(Guid codeId, VerificationPurpose purpose, DateTimeOffset now, CancellationToken cancellationToken);
+
     void Add(VerificationCode code);
 }

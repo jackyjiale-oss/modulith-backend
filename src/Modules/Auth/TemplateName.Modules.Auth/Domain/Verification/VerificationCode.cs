@@ -74,10 +74,17 @@ internal sealed class VerificationCode : AggregateRoot<Guid>
     /// <summary>A code is pending until it is consumed, invalidated or reaches <see cref="ExpiresAt"/> (exclusive).</summary>
     public bool IsPending(DateTimeOffset now) => ConsumedAt is null && InvalidatedAt is null && now < ExpiresAt;
 
+    /// <summary>
+    /// Whether <see cref="Consume"/> would succeed: the code is for <paramref name="expected"/> and still pending. Changes nothing, so a
+    /// handler can check the code before it claims it in the database (<c>IVerificationCodeRepository.TryConsumeAsync</c>, the same rule
+    /// in one conditional statement) and then consumes the instance it holds.
+    /// </summary>
+    public bool CanConsume(VerificationPurpose expected, DateTimeOffset now) => Purpose == expected && IsPending(now);
+
     /// <summary>Uses the code once. Every refusal is the same <see cref="VerificationErrors.InvalidToken"/> so the cause stays private.</summary>
     public Result Consume(VerificationPurpose expected, DateTimeOffset now)
     {
-        if (Purpose != expected || !IsPending(now))
+        if (!CanConsume(expected, now))
         {
             return Result.Failure(VerificationErrors.InvalidToken);
         }

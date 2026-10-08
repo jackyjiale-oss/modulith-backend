@@ -8,9 +8,13 @@ using TemplateName.Modules.Auth.Application.Authentication.Logout;
 using TemplateName.Modules.Auth.Application.Authentication.LogoutAll;
 using TemplateName.Modules.Auth.Application.Authentication.Refresh;
 using TemplateName.Modules.Auth.Application.Me.GetMe;
+using TemplateName.Modules.Auth.Application.Passwords.Change;
+using TemplateName.Modules.Auth.Application.Passwords.Forgot;
+using TemplateName.Modules.Auth.Application.Passwords.Reset;
 using TemplateName.Modules.Auth.Application.Registration.ConfirmEmail;
 using TemplateName.Modules.Auth.Application.Registration.Register;
 using TemplateName.Modules.Auth.Application.Registration.ResendConfirmation;
+using TemplateName.SharedKernel;
 using TemplateName.Web.Common.Results;
 using TemplateName.Web.Common.Security;
 
@@ -67,6 +71,22 @@ internal static class AuthEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
+        group.MapPost("password/forgot", ForgotPasswordAsync)
+            .WithName("ForgotPassword")
+            .AllowAnonymous()
+            .RequireRateLimiting(RateLimitPolicies.AuthStrict)
+            .Produces(StatusCodes.Status202Accepted)
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        group.MapPost("password/reset", ResetPasswordAsync)
+            .WithName("ResetPassword")
+            .AllowAnonymous()
+            .RequireRateLimiting(RateLimitPolicies.AuthStrict)
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
         // Authenticated: said explicitly (not only through the fallback policy) so the OpenAPI document shows the bearer requirement.
         group.MapGet("me", GetMeAsync)
             .WithName("GetCurrentUser")
@@ -86,7 +106,58 @@ internal static class AuthEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status401Unauthorized);
 
+        // Authenticated, but it checks a password, so it is also limited per client address like the anonymous credential routes: a
+        // stolen access token cannot guess the current password at the global per-user rate.
+        group.MapPost("password/change", ChangePasswordAsync)
+            .WithName("ChangePassword")
+            .RequireAuthorization()
+            .RequireRateLimiting(RateLimitPolicies.AuthStrict)
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
         return app;
+    }
+
+    // 202 with no body whether a link was sent or not (unknown or suspended address, cooldown).
+    private static async Task<IResult> ForgotPasswordAsync(
+        ForgotPasswordRequest request,
+        ICommandHandler<ForgotPasswordCommand> handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new ForgotPasswordCommand(request.Email), cancellationToken);
+
+        return result.IsSuccess ? TypedResults.Accepted((string?)null) : result.ToProblem();
+    }
+
+    // 204, or 400 auth.invalid_token (unknown, used, replaced, expired, another purpose's token, or an account that is gone or
+    // suspended, all alike), auth.password_breached or auth.password_reused.
+    private static async Task<IResult> ResetPasswordAsync(
+        ResetPasswordRequest request,
+        ICommandHandler<ResetPasswordCommand> handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new ResetPasswordCommand(request.Token, request.NewPassword), cancellationToken);
+
+        return result.IsSuccess ? TypedResults.NoContent() : result.ToProblem();
+    }
+
+    // 204, or 400 auth.current_password_incorrect, auth.password_breached or auth.password_reused. A token whose user is gone or
+    // suspended gets the body-less 401 of a request without a valid token, as GET me does.
+    private static async Task<IResult> ChangePasswordAsync(
+        ChangePasswordRequest request,
+        ICommandHandler<ChangePasswordCommand> handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new ChangePasswordCommand(request.CurrentPassword, request.NewPassword), cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            return TypedResults.NoContent();
+        }
+
+        return result.Error.Type == ErrorType.NotFound ? TypedResults.Unauthorized() : result.ToProblem();
     }
 
     // 200 with the next token pair of the same session; 401 auth.invalid_refresh_token (unknown token or ended session, alike),

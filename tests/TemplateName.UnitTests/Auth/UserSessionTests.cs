@@ -299,6 +299,31 @@ public sealed class UserSessionTests
     }
 
     [Fact]
+    public void AdoptSecurityStamp_lets_the_session_keep_refreshing_after_a_password_change()
+    {
+        var (session, _) = StartSession();
+
+        session.AdoptSecurityStamp("stamp-2");
+        var rotated = session.Rotate(Hash(1), Hash(2), "stamp-2", Sliding, Now.AddMinutes(1));
+
+        session.SecurityStamp.ShouldBe("stamp-2");
+        rotated.IsSuccess.ShouldBeTrue();
+        session.RevokedAt.ShouldBeNull();
+    }
+
+    [Fact]
+    public void AdoptSecurityStamp_leaves_a_revoked_session_alone()
+    {
+        var (session, _) = StartSession();
+        session.Revoke(SessionRevokedReason.Logout, Now);
+
+        session.AdoptSecurityStamp("stamp-2");
+
+        session.SecurityStamp.ShouldBe(Stamp);
+        Should.Throw<ArgumentException>(() => session.AdoptSecurityStamp(" "));
+    }
+
+    [Fact]
     public void Session_errors_have_the_expected_codes_and_types()
     {
         SessionErrors.InvalidRefreshToken.Code.ShouldBe("auth.invalid_refresh_token");

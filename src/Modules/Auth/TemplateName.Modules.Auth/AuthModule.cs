@@ -132,7 +132,8 @@ public static class AuthModule
     /// <summary>
     /// Maps the module's endpoints; <paramref name="app"/> is the host's <c>/api/v1</c> group. The self-service routes live in its
     /// <c>auth</c> group: <c>POST auth/register</c>, <c>POST auth/email/confirm</c>, <c>POST auth/email/resend-confirmation</c>,
-    /// <c>POST auth/login</c>, <c>POST auth/token/refresh</c>, <c>GET auth/me</c>, <c>POST auth/logout</c> and <c>POST auth/logout-all</c>.
+    /// <c>POST auth/login</c>, <c>POST auth/token/refresh</c>, <c>GET auth/me</c>, <c>POST auth/logout</c>, <c>POST auth/logout-all</c>,
+    /// <c>POST auth/password/forgot</c>, <c>POST auth/password/reset</c> and <c>POST auth/password/change</c>.
     /// </summary>
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
     {

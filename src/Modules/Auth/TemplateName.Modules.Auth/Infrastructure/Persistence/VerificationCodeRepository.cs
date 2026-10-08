@@ -34,5 +34,20 @@ internal sealed class VerificationCodeRepository(AuthDbContext context) : IVerif
         return lastIssuedAt?.UtcDateTime;
     }
 
+    // One UPDATE ... WHERE (the rule of VerificationCode.CanConsume): the database decides which concurrent caller wins. ExecuteUpdate
+    // bypasses the change tracker, so a code this context already holds keeps its in-memory state.
+    public async Task<bool> TryConsumeAsync(Guid codeId, VerificationPurpose purpose, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var consumed = await context.Set<VerificationCode>()
+            .Where(code => code.Id == codeId
+                && code.Purpose == purpose
+                && code.ConsumedAt == null
+                && code.InvalidatedAt == null
+                && code.ExpiresAt > now)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(code => code.ConsumedAt, now), cancellationToken);
+
+        return consumed == 1;
+    }
+
     public void Add(VerificationCode code) => context.Set<VerificationCode>().Add(code);
 }

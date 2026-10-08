@@ -12,6 +12,7 @@ using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Sessions.Events;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Domain.Users.Events;
+using TemplateName.Modules.Auth.Domain.Verification;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
 
 namespace TemplateName.IntegrationTests.Auth;
@@ -266,6 +267,57 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
         (await NewScope().GetRequiredService<ISessionRepository>().TryClaimRefreshTokenAsync(Guid.NewGuid(), Now, Ct)).ShouldBeFalse();
         var stored = await NewScope().GetRequiredService<AuthDbContext>().Set<RefreshToken>().SingleAsync(token => token.Id == first.Id, Ct);
         stored.UsedAt.ShouldBe(Now);
+    }
+
+    [Fact]
+    public async Task Try_consume_verification_code_succeeds_for_exactly_one_of_two_concurrent_callers()
+    {
+        var user = NewUser("judy@example.com");
+        var code = VerificationCode.Issue(
+            user.Id, VerificationPurpose.PasswordReset, user.NormalizedEmail, TokenHash(1), "protected", TimeSpan.FromMinutes(30), null, Now);
+        await SaveAsync(user, code);
+        Factory.Time.Advance(TimeSpan.FromSeconds(5));
+
+        var consumed = await Task.WhenAll(
+            NewScope().GetRequiredService<IVerificationCodeRepository>().TryConsumeAsync(code.Id, VerificationPurpose.PasswordReset, Now, Ct),
+            NewScope().GetRequiredService<IVerificationCodeRepository>().TryConsumeAsync(code.Id, VerificationPurpose.PasswordReset, Now, Ct));
+
+        consumed.Count(isConsumed => isConsumed).ShouldBe(1);
+        (await NewScope().GetRequiredService<IVerificationCodeRepository>().TryConsumeAsync(code.Id, VerificationPurpose.PasswordReset, Now, Ct)).ShouldBeFalse();
+        (await NewScope().GetRequiredService<IVerificationCodeRepository>().TryConsumeAsync(Guid.NewGuid(), VerificationPurpose.PasswordReset, Now, Ct)).ShouldBeFalse();
+        var stored = await NewScope().GetRequiredService<AuthDbContext>().Set<VerificationCode>().SingleAsync(candidate => candidate.Id == code.Id, Ct);
+        stored.ConsumedAt.ShouldBe(Now);
+    }
+
+    [Theory]
+    [InlineData("other purpose")]
+    [InlineData("invalidated")]
+    [InlineData("expired")]
+    [InlineData("pending until one tick from now")]
+    public async Task Try_consume_verification_code_follows_the_domain_rule(string state)
+    {
+        var user = NewUser("ken@example.com");
+        var code = VerificationCode.Issue(
+            user.Id, VerificationPurpose.PasswordReset, user.NormalizedEmail, TokenHash(1), "protected", TimeSpan.FromMinutes(30), null, Now);
+        var at = state switch
+        {
+            "expired" => code.ExpiresAt,
+            "pending until one tick from now" => code.ExpiresAt.AddMilliseconds(-1),
+            _ => Now,
+        };
+        if (state == "invalidated")
+        {
+            code.Invalidate(Now);
+        }
+
+        await SaveAsync(user, code);
+        var purpose = state == "other purpose" ? VerificationPurpose.EmailVerify : VerificationPurpose.PasswordReset;
+
+        var consumed = await NewScope().GetRequiredService<IVerificationCodeRepository>().TryConsumeAsync(code.Id, purpose, at, Ct);
+
+        // The SQL statement repeats VerificationCode.CanConsume, so both must answer alike.
+        consumed.ShouldBe(code.CanConsume(purpose, at));
+        consumed.ShouldBe(state == "pending until one tick from now");
     }
 
     [Fact]

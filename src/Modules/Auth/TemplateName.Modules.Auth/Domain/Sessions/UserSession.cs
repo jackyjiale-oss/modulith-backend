@@ -176,6 +176,22 @@ internal sealed class UserSession : AggregateRoot<Guid>
         Raise(new RefreshTokenReuseDetectedDomainEvent(UserId, Id));
     }
 
+    /// <summary>
+    /// Keeps this session signed in across a password change made from it: the session takes the user's new
+    /// <paramref name="securityStamp"/>, so its next refresh is not refused as a stamp mismatch, while every other session still holds the
+    /// old stamp. A revoked session is left as it is.
+    /// </summary>
+    public void AdoptSecurityStamp(string securityStamp)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(securityStamp);
+        if (RevokedAt is not null)
+        {
+            return;
+        }
+
+        SecurityStamp = securityStamp;
+    }
+
     /// <summary>Ends the session and every token it still holds. Idempotent: a second call keeps the first time and reason.</summary>
     public void Revoke(SessionRevokedReason reason, DateTimeOffset now)
     {
