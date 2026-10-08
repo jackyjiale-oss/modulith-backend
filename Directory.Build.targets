@@ -1,0 +1,57 @@
+<Project>
+  <!--
+    Fails fast, with an actionable message, when the longest file this project writes during a build would
+    exceed the Windows MAX_PATH limit (260 characters) and long paths are not enabled. Without this guard the
+    build dies deep inside resource generation with "Cannot write to the output file ... could not find a part of
+    the path". The longest file is normally "obj\{Configuration}\{TFM}\{RootNamespace}.{Folder}.{Resource}.{culture}.resources".
+
+    Test hooks (used by build/scripts/path-guard-check.sh; not for everyday use):
+      PathLengthCheckForce=true                run on any OS
+      PathLengthCheckLongPathsEnabled=0|1      replaces the registry value
+      PathLengthCheckProjectDirectory=<dir>    replaces the project directory in the length calculation
+    Bypass: -p:SkipPathLengthCheck=true. This file never changes the registry.
+  -->
+  <Target Name="CheckWindowsPathLength"
+          BeforeTargets="BeforeBuild"
+          Condition="'$(SkipPathLengthCheck)' != 'true' and ('$(OS)' == 'Windows_NT' or '$(PathLengthCheckForce)' == 'true')">
+    <PropertyGroup>
+      <_TnMaxPathLength>259</_TnMaxPathLength>
+      <_TnLongPaths>$(PathLengthCheckLongPathsEnabled)</_TnLongPaths>
+      <_TnLongPaths Condition="'$(_TnLongPaths)' == ''">$([MSBuild]::GetRegistryValueFromView('HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\FileSystem', 'LongPathsEnabled', null, RegistryView.Registry64))</_TnLongPaths>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(_TnLongPaths)' != '1'">
+      <_TnProjectDir>$(PathLengthCheckProjectDirectory)</_TnProjectDir>
+      <_TnProjectDir Condition="'$(_TnProjectDir)' == ''">$(MSBuildProjectDirectory)</_TnProjectDir>
+      <_TnProjectDir>$(_TnProjectDir.TrimEnd('\').TrimEnd('/'))</_TnProjectDir>
+      <_TnIntermediateLength>0</_TnIntermediateLength>
+      <_TnIntermediateLength Condition="!$([System.IO.Path]::IsPathRooted('$(IntermediateOutputPath)'))">$(IntermediateOutputPath.Length)</_TnIntermediateLength>
+      <!-- Generated analyzer config: {AssemblyName}.GeneratedMSBuildEditorConfig.editorconfig -->
+      <_TnEditorConfigSuffix>.GeneratedMSBuildEditorConfig.editorconfig</_TnEditorConfigSuffix>
+      <_TnLongestName>$([MSBuild]::Add($(AssemblyName.Length), $(_TnEditorConfigSuffix.Length)))</_TnLongestName>
+      <_TnLongestFile>$(AssemblyName)$(_TnEditorConfigSuffix)</_TnLongestFile>
+    </PropertyGroup>
+
+    <!-- Compiled resources: {RootNamespace}.{relative folder with dots}{file name}.resources, one batch per .resx. -->
+    <ItemGroup Condition="'$(_TnLongPaths)' != '1'">
+      <_TnResx Include="@(EmbeddedResource->WithMetadataValue('Extension', '.resx'))" />
+    </ItemGroup>
+    <PropertyGroup Condition="'$(_TnLongPaths)' != '1'">
+      <_TnResourceName>$(RootNamespace).$([System.String]::new('%(_TnResx.RelativeDir)').Replace('\', '.').Replace('/', '.'))%(_TnResx.Filename).resources</_TnResourceName>
+      <_TnResourceLength>$(_TnResourceName.Length)</_TnResourceLength>
+      <_TnLongestFile Condition="$(_TnResourceLength) &gt; $(_TnLongestName)">$(_TnResourceName)</_TnLongestFile>
+      <_TnLongestName>$([System.Math]::Max($(_TnLongestName), $(_TnResourceLength)))</_TnLongestName>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(_TnLongPaths)' != '1'">
+      <_TnProjectedLength>$([MSBuild]::Add($([MSBuild]::Add($(_TnProjectDir.Length), 1)), $([MSBuild]::Add($(_TnIntermediateLength), $(_TnLongestName)))))</_TnProjectedLength>
+      <_TnExcess>$([MSBuild]::Subtract($(_TnProjectedLength), $(_TnMaxPathLength)))</_TnExcess>
+    </PropertyGroup>
+
+    <Message Condition="'$(_TnLongPaths)' != '1'" Importance="low" Text="Path length check: projected $(_TnProjectedLength) of $(_TnMaxPathLength) characters ($(_TnLongestFile))." />
+
+    <Error Condition="'$(_TnLongPaths)' != '1' and $(_TnProjectedLength) &gt; $(_TnMaxPathLength)"
+           Code="TN0001"
+           Text="The build would write a file with a path of about $(_TnProjectedLength) characters, but Windows allows $(_TnMaxPathLength) while long paths are disabled (longest file: $(_TnLongestFile) in $(IntermediateOutputPath)).%0AWithout a fix the build fails later with 'Cannot write to the output file ... could not find a part of the path'. Pick one:%0A  1. Enable Windows long paths: run in an elevated PowerShell New-ItemProperty -Path &quot;HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem&quot; -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force then reopen the terminal and IDE.%0A  2. Use a shorter folder: clone or generate the project so that its root path is at least $(_TnExcess) characters shorter (project directory now: $(_TnProjectDir)).%0A  3. Bypass this check with -p:SkipPathLengthCheck=true (the build can still fail)." />
+  </Target>
+</Project>

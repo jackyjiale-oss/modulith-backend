@@ -7,6 +7,14 @@
 - [.NET SDK](https://dotnet.microsoft.com/download) 10.0.401 or a later 10.0 feature band (pinned in `global.json`)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (local SQL Server, the Aspire dashboard and the integration tests)
 
+### Windows: long paths
+
+Windows stops at 260 characters per path unless long paths are enabled. The longest file a build writes (a compiled `.resources` file under `src/BuildingBlocks/*.Infrastructure.Common/obj/`) is about 140 characters plus twice the project name below the project root, so a root longer than roughly 90 characters breaks the build with `Cannot write to the output file ... could not find a part of the path`. `Directory.Build.targets` checks this before compiling and stops with error `TN0001`, which states the projected length. Fix it in one of three ways:
+
+1. Enable long paths, once per machine, in an elevated PowerShell, then reopen the terminal and IDE: `New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force`. The check then passes silently.
+2. Clone or generate the project in a shorter folder such as `C:\src\`; `TN0001` says by how many characters.
+3. Bypass the check with `-p:SkipPathLengthCheck=true` (the build can still fail).
+
 ## Run the backend
 
 ```bash

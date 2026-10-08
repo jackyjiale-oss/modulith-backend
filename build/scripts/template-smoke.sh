@@ -33,6 +33,9 @@ step() {
   echo "==> $1"
 }
 
+step "Checking the Windows path-length guard in the template itself"
+bash "$repo_root/build/scripts/path-guard-check.sh" "$repo_root"
+
 step "Installing the template from $repo_root (private hive $hive)"
 cd "$repo_root"
 dotnet new install . --force --debug:custom-hive "$hive"
@@ -58,6 +61,7 @@ for required in \
   CONTRIBUTING.md \
   .release-please-manifest.json \
   Version.props \
+  Directory.Build.targets \
   release-please-config.json \
   .github/workflows/release.yml \
   build/licenses/allowed-licenses.json \
@@ -95,6 +99,7 @@ for forbidden in \
   build/template-content \
   build/scripts/configure-github-repo.sh \
   build/scripts/template-smoke.sh \
+  build/scripts/path-guard-check.sh \
   .template.config \
   .superpowers \
   .vs \
@@ -116,6 +121,13 @@ if [[ -z "$generated_secrets_id" || "$generated_secrets_id" == "$template_secret
   fail "the generated UserSecretsId ('$generated_secrets_id') must be new, not the template's ('$template_secrets_id')"
 fi
 
+if [[ -f "$out/Directory.Build.targets" ]] && ! grep -qF 'Name="CheckWindowsPathLength"' "$out/Directory.Build.targets"; then
+  fail "Directory.Build.targets does not define the CheckWindowsPathLength target"
+fi
+if [[ -f "$out/README.md" ]] && ! grep -qF "TN0001" "$out/README.md"; then
+  fail "README.md does not document the TN0001 long-path error"
+fi
+
 step "Checking relative links in the generated documents"
 # Markdown links ](target) to files in the project; web links and in-page anchors are skipped, #anchors are not checked.
 link_count=0
@@ -135,9 +147,12 @@ if (( failures > 0 )); then
   exit 1
 fi
 
-step "Restoring (locked mode) and building $project_name"
+step "Restoring (locked mode) and checking the Windows path-length guard in $project_name"
 cd "$out"
 dotnet restore --locked-mode
+bash "$repo_root/build/scripts/path-guard-check.sh" "$out"
+
+step "Building $project_name"
 dotnet build --no-restore -c Release
 
 step "Running the unit and architecture tests"
