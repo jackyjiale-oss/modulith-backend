@@ -39,4 +39,28 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
+  <data name="notifications.delivery_not_retryable" xml:space="preserve">
+    <value>Hanya penghantaran yang berstatus surat mati (dead-letter) boleh dicuba semula.</value>
+  </data>
+  <data name="notifications.delivery_expired" xml:space="preserve">
+    <value>Penghantaran ini telah tamat tempoh dan tidak boleh dicuba semula.</value>
+  </data>
+  <data name="notifications.delivery_not_found" xml:space="preserve">
+    <value>Penghantaran '{id}' tidak dijumpai.</value>
+  </data>
+  <data name="notifications.notification_not_found" xml:space="preserve">
+    <value>Pemberitahuan '{id}' tidak dijumpai.</value>
+  </data>
+  <data name="notifications.invalid_quiet_hours" xml:space="preserve">
+    <value>Waktu senyap mesti bermula dan berakhir pada masa yang berbeza.</value>
+  </data>
+  <data name="notifications.unknown_type" xml:space="preserve">
+    <value>Jenis pemberitahuan '{typeCode}' tidak wujud.</value>
+  </data>
+  <data name="notifications.channel_not_supported" xml:space="preserve">
+    <value>Jenis pemberitahuan '{typeCode}' tidak dihantar melalui saluran '{channel}'.</value>
+  </data>
+  <data name="notifications.channel_mandatory" xml:space="preserve">
+    <value>Saluran '{channel}' tidak boleh dimatikan untuk jenis pemberitahuan '{typeCode}'.</value>
+  </data>
 </root>

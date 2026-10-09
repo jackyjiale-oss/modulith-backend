@@ -39,4 +39,28 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
+  <data name="notifications.delivery_not_retryable" xml:space="preserve">
+    <value>Only a dead-lettered delivery can be retried.</value>
+  </data>
+  <data name="notifications.delivery_expired" xml:space="preserve">
+    <value>The delivery has expired and cannot be retried.</value>
+  </data>
+  <data name="notifications.delivery_not_found" xml:space="preserve">
+    <value>Delivery '{id}' was not found.</value>
+  </data>
+  <data name="notifications.notification_not_found" xml:space="preserve">
+    <value>Notification '{id}' was not found.</value>
+  </data>
+  <data name="notifications.invalid_quiet_hours" xml:space="preserve">
+    <value>The quiet hours must start and end at different times.</value>
+  </data>
+  <data name="notifications.unknown_type" xml:space="preserve">
+    <value>Notification type '{typeCode}' does not exist.</value>
+  </data>
+  <data name="notifications.channel_not_supported" xml:space="preserve">
+    <value>Notification type '{typeCode}' is not delivered through the '{channel}' channel.</value>
+  </data>
+  <data name="notifications.channel_mandatory" xml:space="preserve">
+    <value>The '{channel}' channel cannot be switched off for notification type '{typeCode}'.</value>
+  </data>
 </root>

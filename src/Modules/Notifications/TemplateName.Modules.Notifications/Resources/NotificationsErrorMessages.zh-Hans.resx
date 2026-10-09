@@ -39,4 +39,28 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
+  <data name="notifications.delivery_not_retryable" xml:space="preserve">
+    <value>只有进入死信状态的投递才能重试。</value>
+  </data>
+  <data name="notifications.delivery_expired" xml:space="preserve">
+    <value>该投递已过期，无法重试。</value>
+  </data>
+  <data name="notifications.delivery_not_found" xml:space="preserve">
+    <value>未找到投递“{id}”。</value>
+  </data>
+  <data name="notifications.notification_not_found" xml:space="preserve">
+    <value>未找到通知“{id}”。</value>
+  </data>
+  <data name="notifications.invalid_quiet_hours" xml:space="preserve">
+    <value>免打扰时段的开始时间和结束时间不能相同。</value>
+  </data>
+  <data name="notifications.unknown_type" xml:space="preserve">
+    <value>通知类型“{typeCode}”不存在。</value>
+  </data>
+  <data name="notifications.channel_not_supported" xml:space="preserve">
+    <value>通知类型“{typeCode}”不通过“{channel}”渠道发送。</value>
+  </data>
+  <data name="notifications.channel_mandatory" xml:space="preserve">
+    <value>通知类型“{typeCode}”的“{channel}”渠道无法关闭。</value>
+  </data>
 </root>
