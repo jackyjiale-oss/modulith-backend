@@ -5,7 +5,8 @@ namespace TemplateName.Modules.Notifications.Application.Catalog;
 /// <summary>
 /// One kind of notification, declared in code by an <see cref="INotificationTypeSource"/>. <see cref="Code"/> is <c>{area}.{name}</c>
 /// (for example <c>auth.password_changed</c>). <see cref="Variables"/> are the placeholders its templates may use and
-/// <see cref="SecretVariables"/> the ones that carry a secret (a single-use link): they are never shown in a subject or an in-app text.
+/// <see cref="SecretVariables"/> the ones that carry a secret (a single-use link): they are never shown in a subject or an in-app text, and
+/// the scheduler refuses an event whose secret value does not decrypt to an absolute <c>http</c> or <c>https</c> URL.
 /// </summary>
 internal sealed record NotificationTypeDefinition(
     string Code,

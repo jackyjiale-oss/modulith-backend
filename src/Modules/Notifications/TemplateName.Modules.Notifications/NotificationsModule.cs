@@ -1,13 +1,16 @@
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using OpenTelemetry.Metrics;
 using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common.Inbox;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
+using TemplateName.Modules.Notifications.Application.Scheduling;
 using TemplateName.Modules.Notifications.Infrastructure.Catalog;
+using TemplateName.Modules.Notifications.Infrastructure.Observability;
 using TemplateName.Modules.Notifications.Infrastructure.Persistence;
 using TemplateName.Modules.Notifications.Infrastructure.Templates;
 using TemplateName.Modules.Notifications.Resources;
@@ -19,10 +22,12 @@ public static class NotificationsModule
 {
     /// <summary>
     /// Registers the module's <c>NotificationsDbContext</c> (schema <c>notify</c>, migrated with the other module contexts), its inbox,
-    /// repositories and unit of work, handlers and validators, error messages (<c>NotificationsErrorMessages</c>), the
-    /// <see cref="NotificationCatalog"/> (a singleton over every <see cref="INotificationTypeSource"/>), the hosted service that
-    /// validates it when the host starts, and the template renderer with its options (<c>Notifications:Templates</c>). Call it after
-    /// <c>AddAuthModule</c> and before <c>AddApplicationDecorators</c>.
+    /// repositories and unit of work, handlers and validators (including the consumers of Auth's integration events), the
+    /// <see cref="NotificationScheduler"/> they share, the counters (meter <c>TemplateName.Notifications</c>, added to OpenTelemetry),
+    /// error messages (<c>NotificationsErrorMessages</c>), the <see cref="NotificationCatalog"/> (a singleton over every
+    /// <see cref="INotificationTypeSource"/>), the hosted service that validates it when the host starts, and the template renderer with
+    /// its options (<c>Notifications:Templates</c>). Call it after <c>AddAuthModule</c> (whose <c>IUserContactDirectory</c> the scheduler
+    /// uses) and before <c>AddApplicationDecorators</c>.
     /// </summary>
     public static IServiceCollection AddNotificationsModule(this IServiceCollection services, IConfiguration configuration)
     {
@@ -39,6 +44,11 @@ public static class NotificationsModule
         services.AddScoped<IPreferenceRepository, PreferenceRepository>();
         services.AddScoped<IHubTicketRepository, HubTicketRepository>();
         services.AddScoped<IUnitOfWork>(serviceProvider => serviceProvider.GetRequiredService<NotificationsDbContext>());
+        services.AddScoped<NotificationScheduler>();
+
+        // The counters; the meter is added to OpenTelemetry, which exports it whenever the host exports metrics (OTLP configured).
+        services.AddSingleton<INotificationsMetrics, NotificationsMetrics>();
+        services.ConfigureOpenTelemetryMeterProvider(metrics => metrics.AddMeter(NotificationsMetrics.MeterName));
 
         services.AddSingleton<INotificationTypeSource, AuthNotificationTypeSource>();
         services.AddSingleton<NotificationCatalog>();

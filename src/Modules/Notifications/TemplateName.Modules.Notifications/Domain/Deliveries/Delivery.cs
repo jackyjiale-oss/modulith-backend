@@ -14,6 +14,12 @@ namespace TemplateName.Modules.Notifications.Domain.Deliveries;
 /// </remarks>
 internal sealed class Delivery : Entity<Guid>
 {
+    /// <summary>
+    /// The column limit of <see cref="Destination"/>, and the longest email address an email delivery accepts; 320 is the customary size
+    /// (64 for the local part, an at sign and 255 for the domain).
+    /// </summary>
+    public const int MaxDestinationLength = 320;
+
     /// <summary>The column limit of <see cref="LastError"/>.</summary>
     public const int MaxLastErrorLength = 200;
 

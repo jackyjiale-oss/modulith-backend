@@ -86,11 +86,18 @@ internal sealed class Notification : AggregateRoot<Guid>
 
     /// <summary>
     /// Adds the delivery for <paramref name="channel"/>, first due at <paramref name="firstAttemptAt"/> (later than <paramref name="now"/>
-    /// when quiet hours defer it). It inherits the notification's expiry.
+    /// when quiet hours defer it). It inherits the notification's expiry. An email delivery needs one plain address as
+    /// <paramref name="destination"/> (<see cref="EmailDestination"/>).
     /// </summary>
+    /// <exception cref="ArgumentException">An email delivery without a single valid address; the message does not quote it.</exception>
     /// <exception cref="InvalidOperationException">The notification already has a delivery for the channel.</exception>
     public Delivery AddDelivery(NotificationChannel channel, string? destination, DateTimeOffset firstAttemptAt, DateTimeOffset now)
     {
+        if (channel == NotificationChannel.Email && !EmailDestination.IsValid(destination))
+        {
+            throw new ArgumentException("An email delivery needs exactly one valid email address.", nameof(destination));
+        }
+
         if (_deliveries.Exists(delivery => delivery.Channel == channel))
         {
             throw new InvalidOperationException($"The notification already has a {channel} delivery.");

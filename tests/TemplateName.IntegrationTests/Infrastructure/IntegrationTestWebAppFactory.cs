@@ -63,7 +63,7 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
 
     /// <summary>
     /// The Auth integration events the hosts built by this factory published, recorded by
-    /// <see cref="RecordingIntegrationEventHandler{TEvent}"/> in place of the consuming modules; empty at the start of every test.
+    /// <see cref="RecordingIntegrationEventHandler{TEvent}"/> next to the consuming modules' own consumers; empty at the start of every test.
     /// </summary>
     public IntegrationEventRecorder IntegrationEvents { get; } = new();
 
@@ -151,7 +151,8 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.Configure<PasswordHasherOptions>(options => options.IterationCount = TestPasswordHashIterations);
             services.AddModuleDbContext<TestDbContext>(TestDbContext.Schema, PersistenceTestsConnectionStringName, includeInMigrations: false);
 
-            // A recording consumer for each Auth integration event, before the scanned test handlers, so it runs first.
+            // A recording consumer for each Auth integration event, after the Notifications consumers the host registers and before the
+            // scanned test handlers.
             AddRecordingIntegrationEventHandler<EmailVerificationRequestedIntegrationEvent>(services);
             AddRecordingIntegrationEventHandler<PasswordResetRequestedIntegrationEvent>(services);
             AddRecordingIntegrationEventHandler<RegistrationAttemptedIntegrationEvent>(services);

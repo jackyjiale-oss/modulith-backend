@@ -105,6 +105,50 @@ public sealed class NotificationTests
         notification.Deliveries.Count.ShouldBe(2);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not-an-address")]
+    [InlineData("alice@")]
+    [InlineData("alice@example.com, mallory@example.com")]
+    [InlineData("alice@example.com; mallory@example.com")]
+    [InlineData("alice@example.com\r\nBcc: mallory@example.com")]
+    [InlineData("alice@example.com\n")]
+    [InlineData(" alice@example.com")]
+    [InlineData("Alice <alice@example.com>")]
+    [InlineData("\"Alice\" alice@example.com")]
+    public void AddDelivery_refuses_an_email_delivery_without_a_single_valid_address(string? destination)
+    {
+        var notification = Create();
+
+        var exception = Should.Throw<ArgumentException>(() => notification.AddDelivery(NotificationChannel.Email, destination, Now, Now));
+
+        exception.ParamName.ShouldBe("destination");
+        if (!string.IsNullOrEmpty(destination))
+        {
+            exception.Message.ShouldNotContain(destination);
+        }
+
+        notification.Deliveries.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void AddDelivery_refuses_an_email_address_longer_than_the_column()
+    {
+        var notification = Create();
+        var address = new string('a', 64) + "@" + new string('b', Delivery.MaxDestinationLength - 64 - 1) + ".com";
+        address.Length.ShouldBe(Delivery.MaxDestinationLength + 4);
+
+        Should.Throw<ArgumentException>(() => notification.AddDelivery(NotificationChannel.Email, address, Now, Now));
+    }
+
+    [Theory]
+    [InlineData("alice@example.com")]
+    [InlineData("Alice.Smith+tag@sub.example.co.uk")]
+    [InlineData("alice@localhost.test")]
+    public void AddDelivery_accepts_a_single_email_address(string destination)
+        => Create().AddDelivery(NotificationChannel.Email, destination, Now, Now).Destination.ShouldBe(destination);
+
     [Fact]
     public void ToString_does_not_expose_the_protected_data()
     {
