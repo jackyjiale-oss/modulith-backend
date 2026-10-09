@@ -8,7 +8,7 @@
 
 Every message the template sends goes through this module: it consumes the integration events other modules publish, renders a localized message in the **recipient's** language and delivers it by email and in-app. Plan 3 builds it task by task; this page describes what exists today (the skeleton, the notification type catalog, the recipient culture and time zone rules and the domain model) and lists the rest under the sections that will hold it.
 
-- Owns: the notification type catalog, the notification, delivery and in-app rows, user preferences and quiet hours, the inbox that makes its consumers idempotent, and the `notify` schema (not created yet; the first migration comes with the persistence task).
+- Owns: the notification type catalog, the notification, delivery and in-app rows, user preferences and quiet hours, the inbox that makes its consumers idempotent, and the `notify` schema (see [Data](#data)).
 - Does not: send anything on its own initiative (it reacts to integration events), store a notification type table (D7: types are declared in code), or offer scheduling, cancellation, digests, push, SMS, webhooks, bulk sends, provider callbacks, attachments or fallback channels (D17).
 - Talks to: `TemplateName.Modules.Auth.Contracts` only, never `TemplateName.Modules.Auth` (D1; `ModuleBoundaryTests` enforces it). It consumes Auth's integration events and, once when a notification is created, asks `IUserContactDirectory` for the recipient's address, name, language and time zone, which it snapshots on its own rows (D5). No other module references Notifications, so it has no `TemplateName.Modules.Notifications.Contracts` project yet; `INotificationTypeSource` and `NotificationTypeDefinition` move there when a module wants to declare its own types (D1).
 - Consumers only write rows. A consumer records the event in `notify.InboxMessages` in the same save as the notification and its deliveries, so a repeated event has no effect (D3, [ADR 0018](../adr/0018-in-process-integration-events-with-inbox.md)); a separate delivery worker sends. Single-use links reach it as `ISecretProtector` ciphertext and are decrypted only in memory while an email is rendered ([ADR 0020](../adr/0020-secrets-in-cross-module-events.md)).
@@ -27,7 +27,7 @@ None.
 
 <!-- Aggregates, their invariants and life cycle. Draw state machines as a Mermaid stateDiagram-v2. -->
 
-The domain is pure: no persistence and no handlers yet (the persistence task maps it), no clock (every method takes `now`) and no encryption. Timestamps are UTC. Types with a `DateTime` property (`Notification`, `Delivery`, `InAppNotification`) store `now.UtcDateTime`; settings, preferences and hub tickets keep `DateTimeOffset`. Text from outside is cut to its column by one helper, `BoundedText.Cut` (`Domain/`), which never leaves half of a surrogate pair.
+The domain is pure: no persistence (`Infrastructure/Persistence/` maps it, see [Data](#data)) and no handlers yet, no clock (every method takes `now`) and no encryption. Timestamps are UTC. Types with a `DateTime` property (`Notification`, `Delivery`, `InAppNotification`) store `now.UtcDateTime`; settings, preferences and hub tickets keep `DateTimeOffset`. Text from outside is cut to its column by one helper, `BoundedText.Cut` (`Domain/`), which never leaves half of a surrogate pair.
 
 | Type | What it is |
 |---|---|
@@ -133,9 +133,32 @@ None.
 
 <!-- The schema, its tables and indexes, and the migrations in order. -->
 
-None.
+Schema `notify`, owned by `NotificationsDbContext` (`Infrastructure/Persistence/`), which is also the module's `IUnitOfWork` and the host of its inbox (`ApplyInbox()`). There is **no outbox** table: nothing in this module raises a domain event, so the context does not call `ApplyOutbox()`. Writes go through EF Core and the repositories in `Application/Abstractions/` (`INotificationRepository`, `IInAppNotificationRepository`, `IPreferenceRepository`, `IHubTicketRepository`, plus `IInbox`); Dapper reads for the list endpoints arrive with those endpoints. None of the tables is soft-deleted (they are logs and per-user settings), so no query needs an `IsDeleted` filter. The module reads no `auth.*` table: user ids are plain columns, with no foreign key across the schema boundary. Keys are `SequentialGuid`s set by the domain (`ValueGeneratedNever`), except the hub ticket's hash and the composite keys. Every timestamp, `DateTime` or `DateTimeOffset`, is `datetime2(3)` holding UTC (`ApplyDefaultConventions`); a `DateTime` comes back with kind `Utc`, a `DateTimeOffset` with offset zero. Enums are `tinyint` (the values are persisted and never renumbered).
 
-The module will own the `notify` schema with its own `NotificationsDbContext`; see the data ownership table in [`docs/architecture/overview.md`](../architecture/overview.md#data-ownership). `Application/Abstractions/IUnitOfWork.cs` is the module's save abstraction, ready for the context.
+| Table | Purpose | Indexes |
+|---|---|---|
+| `notify.Notifications` | The `Notification` aggregate. `TypeCode nvarchar(100)`, `Culture nvarchar(16)`, `Priority tinyint`, `Data nvarchar(max)` (JSON of non-secret variables), `ProtectedData nvarchar(max)` (JSON of variable name to Data Protection ciphertext, never decrypted here), `CorrelationId nvarchar(32)`, `SourceMessageId`, `RecipientUserId`, `CreatedAt`, `ExpiresAt`. | `PK_Notifications`, `IX_Notifications_SourceMessageId_TypeCode_RecipientUserId` (**unique**: one notification per event, type and recipient) |
+| `notify.Deliveries` | One channel's attempt series (`Delivery`). `Channel tinyint`, `Status tinyint`, `Destination nvarchar(320)`, `AttemptCount`, `NextAttemptAt`, `LockedUntil`, `LastError nvarchar(200)`, `RenderedSubject nvarchar(300)`, `CreatedAt`, `SentAt`, `DeadLetteredAt`, `ExpiresAt`. | `PK_Deliveries`, `IX_Deliveries_NotificationId` (FK to `Notifications`, cascade), `IX_Deliveries_Status_NextAttemptAt` (the worker's claim: key `(Status, NextAttemptAt)`, `INCLUDE (Channel, LockedUntil)`, filtered `[Status] = 0`, so only pending rows are indexed), `IX_Deliveries_CreatedAt_Id` (`CreatedAt DESC, Id DESC`; the administrator's list) |
+| `notify.InAppNotifications` | What a user sees in the inbox (`InAppNotification`). The key **is** the delivery id, so a retried delivery cannot insert a second row. `TypeCode nvarchar(100)`, `Category tinyint`, `Title nvarchar(200)`, `Body nvarchar(2000)`, `CreatedAt`, `ReadAt`. No foreign keys (the user is another module's; the notification is reached through the delivery). | `PK_InAppNotifications`, `IX_InAppNotifications_UserId_CreatedAt_Id` (`UserId, CreatedAt DESC, Id DESC`; the inbox list), `IX_InAppNotifications_UserId` (filtered `[ReadAt] IS NULL`; unread count and mark-all-read) |
+| `notify.UserPreferences` | A per type and channel choice (`UserPreference`), stored only when it differs from the type's default. `TypeCode nvarchar(100)`, `Channel tinyint`, `IsEnabled`, `UpdatedAt`. | `PK_UserPreferences` (`UserId`, `TypeCode`, `Channel`) |
+| `notify.UserSettings` | The `UserNotificationProfile` entity (the table keeps the plan's name). `UserId` is the key; the quiet hours are the nullable `time` columns `QuietHoursStart` and `QuietHoursEnd` (both null for none); `UpdatedAt`; `RowVersion rowversion`. | `PK_UserSettings` (`UserId`) |
+| `notify.HubTickets` | Single-use SignalR tickets (`HubTicket`). The key is `TokenHash varbinary(32)` (SHA-256 of the ticket; the ticket itself is never stored), `UserId`, `CreatedAt`, `ExpiresAt`, `ConsumedAt`. Rows are short-lived; a cleanup job is not part of this task. | `PK_HubTickets` (`TokenHash`) |
+| `notify.InboxMessages` | Which consumer has processed which integration event (`InboxMessage`, a building block): `MessageId`, `Consumer nvarchar(400)`, `ProcessedAt`. | `PK_InboxMessages` (`MessageId`, `Consumer`) |
+| `notify.__EFMigrationsHistory` | Applied migrations of this module. | none |
+
+Rules the repositories and the context keep:
+
+- **Whole aggregates.** `INotificationRepository.GetDeliveryAsync` returns the tracked delivery and loads its notification with all its deliveries into the same context, so a settle or retry saves through the unit of work. The `Notification` maps its deliveries through the `_deliveries` backing field.
+- **The inbox and the notification save together.** A consumer checks `IInbox.HasProcessedAsync`, stages the notification and its deliveries, calls `IInbox.Record` and saves once with `IUnitOfWork.SaveChangesUnlessInboxDuplicateAsync`. It answers `false` (the pending changes are discarded, nothing was written) **only** when the failure is the inbox primary key `PK_InboxMessages`, which is how a concurrent second delivery of the same event loses the race (`Inbox<NotificationsDbContext>.IsDuplicate`). A violation of any other unique key, in particular `IX_Notifications_SourceMessageId_TypeCode_RecipientUserId`, is still thrown, so it cannot be mistaken for "already processed"; the outbox retry then finds the inbox row and does nothing. EF inserts the inbox row before the notification, so two consumers racing on the same event fail on the inbox key.
+- **Consuming a hub ticket.** `IHubTicketRepository.TryConsumeAsync` is one `UPDATE notify.HubTickets SET ConsumedAt = @now OUTPUT inserted.UserId WHERE TokenHash = @hash AND ConsumedAt IS NULL AND ExpiresAt > @now` (raw SQL, parameterized, `datetime2` parameters), the rule of `HubTicket.CanConsume`: of two concurrent callers exactly one gets the user id and the other `null`. A ticket is spent at its expiry instant. It bypasses the change tracker.
+- **Marking all read.** `IInAppNotificationRepository.MarkAllReadAsync` is one `ExecuteUpdateAsync` over the user's unread rows created at or before `now`; rows created later stay unread. It bypasses the change tracker.
+- **Concurrency of the profile.** `UserSettings.RowVersion` makes two simultaneous quiet-hours updates conflict (`DbUpdateConcurrencyException`) instead of the last one winning silently; the endpoint that writes it will map that to 409.
+
+Migrations (`Infrastructure/Persistence/Migrations/`), in order:
+
+1. `InitialNotifications`: creates the schema and every table above.
+
+Add one with the command in [`CLAUDE.md`](../../CLAUDE.md#commands), using `--context NotificationsDbContext`. `MigrateModuleDatabasesAsync` applies this context after Auth's, because `AddNotificationsModule` registers it with `AddModuleDbContext`; the integration test factory migrates it once and Respawn clears every schema between tests.
 
 ## Background processing
 
@@ -154,6 +177,8 @@ None.
 <!-- Where the module's unit and integration tests live and what they cover. -->
 
 Unit tests: `tests/TemplateName.UnitTests/Notifications/`. `NotificationTests`, `DeliveryTests`, `DeliveryRetryPolicyTests`, `InAppNotificationTests`, `UserNotificationProfileTests`, `UserPreferenceTests` (also the preference errors), `QuietHoursTests` and `HubTicketTests` cover the domain; the quiet-hours tests look up the IANA id `America/New_York` with `TimeZoneInfo.FindSystemTimeZoneById`, so a runtime without the zone fails them instead of skipping. `NotificationCatalogTests` covers the catalog rules and the start-up check, `RecipientCultureTests` the locale mapping (including that the current UI culture is ignored) and `TimeZoneResolverTests` the IANA lookup and the UTC fallback. The Windows-id case accepts whatever the runtime resolves, so the tests give the same result on Windows and on Linux with ICU. Architecture tests include the module in `Assemblies.Modules` and `Assemblies.ErrorMessageResources`: module boundary, layering, naming, translation completeness and this document's outline.
+
+Integration tests: `tests/TemplateName.IntegrationTests/Notifications/NotificationsPersistenceTests.cs` runs against the real SQL Server container and covers the round trip of a notification with its deliveries, UTC `datetime2(3)` values (kind `Utc`), the unique notification index, the inbox race of two contexts saving the same event (one `true`, one `false`, one notification row; a duplicate on the notification index still throws), hub ticket consumption by two concurrent callers and at expiry, mark-all-read, preferences with the quiet-hours columns, and the schema itself (column types, keys and index definitions read back from `sys.*`).
 
 ## Changelog
 

@@ -3,8 +3,12 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
+using TemplateName.Infrastructure.Common.Inbox;
+using TemplateName.Infrastructure.Common.Persistence;
+using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
 using TemplateName.Modules.Notifications.Infrastructure.Catalog;
+using TemplateName.Modules.Notifications.Infrastructure.Persistence;
 using TemplateName.Modules.Notifications.Resources;
 
 namespace TemplateName.Modules.Notifications;
@@ -13,7 +17,8 @@ namespace TemplateName.Modules.Notifications;
 public static class NotificationsModule
 {
     /// <summary>
-    /// Registers the module's handlers and validators, error messages (<c>NotificationsErrorMessages</c>), the
+    /// Registers the module's <c>NotificationsDbContext</c> (schema <c>notify</c>, migrated with the other module contexts), its inbox,
+    /// repositories and unit of work, handlers and validators, error messages (<c>NotificationsErrorMessages</c>), the
     /// <see cref="NotificationCatalog"/> (a singleton over every <see cref="INotificationTypeSource"/>) and the hosted service that
     /// validates it when the host starts. Call it after <c>AddAuthModule</c> and before <c>AddApplicationDecorators</c>.
     /// </summary>
@@ -21,8 +26,17 @@ public static class NotificationsModule
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
+        services.AddModuleDbContext<NotificationsDbContext>(NotificationsDbContext.Schema);
+        services.AddInbox<NotificationsDbContext>();
         services.AddApplicationHandlers(typeof(NotificationsModule).Assembly);
         services.AddErrorMessages<NotificationsErrorMessages>();
+
+        services.AddScoped<IInbox, ModuleInbox>();
+        services.AddScoped<INotificationRepository, NotificationRepository>();
+        services.AddScoped<IInAppNotificationRepository, InAppNotificationRepository>();
+        services.AddScoped<IPreferenceRepository, PreferenceRepository>();
+        services.AddScoped<IHubTicketRepository, HubTicketRepository>();
+        services.AddScoped<IUnitOfWork>(serviceProvider => serviceProvider.GetRequiredService<NotificationsDbContext>());
 
         services.AddSingleton<NotificationCatalog>();
         services.AddHostedService<NotificationCatalogStartupCheck>();
