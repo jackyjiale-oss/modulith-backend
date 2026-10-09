@@ -27,6 +27,7 @@ Everything about how this service is built and run. Documents are part of the de
 | Document | Module |
 |---|---|
 | [`modules/auth.md`](modules/auth.md) | Auth: registration, sign-in, tokens, sessions, passwords, roles, permissions and the audit log |
+| [`modules/notifications.md`](modules/notifications.md) | Notifications: the notification type catalog, recipient culture and time zone; email and in-app delivery follows |
 | [`modules/sample.md`](modules/sample.md) | Sample: leave requests, the worked example of every pattern |
 | [`modules/_template.md`](modules/_template.md) | The required outline; copy it to `modules/{module}.md` when you add a module |
 

@@ -5,6 +5,8 @@ using TemplateName.Infrastructure.Common.Resources;
 using TemplateName.Modules.Auth;
 using TemplateName.Modules.Auth.Contracts.Users;
 using TemplateName.Modules.Auth.Resources;
+using TemplateName.Modules.Notifications;
+using TemplateName.Modules.Notifications.Resources;
 using TemplateName.Modules.Sample;
 using TemplateName.Modules.Sample.Resources;
 using TemplateName.SharedKernel;
@@ -33,6 +35,7 @@ public static class Assemblies
     public static IReadOnlyList<Assembly> Modules { get; } =
     [
         typeof(AuthModule).Assembly,
+        typeof(NotificationsModule).Assembly,
         typeof(SampleModule).Assembly,
     ];
 
@@ -57,6 +60,7 @@ public static class Assemblies
         typeof(CommonErrorMessages),
         typeof(InfrastructureErrorMessages),
         typeof(AuthErrorMessages),
+        typeof(NotificationsErrorMessages),
         typeof(SampleErrorMessages),
     ];
 

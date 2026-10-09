@@ -7,6 +7,7 @@
     <ProjectReference Include="..\..\src\BuildingBlocks\TemplateName.Web.Common\TemplateName.Web.Common.csproj" />
     <ProjectReference Include="..\..\src\Modules\Auth\TemplateName.Modules.Auth\TemplateName.Modules.Auth.csproj" />
     <ProjectReference Include="..\..\src\Modules\Auth\TemplateName.Modules.Auth.Contracts\TemplateName.Modules.Auth.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Notifications\TemplateName.Modules.Notifications\TemplateName.Modules.Notifications.csproj" />
     <ProjectReference Include="..\..\src\Modules\Sample\TemplateName.Modules.Sample\TemplateName.Modules.Sample.csproj" />
     <ProjectReference Include="..\..\src\Host\TemplateName.Api\TemplateName.Api.csproj" />
   </ItemGroup>

@@ -13,6 +13,9 @@
     <Project Path="src/Modules/Auth/TemplateName.Modules.Auth/TemplateName.Modules.Auth.csproj" />
     <Project Path="src/Modules/Auth/TemplateName.Modules.Auth.Contracts/TemplateName.Modules.Auth.Contracts.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Notifications/">
+    <Project Path="src/Modules/Notifications/TemplateName.Modules.Notifications/TemplateName.Modules.Notifications.csproj" />
+  </Folder>
   <Folder Name="/src/Host/">
     <Project Path="src/Host/TemplateName.Api/TemplateName.Api.csproj" />
   </Folder>

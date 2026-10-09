@@ -1026,6 +1026,7 @@
           "TemplateName.Application.Common": "[0.0.0, )",
           "TemplateName.Infrastructure.Common": "[0.0.0, )",
           "TemplateName.Modules.Auth": "[0.0.0, )",
+          "TemplateName.Modules.Notifications": "[0.0.0, )",
           "TemplateName.Modules.Sample": "[0.0.0, )",
           "TemplateName.SharedKernel": "[0.0.0, )",
           "TemplateName.Web.Common": "[0.0.0, )"
@@ -1073,6 +1074,16 @@
         "type": "Project",
         "dependencies": {
           "TemplateName.SharedKernel": "[0.0.0, )"
+        }
+      },
+      "templatename.modules.notifications": {
+        "type": "Project",
+        "dependencies": {
+          "TemplateName.Application.Common": "[0.0.0, )",
+          "TemplateName.Infrastructure.Common": "[0.0.0, )",
+          "TemplateName.Modules.Auth.Contracts": "[0.0.0, )",
+          "TemplateName.SharedKernel": "[0.0.0, )",
+          "TemplateName.Web.Common": "[0.0.0, )"
         }
       },
       "templatename.modules.sample": {

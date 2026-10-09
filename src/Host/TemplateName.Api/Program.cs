@@ -8,6 +8,7 @@ using TemplateName.Infrastructure.Common;
 using TemplateName.Infrastructure.Common.Idempotency;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Auth;
+using TemplateName.Modules.Notifications;
 using TemplateName.Modules.Sample;
 using TemplateName.Web.Common;
 using TemplateName.Web.Common.Localization;
@@ -33,6 +34,7 @@ builder.Services.AddHttpSecurity(builder.Configuration);
 builder.Services.AddPermissionAuthorization();
 // Module registrations
 builder.Services.AddAuthModule(builder.Configuration);
+builder.Services.AddNotificationsModule(builder.Configuration);
 builder.Services.AddSampleModule();
 
 // Kestrel binds only its endpoints from the "Kestrel" section; bind Limits (e.g. MaxRequestBodySize) lazily so test overrides apply.
@@ -110,6 +112,8 @@ if (!app.Environment.IsProduction())
 var api = app.MapGroup("/api/v1");
 api.MapAuthEndpoints();
 app.MapAuthWellKnownEndpoints();
+api.MapNotificationsEndpoints();
+app.MapNotificationsHub();
 api.MapSampleEndpoints();
 
 app.Run();
