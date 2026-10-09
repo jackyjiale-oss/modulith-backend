@@ -393,6 +393,12 @@
           "TemplateName.SharedKernel": "[0.0.0, )"
         }
       },
+      "templatename.modules.auth.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "TemplateName.SharedKernel": "[0.0.0, )"
+        }
+      },
       "templatename.sharedkernel": {
         "type": "Project"
       },

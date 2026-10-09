@@ -11,7 +11,7 @@ flowchart TD
     subgraph Modules["Business modules (internal by default)"]
         Auth["TemplateName.Modules.Auth<br/>Domain · Application · Infrastructure · Endpoints"]
         Sample["TemplateName.Modules.Sample<br/>Domain · Application · Infrastructure · Endpoints"]
-        Contracts["TemplateName.Modules.{Module}.Contracts<br/>integration events, public interfaces<br/>(none yet)"]
+        Contracts["TemplateName.Modules.{Module}.Contracts<br/>integration events, public interfaces<br/>(Auth today)"]
     end
 
     subgraph BuildingBlocks["Building blocks (src/BuildingBlocks)"]
@@ -45,7 +45,7 @@ flowchart TD
 
 - **Host** (`src/Host/TemplateName.Api`, [`docs/services/api.md`](../services/api.md)) wires the building blocks and modules in `Program.cs`: services, the middleware pipeline, health checks, OpenAPI and the `/api/v1` route group.
 - **Modules** (`src/Modules/{Module}`, one document per module under [`docs/modules/`](../modules/)) are two projects: `TemplateName.Modules.{Module}` with `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/` and `Resources/` folders, and `TemplateName.Modules.{Module}.Contracts`, the only project another module may reference (ADR 0001). The entry point `{Module}Module` (`Add{Module}Module`, `Map{Module}Endpoints`) is the only public type.
-- **Auth** ([`docs/modules/auth.md`](../modules/auth.md)) is the identity module: users, sessions, roles, permissions and the audit log in the `auth` schema, with the sign-in, token, password and administration endpoints. It implements `IPermissionChecker` for the whole host; no other module references it (it has no `.Contracts` project yet, because nothing outside it needs its data).
+- **Auth** ([`docs/modules/auth.md`](../modules/auth.md)) is the identity module: users, sessions, roles, permissions and the audit log in the `auth` schema, with the sign-in, token, password and administration endpoints. It implements `IPermissionChecker` for the whole host; no other module references it (its `TemplateName.Modules.Auth.Contracts` project holds its integration events and `IUserContactDirectory`, and no module consumes them yet).
 - **Building blocks** ([`shared-kernel`](../building-blocks/shared-kernel.md), [`application-common`](../building-blocks/application-common.md), [`infrastructure-common`](../building-blocks/infrastructure-common.md), [`web-common`](../building-blocks/web-common.md)) hold everything every module needs.
 
 The arrows are project references, and architecture tests (`tests/TemplateName.ArchitectureTests`) enforce them: SharedKernel has no dependencies; Application.Common does not depend on Infrastructure.Common or Web.Common; a module's `Domain` depends on nothing but SharedKernel; its `Application` does not depend on its `Infrastructure` or `Endpoints`; and no module references another module except its `.Contracts`.
@@ -87,7 +87,7 @@ One SQL Server database, one schema per owner, each with its own `__EFMigrations
 
 ## Cross-module communication
 
-There are two modules today (Sample and Auth), and neither uses the other, so nothing crosses a module boundary yet. The rules for when it does:
+There are two modules today (Sample and Auth), and neither uses the other, so nothing crosses a module boundary yet; Auth already declares what a consumer will use (`TemplateName.Modules.Auth.Contracts`: six integration events and `IUserContactDirectory`, see [`docs/modules/auth.md`](../modules/auth.md#events)). A contracts project references only `TemplateName.SharedKernel` and holds only public sealed records, enums and interfaces (`ContractsTests`). The rules for when a boundary is crossed:
 
 - A module exposes integration events (`{Noun}{PastTenseVerb}IntegrationEvent`) and public interfaces only in its `.Contracts` project.
 - Domain events stay inside the module. A domain event handler that must tell another module builds an integration event whose `Id` is the outbox message id (`IOutboxMessageContext.MessageId`) and calls `IIntegrationEventPublisher`, which runs every `IIntegrationEventHandler<T>` in the process, each in its own scope. A failing consumer makes the outbox retry the publish; each consumer records the event in its own module's inbox (`InboxMessages`) in the same save as its rows, so a repeat has no effect. Consumers only write rows. Cross-module effects are eventually consistent, never one transaction (ADR 0007, ADR 0018).

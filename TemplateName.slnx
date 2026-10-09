@@ -11,6 +11,7 @@
   </Folder>
   <Folder Name="/src/Modules/Auth/">
     <Project Path="src/Modules/Auth/TemplateName.Modules.Auth/TemplateName.Modules.Auth.csproj" />
+    <Project Path="src/Modules/Auth/TemplateName.Modules.Auth.Contracts/TemplateName.Modules.Auth.Contracts.csproj" />
   </Folder>
   <Folder Name="/src/Host/">
     <Project Path="src/Host/TemplateName.Api/TemplateName.Api.csproj" />

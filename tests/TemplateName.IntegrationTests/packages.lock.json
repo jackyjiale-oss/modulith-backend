@@ -1064,8 +1064,15 @@
           "OpenTelemetry.Extensions.Hosting": "[1.19.1, )",
           "TemplateName.Application.Common": "[0.0.0, )",
           "TemplateName.Infrastructure.Common": "[0.0.0, )",
+          "TemplateName.Modules.Auth.Contracts": "[0.0.0, )",
           "TemplateName.SharedKernel": "[0.0.0, )",
           "TemplateName.Web.Common": "[0.0.0, )"
+        }
+      },
+      "templatename.modules.auth.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "TemplateName.SharedKernel": "[0.0.0, )"
         }
       },
       "templatename.modules.sample": {

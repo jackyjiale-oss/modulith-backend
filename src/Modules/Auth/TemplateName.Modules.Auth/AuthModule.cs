@@ -22,8 +22,10 @@ using TemplateName.Modules.Auth.Application.Admin.Users;
 using TemplateName.Modules.Auth.Application.Authentication;
 using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Application.Verification;
+using TemplateName.Modules.Auth.Contracts.Users;
 using TemplateName.Modules.Auth.Endpoints;
 using TemplateName.Modules.Auth.Infrastructure.Authorization;
+using TemplateName.Modules.Auth.Infrastructure.Contracts;
 using TemplateName.Modules.Auth.Infrastructure.Email;
 using TemplateName.Modules.Auth.Infrastructure.Observability;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
@@ -41,7 +43,7 @@ public static class AuthModule
 
     /// <summary>
     /// Registers the module's context (schema <c>auth</c>), outbox, handlers and validators, repositories, audit writer, the user
-    /// administration's SuperAdmin rules and reset-link issuer, the role administration's cache invalidator, error messages
+    /// administration's SuperAdmin rules and reset-link issuer, the role administration's cache invalidator, the contact directory other modules call (<c>IUserContactDirectory</c> from the Contracts project), error messages
     /// (<c>AuthErrorMessages</c>), the SMTP email sender with <c>Auth:Links</c> and <c>Auth:Verification</c>, the sign-in settings
     /// <c>Auth:RefreshToken</c> and <c>Auth:Lockout</c>, the counters of the <c>TemplateName.Auth</c> meter (added to OpenTelemetry), the
     /// access tokens with the JWT bearer handler as the default authentication scheme, the permission checker with its cache, the
@@ -68,6 +70,7 @@ public static class AuthModule
         services.AddScoped<PermissionGrantRules>();
         services.AddScoped<RolePermissionCacheInvalidator>();
         services.AddScoped<PasswordResetLinkIssuer>();
+        services.AddScoped<IUserContactDirectory, UserContactDirectory>();
 
         services.AddHttpContextAccessor();
         services.AddScoped<IClientContext, HttpClientContext>();
