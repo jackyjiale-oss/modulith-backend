@@ -81,7 +81,9 @@ public sealed class CreateUserCommandHandlerTests : AdminHandlerTestBase
         code.Target.ShouldBe(user.NormalizedEmail);
         code.TokenHash.ShouldBe(TokenHash);
         code.ExpiresAt.ShouldBe(Now.AddMinutes(30));
-        code.DomainEvents.OfType<VerificationCodeIssuedDomainEvent>().ShouldHaveSingleItem().ProtectedToken.ShouldBe("protected:" + TokenValue);
+        var issued = code.DomainEvents.OfType<VerificationCodeIssuedDomainEvent>().ShouldHaveSingleItem();
+        issued.ProtectedToken.ShouldBe("protected:" + TokenValue);
+        issued.Trigger.ShouldBe(VerificationTrigger.CreatedByAdmin);
 
         var audit = AuditEntries.ShouldHaveSingleItem();
         audit.EventType.ShouldBe(AuthAuditEvents.AdminUserCreated);

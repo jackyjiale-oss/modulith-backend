@@ -317,6 +317,7 @@ public sealed class ResetPasswordCommandHandlerTests
         => VerificationCode.Issue(
             _user.Id,
             VerificationPurpose.PasswordReset,
+            VerificationTrigger.SelfService,
             _user.NormalizedEmail,
             [.. Enumerable.Repeat((byte)9, 32)],
             "protected",
@@ -329,6 +330,7 @@ public sealed class ResetPasswordCommandHandlerTests
         var code = VerificationCode.Issue(
             userId ?? _user.Id,
             purpose,
+            VerificationTrigger.SelfService,
             _user.NormalizedEmail,
             TokenHash,
             "protected",

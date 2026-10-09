@@ -6,6 +6,9 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence;
 
 internal sealed class VerificationCodeRepository(AuthDbContext context) : IVerificationCodeRepository
 {
+    public Task<VerificationCode?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+        => context.Set<VerificationCode>().SingleOrDefaultAsync(code => code.Id == id, cancellationToken);
+
     public Task<VerificationCode?> GetByTokenHashAsync(byte[] tokenHash, CancellationToken cancellationToken)
         => context.Set<VerificationCode>().SingleOrDefaultAsync(code => code.TokenHash == tokenHash, cancellationToken);
 

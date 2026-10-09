@@ -122,7 +122,7 @@ public sealed class ConfirmEmailCommandHandlerTests
     [Fact]
     public async Task Code_whose_user_no_longer_exists_is_invalid()
     {
-        var code = VerificationCode.Issue(Guid.NewGuid(), VerificationPurpose.EmailVerify, "GONE@EXAMPLE.COM", TokenHash, "protected", TimeSpan.FromHours(1), null, Now.AddMinutes(-1));
+        var code = VerificationCode.Issue(Guid.NewGuid(), VerificationPurpose.EmailVerify, VerificationTrigger.SelfService, "GONE@EXAMPLE.COM", TokenHash, "protected", TimeSpan.FromHours(1), null, Now.AddMinutes(-1));
         _verificationCodes.GetByTokenHashAsync(TokenHash, Arg.Any<CancellationToken>()).Returns(code);
 
         var result = await _sut.HandleAsync(new ConfirmEmailCommand(Token), Ct);
@@ -139,7 +139,7 @@ public sealed class ConfirmEmailCommandHandlerTests
 
     private VerificationCode IssueCode(VerificationPurpose purpose, DateTimeOffset issuedAt)
     {
-        var code = VerificationCode.Issue(_user.Id, purpose, _user.NormalizedEmail, TokenHash, "protected", TimeSpan.FromHours(1), null, issuedAt);
+        var code = VerificationCode.Issue(_user.Id, purpose, VerificationTrigger.SelfService, _user.NormalizedEmail, TokenHash, "protected", TimeSpan.FromHours(1), null, issuedAt);
         _verificationCodes.GetByTokenHashAsync(TokenHash, Arg.Any<CancellationToken>()).Returns(code);
         return code;
     }

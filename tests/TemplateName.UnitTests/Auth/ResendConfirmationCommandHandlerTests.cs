@@ -85,7 +85,7 @@ public sealed class ResendConfirmationCommandHandlerTests
     [Fact]
     public async Task Resend_after_cooldown_invalidates_pending_codes_and_issues_a_new_one()
     {
-        var previous = VerificationCode.Issue(_user.Id, VerificationPurpose.EmailVerify, _user.NormalizedEmail, new byte[32], "old", TimeSpan.FromHours(1), null, Now.AddMinutes(-1));
+        var previous = VerificationCode.Issue(_user.Id, VerificationPurpose.EmailVerify, VerificationTrigger.SelfService, _user.NormalizedEmail, new byte[32], "old", TimeSpan.FromHours(1), null, Now.AddMinutes(-1));
         _verificationCodes.GetLastIssuedAtAsync(_user.Id, VerificationPurpose.EmailVerify, Arg.Any<CancellationToken>())
             .Returns(Now.AddMinutes(-1).UtcDateTime);
         _verificationCodes.GetPendingAsync(_user.Id, VerificationPurpose.EmailVerify, Now, Arg.Any<CancellationToken>())

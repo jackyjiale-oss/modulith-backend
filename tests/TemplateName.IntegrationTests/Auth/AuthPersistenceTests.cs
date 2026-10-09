@@ -276,7 +276,7 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
     {
         var user = NewUser("judy@example.com");
         var code = VerificationCode.Issue(
-            user.Id, VerificationPurpose.PasswordReset, user.NormalizedEmail, TokenHash(1), "protected", TimeSpan.FromMinutes(30), null, Now);
+            user.Id, VerificationPurpose.PasswordReset, VerificationTrigger.SelfService, user.NormalizedEmail, TokenHash(1), "protected", TimeSpan.FromMinutes(30), null, Now);
         await SaveAsync(user, code);
         Factory.Time.Advance(TimeSpan.FromSeconds(5));
 
@@ -300,7 +300,7 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
     {
         var user = NewUser("ken@example.com");
         var code = VerificationCode.Issue(
-            user.Id, VerificationPurpose.PasswordReset, user.NormalizedEmail, TokenHash(1), "protected", TimeSpan.FromMinutes(30), null, Now);
+            user.Id, VerificationPurpose.PasswordReset, VerificationTrigger.SelfService, user.NormalizedEmail, TokenHash(1), "protected", TimeSpan.FromMinutes(30), null, Now);
         var at = state switch
         {
             "expired" => code.ExpiresAt,

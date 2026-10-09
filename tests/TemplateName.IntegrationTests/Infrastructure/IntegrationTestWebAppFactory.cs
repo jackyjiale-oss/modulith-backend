@@ -19,7 +19,9 @@ using TemplateName.IntegrationTests.Outbox;
 using TemplateName.IntegrationTests.Persistence;
 using TemplateName.Modules.Auth;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Contracts.IntegrationEvents;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+using TemplateName.SharedKernel;
 using Testcontainers.MsSql;
 
 namespace TemplateName.IntegrationTests.Infrastructure;
@@ -58,6 +60,12 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
 
     /// <summary>The events the outbox test handlers have received.</summary>
     public EventRecorder EventRecorder { get; } = new();
+
+    /// <summary>
+    /// The Auth integration events the hosts built by this factory published, recorded by
+    /// <see cref="RecordingIntegrationEventHandler{TEvent}"/> in place of the consuming modules; empty at the start of every test.
+    /// </summary>
+    public IntegrationEventRecorder IntegrationEvents { get; } = new();
 
     /// <summary>The outbox message contexts the message context test handler has read.</summary>
     public MessageContextRecorder MessageContextRecorder { get; } = new();
@@ -142,6 +150,15 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             // Production keeps the Identity default iteration count and has no setting for it; tests hash far more often.
             services.Configure<PasswordHasherOptions>(options => options.IterationCount = TestPasswordHashIterations);
             services.AddModuleDbContext<TestDbContext>(TestDbContext.Schema, PersistenceTestsConnectionStringName, includeInMigrations: false);
+
+            // A recording consumer for each Auth integration event, before the scanned test handlers, so it runs first.
+            AddRecordingIntegrationEventHandler<EmailVerificationRequestedIntegrationEvent>(services);
+            AddRecordingIntegrationEventHandler<PasswordResetRequestedIntegrationEvent>(services);
+            AddRecordingIntegrationEventHandler<RegistrationAttemptedIntegrationEvent>(services);
+            AddRecordingIntegrationEventHandler<PasswordChangedIntegrationEvent>(services);
+            AddRecordingIntegrationEventHandler<UserLockedOutIntegrationEvent>(services);
+            AddRecordingIntegrationEventHandler<RefreshTokenReuseDetectedIntegrationEvent>(services);
+            services.AddSingleton(IntegrationEvents);
             services.AddApplicationHandlers(typeof(IntegrationTestWebAppFactory).Assembly);
             services.AddOutbox<TestDbContext>(typeof(IntegrationTestWebAppFactory).Assembly);
             services.AddInbox<TestDbContext>();
@@ -154,6 +171,11 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.AddSingleton<IStartupFilter, TestClientAddressStartupFilter>();
         });
     }
+
+    /// <summary>Registers the recording consumer of <typeparamref name="TEvent"/> as <c>AddApplicationHandlers</c> registers a scanned one.</summary>
+    private static void AddRecordingIntegrationEventHandler<TEvent>(IServiceCollection services)
+        where TEvent : IIntegrationEvent
+        => services.AddIntegrationEventHandler(typeof(TEvent), typeof(RecordingIntegrationEventHandler<TEvent>));
 
     private ResettableDatabase TestsDatabase
         => _testsDatabase ?? throw new InvalidOperationException("The SQL Server container has not been started.");

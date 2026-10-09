@@ -272,6 +272,7 @@ public sealed class ChangePasswordCommandHandlerTests
         => VerificationCode.Issue(
             _user.Id,
             VerificationPurpose.PasswordReset,
+            VerificationTrigger.SelfService,
             _user.NormalizedEmail,
             [.. Guid.NewGuid().ToByteArray(), .. Guid.NewGuid().ToByteArray()],
             "protected",

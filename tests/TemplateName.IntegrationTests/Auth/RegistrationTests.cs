@@ -132,6 +132,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
             var code = VerificationCode.Issue(
                 user.Id,
                 VerificationPurpose.PasswordReset,
+                VerificationTrigger.SelfService,
                 user.NormalizedEmail,
                 generated.Hash,
                 "not-used-by-this-test",

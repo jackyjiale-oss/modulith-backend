@@ -598,6 +598,7 @@ public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : Integr
         context.Add(VerificationCode.Issue(
             userId,
             VerificationPurpose.PasswordReset,
+            VerificationTrigger.SelfService,
             User.NormalizeEmail(Email),
             token.Hash,
             scope.ServiceProvider.GetRequiredService<ISecretProtector>().Protect(token.Value),

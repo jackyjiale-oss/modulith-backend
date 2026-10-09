@@ -68,7 +68,7 @@ public sealed class ForgotPasswordCommandHandlerTests
     [Fact]
     public async Task Known_email_invalidates_pending_reset_codes_and_issues_a_new_one()
     {
-        var previous = VerificationCode.Issue(_user.Id, VerificationPurpose.PasswordReset, _user.NormalizedEmail, new byte[32], "old", TimeSpan.FromMinutes(30), null, Now.AddMinutes(-5));
+        var previous = VerificationCode.Issue(_user.Id, VerificationPurpose.PasswordReset, VerificationTrigger.SelfService, _user.NormalizedEmail, new byte[32], "old", TimeSpan.FromMinutes(30), null, Now.AddMinutes(-5));
         _verificationCodes.GetLastIssuedAtAsync(_user.Id, VerificationPurpose.PasswordReset, Arg.Any<CancellationToken>())
             .Returns(Now.AddMinutes(-5).UtcDateTime);
         _verificationCodes.GetPendingAsync(_user.Id, VerificationPurpose.PasswordReset, Now, Arg.Any<CancellationToken>())
@@ -87,7 +87,9 @@ public sealed class ForgotPasswordCommandHandlerTests
         issued.TokenHash.ShouldBe(TokenHash);
         issued.ExpiresAt.ShouldBe(Now.AddMinutes(30));
         issued.CreatedIp.ShouldBe("203.0.113.7");
-        issued.DomainEvents.OfType<VerificationCodeIssuedDomainEvent>().ShouldHaveSingleItem().ProtectedToken.ShouldBe("protected:" + TokenValue);
+        var issuedEvent = issued.DomainEvents.OfType<VerificationCodeIssuedDomainEvent>().ShouldHaveSingleItem();
+        issuedEvent.ProtectedToken.ShouldBe("protected:" + TokenValue);
+        issuedEvent.Trigger.ShouldBe(VerificationTrigger.SelfService);
         var audit = _auditEntries.ShouldHaveSingleItem();
         audit.EventType.ShouldBe(AuthAuditEvents.PasswordForgotRequested);
         audit.Succeeded.ShouldBeTrue();

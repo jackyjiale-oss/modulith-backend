@@ -52,6 +52,7 @@ internal sealed class ResendConfirmationCommandHandler(
         verificationCodes.Add(VerificationCode.Issue(
             user.Id,
             VerificationPurpose.EmailVerify,
+            VerificationTrigger.SelfService,
             user.NormalizedEmail,
             token.Hash,
             secretProtector.Protect(token.Value),
