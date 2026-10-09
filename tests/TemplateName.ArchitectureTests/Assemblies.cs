@@ -61,13 +61,14 @@ public static class Assemblies
         Api,
     ];
 
-    /// <summary>The open generic interfaces a command, query or domain event handler implements.</summary>
+    /// <summary>The open generic interfaces a command, query, domain event or integration event handler implements.</summary>
     public static IReadOnlyList<Type> HandlerInterfaces { get; } =
     [
         typeof(ICommandHandler<>),
         typeof(ICommandHandler<,>),
         typeof(IQueryHandler<,>),
         typeof(IDomainEventHandler<>),
+        typeof(IIntegrationEventHandler<>),
     ];
 
     /// <summary>Theory data: the assembly name of each module, which doubles as its root namespace.</summary>

@@ -12,6 +12,7 @@ using Respawn;
 using Respawn.Graph;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Messaging;
+using TemplateName.Infrastructure.Common.Inbox;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.IntegrationTests.Outbox;
@@ -57,7 +58,10 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     /// <summary>The events the outbox test handlers have received.</summary>
     public EventRecorder EventRecorder { get; } = new();
 
-    /// <summary>Makes the flaky outbox test handler fail.</summary>
+    /// <summary>The outbox message contexts the message context test handler has read.</summary>
+    public MessageContextRecorder MessageContextRecorder { get; } = new();
+
+    /// <summary>Makes the flaky outbox test handlers fail.</summary>
     public FlakySwitch FlakySwitch { get; } = new();
 
     /// <summary>Parks the gate outbox test handler inside a message.</summary>
@@ -135,8 +139,10 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.AddModuleDbContext<TestDbContext>(TestDbContext.Schema, PersistenceTestsConnectionStringName, includeInMigrations: false);
             services.AddApplicationHandlers(typeof(IntegrationTestWebAppFactory).Assembly);
             services.AddOutbox<TestDbContext>(typeof(IntegrationTestWebAppFactory).Assembly);
+            services.AddInbox<TestDbContext>();
             services.AddSingleton<IPermissionSource>(PermissionSource);
             services.AddSingleton(EventRecorder);
+            services.AddSingleton(MessageContextRecorder);
             services.AddSingleton(FlakySwitch);
             services.AddSingleton(HandlerGate);
             services.AddSingleton<IStartupFilter, ProtectedTestEndpointStartupFilter>();

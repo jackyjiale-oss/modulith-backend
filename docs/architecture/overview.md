@@ -90,7 +90,7 @@ One SQL Server database, one schema per owner, each with its own `__EFMigrations
 There are two modules today (Sample and Auth), and neither uses the other, so nothing crosses a module boundary yet. The rules for when it does:
 
 - A module exposes integration events (`{Noun}{PastTenseVerb}IntegrationEvent`) and public interfaces only in its `.Contracts` project.
-- Domain events stay inside the module. A domain event handler that must tell another module publishes an integration event; the consumer records what it has processed (inbox, Plan 3). Cross-module effects are eventually consistent, never one transaction (ADR 0007).
+- Domain events stay inside the module. A domain event handler that must tell another module builds an integration event whose `Id` is the outbox message id (`IOutboxMessageContext.MessageId`) and calls `IIntegrationEventPublisher`, which runs every `IIntegrationEventHandler<T>` in the process, each in its own scope. A failing consumer makes the outbox retry the publish; each consumer records the event in its own module's inbox (`InboxMessages`) in the same save as its rows, so a repeat has no effect. Consumers only write rows. Cross-module effects are eventually consistent, never one transaction (ADR 0007, ADR 0018).
 
 ## Decisions
 
@@ -113,3 +113,4 @@ There are two modules today (Sample and Auth), and neither uses the other, so no
 | [0015](../adr/0015-es256-jwt-with-configured-signing-keys.md) | ES256 access tokens signed with keys from configuration |
 | [0016](../adr/0016-server-side-permissions-with-per-user-cache.md) | Server-side permissions with a per-user cache |
 | [0017](../adr/0017-outbox-secrets-protected-with-data-protection.md) | Single-use tokens in outbox events protected with Data Protection |
+| [0018](../adr/0018-in-process-integration-events-with-inbox.md) | In-process integration events with a per-consumer inbox |

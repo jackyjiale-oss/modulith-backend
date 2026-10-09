@@ -1,11 +1,12 @@
 using Microsoft.EntityFrameworkCore;
+using TemplateName.Infrastructure.Common.Inbox;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
 
 namespace TemplateName.IntegrationTests.Persistence;
 
 /// <summary>
-/// A module-style context (schema <c>test</c>) used to test the shared persistence conventions and the outbox. Created with
+/// A module-style context (schema <c>test</c>) used to test the shared persistence conventions, the outbox and the inbox. Created with
 /// <c>EnsureCreated</c>, not migrations.
 /// </summary>
 internal sealed class TestDbContext(DbContextOptions<TestDbContext> options) : DbContext(options)
@@ -29,6 +30,7 @@ internal sealed class TestDbContext(DbContextOptions<TestDbContext> options) : D
         });
 
         modelBuilder.ApplyOutbox();
+        modelBuilder.ApplyInbox();
         modelBuilder.ApplySoftDeleteQueryFilters();
     }
 }

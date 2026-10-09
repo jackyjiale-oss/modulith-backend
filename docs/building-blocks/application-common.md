@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The application-layer contracts modules code against: command, query and domain event handlers with their registration and decorators (ADR 0005), the current user, the read-side connection factory, error-message resources (ADR 0009) and cursor pagination (ADR 0010). It depends on SharedKernel, FluentValidation, Scrutor, Dapper (for `KeysetQuery.Parameters`) and the `Microsoft.Extensions` abstractions, never on Infrastructure.Common or Web.Common (architecture test).
+The application-layer contracts modules code against: command, query, domain event and integration event handlers with their registration and decorators (ADR 0005), the integration event publisher (ADR 0018), the current user, the read-side connection factory, error-message resources (ADR 0009) and cursor pagination (ADR 0010). It depends on SharedKernel, FluentValidation, Scrutor, Dapper (for `KeysetQuery.Parameters`) and the `Microsoft.Extensions` abstractions, never on Infrastructure.Common or Web.Common (architecture test).
 
 Code: `src/BuildingBlocks/TemplateName.Application.Common/`.
 
@@ -18,11 +18,14 @@ Code: `src/BuildingBlocks/TemplateName.Application.Common/`.
 | `ICommandHandler<TCommand, TResponse>` | `Task<Result<TResponse>> HandleAsync(TCommand, CancellationToken)`. |
 | `IQueryHandler<TQuery, TResponse>` | `Task<Result<TResponse>> HandleAsync(TQuery, CancellationToken)`. |
 | `IDomainEventHandler<TEvent>` | `Task HandleAsync(TEvent, CancellationToken)`; run by the module outbox after the save, at least once (ADR 0007). Must be idempotent. |
+| `IOutboxMessageContext` | `Guid MessageId`, `DateTimeOffset OccurredAt`: the outbox message a domain event handler runs for, the same on every retry. Use `MessageId` as the `Id` of the integration event the handler publishes. Set by the outbox dispatcher in each message's scope; reading it anywhere else (a request, an integration event handler) throws `InvalidOperationException`. |
+| `IIntegrationEventPublisher` | `Task PublishAsync<TEvent>(TEvent, CancellationToken)`: runs every `IIntegrationEventHandler<TEvent>` sequentially, each in its own scope; every handler runs even if an earlier one throws, then one failure is rethrown as it is and several as an `AggregateException`, so the outbox retries the publishing handler. Cancellation is rethrown at once. Call it from a domain event handler only (ADR 0018). Infrastructure.Common implements it in process. |
+| `IIntegrationEventHandler<TEvent>` | `Task HandleAsync(TEvent, CancellationToken)`; consumes another module's integration event, at least once. It checks and records the event in its module's inbox in the same save as its rows, and only writes rows (slow work is queued). |
 
 | Extension | Does |
 |---|---|
-| `services.AddApplicationHandlers(assembly)` | Registers every handler (including `internal` ones) of the four interfaces above, and every FluentValidation validator in the assembly, as scoped. |
-| `services.AddApplicationDecorators()` | Wraps every registered command and query handler with the validation decorator, then the logging decorator (outermost). Call it once, last, after every module. Domain event handlers are not decorated. |
+| `services.AddApplicationHandlers(assembly)` | Registers every handler (including `internal` ones) of the five handler interfaces above, and every FluentValidation validator in the assembly, as scoped. |
+| `services.AddApplicationDecorators()` | Wraps every registered command and query handler with the validation decorator, then the logging decorator (outermost). Call it once, last, after every module. Domain and integration event handlers are not decorated. |
 
 - **Validation decorator:** runs every `IValidator<T>` of the message; on failure it returns a `ValidationError` (`validation.failed`) without calling the handler. Field keys are camel-cased paths (`Items[0].Name` → `items[0].name`).
 - **Logging decorator:** logs `Processing {RequestName}` and `Completed {RequestName} in {ElapsedMs} ms` (Information) or `Failed {RequestName} with {ErrorCode} in {ElapsedMs} ms` (Warning). Exceptions are not caught; the exception handler logs them once.

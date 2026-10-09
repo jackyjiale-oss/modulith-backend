@@ -29,6 +29,7 @@ public abstract class IntegrationTestBase(IntegrationTestWebAppFactory factory) 
         await Factory.Services.SeedAuthModuleAsync(Ct);
         Factory.CurrentUser.UserId = null;
         Factory.EventRecorder.Clear();
+        Factory.MessageContextRecorder.Clear();
         Factory.EmailSender.Clear();
         Factory.FlakySwitch.Reset();
         Factory.HandlerGate.Reset();

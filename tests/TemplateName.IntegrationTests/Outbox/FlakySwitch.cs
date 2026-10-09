@@ -1,6 +1,9 @@
 namespace TemplateName.IntegrationTests.Outbox;
 
-/// <summary>Makes <see cref="FlakyTestEventHandler"/> fail: once (<see cref="FailNext"/>) or on every call (<see cref="FailAlways"/>).</summary>
+/// <summary>
+/// Makes <see cref="FlakyTestEventHandler"/> fail: once (<see cref="FailNext"/>) or on every call (<see cref="FailAlways"/>).
+/// <see cref="MessageContextTestEventHandler"/> also fails once on <see cref="FailNext"/>.
+/// </summary>
 public sealed class FlakySwitch
 {
     public bool FailNext { get; set; }

@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TemplateName.Application.Common.Messaging;
+using TemplateName.Infrastructure.Common.Messaging;
 using TemplateName.SharedKernel;
 
 namespace TemplateName.Infrastructure.Common.Outbox;
@@ -23,7 +24,8 @@ namespace TemplateName.Infrastructure.Common.Outbox;
 /// </summary>
 /// <remarks>
 /// Handlers resolve the same scoped <typeparamref name="TContext"/> as the dispatcher. Changes a handler leaves tracked but unsaved
-/// are committed in the same save as its consumer row, so they commit or roll back together; this is supported.
+/// are committed in the same save as its consumer row, so they commit or roll back together; this is supported. Each message's scope
+/// also carries its <see cref="IOutboxMessageContext"/> (id and occurrence time), the same on every retry (ADR 0018).
 /// </remarks>
 public sealed partial class OutboxDispatcher<TContext>(
     IServiceScopeFactory scopeFactory,
@@ -44,7 +46,7 @@ public sealed partial class OutboxDispatcher<TContext>(
               AND (LockedUntil IS NULL OR LockedUntil < @Now)
             ORDER BY OccurredAt)
         UPDATE batch SET LockedUntil = @LeaseUntil
-        OUTPUT inserted.Id, inserted.Type, inserted.Content, inserted.AttemptCount, inserted.LockedUntil;
+        OUTPUT inserted.Id, inserted.Type, inserted.Content, inserted.OccurredAt, inserted.AttemptCount, inserted.LockedUntil;
         """;
 
     private const int UniqueConstraintViolation = 2627;
@@ -98,6 +100,8 @@ public sealed partial class OutboxDispatcher<TContext>(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<TContext>();
+        scope.ServiceProvider.GetRequiredService<OutboxMessageContext>()
+            .Set(message.Id, new DateTimeOffset(DateTime.SpecifyKind(message.OccurredAt, DateTimeKind.Utc)));
 
         var failures = new List<DispatchFailure>();
         try
@@ -264,7 +268,7 @@ public sealed partial class OutboxDispatcher<TContext>(
     private static partial void LogAlreadyHandled(ILogger logger, string handlerName, Guid outboxMessageId);
 
     /// <summary>The columns the claim query returns; <see cref="LockedUntil"/> is the lease this dispatcher holds.</summary>
-    private sealed record ClaimedMessage(Guid Id, string Type, string Content, int AttemptCount, DateTime LockedUntil);
+    private sealed record ClaimedMessage(Guid Id, string Type, string Content, DateTime OccurredAt, int AttemptCount, DateTime LockedUntil);
 
     /// <summary>A handler failure, or a failure of the whole message when <see cref="HandlerName"/> is <see langword="null"/>.</summary>
     private sealed record DispatchFailure(string? HandlerName, Exception Exception);

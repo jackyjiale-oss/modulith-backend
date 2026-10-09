@@ -12,6 +12,7 @@ public static class MessagingServiceCollectionExtensions
         typeof(ICommandHandler<,>),
         typeof(IQueryHandler<,>),
         typeof(IDomainEventHandler<>),
+        typeof(IIntegrationEventHandler<>),
     ];
 
     /// <summary>Registers every handler and validator in <paramref name="assembly"/>, including internal ones, as scoped.</summary>

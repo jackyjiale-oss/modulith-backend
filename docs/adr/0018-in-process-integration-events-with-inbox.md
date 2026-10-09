@@ -1,0 +1,27 @@
+# 0018. In-process integration events with a per-consumer inbox
+
+- Status: Accepted
+- Date: 2026-10-09
+- Deciders: Lee Jia Le
+
+## Context
+Modules may not call each other's internals or read each other's tables (ADR 0001), and each module saves through its own `DbContext`, so one module cannot write another module's rows in its transaction (blueprint review, Section 2.2). The blueprint had Auth and Notifications commit "in the same transaction"; the review replaced that with a per-module outbox (ADR 0007, review Section 2.1) and an idempotent consumer: the publishing module's outbox dispatcher publishes an integration event and the consuming module records what it has processed (an inbox). The Notifications module (Plan 3) is the first consumer: Auth's security events must create notifications reliably, exactly once per event, even though the outbox delivers at least once and does not order messages.
+
+## Options considered
+1. Direct module calls: the Auth outbox handler calls a public Notifications interface from `Notifications.Contracts`. Simple, but Auth then depends on every module that reacts to it, every new consumer edits Auth, and the consumer still needs its own duplicate protection.
+2. In-process integration events with an inbox: an Auth outbox handler turns the domain event into a public integration event from `Auth.Contracts` and hands it to an in-process publisher, which runs every registered consumer; each consumer records the event in its own module's inbox in the same save as its rows.
+3. A message broker (RabbitMQ, Azure Service Bus) between the outbox and the consumers: durable fan-out and independent consumer retries, but a new piece of infrastructure to run, a serializer and versioned envelopes, and (with MassTransit 9) a licence the rules forbid. More than one process needs.
+
+## Decision
+We chose option 2 (decisions D2 and D3 of Plan 3).
+
+- **Contracts.** `IIntegrationEvent` (SharedKernel) has `Guid Id` and `DateTimeOffset OccurredAt`. Implementations are `public sealed record {Noun}{PastTenseVerb}IntegrationEvent` in the publishing module's `.Contracts` project. Events are never stored or serialized, so there is no version field; a breaking change is a new record type (`...V2IntegrationEvent`).
+- **Stable id.** A domain event handler in the publishing module builds the integration event with `Id = IOutboxMessageContext.MessageId`, the id of the outbox message being dispatched. `OutboxDispatcher` sets that scoped context in each message's scope before running the handlers, so a retry publishes the same id. One domain event maps to at most one integration event. Reading the context outside an outbox dispatch throws `InvalidOperationException`.
+- **Publishing.** `IIntegrationEventPublisher` (singleton `InProcessIntegrationEventPublisher`) runs every `IIntegrationEventHandler<T>` registered by `AddApplicationHandlers`, sequentially, each in its own async DI scope, so each consumer has its own `DbContext`. Every handler runs even when an earlier one fails; afterwards a single failure is rethrown as it is and several as an `AggregateException`. The publishing domain event handler therefore fails, and the outbox retries it later (ADR 0007); the consumers that succeeded see the repeat in their inbox and do nothing. Cancellation is rethrown at once.
+- **Inbox.** A consuming module maps `InboxMessages` (`MessageId`, `Consumer` up to 500 characters, `ProcessedAt`; primary key `(MessageId, Consumer)`) into its own schema with `ApplyInbox()` and registers `Inbox<TContext>` with `AddInbox<TContext>()`. A consumer calls `HasProcessedAsync`, writes its rows, calls `Record` (which only stages the row) and saves once, so the inbox row commits or rolls back with its own rows. When two deliveries race past the check, the second save fails on the primary key; `Inbox<TContext>.IsDuplicate` recognizes SQL Server error 2627 or 2601 naming `PK_InboxMessages` (and nothing else), and the consumer treats the event as processed.
+- **Consumers write rows only.** A consumer runs inside the publisher's outbox dispatch, under its lease. It must be fast and local: it writes its module's rows and never sends mail or calls other systems; slow work is queued (for Notifications, the delivery worker sends).
+
+## Consequences
+- Positive: no new infrastructure; the publishing module knows only its own contracts, and adding a consumer touches only the consuming module; each consumer has an exactly-once effect even though publishing is at least once; one failing consumer delays only itself, and the others are not repeated.
+- Negative / trade-offs accepted: publishing is at least once, so every consumer must use the inbox; there is no ordering between events, as for the outbox; a consumer failure retries the whole publishing handler, so all consumers of that event wait for the outbox's backoff; consumers run in the publisher's process and dispatch loop, so a slow consumer slows the publisher's outbox; the publisher resolves the handler list once per handler scope, so handler constructors must be cheap; inbox rows accumulate until a cleanup job removes them.
+- Follow-up actions: Auth's contracts and publishing handlers (Plan 3, Tasks 3-4); the Notifications consumers (Task 10); a cleanup job for old inbox and outbox rows (Plan 5); moving to a broker later adds an envelope (type, version) and a serializer behind the same `IIntegrationEventPublisher`, and the inbox stays as it is.
