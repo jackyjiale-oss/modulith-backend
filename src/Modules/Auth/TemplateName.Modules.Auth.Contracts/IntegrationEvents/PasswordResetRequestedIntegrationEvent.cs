@@ -9,7 +9,8 @@ namespace TemplateName.Modules.Auth.Contracts.IntegrationEvents;
 /// <param name="Email">The address the link was issued for, which is where it must be sent (the user address when it was issued).</param>
 /// <param name="ProtectedActionUrl">
 /// The complete link, encrypted with <c>ISecretProtector</c>. It is single-use and secret: store it only as this ciphertext, decrypt it
-/// only while rendering the message, and never log it or put it in a subject or an in-app text.
+/// only in memory (to check it, and while rendering the message), and never store, log or put the plaintext in an exception, a subject
+/// or an in-app text.
 /// </param>
 /// <param name="ExpiresAt">When the link stops working (UTC).</param>
 /// <param name="Reason">Why the link was issued.</param>

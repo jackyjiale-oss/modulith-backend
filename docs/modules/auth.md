@@ -224,7 +224,7 @@ The public surface of the module is the `TemplateName.Modules.Auth.Contracts` pr
 
 | Integration event | Carries | Meaning |
 |---|---|---|
-| `EmailVerificationRequestedIntegrationEvent` | `UserId`, `Email`, `ProtectedActionUrl`, `ExpiresAt` | A confirmation link was issued. `Email` is the address the link was issued for (where it must go); `ProtectedActionUrl` is the full link encrypted with `ISecretProtector`: single-use and secret, stored only as ciphertext, decrypted only while rendering, never logged |
+| `EmailVerificationRequestedIntegrationEvent` | `UserId`, `Email`, `ProtectedActionUrl`, `ExpiresAt` | A confirmation link was issued. `Email` is the address the link was issued for (where it must go); `ProtectedActionUrl` is the full link encrypted with `ISecretProtector`: single-use and secret, stored only as ciphertext, decrypted only in memory (the consumer's URL check and the rendering of the email), never logged |
 | `PasswordResetRequestedIntegrationEvent` | `UserId`, `Email`, `ProtectedActionUrl`, `ExpiresAt`, `Reason` | A reset link was issued, with the same address and ciphertext rules; `Reason` is `PasswordResetReason.SelfService` (the user asked), `CreatedByAdmin` (set the first password of an administrator-created account) or `ForcedByAdmin` |
 | `RegistrationAttemptedIntegrationEvent` | `UserId` | Someone registered an address that already has an account; `UserId` is its owner |
 | `PasswordChangedIntegrationEvent` | `UserId` | A password was changed or reset |
