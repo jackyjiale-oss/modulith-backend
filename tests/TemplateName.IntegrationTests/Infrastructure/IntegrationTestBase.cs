@@ -7,7 +7,8 @@ namespace TemplateName.IntegrationTests.Infrastructure;
 /// <summary>
 /// Base class for tests that call the running API through <see cref="Client"/>. Each test starts with empty databases seeded with the
 /// Auth module's system roles and the permissions every module declares, the clock at its start instant, an anonymous client and user,
-/// no extra declared permissions, no recorded events or emails and handlers that neither fail nor wait.
+/// no extra declared permissions, no recorded events or emails and handlers that neither fail nor wait. Only the Data Protection key
+/// ring (<c>auth.DataProtectionKeys</c>) is kept from earlier tests, because the hosts keep it in memory.
 /// </summary>
 public abstract class IntegrationTestBase(IntegrationTestWebAppFactory factory) : IAsyncLifetime
 {
