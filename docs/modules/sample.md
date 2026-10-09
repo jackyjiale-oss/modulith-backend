@@ -9,8 +9,8 @@
 A small leave-request workflow that shows every template pattern end to end: an aggregate with domain events, commands and queries through the injected handlers and decorators, EF Core writes, Dapper reads, a cursor-paginated list, the per-module outbox and ProblemDetails errors.
 
 - Owns: leave requests and the `sample` schema.
-- Does not: authenticate anyone. Until the Auth plan replaces it with `ICurrentUser`, the approver id comes from the request body.
-- Talks to: no other module. It has no `TemplateName.Modules.Sample.Contracts` project yet, because nothing outside the module needs its data.
+- Does not: authenticate anyone or store permissions. The Auth module signs callers in and checks the permissions this module declares; the approver is the signed-in caller (`ICurrentUser`).
+- Talks to: no other module (it does not reference the Auth module; its permissions go through `IPermissionSource` in Application.Common). It has no `TemplateName.Modules.Sample.Contracts` project yet, because nothing outside the module needs its data.
 
 Code: `src/Modules/Sample/TemplateName.Modules.Sample/`. The host calls `AddSampleModule()` and maps `MapSampleEndpoints()` on the `/api/v1` group.
 
@@ -18,16 +18,26 @@ Code: `src/Modules/Sample/TemplateName.Modules.Sample/`. The host calls `AddSamp
 
 <!-- Every endpoint, written as METHOD + full route (e.g. GET /api/v1/{module}/{resources}/{id:guid}), with its success status and error codes. -->
 
-All endpoints carry the OpenAPI tag `Sample`.
+All endpoints carry the OpenAPI tag `Sample` and need a signed-in caller (`Authorization: Bearer {access token}`) who holds the route's permission (`RequirePermission`, see [Permissions](#permissions)). A request without a valid token gets 401 `http.401` (with `WWW-Authenticate: Bearer`), a signed-in caller without the permission 403 `http.403`; both are ProblemDetails with `traceId`, and neither reaches the handler. The OpenAPI document marks every route with the `Bearer` security requirement and lists the 401 and 403 responses.
 
 | Method | Route | Purpose | Success | Errors |
 |---|---|---|---|---|
 | POST | `POST /api/v1/sample/leave-requests` | Submit a leave request. Body `{ "employeeId", "startDate", "endDate", "reason" }` (dates `yyyy-MM-dd`). Accepts an optional `Idempotency-Key` header. | `201 Created`, `Location: /api/v1/sample/leave-requests/{id}`, body `{ "id": "<guid>" }` | 400 `validation.failed` (with `errors`), 400 `request.malformed`, 400 `idempotency.invalid_key`, 409 `idempotency.in_progress`, 422 `idempotency.key_reused` |
 | GET | `GET /api/v1/sample/leave-requests` | List leave requests, newest first by default, one cursor page at a time (query parameters below). | `200 OK`, `CursorPage<LeaveRequestListItemResponse>` | 400 `validation.failed` (with `errors.pageSize`), 400 `pagination.invalid_sort`, 400 `pagination.invalid_cursor`, 400 `pagination.cursor_mismatch`, 400 `request.malformed` |
 | GET | `GET /api/v1/sample/leave-requests/{id:guid}` | Read one leave request. | `200 OK`, `LeaveRequestResponse` | 404 `leave.not_found` |
-| POST | `POST /api/v1/sample/leave-requests/{id:guid}/approve` | Approve a pending request. Body `{ "approverId" }`. | `204 No Content` | 400 `request.malformed`, 404 `leave.not_found`, 409 `leave.not_pending`, 409 `concurrency.conflict` |
+| POST | `POST /api/v1/sample/leave-requests/{id:guid}/approve` | Approve a pending request as the signed-in caller. No body: the approver is `ICurrentUser.UserId` (the token's `sub`); an `approverId` sent anyway is ignored. | `204 No Content` | 404 `leave.not_found`, 409 `leave.not_pending`, 409 `concurrency.conflict` |
 
-Submit is idempotent when the client sends `Idempotency-Key` (1 to 100 characters, scoped to the signed-in user or `anonymous`): a retry with the same key and body within `Idempotency:TimeToLive` (one day by default) gets the first response again, with `Idempotency-Replayed: true`, instead of creating a second request. The same key with a different body gets 422, and a retry while the first request is still running gets 409 (for at most `Idempotency:InProgressTimeout`, five minutes by default, after which the key is treated as abandoned). A 5xx response is not stored, so the client can retry it. The OpenAPI document does not yet list the `Idempotency-Key` header or the 409/422 responses; the idempotency limitations are in [`infrastructure-common`](../building-blocks/infrastructure-common.md#idempotency).
+### Permissions
+
+The module declares its permissions in `Application/SamplePermissions.cs` and `SamplePermissionSource` (module `sample`), which `AddSampleModule` registers as a singleton `IPermissionSource`; the Auth module's seeder syncs them into `auth.Permissions` at start-up, and `SuperAdmin` receives them there. Grant them to other roles through the Auth module.
+
+| Code | Required by | Allows |
+|---|---|---|
+| `sample.leave_request.view` | `GET /api/v1/sample/leave-requests`, `GET /api/v1/sample/leave-requests/{id:guid}` | List leave requests and read their details. |
+| `sample.leave_request.create` | `POST /api/v1/sample/leave-requests` | Submit a leave request. |
+| `sample.leave_request.approve` | `POST /api/v1/sample/leave-requests/{id:guid}/approve` | Approve a pending leave request as the approver. |
+
+Submit is idempotent when the client sends `Idempotency-Key` (1 to 100 characters, scoped to the signed-in user): a retry with the same key and body within `Idempotency:TimeToLive` (one day by default) gets the first response again, with `Idempotency-Replayed: true`, instead of creating a second request. The same key with a different body gets 422, and a retry while the first request is still running gets 409 (for at most `Idempotency:InProgressTimeout`, five minutes by default, after which the key is treated as abandoned). A 5xx response is not stored, so the client can retry it. The OpenAPI document does not yet list the `Idempotency-Key` header or the 409/422 responses; the idempotency limitations are in [`infrastructure-common`](../building-blocks/infrastructure-common.md#idempotency).
 
 The list is cursor-paginated (ADR 0010); it has no page numbers or offsets. Query parameters:
 
@@ -42,7 +52,7 @@ The list is cursor-paginated (ADR 0010); it has no page numbers or offsets. Quer
 
 The response is `{ items, pageSize, nextCursor, previousCursor, totalCount? }`. A cursor is `null` when there is no page in that direction (`previousCursor` is `null` on the first page); `totalCount` is present only when requested. An item (`LeaveRequestListItemResponse`) is `{ id, employeeId, startDate, endDate, status, createdAt }`. Paging is stable: requests submitted or deleted between two calls never cause a skipped or repeated item, and requests with the same sort value are ordered by `id`. Soft-deleted requests never appear. If the rows beyond a cursor disappear before it is used (deleted, or no longer matching `status`), the page is empty but still carries the cursor back the way it came (`previousCursor` going forward, `nextCursor` going backward), starting after the position the client came from.
 
-`LeaveRequestResponse` is `{ id, employeeId, startDate, endDate, reason, status, approverId, createdAt }`; `status` is the enum name (`"Pending"`, never localized), `createdAt` is UTC with a trailing `Z`. Every error is RFC 9457 ProblemDetails with `code` and `traceId`, plus `params` when the error has parameters; `detail` (and validation messages) follow `Accept-Language` (`en`, `ms`, `zh-Hans`, else English; ADR 0009).
+`LeaveRequestResponse` is `{ id, employeeId, startDate, endDate, reason, status, approverId, createdAt }`; `status` is the enum name (`"Pending"`, never localized), `createdAt` is UTC with a trailing `Z`. Every error is RFC 9457 ProblemDetails with `code` and `traceId`, plus `params` when the error has parameters; `detail` (and validation messages) follow the signed-in user's saved locale, else `Accept-Language` (`en`, `ms`, `zh-Hans`, else English; ADR 0009).
 
 ## Domain model
 
@@ -51,7 +61,7 @@ The response is `{ items, pageSize, nextCursor, previousCursor, totalCount? }`. 
 `LeaveRequest` (aggregate root, `Domain/LeaveRequests/`) is auditable (`CreatedAt/By`, `UpdatedAt/By`), soft-deletable (`IsDeleted`, `DeletedAt/By`) and guarded by a `RowVersion` concurrency token.
 
 - `LeaveRequest.Submit(...)` creates it as `Pending`; the end date must not be before the start date.
-- `Approve(approverId)` moves `Pending` to `Approved` and records the approver; any other status fails with `leave.not_pending`.
+- `Approve(approverId)` moves `Pending` to `Approved` and records the approver (the endpoint passes the signed-in caller's id); any other status fails with `leave.not_pending`.
 
 ```mermaid
 stateDiagram-v2
@@ -74,7 +84,7 @@ stateDiagram-v2
 
 The codes are declared in `Domain/LeaveRequests/LeaveRequestErrors.cs`. Their messages are in `Resources/SampleErrorMessages.resx` (English) with `SampleErrorMessages.ms.resx` and `SampleErrorMessages.zh-Hans.resx` (drafts awaiting native review); `AddSampleModule` registers them, and `detail` is the message in the caller's language with `{id}` filled in.
 
-The submit validator rejects an end date before the start date first (`validation.failed`, field `endDate`); `leave.invalid_date_range` is the aggregate's own guard. Shared codes from the building blocks also apply, with their messages in `CommonErrorMessages` (Web.Common) and `InfrastructureErrorMessages` (Infrastructure.Common): `validation.failed`, `request.malformed`, `concurrency.conflict`, `idempotency.*`, `rate_limit.exceeded`, `server.unexpected_error`.
+The submit validator rejects an end date before the start date first (`validation.failed`, field `endDate`); `leave.invalid_date_range` is the aggregate's own guard. Shared codes from the building blocks also apply, with their messages in `CommonErrorMessages` (Web.Common) and `InfrastructureErrorMessages` (Infrastructure.Common): `validation.failed`, `request.malformed`, `http.401`, `http.403`, `concurrency.conflict`, `idempotency.*`, `rate_limit.exceeded`, `server.unexpected_error`.
 
 The list endpoint returns the cursor-pagination codes (declared in `PaginationErrors`, Application.Common; messages in `CommonErrorMessages`):
 
@@ -156,9 +166,9 @@ dotnet ef migrations add {Verb}{What} \
 
 <!-- Where the module's unit and integration tests live and what they cover. -->
 
-- Unit tests, `tests/TemplateName.UnitTests/Sample/`: `LeaveRequestTests` (aggregate rules), `SubmitLeaveRequestCommandValidatorTests`, `SubmitLeaveRequestCommandHandlerTests`, `ApproveLeaveRequestCommandHandlerTests`, `LeaveRequestSubmittedDomainEventHandlerTests`, `ListLeaveRequestsQueryValidatorTests`. The pagination building blocks have their own unit tests in `tests/TemplateName.UnitTests/Pagination/`.
-- Integration tests, `tests/TemplateName.IntegrationTests/Sample/`: `LeaveRequestEndpointTests` runs the real API against SQL Server: submit, read, approve twice, validation and malformed-body errors, the 500 contract, soft-deleted rows hidden from the Dapper query, and the submitted event dispatched through the outbox (recorded by `RecordingLeaveSubmittedHandler`). `ListLeaveRequestsTests` covers the list: first page and defaults, walking forward and backward, no duplicates when requests are inserted between pages, ties on `createdAt` broken by `id`, `createdAt` values a millisecond apart, the `employeeId`, `status` and `sort` options, total count, soft-deleted rows excluded, the `pagination.*` and `pageSize` errors, and the query parameters in the OpenAPI document.
-- Integration tests, `tests/TemplateName.IntegrationTests/Localization/`: `LocalizationTests` reads Sample errors in Malay, Simplified Chinese (from `zh-CN`) and English fallback, and checks that `code`, `params` and enum values stay unlocalized and that validation messages are translated.
+- Unit tests, `tests/TemplateName.UnitTests/Sample/`: `LeaveRequestTests` (aggregate rules), `SamplePermissionSourceTests` (the three codes, module `sample`, every `SamplePermissions` constant declared, the singleton registration), `SubmitLeaveRequestCommandValidatorTests`, `SubmitLeaveRequestCommandHandlerTests`, `ApproveLeaveRequestCommandHandlerTests`, `LeaveRequestSubmittedDomainEventHandlerTests`, `ListLeaveRequestsQueryValidatorTests`. The pagination building blocks have their own unit tests in `tests/TemplateName.UnitTests/Pagination/`.
+- Integration tests, `tests/TemplateName.IntegrationTests/Sample/`: `SampleAuthorizationTests` covers the permissions: anonymous callers get 401 and signed-in callers without a permission 403 on every route (ProblemDetails with `code` and `traceId`, nothing changed), submit needs `create`, list and get need `view`, approve records the signed-in caller and ignores an `approverId` in a body, and removing a grant from the caller's role takes effect on the next request once `IPermissionCache.InvalidateUsersAsync` ran. The other Sample, localization and idempotency tests sign in first with the permissions they need (`SignInAsync` on `IntegrationTestBase`, see the [Auth module's testing notes](auth.md#testing)). `LeaveRequestEndpointTests` runs the real API against SQL Server: submit, read, approve twice, validation and malformed-body errors, the 500 contract, soft-deleted rows hidden from the Dapper query, and the submitted event dispatched through the outbox (recorded by `RecordingLeaveSubmittedHandler`). `ListLeaveRequestsTests` covers the list: first page and defaults, walking forward and backward, no duplicates when requests are inserted between pages, ties on `createdAt` broken by `id`, `createdAt` values a millisecond apart, the `employeeId`, `status` and `sort` options, total count, soft-deleted rows excluded, the `pagination.*` and `pageSize` errors, and the query parameters in the OpenAPI document.
+- Integration tests, `tests/TemplateName.IntegrationTests/Localization/`: `LocalizationTests` (signed in with a saved locale the API does not support, so `Accept-Language` decides) reads Sample errors in Malay, Simplified Chinese (from `zh-CN`) and English fallback, and checks that `code`, `params` and enum values stay unlocalized and that validation messages are translated.
 - Architecture tests, `TranslationTests`: every `LeaveRequestErrors` code has an English message, and the translations have the same keys and placeholders.
 - Integration tests, `tests/TemplateName.IntegrationTests/Idempotency/`: `IdempotencyTests` drives `Idempotency-Key` through the submit endpoint: replay (including a stored 400), key reuse with another body, invalid, empty, repeated and expired keys, a key still in progress, concurrent duplicates running once, 5xx responses (thrown or returned) not being stored, an abandoned key reusable after its in-progress lease, and a superseded request unable to store over or release the new owner's key.
 - Documentation and contract: `DocumentationTests` (architecture tests) check that this page exists, keeps the required sections and lists every `LeaveRequestErrors` code; `EndpointDocumentationTests` check that every mapped `/api/v1/sample/…` route appears above as `METHOD /route`; `OpenApiSnapshotTests` pin the endpoints' OpenAPI description (ADR 0011).

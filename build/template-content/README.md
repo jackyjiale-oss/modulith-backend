@@ -15,32 +15,37 @@ Windows stops at 260 characters per path unless long paths are enabled. The long
 2. Clone or generate the project in a shorter folder such as `C:\src\`; `TN0001` says by how many characters.
 3. Bypass the check with `-p:SkipPathLengthCheck=true` (the build can still fail).
 
-## Quick start
+## Run the backend
 
 ```bash
 cp .env.example .env                 # then set your own SQL_SA_PASSWORD
-docker compose up -d                 # SQL Server and the Aspire dashboard
+docker compose up -d                 # SQL Server, the Aspire dashboard and Mailpit
 git init                             # skip if this folder is already a repository
 git config core.hooksPath .githooks  # commit-message check (CONTRIBUTING.md)
 chmod +x .githooks/commit-msg        # the hook must be executable (harmless on Windows)
 dotnet user-secrets set "ConnectionStrings:Database" \
-  "Server=localhost,1433;Database=TemplateName;User Id=sa;Password=<from .env>;TrustServerCertificate=True" \
+  "Server=127.0.0.1,1433;Database=TemplateName;User Id=sa;Password=<from .env>;TrustServerCertificate=True" \
   --project src/Host/TemplateName.Api
+dotnet user-secrets set "Auth:Seed:AdminPassword" "<value>" --project src/Host/TemplateName.Api
 dotnet run --project src/Host/TemplateName.Api
 ```
 
-In Development the API applies the module migrations on startup.
+SQL Server needs several seconds on its first start: if the API stops at the migration step, wait until the container is ready (`docker compose logs sqlserver` shows `SQL Server is now ready for client connections`) and run it again. The connection string uses `127.0.0.1`, not `localhost`, because `localhost` can hang on some Windows setups.
+
+In Development the API applies the module migrations on startup and seeds the roles, the permissions and the first administrator, `admin@localhost.test`, with the password you set above (12 to 128 characters; choose your own and never commit it). Sign in as that administrator with `POST /api/v1/auth/login` in Scalar and send the returned `accessToken` as a bearer token. Remove `Auth:Seed:AdminPassword` from user secrets after the first start. Emails (account confirmation, password reset) are not delivered anywhere locally: Mailpit catches them, and its inbox is at <http://localhost:8025>.
 
 | What | URL |
 |---|---|
 | API reference (Scalar) | <https://localhost:5001/scalar/v1> |
 | Health (readiness) | <https://localhost:5001/health/ready> |
 | Aspire dashboard (logs, traces, metrics) | <http://localhost:18888> |
+| Mailpit inbox (emails the API sends) | <http://localhost:8025> |
 
 ## Modules
 
 | Module | Document |
 |---|---|
+| Auth (sign-in, tokens, sessions, roles, permissions, audit log) | [`docs/modules/auth.md`](docs/modules/auth.md) |
 | Sample (leave requests) | [`docs/modules/sample.md`](docs/modules/sample.md) |
 
 A new module gets its own page, copied from [`docs/modules/_template.md`](docs/modules/_template.md).

@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.SqlClient;
@@ -14,6 +16,9 @@ using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.IntegrationTests.Outbox;
 using TemplateName.IntegrationTests.Persistence;
+using TemplateName.Modules.Auth;
+using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Infrastructure.Persistence;
 using Testcontainers.MsSql;
 
 namespace TemplateName.IntegrationTests.Infrastructure;
@@ -27,6 +32,7 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     private const string PersistenceTestsDatabaseName = "TemplateName_PersistenceTests";
     private const string PersistenceTestsConnectionStringName = "PersistenceTests";
     private const string CreateDatabasesSql = $"CREATE DATABASE [{TestsDatabaseName}]; CREATE DATABASE [{PersistenceTestsDatabaseName}];";
+    private const int TestPasswordHashIterations = 1000;
 
     private static readonly DateTimeOffset StartTime = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
@@ -37,8 +43,17 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     /// <summary>The clock every host built by this factory uses; it starts at 2026-01-01T00:00:00Z and moves only when a test moves it.</summary>
     public FakeTimeProvider Time { get; } = new(StartTime);
 
-    /// <summary>The user every host built by this factory sees; anonymous until a test sets <see cref="TestCurrentUser.UserId"/>.</summary>
-    public TestCurrentUser CurrentUser { get; } = new();
+    /// <summary>
+    /// The user every host built by this factory sees: the user a test forces with <see cref="TestCurrentUser.UserId"/>, else the caller
+    /// the request's access token names, else anonymous.
+    /// </summary>
+    public TestCurrentUser CurrentUser { get; } = new(new HttpContextAccessor());
+
+    /// <summary>A permission source tests change to declare or drop permissions before seeding again; empty at the start of every test.</summary>
+    public TestPermissionSource PermissionSource { get; } = new();
+
+    /// <summary>Every email the hosts built by this factory sent, kept in memory instead of going to SMTP; empty at the start of every test.</summary>
+    internal RecordingEmailSender EmailSender { get; } = new();
 
     /// <summary>The events the outbox test handlers have received.</summary>
     public EventRecorder EventRecorder { get; } = new();
@@ -65,13 +80,18 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
         _testsDatabase = new ResettableDatabase(ConnectionStringFor(TestsDatabaseName));
         _persistenceTestsDatabase = new ResettableDatabase(ConnectionStringFor(PersistenceTestsDatabaseName));
 
-        // Reading Services builds and starts the host.
+        // Reading Services builds and starts the host. The host does not seed on start (Auth:Seed:RunOnStartup is off), so seed here.
         await Services.MigrateModuleDatabasesAsync(cancellationToken);
+        await Services.SeedAuthModuleAsync(cancellationToken);
         await using var scope = Services.CreateAsyncScope();
         await scope.ServiceProvider.GetRequiredService<TestDbContext>().Database.EnsureCreatedAsync(cancellationToken);
     }
 
-    /// <summary>Deletes the rows of every table (except migration history) in both test databases.</summary>
+    /// <summary>
+    /// Deletes the rows of every table in both test databases except the migration history and the Data Protection key ring
+    /// (<c>auth.DataProtectionKeys</c>): the hosts keep their key rings in memory across tests, as production never deletes keys, so a
+    /// host whose ring is reloaded from the database still finds every key it has protected with.
+    /// </summary>
     public async Task ResetDatabasesAsync(CancellationToken cancellationToken)
     {
         await TestsDatabase.ResetAsync(cancellationToken);
@@ -90,6 +110,11 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
 
         // Host settings, not an in-memory source, so tests can override them with UseSetting on a derived factory.
         builder.UseSetting("RateLimiting:GlobalPermitLimit", "100000");
+        builder.UseSetting("RateLimiting:AuthStrictPermitLimit", "100000");
+        builder.UseSetting("Auth:Seed:RunOnStartup", "false");
+
+        // No calls to the real Have I Been Pwned service from tests; HibpBreachedPasswordCheckerTests cover the checker.
+        builder.UseSetting("Auth:Password:CheckBreached", "false");
         builder.UseSetting("ConnectionStrings:Database", TestsDatabase.ConnectionString);
         builder.UseSetting($"ConnectionStrings:{PersistenceTestsConnectionStringName}", PersistenceTestsDatabase.ConnectionString);
         builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
@@ -107,12 +132,20 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.AddSingleton<TimeProvider>(Time);
             services.RemoveAll<ICurrentUser>();
             services.AddSingleton<ICurrentUser>(CurrentUser);
+            services.RemoveAll<IEmailSender>();
+            services.AddSingleton<IEmailSender>(EmailSender);
+
+            // Production keeps the Identity default iteration count and has no setting for it; tests hash far more often.
+            services.Configure<PasswordHasherOptions>(options => options.IterationCount = TestPasswordHashIterations);
             services.AddModuleDbContext<TestDbContext>(TestDbContext.Schema, PersistenceTestsConnectionStringName, includeInMigrations: false);
             services.AddApplicationHandlers(typeof(IntegrationTestWebAppFactory).Assembly);
             services.AddOutbox<TestDbContext>(typeof(IntegrationTestWebAppFactory).Assembly);
+            services.AddSingleton<IPermissionSource>(PermissionSource);
             services.AddSingleton(EventRecorder);
             services.AddSingleton(FlakySwitch);
             services.AddSingleton(HandlerGate);
+            services.AddSingleton<IStartupFilter, ProtectedTestEndpointStartupFilter>();
+            services.AddSingleton<IStartupFilter, TestClientAddressStartupFilter>();
         });
     }
 
@@ -128,13 +161,18 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     /// <summary>One database and its Respawner, created on the first reset that finds tables to clear.</summary>
     private sealed class ResettableDatabase(string connectionString)
     {
+        private const string DataProtectionKeysTable = "DataProtectionKeys";
+
         private const string HasTablesSql =
             "SELECT CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME <> '__EFMigrationsHistory') THEN 1 ELSE 0 END";
 
+        // The key ring stays: a host that protected a value with a key it cached must find that key again when Data Protection reloads
+        // its ring from the database (after a new key invalidates the cache, or on an unknown key id). Deleting the rows made that
+        // reload create a fresh key and drop the cached one, so a token protected before it could no longer be unprotected.
         private static readonly RespawnerOptions RespawnerOptions = new()
         {
             DbAdapter = DbAdapter.SqlServer,
-            TablesToIgnore = [new Table("__EFMigrationsHistory")],
+            TablesToIgnore = [new Table("__EFMigrationsHistory"), new Table(AuthDbContext.Schema, DataProtectionKeysTable)],
         };
 
         private Respawner? _respawner;

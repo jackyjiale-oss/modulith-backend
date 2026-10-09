@@ -1,6 +1,6 @@
 # API host (`TemplateName.Api`)
 
-The one deployable process: `src/Host/TemplateName.Api`. `Program.cs` registers the building blocks and modules, builds the middleware pipeline, maps health checks, OpenAPI and the module endpoints under `/api/v1`, and (in Development) migrates the databases on start. This page lists what the host does and every setting it reads. Architecture: [`docs/architecture/overview.md`](../architecture/overview.md).
+The one deployable process: `src/Host/TemplateName.Api`. `Program.cs` registers the building blocks and modules, builds the middleware pipeline, maps health checks, OpenAPI and the module endpoints under `/api/v1`, (in Development) migrates the databases on start, and seeds the Auth module's roles and permissions. This page lists what the host does and every setting it reads. Architecture: [`docs/architecture/overview.md`](../architecture/overview.md).
 
 ## Service registration
 
@@ -13,31 +13,40 @@ Order matters; `Program.cs` marks it with comments.
 | 3 | `AddWebCommon()` | ProblemDetails customization, the global exception handler, `ICurrentUser`, `ThrowOnBadRequest` ([web-common](../building-blocks/web-common.md)) |
 | 4 | `AddApiLocalization(configuration)` | The `Localization` options, request localization, FluentValidation translations |
 | 5 | `ConfigureHttpJsonOptions` | `JsonStringEnumConverter`: enums are strings in JSON (`"Pending"`) |
-| 6 | `AddOpenApi("v1")` | The OpenAPI document `v1` |
+| 6 | `AddOpenApi("v1", options => options.AddBearerSecurity())` | The OpenAPI document `v1`, with the `Bearer` security scheme required by every operation that names a permission or policy ([Web.Common](../building-blocks/web-common.md)) |
 | 7 | `AddHealthChecks()` | Health checks; each module context adds its own `ready` check |
-| 8 | `AddHttpSecurity(configuration)` | CORS, the global rate limiter, forwarded headers |
-| 9 | `AddSampleModule()` (one line per module) | The module's context, outbox, handlers, validators and error messages |
-| 10 | `AddOptions<KestrelServerOptions>()…Bind("Kestrel")` | Binds the whole `Kestrel` section lazily, so `Kestrel:Limits:*` apply and test overrides work |
-| 11 | `AddApplicationDecorators()` | Validation and logging decorators around every handler registered above; always last |
+| 8 | `AddHttpSecurity(configuration)` | CORS, the global rate limiter, the `auth-strict` rate-limit policy, forwarded headers |
+| 9 | `AddPermissionAuthorization()` | The permission authorization handler behind `RequirePermission(code)` and the **fallback policy**: every endpoint requires an authenticated user unless it says `.AllowAnonymous()` ([web-common](../building-blocks/web-common.md)). It needs the explicit `UseAuthentication` and `UseAuthorization` of the pipeline (slots 1a and 10): without them `WebApplication` adds `UseAuthorization` ahead of `UseRouting` by itself, where no endpoint is known and the fallback policy answers 401 to every request. |
+| 10 | `AddAuthModule(configuration)`, `AddSampleModule()` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme (the default authentication scheme), the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)) |
+| 11 | `AddOptions<KestrelServerOptions>()…Bind("Kestrel")` | Binds the whole `Kestrel` section lazily, so `Kestrel:Limits:*` apply and test overrides work |
+| 12 | `AddApplicationDecorators()` | Validation and logging decorators around every handler registered above; always last |
+
+## Start-up
+
+Before the pipeline serves requests, the host runs two steps, in this order:
+
+1. **Migrations**, when `Database:ApplyMigrationsOnStartup` is on (Development; see [Migrations](#migrations)).
+2. **Auth seeding**, when `Auth:Seed:RunOnStartup` is on (the default in every environment): `SeedAuthModuleAsync` creates the system roles, syncs the permissions every module declares, keeps `SuperAdmin` on every permission and, when `Auth:Seed:AdminEmail` and `Auth:Seed:AdminPassword` are both set, creates the first administrator. It is idempotent and runs under a database lock, so several instances may start together. An invalid permission declaration or an invalid `Auth:Seed` value stops the host with a message naming it. The database must already be migrated: outside Development, run the `migrate` mode first (Plan 6) or turn the key off and seed from there. Details: [Auth module](../modules/auth.md#background-processing).
 
 ## Pipeline
 
 | Slot | Middleware | Notes |
 |---|---|---|
 | 1 | `UseForwardedHeaders` | Honors `X-Forwarded-For` / `X-Forwarded-Proto` from trusted proxies only (`ForwardedHeaders` section). First, so everything after sees the client's address and scheme. |
-| 1a | `UseApiLocalization` | Picks the UI culture from `Accept-Language`. Before the exception handler, because culture is async-local: set later, 500 and malformed-body responses would come back in English (ADR 0009). Also sets the default thread cultures for background work. |
+| 1a | `UseAuthentication` | Validates the `Authorization: Bearer` access token (ES256 JWT, [Auth module](../modules/auth.md#access-tokens)) and sets the request's user. It never rejects: a missing, malformed, forged or expired token leaves the request anonymous, and slot 10 decides whether that is allowed. Before localization, so the signed-in user's saved `locale` claim is visible to it (decision D7). It runs outside the exception handler (slot 2), so an exception thrown inside authentication, for example from an authentication event, is not turned into a ProblemDetails response: authentication events must not throw. |
+| 1b | `UseApiLocalization` | Picks the UI culture from the signed-in user's `locale` claim, else from `Accept-Language` (an unsupported claim falls through to the header). Before the exception handler, because culture is async-local: set later, 500 and malformed-body responses would come back in English (ADR 0009). Also sets the default thread cultures for background work. |
 | 2 | `UseExceptionHandler` | `ConcurrencyExceptionHandler` (409 `concurrency.conflict`), then `GlobalExceptionHandler` (400 `request.malformed` for bad bodies, else 500 `server.unexpected_error`). |
-| 3 | `UseStatusCodePages` | Body-less 4xx/5xx responses (unknown route, wrong method) become ProblemDetails with `code` `http.{status}`. |
+| 3 | `UseStatusCodePages` | Body-less 4xx/5xx responses (401 or 403 from slot 10, unknown route, wrong method) become ProblemDetails with `code` `http.{status}`. |
 | 4 | `UseTraceIdHeader` | `X-Trace-Id` = the W3C trace id, also the `traceId` of every problem response. |
 | 5 | `UseSecurityHeaders` | `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`. |
 | 6 | `UseHsts` + `UseHttpsRedirection` | Every environment except Development. |
 | 7 | `UseRequestLogging` | One Serilog event per request with `UserId`; health checks at `Verbose`, failures (exception or 5xx) at `Error`. |
 | 8 | `UseRouting` | |
-| 9 | `UseCors` | Default policy from `Cors:AllowedOrigins`. |
-| — | *(Auth plan)* `UseAuthentication` / `UseAuthorization` | Go between slots 9 and 10, so the rate limiter's `user:{sub}` partition sees the signed-in user. |
-| 10 | `UseRateLimiter` | Global fixed-window limiter; 429 `rate_limit.exceeded` with `Retry-After`. |
+| 9 | `UseCors` | Default policy from `Cors:AllowedOrigins`. Before authorization, so a preflight (which carries no token) is answered without a 401. |
+| 9a | `UseRateLimiter` | Global fixed-window limiter, plus the `auth-strict` policy on the endpoints that ask for it; 429 `rate_limit.exceeded` with `Retry-After`. After routing (the endpoint's rate-limit metadata is known) and authentication (the `user:{sub}` partition sees the signed-in user), and before authorization, so the 401 and 403 responses that slot 10 produces are counted too. |
+| 10 | `UseAuthorization` | After routing, so it reads the endpoint's metadata. An endpoint with `.AllowAnonymous()` passes; one with `RequirePermission(code)` needs that permission (403 for a signed-in caller without it); every other endpoint, and a request that matched no endpoint, falls under the fallback policy and needs an authenticated user. An anonymous caller gets 401 `http.401` (localized, with `traceId` and `WWW-Authenticate: Bearer`). |
 | 11 | `UseIdempotency` | `Idempotency-Key` on endpoints marked `WithIdempotency()`; after routing because it reads endpoint metadata. |
-| 12 | Endpoints | `/health/live`, `/health/ready` (both exempt from rate limiting), OpenAPI and Scalar outside Production, then the `/api/v1` group with every module's endpoints. |
+| 12 | Endpoints | `/health/live`, `/health/ready` (both anonymous and exempt from rate limiting), OpenAPI and Scalar outside Production (anonymous), then the `/api/v1` group with every module's endpoints, and the Auth module's anonymous `GET /.well-known/jwks.json` at the root (`MapAuthWellKnownEndpoints`). Everything else is protected by the fallback policy. |
 
 Slots 4 and 5 register their headers with `Response.OnStarting` before the rest of the pipeline runs, so they are written when the response starts and survive the exception handler clearing the response headers. `Content-Language` is the exception: responses written by the exception handler (500, malformed body, concurrency conflict) do not carry it, although their `detail` is still localized (ADR 0009).
 
@@ -94,8 +103,12 @@ The policy exposes `X-Trace-Id`, `Location`, `Retry-After` and `Idempotency-Repl
 |---|---|---|---|
 | `GlobalPermitLimit` | `300` | 1 or more | Requests per partition per window. |
 | `GlobalWindow` | `00:01:00` | `00:00:01` to `1.00:00:00` | Fixed window length. |
+| `AuthStrictPermitLimit` | `10` | 1 or more | Requests per client address per window, shared by every endpoint with the `auth-strict` policy (`RequireRateLimiting(RateLimitPolicies.AuthStrict)`): `POST /api/v1/auth/register`, `/email/confirm`, `/email/resend-confirmation`, `/login`, `/token/refresh`, `/password/forgot`, `/password/reset` and `/password/change`. |
+| `AuthStrictWindow` | `00:01:00` | `00:00:01` to `1.00:00:00` | The `auth-strict` fixed window length. |
 
-The partition is `user:{sub}` for an authenticated caller, else `ip:{remote address}` as left by the forwarded-headers middleware, so a spoofed `X-Forwarded-For` cannot choose a partition. Requests over the limit are rejected at once (no queue).
+The global partition is `user:{sub}` for an authenticated caller, else `ip:{remote address}`; the `auth-strict` partition is always `ip:{remote address}`. The address is the one left by the forwarded-headers middleware, so a spoofed `X-Forwarded-For` cannot choose a partition. An `auth-strict` endpoint is also under the global limiter. Requests over a limit are rejected at once (no queue).
+
+**Sizing `auth-strict` behind NAT.** The `auth-strict` budget is **one bucket per client address shared by all eight routes** above (refresh included), 10 per minute by default. Many users behind one NAT or carrier-grade NAT address (an office, a campus, a mobile network) share that bucket, so their logins and token refreshes together can exhaust it and get 429s. For such deployments raise `RateLimiting:AuthStrictPermitLimit` (and make sure the forwarded-headers settings give the real client address). A separate, larger policy for refresh is a planned follow-up.
 
 ### `ForwardedHeaders`
 
@@ -111,7 +124,7 @@ With both lists empty only loopback proxies are trusted (the ASP.NET Core defaul
 | Key | Default | Validation (on start) | Meaning |
 |---|---|---|---|
 | `DefaultCulture` | `en` | required; must be in `SupportedUICultures` | Fallback UI culture, and the formatting culture of every request and of background work. |
-| `SupportedUICultures` | `["en", "ms", "zh-Hans"]` | at least one; each a culture the runtime knows (needs ICU, `InvariantGlobalization` off) | Languages a client may ask for with `Accept-Language`. A configured list replaces the default list. |
+| `SupportedUICultures` | `["en", "ms", "zh-Hans"]` | at least one; each a culture the runtime knows (needs ICU, `InvariantGlobalization` off) | Languages a response can use, chosen from the signed-in user's saved `locale` claim, else from `Accept-Language`. A configured list replaces the default list. |
 
 ### `Serilog`
 
@@ -141,6 +154,28 @@ The endpoint decides which OpenTelemetry services are registered, so it is **rea
 
 `Program.cs` binds the whole `Kestrel` section to `KestrelServerOptions` explicitly (Kestrel itself binds only endpoints from it), so any `Kestrel:Limits:*` key works.
 
+### `Auth:Seed`
+
+| Key | Default | Validation | Meaning |
+|---|---|---|---|
+| `RunOnStartup` | `true` | none | Seed the Auth module after the migration step ([Start-up](#start-up)). The integration tests set `false` and seed from the harness. |
+| `AdminEmail` | empty (`admin@localhost.test` in `appsettings.Development.json`) | when seeding: a plain email address, up to 256 characters | The first administrator's email. |
+| `AdminPassword` | empty | when seeding: within `Auth:Password:MinLength`/`MaxLength` | The first administrator's password. **Never in a file**: `dotnet user-secrets set "Auth:Seed:AdminPassword" "…" --project src/Host/TemplateName.Api` or `Auth__Seed__AdminPassword`. Without it no administrator is seeded. **Remove it after the first start**: the account then exists, and an account with that email, even a soft-deleted one, is never re-created (each start logs a warning while the key is still set). |
+
+The Auth module reads the sections below, each with its keys, defaults and ranges in the [Auth module](../modules/auth.md#configuration) document. Seven of them are validated on start (`Auth:Password`, `Auth:Email`, `Auth:Links`, `Auth:Verification`, `Auth:RefreshToken`, `Auth:Lockout` and `Auth:Jwt`), so an out-of-range value or a bad signing key stops the host. `Auth:DataProtection` is read as it is (a missing name falls back to `TemplateName`), and `Auth:Seed` is checked when the seeder runs.
+
+| Section | Holds |
+|---|---|
+| `Auth:Password` | Length limits, history count, the breached-password check. |
+| `Auth:Email` | The SMTP sender (Mailpit locally); `Username` and `Password` only from user secrets or the environment. |
+| `Auth:Links` | The front-end URLs the confirmation and reset links open. |
+| `Auth:Verification` | Lifetimes of the confirmation and reset links, the resend cooldown. |
+| `Auth:RefreshToken` | Sliding and absolute session lifetimes. |
+| `Auth:Lockout` | Failed attempts and lockout duration. |
+| `Auth:Jwt` | Issuer, audience, lifetime, skew and the signing keys (required outside Development and Testing). |
+| `Auth:DataProtection` | The Data Protection application name. |
+| `Auth:Seed` | Above. |
+
 ### Other keys
 
 | Key | Default | Meaning |
@@ -152,13 +187,13 @@ The endpoint decides which OpenTelemetry services are registered, so it is **rea
 | Endpoint | Checks | Use |
 |---|---|---|
 | `GET /health/live` | none: 200 while the process serves requests | Liveness probe |
-| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `sample`, plus one per added module) | Readiness probe, load balancer |
+| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `auth`, `sample`, plus one per added module) | Readiness probe, load balancer |
 
-Both are exempt from rate limiting, logged at `Verbose` when healthy, and left out of traces.
+Both are anonymous, exempt from rate limiting, logged at `Verbose` when healthy, and left out of traces.
 
 ## OpenAPI and Scalar
 
-Outside Production (Development, Testing, and any other non-Production environment) the host serves the OpenAPI document at `/openapi/v1.json` and the Scalar reference at `/scalar/v1`. Production maps neither. The document is pinned by `OpenApiSnapshotTests` (ADR 0011): an intended API change is accepted by replacing the committed `.verified.json` with the `.received.json` the failing test writes.
+Outside Production (Development, Testing, and any other non-Production environment) the host serves the OpenAPI document at `/openapi/v1.json` and the Scalar reference at `/scalar/v1`. Production maps neither. The document declares the `Bearer` scheme (`http`, `bearer`, `JWT`) and marks every operation whose endpoint carries authorization data (`RequirePermission`, `RequireAuthorization`) and no `.AllowAnonymous()` with it, so Scalar can send an access token. The document is pinned by `OpenApiSnapshotTests` (ADR 0011): an intended API change is accepted by replacing the committed `.verified.json` with the `.received.json` the failing test writes.
 
 ## Environments
 
@@ -171,6 +206,8 @@ Outside Production (Development, Testing, and any other non-Production environme
 | HSTS + HTTPS redirection | no | yes | yes |
 | `exceptionDetails` in 500 responses | yes | no | no |
 | OpenAPI + Scalar | yes | yes | no |
+| Auth seeding on start | yes; the administrator `admin@localhost.test` once its password is in user secrets | no (the test harness seeds after each reset) | yes (roles and permissions; an administrator only when both settings are supplied) |
+| JWT signing key (`Auth:Jwt:SigningKeys`) | an ephemeral key when none is configured | an ephemeral key when none is configured | required: the host does not start without one ([Auth module](../modules/auth.md#access-tokens)) |
 
 Local URLs: `https://localhost:5001` and `http://localhost:5000`.
 
@@ -187,7 +224,8 @@ Local URLs: `https://localhost:5001` and `http://localhost:5000`.
 HTTP security:
 - When the connection has no remote IP address (a Unix domain socket), the forwarded-headers middleware accepts `X-Forwarded-For` from it whatever the trusted lists say. Do not listen on a socket that untrusted clients can reach.
 - Behind a TLS-terminating proxy that does not send `X-Forwarded-Proto`, HTTPS redirection cannot work out the port; set `HTTPS_PORT` (or `https_port`) or forward the scheme.
-- CORS preflight requests are answered before the rate limiter, so they are not counted.
+- CORS preflight requests are answered before the rate limiter, so they are not counted. 401 and 403 responses are counted: the limiter (slot 9a) runs before authorization (slot 10), so an anonymous request to a protected or unknown route and a signed-in request without the permission each use up the caller's allowance (an anonymous caller is partitioned by address, a signed-in one by `user:{sub}`).
+- An anonymous request to a route that does not exist gets 401, not 404: the fallback policy also covers requests that matched no endpoint, so anonymous callers cannot probe which routes exist. A signed-in caller gets 404.
 - IPv6 and IPv4-mapped addresses are partition keys as plain strings, so one client can appear as two addresses.
 - The limiter keeps its counters in memory per instance: with N instances a client gets up to N × `GlobalPermitLimit` (a Redis-backed limiter is Plan 5).
 - A bare `Accept-Language: zh` gets English, because `zh` is not a supported culture and `zh-Hans` is its child, not its parent.

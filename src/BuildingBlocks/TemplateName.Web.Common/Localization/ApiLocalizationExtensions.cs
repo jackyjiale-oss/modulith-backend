@@ -11,9 +11,11 @@ namespace TemplateName.Web.Common.Localization;
 public static class ApiLocalizationExtensions
 {
     /// <summary>
-    /// The request localization the API uses: the UI culture comes from <c>Accept-Language</c> only (regions fall back to their parent,
-    /// so <c>zh-CN</c> gets <c>zh-Hans</c>; anything unsupported or malformed gets <see cref="ApiLocalizationOptions.DefaultCulture"/>),
-    /// the formatting culture is always the default culture, and the chosen language is echoed in <c>Content-Language</c>.
+    /// The request localization the API uses: the UI culture comes from the signed-in user's saved <c>locale</c> claim
+    /// (<see cref="UserLocaleClaimCultureProvider"/>), else from <c>Accept-Language</c> (regions fall back to their parent, so
+    /// <c>zh-CN</c> gets <c>zh-Hans</c>; an unsupported claim falls through to the header; anything unsupported or malformed gets
+    /// <see cref="ApiLocalizationOptions.DefaultCulture"/>), the formatting culture is always the default culture, and the chosen
+    /// language is echoed in <c>Content-Language</c>.
     /// </summary>
     public static RequestLocalizationOptions CreateRequestLocalizationOptions(ApiLocalizationOptions settings)
         => Apply(new RequestLocalizationOptions(), settings);
@@ -51,7 +53,8 @@ public static class ApiLocalizationExtensions
 
     /// <summary>
     /// Makes background work (no request culture) use the default culture instead of the server's regional settings, then adds the
-    /// request localization middleware. Register it before <c>UseExceptionHandler</c>, so error responses are localized too.
+    /// request localization middleware. Register it after <c>UseAuthentication</c>, so the saved <c>locale</c> claim is visible, and
+    /// before <c>UseExceptionHandler</c>, so error responses are localized too.
     /// </summary>
     public static WebApplication UseApiLocalization(this WebApplication app)
     {
@@ -68,7 +71,8 @@ public static class ApiLocalizationExtensions
         options.DefaultRequestCulture = new RequestCulture(settings.DefaultCulture);
         options.SupportedCultures = [CultureInfo.GetCultureInfo(settings.DefaultCulture)];
         options.SupportedUICultures = [.. settings.SupportedUICultures.Select(CultureInfo.GetCultureInfo)];
-        options.RequestCultureProviders = [new AcceptLanguageHeaderRequestCultureProvider()];
+        // The saved locale claim first, so it wins over Accept-Language (decision D7); no query-string or cookie provider.
+        options.RequestCultureProviders = [new UserLocaleClaimCultureProvider(), new AcceptLanguageHeaderRequestCultureProvider()];
         options.FallBackToParentUICultures = true;
         options.ApplyCurrentCultureToResponseHeaders = true;
         return options;

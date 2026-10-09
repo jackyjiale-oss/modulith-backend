@@ -45,6 +45,25 @@ public sealed class HttpContextCurrentUserTests
         sut.UserId.ShouldBeNull();
     }
 
+    [Fact]
+    public void SessionId_is_read_from_the_sid_claim_and_null_when_malformed()
+    {
+        var sessionId = Guid.Parse("0199b0a3-6000-7d4f-8b62-3b9f5d7c8e21");
+
+        CreateSut(new Claim("sub", UserId.ToString()), new Claim("sid", sessionId.ToString())).SessionId.ShouldBe(sessionId);
+        CreateSut(new Claim("sub", UserId.ToString()), new Claim("sid", "not-a-guid")).SessionId.ShouldBeNull();
+        CreateSut(new Claim("sub", UserId.ToString())).SessionId.ShouldBeNull();
+    }
+
+    [Fact]
+    public void No_request_means_no_session()
+    {
+        var accessor = Substitute.For<IHttpContextAccessor>();
+        accessor.HttpContext.Returns((HttpContext?)null);
+
+        new HttpContextCurrentUser(accessor).SessionId.ShouldBeNull();
+    }
+
     private static HttpContextCurrentUser CreateSut(params Claim[] claims)
     {
         var accessor = Substitute.For<IHttpContextAccessor>();

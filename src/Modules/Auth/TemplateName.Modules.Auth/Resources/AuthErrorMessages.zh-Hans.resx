@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="auth.invalid_credentials" xml:space="preserve">
+    <value>邮箱或密码不正确。</value>
+  </data>
+  <data name="auth.email_not_verified" xml:space="preserve">
+    <value>邮箱地址尚未验证。</value>
+  </data>
+  <data name="auth.account_inactive" xml:space="preserve">
+    <value>该账户未启用。</value>
+  </data>
+  <data name="auth.user_not_found" xml:space="preserve">
+    <value>未找到用户“{id}”。</value>
+  </data>
+  <data name="auth.password_reused" xml:space="preserve">
+    <value>该密码最近使用过，请选择其他密码。</value>
+  </data>
+  <data name="auth.password_breached" xml:space="preserve">
+    <value>该密码出现在已知的数据泄露中，请选择其他密码。</value>
+  </data>
+  <data name="auth.current_password_incorrect" xml:space="preserve">
+    <value>当前密码不正确。</value>
+  </data>
+  <data name="auth.role_not_found" xml:space="preserve">
+    <value>未找到角色“{id}”。</value>
+  </data>
+  <data name="auth.role_name_taken" xml:space="preserve">
+    <value>名为“{name}”的角色已存在。</value>
+  </data>
+  <data name="auth.system_role_protected" xml:space="preserve">
+    <value>这是系统角色，不能通过此方式修改。</value>
+  </data>
+  <data name="auth.permission_not_found" xml:space="preserve">
+    <value>一个或多个权限不存在或已不能授予。</value>
+  </data>
+  <data name="auth.permission_grant_not_allowed" xml:space="preserve">
+    <value>您不能授予自己并不拥有的权限。</value>
+  </data>
+  <data name="auth.invalid_refresh_token" xml:space="preserve">
+    <value>刷新令牌无效。</value>
+  </data>
+  <data name="auth.refresh_token_expired" xml:space="preserve">
+    <value>刷新令牌已过期，请重新登录。</value>
+  </data>
+  <data name="auth.refresh_token_reused" xml:space="preserve">
+    <value>刷新令牌已被使用过，会话已终止，请重新登录。</value>
+  </data>
+  <data name="auth.session_not_found" xml:space="preserve">
+    <value>未找到会话“{id}”。</value>
+  </data>
+  <data name="auth.invalid_token" xml:space="preserve">
+    <value>链接无效或已过期。</value>
+  </data>
+  <data name="auth.email_taken" xml:space="preserve">
+    <value>使用此电子邮件地址的账户已存在。</value>
+  </data>
+  <data name="auth.cannot_lock_self" xml:space="preserve">
+    <value>您不能锁定自己的账户。</value>
+  </data>
+  <data name="auth.last_super_admin" xml:space="preserve">
+    <value>不能锁定最后一个活跃的 SuperAdmin，也不能移除其 SuperAdmin 角色。</value>
+  </data>
+  <data name="auth.cannot_manage_super_admin" xml:space="preserve">
+    <value>只有 SuperAdmin 才能管理 SuperAdmin 账户或授予 SuperAdmin 角色。</value>
+  </data>
+  <data name="auth.role_assignment_not_allowed" xml:space="preserve">
+    <value>您无权分配角色，因此新账户只能获得默认角色。</value>
+  </data>
+</root>

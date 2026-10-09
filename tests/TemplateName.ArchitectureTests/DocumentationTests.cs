@@ -89,6 +89,19 @@ public sealed class DocumentationTests
         DocumentPaths.ModuleDocument(routeSegment).ShouldBe(expected);
     }
 
+    [Theory]
+    [InlineData("/api/v1/sample/leave-requests/", "sample")]
+    [InlineData("/api/v1/auth/sessions/{id:guid}", "auth")]
+    [InlineData("/api/v1/admin/auth/users/{id:guid}/lock", "auth")]
+    [InlineData("/api/v1/admin/auth/users/", "auth")]
+    [InlineData("/API/V1/Admin/leave-management/x", "leave-management")]
+    public void Endpoint_route_is_attributed_to_its_module(string route, string module)
+    {
+        // EndpointDocumentationTests looks an endpoint up in the document of this module: administration routes
+        // (/api/v1/admin/{module}/...) belong to the module after admin/, never to a module called "admin".
+        DocumentPaths.ModuleOfApiRoute(route).ShouldBe(module);
+    }
+
     [Fact]
     public void Every_building_block_has_a_document()
     {

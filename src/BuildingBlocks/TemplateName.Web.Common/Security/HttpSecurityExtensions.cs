@@ -21,8 +21,9 @@ public static class HttpSecurityExtensions
     private const string RateLimitExceededDetail = "Too many requests. Try again later.";
 
     /// <summary>
-    /// Registers CORS (listed origins only), the global rate limiter and forwarded-headers handling. Options are bound from the
-    /// <c>Cors</c>, <c>RateLimiting</c> and <c>ForwardedHeaders</c> sections, validated on start and read lazily.
+    /// Registers CORS (listed origins only), the global rate limiter, the <see cref="RateLimitPolicies.AuthStrict"/> policy and
+    /// forwarded-headers handling. Options are bound from the <c>Cors</c>, <c>RateLimiting</c> and <c>ForwardedHeaders</c> sections,
+    /// validated on start and read lazily.
     /// </summary>
     public static IServiceCollection AddHttpSecurity(this IServiceCollection services, IConfiguration configuration)
     {
@@ -43,7 +44,11 @@ public static class HttpSecurityExtensions
 
         services.AddRateLimiter(options => options.OnRejected = WriteRateLimitProblemAsync);
         services.AddOptions<RateLimiterOptions>().Configure<IOptions<RateLimitingOptions>>(
-            (limiterOptions, rateLimitingOptions) => limiterOptions.GlobalLimiter = CreateGlobalLimiter(rateLimitingOptions.Value));
+            (limiterOptions, rateLimitingOptions) =>
+            {
+                limiterOptions.GlobalLimiter = CreateGlobalLimiter(rateLimitingOptions.Value);
+                limiterOptions.AddPolicy(RateLimitPolicies.AuthStrict, httpContext => CreateAuthStrictPartition(httpContext, rateLimitingOptions.Value));
+            });
 
         services.AddOptions<ForwardedHeadersOptions>().Configure<IOptions<ApiForwardedHeadersOptions>>(
             (forwardedHeadersOptions, apiOptions) => ConfigureForwardedHeaders(forwardedHeadersOptions, apiOptions.Value));
@@ -62,18 +67,32 @@ public static class HttpSecurityExtensions
                 AutoReplenishment = true,
             }));
 
-    /// <summary>
-    /// <c>user:{sub}</c> for an authenticated caller, else <c>ip:{address}</c>. The address is the connection's remote address as left by
-    /// the forwarded-headers middleware, which rewrites it only for a trusted proxy, so a spoofed <c>X-Forwarded-For</c> cannot pick a partition.
-    /// </summary>
+    /// <summary>A fixed window per client address, whoever is signed in: the credential endpoints it guards are anonymous.</summary>
+    private static RateLimitPartition<string> CreateAuthStrictPartition(HttpContext httpContext, RateLimitingOptions options)
+        => RateLimitPartition.GetFixedWindowLimiter(
+            ClientAddressPartitionKey(httpContext),
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = options.AuthStrictPermitLimit,
+                Window = options.AuthStrictWindow,
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            });
+
+    /// <summary><c>user:{sub}</c> for an authenticated caller, else <see cref="ClientAddressPartitionKey"/>.</summary>
     private static string ResolvePartitionKey(HttpContext httpContext)
     {
         var user = httpContext.User;
         var subject = user.Identity?.IsAuthenticated == true ? user.FindFirst("sub")?.Value : null;
-        return subject is not null
-            ? $"user:{subject}"
-            : $"ip:{httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
+        return subject is not null ? $"user:{subject}" : ClientAddressPartitionKey(httpContext);
     }
+
+    /// <summary>
+    /// <c>ip:{address}</c>: the connection's remote address as left by the forwarded-headers middleware, which rewrites it only for a
+    /// trusted proxy, so a spoofed <c>X-Forwarded-For</c> cannot pick a partition.
+    /// </summary>
+    private static string ClientAddressPartitionKey(HttpContext httpContext)
+        => $"ip:{httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
 
     private static async ValueTask WriteRateLimitProblemAsync(OnRejectedContext context, CancellationToken cancellationToken)
     {

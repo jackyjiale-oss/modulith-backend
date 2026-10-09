@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -41,7 +42,8 @@ public sealed class HostTests(IntegrationTestWebAppFactory factory) : Integratio
     [Fact]
     public async Task Unknown_route_returns_404_problem_details_with_trace_id()
     {
-        using var response = await Client.GetAsync("/api/v1/does-not-exist", Ct);
+        // Signed in: for an anonymous caller the fallback policy answers 401 first (Auth/PipelineTests).
+        using var response = await Client.GetSignedInAsync(Factory.Services, "/api/v1/does-not-exist", Ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
         response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
@@ -58,7 +60,8 @@ public sealed class HostTests(IntegrationTestWebAppFactory factory) : Integratio
             services => services.AddSingleton<IStartupFilter, ThrowingEndpointStartupFilter>()));
         using var client = throwing.CreateClient();
 
-        using var response = await client.GetAsync("/throw", Ct);
+        // Signed in: the branch runs after the host's pipeline, whose fallback policy answers an anonymous caller with 401.
+        using var response = await client.GetSignedInAsync(throwing.Services, "/throw", Ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
         response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
@@ -86,12 +89,27 @@ public sealed class HostTests(IntegrationTestWebAppFactory factory) : Integratio
     [Fact]
     public async Task Scalar_is_not_mapped_in_production()
     {
-        await using var production = Factory.WithWebHostBuilder(builder => builder.UseEnvironment("Production"));
+        using var signingKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await using var production = Factory.WithWebHostBuilder(builder => builder
+            .UseEnvironment("Production")
+            .UseSetting("Auth:Jwt:SigningKeys:0:KeyId", "production-test")
+            .UseSetting("Auth:Jwt:SigningKeys:0:PrivateKeyPem", signingKey.ExportPkcs8PrivateKeyPem()));
         using var client = production.CreateClient();
 
-        using var response = await client.GetAsync("/scalar/v1", Ct);
+        // Signed in: for an anonymous caller the fallback policy answers 401 before the missing route shows.
+        using var response = await client.GetSignedInAsync(production.Services, "/scalar/v1", Ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Production_does_not_start_without_a_signing_key()
+    {
+        await using var production = Factory.WithWebHostBuilder(builder => builder.UseEnvironment("Production"));
+
+        var failure = Should.Throw<OptionsValidationException>(() => production.CreateClient());
+
+        failure.Message.ShouldContain("Auth:Jwt:SigningKeys");
     }
 
     [Fact]

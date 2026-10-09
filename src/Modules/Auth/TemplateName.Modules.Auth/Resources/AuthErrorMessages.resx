@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="auth.invalid_credentials" xml:space="preserve">
+    <value>The email or password is incorrect.</value>
+  </data>
+  <data name="auth.email_not_verified" xml:space="preserve">
+    <value>The email address has not been verified.</value>
+  </data>
+  <data name="auth.account_inactive" xml:space="preserve">
+    <value>The account is not active.</value>
+  </data>
+  <data name="auth.user_not_found" xml:space="preserve">
+    <value>User '{id}' was not found.</value>
+  </data>
+  <data name="auth.password_reused" xml:space="preserve">
+    <value>The password was used recently. Choose a different one.</value>
+  </data>
+  <data name="auth.password_breached" xml:space="preserve">
+    <value>The password appears in a known data breach. Choose a different one.</value>
+  </data>
+  <data name="auth.current_password_incorrect" xml:space="preserve">
+    <value>The current password is incorrect.</value>
+  </data>
+  <data name="auth.role_not_found" xml:space="preserve">
+    <value>Role '{id}' was not found.</value>
+  </data>
+  <data name="auth.role_name_taken" xml:space="preserve">
+    <value>A role named '{name}' already exists.</value>
+  </data>
+  <data name="auth.system_role_protected" xml:space="preserve">
+    <value>This is a system role and cannot be changed this way.</value>
+  </data>
+  <data name="auth.permission_not_found" xml:space="preserve">
+    <value>One or more of the permissions do not exist or can no longer be granted.</value>
+  </data>
+  <data name="auth.permission_grant_not_allowed" xml:space="preserve">
+    <value>You cannot grant a permission you do not hold yourself.</value>
+  </data>
+  <data name="auth.invalid_refresh_token" xml:space="preserve">
+    <value>The refresh token is not valid.</value>
+  </data>
+  <data name="auth.refresh_token_expired" xml:space="preserve">
+    <value>The refresh token has expired. Sign in again.</value>
+  </data>
+  <data name="auth.refresh_token_reused" xml:space="preserve">
+    <value>The refresh token was already used. The session has been ended; sign in again.</value>
+  </data>
+  <data name="auth.session_not_found" xml:space="preserve">
+    <value>Session '{id}' was not found.</value>
+  </data>
+  <data name="auth.invalid_token" xml:space="preserve">
+    <value>The link is invalid or has expired.</value>
+  </data>
+  <data name="auth.email_taken" xml:space="preserve">
+    <value>An account with this email address already exists.</value>
+  </data>
+  <data name="auth.cannot_lock_self" xml:space="preserve">
+    <value>You cannot lock your own account.</value>
+  </data>
+  <data name="auth.last_super_admin" xml:space="preserve">
+    <value>The last active SuperAdmin cannot be locked or lose the SuperAdmin role.</value>
+  </data>
+  <data name="auth.cannot_manage_super_admin" xml:space="preserve">
+    <value>Only a SuperAdmin can manage a SuperAdmin account or grant the SuperAdmin role.</value>
+  </data>
+  <data name="auth.role_assignment_not_allowed" xml:space="preserve">
+    <value>You may not assign roles, so a new account can only get the default role.</value>
+  </data>
+</root>

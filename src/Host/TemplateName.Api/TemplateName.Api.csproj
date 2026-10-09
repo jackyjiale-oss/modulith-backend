@@ -9,6 +9,7 @@
     <ProjectReference Include="..\..\BuildingBlocks\TemplateName.Application.Common\TemplateName.Application.Common.csproj" />
     <ProjectReference Include="..\..\BuildingBlocks\TemplateName.Infrastructure.Common\TemplateName.Infrastructure.Common.csproj" />
     <ProjectReference Include="..\..\BuildingBlocks\TemplateName.Web.Common\TemplateName.Web.Common.csproj" />
+    <ProjectReference Include="..\..\Modules\Auth\TemplateName.Modules.Auth\TemplateName.Modules.Auth.csproj" />
     <ProjectReference Include="..\..\Modules\Sample\TemplateName.Modules.Sample\TemplateName.Modules.Sample.csproj" />
   </ItemGroup>
 

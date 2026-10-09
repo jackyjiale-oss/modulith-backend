@@ -38,6 +38,32 @@ public sealed class OutboxTests(IntegrationTestWebAppFactory factory) : Integrat
     }
 
     [Fact]
+    public async Task Event_raised_by_an_unchanged_tracked_aggregate_is_written_to_the_outbox()
+    {
+        var saved = await SaveNewAggregateAsync("a");
+        await using (var cleanup = NewTestDbContext())
+        {
+            await cleanup.Set<OutboxMessage>().ExecuteDeleteAsync(Ct);
+        }
+
+        await using (var db = NewTestDbContext())
+        {
+            // Loaded and tracked, then an event without any state change: the entry stays Unchanged (as on a duplicate registration),
+            // and nothing else is pending in the save.
+            var loaded = await db.Set<TestAggregate>().SingleAsync(aggregate => aggregate.Id == saved.Id, Ct);
+            loaded.Note();
+            db.Entry(loaded).State.ShouldBe(EntityState.Unchanged);
+
+            (await db.SaveChangesAsync(Ct)).ShouldBe(1);
+            loaded.DomainEvents.ShouldBeEmpty();
+        }
+
+        var message = await SingleMessageAsync();
+        message.Type.ShouldBe(typeof(TestAggregateNotedDomainEvent).FullName);
+        JsonSerializer.Deserialize<TestAggregateNotedDomainEvent>(message.Content).ShouldBe(new TestAggregateNotedDomainEvent(saved.Id));
+    }
+
+    [Fact]
     public async Task ProcessBatch_dispatches_and_marks_processed()
     {
         var aggregate = await SaveNewAggregateAsync("a");

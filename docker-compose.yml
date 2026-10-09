@@ -1,5 +1,6 @@
 # Local development dependencies. Copy .env.example to .env first: `docker compose up -d`.
-# Ports are published on loopback only: the SA password is a local default and the dashboard allows anonymous access.
+# Ports are published on loopback only: the SA password is a local default, the dashboard allows anonymous access and Mailpit has no login.
+# Mailpit catches every email the Auth module sends (SMTP on 1025, inbox UI at http://localhost:8025); nothing leaves the machine.
 services:
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
@@ -18,6 +19,13 @@ services:
     ports:
       - "127.0.0.1:18888:18888" # dashboard UI
       - "127.0.0.1:4317:18889" # OTLP gRPC receiver (OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317)
+
+  mailpit:
+    # Keep this tag in step with MailpitFixture.Image in tests/TemplateName.IntegrationTests/Auth/MailpitFixture.cs (a test checks it).
+    image: axllent/mailpit:v1.31.4
+    ports:
+      - "127.0.0.1:1025:1025" # SMTP (Auth:Email:Host=localhost, Port=1025)
+      - "127.0.0.1:8025:8025" # web UI and REST API
 
 volumes:
   sqldata:

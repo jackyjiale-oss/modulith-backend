@@ -2,6 +2,8 @@ using System.Reflection;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Resources;
+using TemplateName.Modules.Auth;
+using TemplateName.Modules.Auth.Resources;
 using TemplateName.Modules.Sample;
 using TemplateName.Modules.Sample.Resources;
 using TemplateName.SharedKernel;
@@ -29,6 +31,7 @@ public static class Assemblies
     /// <summary>One entry per business module; each is the module's own assembly (never a <c>.Contracts</c> assembly).</summary>
     public static IReadOnlyList<Assembly> Modules { get; } =
     [
+        typeof(AuthModule).Assembly,
         typeof(SampleModule).Assembly,
     ];
 
@@ -46,6 +49,7 @@ public static class Assemblies
     [
         typeof(CommonErrorMessages),
         typeof(InfrastructureErrorMessages),
+        typeof(AuthErrorMessages),
         typeof(SampleErrorMessages),
     ];
 
