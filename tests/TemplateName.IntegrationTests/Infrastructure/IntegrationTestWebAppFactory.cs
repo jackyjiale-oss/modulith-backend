@@ -19,6 +19,7 @@ using TemplateName.IntegrationTests.Outbox;
 using TemplateName.IntegrationTests.Persistence;
 using TemplateName.Modules.Auth;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Infrastructure.Persistence;
 using Testcontainers.MsSql;
 
 namespace TemplateName.IntegrationTests.Infrastructure;
@@ -90,7 +91,11 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
         await scope.ServiceProvider.GetRequiredService<TestDbContext>().Database.EnsureCreatedAsync(cancellationToken);
     }
 
-    /// <summary>Deletes the rows of every table (except migration history) in both test databases.</summary>
+    /// <summary>
+    /// Deletes the rows of every table in both test databases except the migration history and the Data Protection key ring
+    /// (<c>auth.DataProtectionKeys</c>): the hosts keep their key rings in memory across tests, as production never deletes keys, so a
+    /// host whose ring is reloaded from the database still finds every key it has protected with.
+    /// </summary>
     public async Task ResetDatabasesAsync(CancellationToken cancellationToken)
     {
         await TestsDatabase.ResetAsync(cancellationToken);
@@ -162,13 +167,18 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     /// <summary>One database and its Respawner, created on the first reset that finds tables to clear.</summary>
     private sealed class ResettableDatabase(string connectionString)
     {
+        private const string DataProtectionKeysTable = "DataProtectionKeys";
+
         private const string HasTablesSql =
             "SELECT CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME <> '__EFMigrationsHistory') THEN 1 ELSE 0 END";
 
+        // The key ring stays: a host that protected a value with a key it cached must find that key again when Data Protection reloads
+        // its ring from the database (after a new key invalidates the cache, or on an unknown key id). Deleting the rows made that
+        // reload create a fresh key and drop the cached one, so a token protected before it could no longer be unprotected.
         private static readonly RespawnerOptions RespawnerOptions = new()
         {
             DbAdapter = DbAdapter.SqlServer,
-            TablesToIgnore = [new Table("__EFMigrationsHistory")],
+            TablesToIgnore = [new Table("__EFMigrationsHistory"), new Table(AuthDbContext.Schema, DataProtectionKeysTable)],
         };
 
         private Respawner? _respawner;

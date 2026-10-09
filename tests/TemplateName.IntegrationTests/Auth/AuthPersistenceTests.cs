@@ -436,14 +436,32 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
     {
         var keyManager = Factory.Services.GetRequiredService<IKeyManager>();
 
-        keyManager.CreateNewKey(Now, Now.AddDays(90));
+        var key = keyManager.CreateNewKey(Now, Now.AddDays(90));
 
+        // The reset between tests keeps the key ring, so earlier keys may be there too; look for this one.
+        var friendlyName = $"key-{key.KeyId:D}";
         var context = NewScope().GetRequiredService<AuthDbContext>();
         var keyCount = await context.Database
-            .SqlQuery<int>($"SELECT COUNT(*) AS [Value] FROM [auth].[DataProtectionKeys]")
+            .SqlQuery<int>($"SELECT COUNT(*) AS [Value] FROM [auth].[DataProtectionKeys] WHERE [FriendlyName] = {friendlyName}")
             .SingleAsync(Ct);
         keyCount.ShouldBe(1);
-        (await context.DataProtectionKeys.SingleAsync(Ct)).Xml.ShouldNotBeNullOrEmpty();
+        var row = await context.DataProtectionKeys.SingleAsync(stored => stored.FriendlyName == friendlyName, Ct);
+        row.Xml.ShouldNotBeNull().ShouldContain(key.KeyId.ToString("D"));
+    }
+
+    [Fact]
+    public async Task Data_protection_keys_survive_the_reset_between_tests()
+    {
+        // The shared host keeps the key it protects with in memory. A host that loads the ring from the database afterwards (another
+        // instance, or this one once a new key has invalidated its cache) must still find that key; when the reset deleted it, the
+        // reload created a new key instead and an outbox token protected before it could no longer be read (AuthFlowTests on CI).
+        const string Secret = "single-use token";
+        var protectedValue = Factory.Services.GetRequiredService<ISecretProtector>().Protect(Secret);
+
+        await Factory.ResetDatabasesAsync(Ct);
+
+        await using var reloaded = Factory.WithWebHostBuilder(_ => { });
+        reloaded.Services.GetRequiredService<ISecretProtector>().Unprotect(protectedValue).ShouldBe(Secret);
     }
 
     [Fact]
