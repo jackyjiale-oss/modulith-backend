@@ -131,6 +131,11 @@ public sealed class TemplateCompletenessTests
         ]);
         TestSource.UndeclaredVariables(TestNotificationTypeSource.Broken).ShouldBe([$"{prefix}.ms.title.scriban uses the undeclared variable 'user_name'"]);
         TestSource.SecretVariableMisuse(TestNotificationTypeSource.Broken).ShouldBe([$"{prefix}.zh-Hans.title.scriban uses the secret variables [action_url]"]);
+
+        // this.action_url names no variable, yet prints the secret.
+        var thisTitle = $"{typeof(TestNotificationTypeSource).Assembly.GetName().Name}.Templates.InApp.test.this_access.en.title.scriban";
+        TestSource.UndeclaredVariables(TestNotificationTypeSource.ThisAccess).ShouldBe([$"{thisTitle} uses the undeclared variable 'this'"]);
+        TestSource.SecretVariableMisuse(TestNotificationTypeSource.ThisAccess).ShouldBe([$"{thisTitle} uses the secret variables [action_url]"]);
     }
 
     [Fact]

@@ -18,6 +18,13 @@ internal static class TemplateVariables
     /// <summary>The rendered subject, HTML-encoded, for an email layout's <c>&lt;title&gt;</c>.</summary>
     public const string Subject = "subject";
 
+    /// <summary>
+    /// Reported for Scriban's <c>this</c> (the whole model: <c>this.action_url</c>, <c>with this</c>, <c>for x in this</c>,
+    /// <c>import this</c>). It reads every variable, secrets included, without naming one, so it is never allowed: the renderer refuses
+    /// it even when a variable of that name is supplied, and the completeness tests report it.
+    /// </summary>
+    public const string This = "this";
+
     /// <summary>The only variables an email layout sees.</summary>
     public static IReadOnlySet<string> LayoutVariables { get; } = new HashSet<string>([Content, Subject, ProductName], StringComparer.Ordinal);
 
@@ -25,8 +32,11 @@ internal static class TemplateVariables
     private static readonly string[] EngineVariables = ["for", "while", "tablerow"];
 
     /// <summary>
-    /// The global names <paramref name="template"/> reads and does not define itself: names it assigns, captures, loops over or declares
-    /// as a function or parameter are left out, as are member names (<c>a.b</c> reads <c>a</c>) and named-argument names.
+    /// Every global name <paramref name="template"/> mentions as a variable, read or written: a name it assigns, captures, loops over or
+    /// declares as a function or parameter counts too, because Scriban resolves such a name in the model, so a definition that never
+    /// runs (<c>{{ if false }}{{ action_url = 'x' }}{{ end }}{{ action_url }}</c>) must not hide a read. A template's own names are
+    /// <c>$</c> locals (<c>for $item in ...</c>, <c>$total = ...</c>) and are left out, as are member names (<c>a.b</c> mentions
+    /// <c>a</c>), named-argument and object-member names. <c>this</c> is reported as <see cref="This"/>.
     /// </summary>
     public static IReadOnlySet<string> Collect(Template template)
     {
@@ -34,21 +44,23 @@ internal static class TemplateVariables
 
         var collector = new Collector();
         collector.Visit(template.Page);
-        collector.Read.ExceptWith(collector.Defined);
-        collector.Read.ExceptWith(EngineVariables);
+        collector.Names.ExceptWith(EngineVariables);
 
-        return collector.Read;
+        return collector.Names;
     }
 
     private sealed class Collector : ScriptVisitor
     {
-        public HashSet<string> Read { get; } = new(StringComparer.Ordinal);
-
-        public HashSet<string> Defined { get; } = new(StringComparer.Ordinal);
+        public HashSet<string> Names { get; } = new(StringComparer.Ordinal);
 
         public override void Visit(ScriptVariableGlobal node)
         {
-            Read.Add(node.Name);
+            Names.Add(node.Name);
+        }
+
+        public override void Visit(ScriptThisExpression node)
+        {
+            Names.Add(This);
         }
 
         public override void Visit(ScriptMemberExpression node)
@@ -64,56 +76,6 @@ internal static class TemplateVariables
         public override void Visit(ScriptObjectMember node)
         {
             Visit(node.Value);
-        }
-
-        public override void Visit(ScriptAssignExpression node)
-        {
-            Define(node.Target);
-            Visit(node.Value);
-        }
-
-        public override void Visit(ScriptCaptureStatement node)
-        {
-            Define(node.Target);
-            Visit(node.Body);
-        }
-
-        public override void Visit(ScriptForStatement node)
-        {
-            Define(node.Variable);
-            Visit(node.Iterator);
-            Visit(node.NamedArguments);
-            Visit(node.Body);
-            Visit(node.Else);
-        }
-
-        public override void Visit(ScriptTableRowStatement node)
-        {
-            Visit((ScriptForStatement)node);
-        }
-
-        public override void Visit(ScriptFunction node)
-        {
-            Define(node.NameOrDoToken as ScriptExpression);
-            foreach (var parameter in node.Parameters ?? [])
-            {
-                Define(parameter.Name);
-            }
-
-            Visit(node.Body);
-        }
-
-        private void Define(ScriptExpression? target)
-        {
-            if (target is ScriptVariableGlobal variable)
-            {
-                Defined.Add(variable.Name);
-            }
-            else
-            {
-                // a.b = 1 or a[0] = 1 reads a.
-                Visit(target);
-            }
         }
     }
 }

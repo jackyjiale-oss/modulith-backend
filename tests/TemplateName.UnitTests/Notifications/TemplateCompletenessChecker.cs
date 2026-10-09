@@ -68,6 +68,7 @@ internal sealed class TemplateCompletenessChecker(NotificationCatalog catalog)
     {
         var type = Type(typeCode);
         var declared = type.Variables.Concat(type.SecretVariables).Append(TemplateVariables.ProductName).ToHashSet(StringComparer.Ordinal);
+        declared.Remove(TemplateVariables.This);
 
         return Parts(typeCode)
             .Where(entry => entry.Template is { HasErrors: false })
@@ -77,7 +78,7 @@ internal sealed class TemplateCompletenessChecker(NotificationCatalog catalog)
             .ToList();
     }
 
-    /// <summary>Decision D4: secret variables appear only in the email text and HTML parts, never in a subject or an in-app part.</summary>
+    /// <summary>Decision D4: secret variables appear only in the email text and HTML parts, never in a subject or an in-app part (<c>this</c> counts as all of them).</summary>
     public IReadOnlyList<string> SecretVariableMisuse(string typeCode)
     {
         var type = Type(typeCode);
@@ -94,7 +95,12 @@ internal sealed class TemplateCompletenessChecker(NotificationCatalog catalog)
             foreach (var culture in RecipientCulture.Supported)
             {
                 var resourceName = EmbeddedTemplateStore.PartResourceName(assembly, channel, typeCode, culture, part);
-                var secrets = Variables(assembly, resourceName)?.Where(type.SecretVariables.Contains).Order(StringComparer.Ordinal).ToList() ?? [];
+                var variables = Variables(assembly, resourceName) ?? [];
+
+                // 'this' reads the whole model, so it uses every secret variable without naming one.
+                var secrets = (variables.Contains(TemplateVariables.This) ? type.SecretVariables : variables.Where(type.SecretVariables.Contains))
+                    .Order(StringComparer.Ordinal)
+                    .ToList();
                 if (secrets.Count > 0)
                 {
                     problems.Add($"{resourceName} uses the secret variables [{string.Join(", ", secrets)}]");

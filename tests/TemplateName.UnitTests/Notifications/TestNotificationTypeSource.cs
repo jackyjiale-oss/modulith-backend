@@ -41,6 +41,9 @@ internal sealed class TestNotificationTypeSource : INotificationTypeSource
     /// <summary>A title that reads a .NET property of a variable.</summary>
     public const string MemberAccess = "test.member_access";
 
+    /// <summary>A title that reads a secret through <c>this</c>, the whole model, without naming it.</summary>
+    public const string ThisAccess = "test.this_access";
+
     /// <summary>A title with a loop of 100,000 iterations.</summary>
     public const string RunawayLoop = "test.runaway_loop";
 
@@ -59,6 +62,7 @@ internal sealed class TestNotificationTypeSource : INotificationTypeSource
         Define(ImportAttempt, [NotificationChannel.InApp], ["display_name"]),
         Define(BuiltinCall, [NotificationChannel.InApp], ["display_name"]),
         Define(MemberAccess, [NotificationChannel.InApp], ["display_name"]),
+        Define(ThisAccess, [NotificationChannel.InApp], ["display_name"], ["action_url"]),
         Define(RunawayLoop, [NotificationChannel.InApp], ["display_name"]),
         Define(RunawayRecursion, [NotificationChannel.InApp], ["display_name"]),
     ];

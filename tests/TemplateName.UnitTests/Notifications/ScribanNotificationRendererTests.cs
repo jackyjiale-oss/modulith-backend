@@ -220,14 +220,15 @@ public sealed class ScribanNotificationRendererTests
     [InlineData(TestNotificationTypeSource.ImportAttempt, "failed while rendering at line 1, column ")]
     [InlineData(TestNotificationTypeSource.BuiltinCall, "uses variables that were not supplied: date, object")]
     [InlineData(TestNotificationTypeSource.MemberAccess, "failed while rendering")]
+    [InlineData(TestNotificationTypeSource.ThisAccess, "uses variables that were not supplied: this")]
     [InlineData(TestNotificationTypeSource.RunawayLoop, "failed while rendering")]
-    [InlineData(TestNotificationTypeSource.RunawayRecursion, "failed while rendering")]
+    [InlineData(TestNotificationTypeSource.RunawayRecursion, "uses variables that were not supplied: again")]
     public void Template_cannot_leave_the_sandbox(string typeCode, string expectedReason)
     {
         // No file loader, no built-in functions, no .NET members, bounded loops and recursion: each fails in the title as a render
         // exception that names the type and never echoes the values.
         const string Distinctive = "Zq7-distinctive-display-name";
-        var variables = new Dictionary<string, string> { ["display_name"] = Distinctive };
+        var variables = new Dictionary<string, string> { ["display_name"] = Distinctive, ["action_url"] = Distinctive, ["this"] = Distinctive };
 
         var exception = Should.Throw<TemplateRenderException>(() => _renderer.Render(typeCode, NotificationChannel.InApp, "en", variables));
 

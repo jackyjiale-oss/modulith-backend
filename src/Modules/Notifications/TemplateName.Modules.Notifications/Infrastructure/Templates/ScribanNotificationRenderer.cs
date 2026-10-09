@@ -88,7 +88,11 @@ internal sealed class ScribanNotificationRenderer(EmbeddedTemplateStore store, I
 
     private static string Render(StoredTemplate template, ScriptObject model, RenderRequest request)
     {
-        var missing = template.Variables.Where(name => !model.ContainsKey(name)).Order(StringComparer.Ordinal).ToList();
+        // 'this' is the whole model (every secret included); it never counts as supplied, even if a variable has that name.
+        var missing = template.Variables
+            .Where(name => name == TemplateVariables.This || !model.ContainsKey(name))
+            .Order(StringComparer.Ordinal)
+            .ToList();
         if (missing.Count > 0)
         {
             throw new TemplateRenderException(
