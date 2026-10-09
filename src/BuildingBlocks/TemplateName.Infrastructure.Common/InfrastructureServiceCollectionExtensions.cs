@@ -5,11 +5,13 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using TemplateName.Application.Common.Data;
 using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
+using TemplateName.Application.Common.Security;
 using TemplateName.Infrastructure.Common.Idempotency;
 using TemplateName.Infrastructure.Common.Messaging;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Infrastructure.Common.Resources;
+using TemplateName.Infrastructure.Common.Security;
 
 namespace TemplateName.Infrastructure.Common;
 
@@ -20,7 +22,8 @@ public static class InfrastructureServiceCollectionExtensions
     /// the <c>Database</c> options, the read-side connection factory and Dapper's <c>DateOnly</c> type handler, the EF Core save
     /// interceptors, the concurrency-conflict exception handler, the <c>platform</c> context (idempotency keys), the messages of
     /// their error codes (<c>InfrastructureErrorMessages</c>), the in-process <see cref="IIntegrationEventPublisher"/> (singleton) and
-    /// the <see cref="IOutboxMessageContext"/> the outbox dispatcher sets (scoped). Call it before
+    /// the <see cref="IOutboxMessageContext"/> the outbox dispatcher sets (scoped), and the <see cref="ISecretProtector"/> (singleton,
+    /// Data Protection purpose <c>TemplateName.Secrets.v1</c>) with a Data Protection registration that has no key store of its own. Call it before
     /// <c>AddWebCommon</c>, so the concurrency handler runs before the global one, and before any <c>AddModuleDbContext</c> or
     /// <c>AddOutbox</c>, so the <c>platform</c> migrations apply first.
     /// </summary>
@@ -40,6 +43,11 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<OutboxMessageContext>();
         services.AddScoped<IOutboxMessageContext>(provider => provider.GetRequiredService<OutboxMessageContext>());
         services.AddSingleton<IIntegrationEventPublisher, InProcessIntegrationEventPublisher>();
+
+        // Data Protection without a key store: the module that owns the key ring adds the application name and the persistence
+        // (Auth: auth.DataProtectionKeys). Without one the keys are kept on the local file system.
+        services.AddDataProtection();
+        services.AddSingleton<ISecretProtector, DataProtectionSecretProtector>();
         services.AddExceptionHandler<ConcurrencyExceptionHandler>();
         services.AddErrorMessages<InfrastructureErrorMessages>();
         services.AddModuleDbContext<PlatformDbContext>(PlatformDbContext.Schema);

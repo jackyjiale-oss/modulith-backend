@@ -78,7 +78,6 @@ public static class AuthModule
             .ValidateOnStart();
         services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
         services.AddSingleton<ISecureTokenService, SecureTokenService>();
-        services.AddSingleton<ISecretProtector, DataProtectionSecretProtector>();
         services.AddHttpClient(HibpBreachedPasswordChecker.HttpClientName, client => client.Timeout = HibpBreachedPasswordChecker.RequestBudget);
         services.AddSingleton<IBreachedPasswordChecker, HibpBreachedPasswordChecker>();
 

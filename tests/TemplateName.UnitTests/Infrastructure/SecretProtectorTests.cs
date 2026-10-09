@@ -1,14 +1,17 @@
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.DataProtection;
-using TemplateName.Modules.Auth.Infrastructure.Security;
+using TemplateName.Infrastructure.Common.Security;
 
-namespace TemplateName.UnitTests.Auth;
+namespace TemplateName.UnitTests.Infrastructure;
 
 public sealed class SecretProtectorTests
 {
     private const string Secret = "the-verification-token";
 
-    private readonly DataProtectionSecretProtector _protector = new(new EphemeralDataProtectionProvider());
+    private readonly EphemeralDataProtectionProvider _provider = new();
+    private readonly DataProtectionSecretProtector _protector;
+
+    public SecretProtectorTests() => _protector = new DataProtectionSecretProtector(_provider);
 
     [Fact]
     public void Round_trips()
@@ -34,5 +37,13 @@ public sealed class SecretProtectorTests
     public void Protected_value_differs_between_calls()
     {
         _protector.Protect(Secret).ShouldNotBe(_protector.Protect(Secret));
+    }
+
+    [Fact]
+    public void Purpose_is_the_shared_secrets_purpose_v1()
+    {
+        var protectedValue = _provider.CreateProtector("TemplateName.Secrets.v1").Protect(Secret);
+
+        _protector.Unprotect(protectedValue).ShouldBe(Secret);
     }
 }

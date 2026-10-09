@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Extensions.Options;
 using TemplateName.Application.Common.Messaging;
+using TemplateName.Application.Common.Security;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Application.Verification;
 using TemplateName.Modules.Auth.Domain.Audit;

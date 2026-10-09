@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The application-layer contracts modules code against: command, query, domain event and integration event handlers with their registration and decorators (ADR 0005), the integration event publisher (ADR 0018), the current user, the read-side connection factory, error-message resources (ADR 0009) and cursor pagination (ADR 0010). It depends on SharedKernel, FluentValidation, Scrutor, Dapper (for `KeysetQuery.Parameters`) and the `Microsoft.Extensions` abstractions, never on Infrastructure.Common or Web.Common (architecture test).
+The application-layer contracts modules code against: command, query, domain event and integration event handlers with their registration and decorators (ADR 0005), the integration event publisher (ADR 0018), the current user, the secret protector contract, the read-side connection factory, error-message resources (ADR 0009) and cursor pagination (ADR 0010). It depends on SharedKernel, FluentValidation, Scrutor, Dapper (for `KeysetQuery.Parameters`) and the `Microsoft.Extensions` abstractions, never on Infrastructure.Common or Web.Common (architecture test).
 
 Code: `src/BuildingBlocks/TemplateName.Application.Common/`.
 
@@ -40,6 +40,12 @@ Code: `src/BuildingBlocks/TemplateName.Application.Common/`.
 | `IPermissionSource` | `IReadOnlyCollection<PermissionDefinition> Permissions`. Any module registers one as a singleton; the Auth module collects every registered source and syncs the definitions into its permission table at startup. A definition that breaks the rules above (or a code declared twice, by any sources) stops the sync with a message naming the code and the source ([Auth module](../modules/auth.md#background-processing)). |
 | `IPermissionChecker` | `Task<bool> HasPermissionAsync(Guid userId, string permission, CancellationToken)`: whether the user holds the permission through any role. The Auth module implements it (cached per user, ADR 0016); other modules depend on the interface only. |
 | `IDbConnectionFactory` | `Task<DbConnection> OpenConnectionAsync(CancellationToken)`: an open connection for Dapper reads. Infrastructure.Common implements it. |
+
+### Security
+
+| Type | What it is |
+|---|---|
+| `ISecretProtector` | `string Protect(string plaintext)`, `string Unprotect(string protectedValue)`: encrypts a secret that has to leave the process or be stored by another module (a token in an outbox event, a link in an integration event; ADR 0017). The same value protected twice differs; `Unprotect` throws `CryptographicException` for a changed value or one protected by another key ring. Infrastructure.Common implements it with Data Protection; a module injects the interface and never references Data Protection. |
 
 ### Localization
 
