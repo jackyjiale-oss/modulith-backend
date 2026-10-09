@@ -9,6 +9,7 @@ using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
 using TemplateName.Modules.Notifications.Infrastructure.Catalog;
 using TemplateName.Modules.Notifications.Infrastructure.Persistence;
+using TemplateName.Modules.Notifications.Infrastructure.Templates;
 using TemplateName.Modules.Notifications.Resources;
 
 namespace TemplateName.Modules.Notifications;
@@ -19,8 +20,9 @@ public static class NotificationsModule
     /// <summary>
     /// Registers the module's <c>NotificationsDbContext</c> (schema <c>notify</c>, migrated with the other module contexts), its inbox,
     /// repositories and unit of work, handlers and validators, error messages (<c>NotificationsErrorMessages</c>), the
-    /// <see cref="NotificationCatalog"/> (a singleton over every <see cref="INotificationTypeSource"/>) and the hosted service that
-    /// validates it when the host starts. Call it after <c>AddAuthModule</c> and before <c>AddApplicationDecorators</c>.
+    /// <see cref="NotificationCatalog"/> (a singleton over every <see cref="INotificationTypeSource"/>), the hosted service that
+    /// validates it when the host starts, and the template renderer with its options (<c>Notifications:Templates</c>). Call it after
+    /// <c>AddAuthModule</c> and before <c>AddApplicationDecorators</c>.
     /// </summary>
     public static IServiceCollection AddNotificationsModule(this IServiceCollection services, IConfiguration configuration)
     {
@@ -40,6 +42,13 @@ public static class NotificationsModule
 
         services.AddSingleton<NotificationCatalog>();
         services.AddHostedService<NotificationCatalogStartupCheck>();
+
+        services.AddOptions<TemplateOptions>()
+            .Bind(configuration.GetSection(TemplateOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddSingleton<EmbeddedTemplateStore>();
+        services.AddSingleton<INotificationRenderer, ScribanNotificationRenderer>();
 
         return services;
     }

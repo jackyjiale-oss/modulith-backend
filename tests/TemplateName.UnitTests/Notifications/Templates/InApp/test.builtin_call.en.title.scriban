@@ -1,0 +1,1 @@
+{{ date.now }} {{ object.eval_template '{{ 1 + 1 }}' }}

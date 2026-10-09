@@ -1,0 +1,3 @@
+{{ display_name }}，您好：
+
+您的账户创建于 {{ occurred_at }}。打开此链接开始使用：{{ action_url }}

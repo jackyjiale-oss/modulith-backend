@@ -1,0 +1,3 @@
+Hai {{ display_name }},
+
+Akaun anda dicipta pada {{ occurred_at }}. Buka pautan ini untuk bermula: {{ action_url }}

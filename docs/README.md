@@ -53,6 +53,7 @@ Everything about how this service is built and run. Documents are part of the de
 | [0016](adr/0016-server-side-permissions-with-per-user-cache.md) | Server-side permissions with a per-user cache |
 | [0017](adr/0017-outbox-secrets-protected-with-data-protection.md) | Single-use tokens in outbox events protected with Data Protection |
 | [0018](adr/0018-in-process-integration-events-with-inbox.md) | In-process integration events with a per-consumer inbox |
+| [0019](adr/0019-embedded-scriban-notification-templates.md) | Notification templates as Scriban files embedded in the declaring assembly |
 | [0020](adr/0020-secrets-in-cross-module-events.md) | Single-use links cross module boundaries encrypted |
 
 A new decision gets the next number: `adr/NNNN-kebab-title.md`, in the same format, listed here and in the architecture overview.

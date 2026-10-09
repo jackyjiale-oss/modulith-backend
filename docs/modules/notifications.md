@@ -6,14 +6,14 @@
 
 <!-- What the module owns, what it deliberately does not do, and which other modules it talks to (only through *.Contracts). -->
 
-Every message the template sends goes through this module: it consumes the integration events other modules publish, renders a localized message in the **recipient's** language and delivers it by email and in-app. Plan 3 builds it task by task; this page describes what exists today (the skeleton, the notification type catalog, the recipient culture and time zone rules and the domain model) and lists the rest under the sections that will hold it.
+Every message the template sends goes through this module: it consumes the integration events other modules publish, renders a localized message in the **recipient's** language and delivers it by email and in-app. Plan 3 builds it task by task; this page describes what exists today (the skeleton, the notification type catalog, the recipient culture and time zone rules, the domain model, persistence and template rendering) and lists the rest under the sections that will hold it.
 
 - Owns: the notification type catalog, the notification, delivery and in-app rows, user preferences and quiet hours, the inbox that makes its consumers idempotent, and the `notify` schema (see [Data](#data)).
 - Does not: send anything on its own initiative (it reacts to integration events), store a notification type table (D7: types are declared in code), or offer scheduling, cancellation, digests, push, SMS, webhooks, bulk sends, provider callbacks, attachments or fallback channels (D17).
 - Talks to: `TemplateName.Modules.Auth.Contracts` only, never `TemplateName.Modules.Auth` (D1; `ModuleBoundaryTests` enforces it). It consumes Auth's integration events and, once when a notification is created, asks `IUserContactDirectory` for the recipient's address, name, language and time zone, which it snapshots on its own rows (D5). No other module references Notifications, so it has no `TemplateName.Modules.Notifications.Contracts` project yet; `INotificationTypeSource` and `NotificationTypeDefinition` move there when a module wants to declare its own types (D1).
 - Consumers only write rows. A consumer records the event in `notify.InboxMessages` in the same save as the notification and its deliveries, so a repeated event has no effect (D3, [ADR 0018](../adr/0018-in-process-integration-events-with-inbox.md)); a separate delivery worker sends. Single-use links reach it as `ISecretProtector` ciphertext and are decrypted only in memory while an email is rendered ([ADR 0020](../adr/0020-secrets-in-cross-module-events.md)).
 
-Code: `src/Modules/Notifications/TemplateName.Modules.Notifications/`. The host calls `AddNotificationsModule(configuration)` after `AddAuthModule`, maps `MapNotificationsEndpoints()` on the `/api/v1` group and `MapNotificationsHub()` on the application root; both map methods are empty until the endpoints and the SignalR hub are added. `AddNotificationsModule` registers the handlers and validators, the error messages (`NotificationsErrorMessages`), the `NotificationCatalog` singleton and the hosted service that validates it at start.
+Code: `src/Modules/Notifications/TemplateName.Modules.Notifications/`. The host calls `AddNotificationsModule(configuration)` after `AddAuthModule`, maps `MapNotificationsEndpoints()` on the `/api/v1` group and `MapNotificationsHub()` on the application root; both map methods are empty until the endpoints and the SignalR hub are added. `AddNotificationsModule` registers the handlers and validators, the error messages (`NotificationsErrorMessages`), the `NotificationCatalog` singleton and the hosted service that validates it at start, and the template renderer (`INotificationRenderer`, see [Templates and rendering](#templates-and-rendering)).
 
 ## Endpoints
 
@@ -85,7 +85,7 @@ An `INotificationTypeSource` returns the types it declares. `NotificationCatalog
 | Channels | At least one default channel; every mandatory channel is also a default channel. |
 | Variables | Variable and secret variable names match `^[a-z][a-z0-9_]*\z`, and no name is both. |
 
-`Find(code)` returns a type or `null`, `All` lists them and `TemplateAssemblyOf(code)` returns the assembly of the source that declared the type. No source is registered yet, so the catalog is empty; Auth's types come with the templates in a later task.
+`Find(code)` returns a type or `null`, `All` lists them and `TemplateAssemblyOf(code)` returns the assembly of the source that declared the type, where its templates live. No source is registered yet, so the catalog is empty; Auth's types come with their templates in a later task.
 
 ## Recipient culture and time zone
 
@@ -93,6 +93,35 @@ Notifications use the recipient's saved settings, never the request culture or t
 
 - `RecipientCulture.Resolve(locale)` returns the first of `en`, `ms`, `zh-Hans` found by walking the locale and its parents with `CultureInfo.GetCultureInfo(locale, predefinedOnly: true)`: `zh-CN` and `zh-SG` give `zh-Hans`, `ms-MY` gives `ms`, `en-GB` gives `en`. A null, blank, invalid or unsupported locale (`fr-FR`, `zh-Hant`) gives `en`.
 - `TimeZoneResolver.Resolve(ianaId)` returns the zone `TimeZoneInfo.TryFindSystemTimeZoneById` finds (an IANA id such as `Asia/Kuala_Lumpur`; a runtime with ICU also maps Windows ids), else `UTC` with `IsFallback = true` so the caller can log that the id was unusable. Quiet hours use it (D11).
+
+## Templates and rendering
+
+Every message is rendered from Scriban templates embedded in the assembly of the source that declares its type ([ADR 0019](../adr/0019-embedded-scriban-notification-templates.md), D8). The code is in `Infrastructure/Templates/`; callers use `INotificationRenderer` (`Application/Abstractions/`).
+
+**Files.** One file per type, channel, culture and part, in a `Templates` folder at the root of the declaring project, embedded with `<EmbeddedResource Include="Templates\**\*.scriban" />`:
+
+| Channel | Files | `RenderedMessage` |
+|---|---|---|
+| Email | `Templates/Email/{type}.{culture}.subject.scriban`, `.text.scriban`, `.html.scriban` | `Subject`, `TextBody`, `HtmlBody` (the `html` part inside the culture's layout) |
+| In-app | `Templates/InApp/{type}.{culture}.title.scriban`, `.body.scriban` | `Subject` (the title), `TextBody` (the body); `HtmlBody` is `null` |
+
+The email layouts are `Templates/Email/_layout.{en,ms,zh-Hans}.html.scriban` in this module: a minimal responsive HTML email (one table at most 600 pixels wide, inline styles only, no images, scripts or remote resources, `lang` set to the culture, the subject as `<title>`) whose footer shows the product name and says why the recipient got the email. The `ms` and `zh-Hans` layouts are drafts for a native speaker to review. MSBuild names a resource `{assemblyName}.Templates.{Email|InApp}.{file name}`; the dots of a type code (`auth.password_changed`), the hyphen of `zh-Hans` and the underscore of `_layout` are kept as they are (`TemplateCompletenessTests` lists the real names).
+
+**Placeholders.** A template sees only strings: the variables the type declares (`{{ display_name }}`), its secret variables, and `{{ product_name }}` from `Notifications:Templates:ProductName` (reserved: a supplied variable of that name is ignored). There are no built-in functions, so callers pass numbers and dates already formatted for the recipient (for example `occurred_at` in the recipient's time zone); literal arithmetic in a template formats with the invariant culture. `if`, `for` and local assignments work as in Scriban. A layout sees only `content`, `subject` and `product_name`.
+
+**Encoding.** Values are data: they are inserted as text and never parsed as templates, so a display name of `{{ 1+1 }}` prints as written.
+
+- `html` parts: every value is HTML-encoded (`WebUtility.HtmlEncode`) before it reaches the template, so `<script>` becomes `&lt;script&gt;` without the template doing anything. The layout receives the rendered `html` part as `content` without encoding, and `subject` and `product_name` encoded. Put values only in element text or in **quoted** attribute values (`href="{{ action_url }}"`), never in an unquoted attribute, a `<script>` or a `style`; link variables come from trusted code (Auth builds its links).
+- `subject`, `text`, `title` and `body` parts get the values unchanged; they are plain text (an in-app client must display them as text). The subject and the in-app title become one line (line breaks, tabs and other control characters turn into spaces) and are cut to 300 characters; every part is trimmed.
+- Secret variables (a single-use link) may appear only in the email `text` and `html` parts (D4); a completeness test fails if a subject, a title or an in-app body uses one.
+
+**Fallback.** `EmbeddedTemplateStore` looks a part up in the requested culture, then in `en`; an unsupported culture goes straight to `en`. The culture is the one snapshotted on the notification (`RecipientCulture`), never `CultureInfo.CurrentUICulture`. A template that exists but does not parse fails instead of falling back. Each resource is read and parsed once and cached for the life of the process.
+
+**Sandbox.** Templates are trusted code, reviewed in pull requests; values are not. Each part renders with a fresh model and a `TemplateContext` that has no built-in functions (so no `include`, `date.now` or `object.eval_template`), no template loader, no access to .NET members of a value, `StrictVariables`, at most 1,000 loop iterations, 20 nested calls and 200,000 characters of output, and the invariant culture. Before rendering, the variables the template reads (collected from its Scriban syntax tree by `TemplateVariables`) are compared with those supplied, so a template cannot call anything that is not a supplied value.
+
+**Errors.** Every failure throws `TemplateRenderException` with `TypeCode`, `Channel`, `Culture` and `Reason`: an undeclared type, a part missing in both cultures, a parse error (the parser's message, which quotes only the template), a variable that was not supplied (by name) or a run-time failure (position and exception type only, because the engine's message can quote a value). The message never contains a variable value; the delivery worker treats it as a permanent failure.
+
+**Adding a type's templates.** Declare the type and its variables in an `INotificationTypeSource`; add every part for every default channel in `en`, `ms` and `zh-Hans` under `Templates/` of the same project (this module's `.csproj` already embeds `Templates\**\*.scriban`; another project needs that line); use the same placeholders in every culture; keep secret variables out of subjects and in-app parts; then run the unit tests. `TemplateCompletenessTests` checks each registered type: every part exists and parses (`Every_type_has_every_part_for_every_default_channel_and_culture`), the cultures use the placeholders of `en` (`Every_culture_uses_the_same_placeholders_as_en`), only declared variables and `product_name` are used (`Templates_use_only_declared_variables_and_product_name`), secrets stay out of subjects and in-app parts (`Subjects_titles_and_in_app_bodies_never_use_secret_variables`), and no embedded template lacks a type or layout (`No_orphan_template_resources`).
 
 ## Error codes
 
@@ -125,9 +154,11 @@ The module raises no events and has no outbox. It will consume Auth's integratio
 
 <!-- Configuration sections and keys the module reads, with defaults. -->
 
-None.
+| Key | Default | Meaning |
+|---|---|---|
+| `Notifications:Templates:ProductName` | `TemplateName` | The product's name as recipients know it: `{{ product_name }}` in every template and the email footer. Required, at most 100 characters; validated at start. |
 
-`AddNotificationsModule` takes the configuration for the sections later tasks add (`Notifications:Email`, `Notifications:Delivery`, `Notifications:Hub`).
+Later tasks add `Notifications:Email`, `Notifications:Delivery` and `Notifications:Hub`.
 
 ## Data
 
@@ -176,7 +207,7 @@ None.
 
 <!-- Where the module's unit and integration tests live and what they cover. -->
 
-Unit tests: `tests/TemplateName.UnitTests/Notifications/`. `NotificationTests`, `DeliveryTests`, `DeliveryRetryPolicyTests`, `InAppNotificationTests`, `UserNotificationProfileTests`, `UserPreferenceTests` (also the preference errors), `QuietHoursTests` and `HubTicketTests` cover the domain; the quiet-hours tests look up the IANA id `America/New_York` with `TimeZoneInfo.FindSystemTimeZoneById`, so a runtime without the zone fails them instead of skipping. `NotificationCatalogTests` covers the catalog rules and the start-up check, `RecipientCultureTests` the locale mapping (including that the current UI culture is ignored) and `TimeZoneResolverTests` the IANA lookup and the UTC fallback. The Windows-id case accepts whatever the runtime resolves, so the tests give the same result on Windows and on Linux with ICU. Architecture tests include the module in `Assemblies.Modules` and `Assemblies.ErrorMessageResources`: module boundary, layering, naming, translation completeness and this document's outline.
+Unit tests: `tests/TemplateName.UnitTests/Notifications/`. `NotificationTests`, `DeliveryTests`, `DeliveryRetryPolicyTests`, `InAppNotificationTests`, `UserNotificationProfileTests`, `UserPreferenceTests` (also the preference errors), `QuietHoursTests` and `HubTicketTests` cover the domain; the quiet-hours tests look up the IANA id `America/New_York` with `TimeZoneInfo.FindSystemTimeZoneById`, so a runtime without the zone fails them instead of skipping. `NotificationCatalogTests` covers the catalog rules and the start-up check; `ScribanNotificationRendererTests` the renderer (layout, HTML encoding, values never parsed as templates, a missing variable reported without any value, the `en` fallback, the current UI culture ignored, invariant numbers, the one-line subject, the sandbox, parse errors and concurrent renders); `TemplateCompletenessTests` the template rules over the production catalog, and the checker that enforces them (`TemplateCompletenessChecker`) against `TestNotificationTypeSource`, where it must pass a complete type and report every planted problem. That source's templates under `Notifications/Templates/` are embedded in the test assembly with the names a module's `Templates` folder gets. The per-type completeness theories are skipped while no production type exists. `RecipientCultureTests` covers the locale mapping (including that the current UI culture is ignored) and `TimeZoneResolverTests` the IANA lookup and the UTC fallback. The Windows-id case accepts whatever the runtime resolves, so the tests give the same result on Windows and on Linux with ICU. Architecture tests include the module in `Assemblies.Modules` and `Assemblies.ErrorMessageResources`: module boundary, layering, naming, translation completeness and this document's outline.
 
 Integration tests: `tests/TemplateName.IntegrationTests/Notifications/NotificationsPersistenceTests.cs` runs against the real SQL Server container and covers the round trip of a notification with its deliveries, UTC `datetime2(3)` values (kind `Utc`), the unique notification index, the inbox race of two contexts saving the same event (one `true`, one `false`, one notification row; a duplicate on the notification index still throws), hub ticket consumption by two concurrent callers and at expiry, mark-all-read, preferences with the quiet-hours columns, and the schema itself (column types, keys and index definitions read back from `sys.*`).
 

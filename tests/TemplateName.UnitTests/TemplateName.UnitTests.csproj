@@ -19,4 +19,13 @@
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--
+      Test-only notification templates for TestNotificationTypeSource. The template store expects the names a module gets from a
+      root-level Templates folder ({AssemblyName}.Templates.{Channel}.{file}), so the Notifications folder is left out of the name.
+    -->
+    <EmbeddedResource Include="Notifications\Templates\Email\*.scriban" LogicalName="$(AssemblyName).Templates.Email.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Notifications\Templates\InApp\*.scriban" LogicalName="$(AssemblyName).Templates.InApp.%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

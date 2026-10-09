@@ -1079,6 +1079,7 @@
       "templatename.modules.notifications": {
         "type": "Project",
         "dependencies": {
+          "Scriban": "[7.5.0, )",
           "TemplateName.Application.Common": "[0.0.0, )",
           "TemplateName.Infrastructure.Common": "[0.0.0, )",
           "TemplateName.Modules.Auth.Contracts": "[0.0.0, )",
@@ -1339,6 +1340,12 @@
         "requested": "[2.17.14, )",
         "resolved": "2.17.14",
         "contentHash": "wkZQbMQPSgU1w9BciBCe2Gh7l8hI9mSe+B1FRGC6zbPE2cD7YH3BDxwKWGzlJwuXAxgbfzK4UzQTnTDIgP6XFw=="
+      },
+      "Scriban": {
+        "type": "CentralTransitive",
+        "requested": "[7.5.0, )",
+        "resolved": "7.5.0",
+        "contentHash": "5Dk6VXG6dimWQFRtCs202cYYkdE1GeOqpUgCwNSp4C4NhpjeMaVNssxe6Ifb1Z3HCfabvrbk9XLbvQXeZXG91w=="
       },
       "Scrutor": {
         "type": "CentralTransitive",

@@ -881,6 +881,7 @@
       "templatename.modules.notifications": {
         "type": "Project",
         "dependencies": {
+          "Scriban": "[7.5.0, )",
           "TemplateName.Application.Common": "[0.0.0, )",
           "TemplateName.Infrastructure.Common": "[0.0.0, )",
           "TemplateName.Modules.Auth.Contracts": "[0.0.0, )",
@@ -1100,6 +1101,12 @@
           "Microsoft.Extensions.Options": "10.0.0",
           "OpenTelemetry.Api.ProviderBuilderExtensions": "[1.19.0, 2.0.0)"
         }
+      },
+      "Scriban": {
+        "type": "CentralTransitive",
+        "requested": "[7.5.0, )",
+        "resolved": "7.5.0",
+        "contentHash": "5Dk6VXG6dimWQFRtCs202cYYkdE1GeOqpUgCwNSp4C4NhpjeMaVNssxe6Ifb1Z3HCfabvrbk9XLbvQXeZXG91w=="
       },
       "Scrutor": {
         "type": "CentralTransitive",

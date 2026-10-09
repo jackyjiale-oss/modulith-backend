@@ -12,4 +12,13 @@
     <ProjectReference Include="..\..\Auth\TemplateName.Modules.Auth.Contracts\TemplateName.Modules.Auth.Contracts.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Scriban" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Notification templates (ADR 0019): the store reads them as manifest resources. -->
+    <EmbeddedResource Include="Templates\**\*.scriban" />
+  </ItemGroup>
+
 </Project>

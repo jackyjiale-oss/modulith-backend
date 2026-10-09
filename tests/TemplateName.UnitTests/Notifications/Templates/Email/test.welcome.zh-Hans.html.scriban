@@ -1,0 +1,3 @@
+<p>{{ display_name }}，您好：</p>
+<p>您的账户创建于 {{ occurred_at }}。</p>
+<p><a href="{{ action_url }}">开始使用</a></p>
