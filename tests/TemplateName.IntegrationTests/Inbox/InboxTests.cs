@@ -81,6 +81,27 @@ public sealed class InboxTests(IntegrationTestWebAppFactory factory) : Integrati
     }
 
     [Fact]
+    public async Task Consumer_of_400_characters_round_trips_and_401_is_rejected()
+    {
+        // MessageId (16 bytes) plus nvarchar(400) (800 bytes) keeps the clustered key under SQL Server's 900-byte limit.
+        var messageId = SequentialGuid.Create(Factory.Time.GetUtcNow());
+        var longest = new string('c', 400);
+        var (db, inbox) = NewScope();
+        db.Model.FindEntityType(typeof(InboxMessage))!.FindProperty(nameof(InboxMessage.Consumer))!.GetMaxLength().ShouldBe(400);
+
+        inbox.Record(messageId, longest);
+        await db.SaveChangesAsync(Ct);
+
+        var (read, readInbox) = NewScope();
+        (await readInbox.HasProcessedAsync(messageId, longest, Ct)).ShouldBeTrue();
+        (await read.Set<InboxMessage>().AsNoTracking().SingleAsync(Ct)).Consumer.ShouldBe(longest);
+
+        var tooLong = new string('c', 401);
+        Should.Throw<ArgumentOutOfRangeException>(() => readInbox.Record(messageId, tooLong));
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(() => readInbox.HasProcessedAsync(messageId, tooLong, Ct));
+    }
+
+    [Fact]
     public async Task Unique_violation_outside_the_inbox_is_not_a_duplicate()
     {
         var aggregate = TestAggregate.Create("a", Factory.Time.GetUtcNow());

@@ -6,7 +6,11 @@ namespace TemplateName.Infrastructure.Common.Inbox;
 /// </summary>
 public sealed class InboxMessage
 {
-    public const int ConsumerMaxLength = 500;
+    /// <summary>
+    /// The longest consumer name. The clustered primary key is <c>uniqueidentifier</c> (16 bytes) plus <c>nvarchar(400)</c> (800
+    /// bytes), under SQL Server's 900-byte limit for a clustered index key; a longer column would make long names fail on insert.
+    /// </summary>
+    public const int ConsumerMaxLength = 400;
 
     /// <summary>The name of the primary key constraint; <see cref="Inbox{TContext}.IsDuplicate"/> looks for it in SQL Server's error.</summary>
     internal const string PrimaryKeyName = "PK_InboxMessages";

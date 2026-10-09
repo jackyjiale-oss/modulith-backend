@@ -6,45 +6,41 @@ using TemplateName.SharedKernel;
 namespace TemplateName.Infrastructure.Common.Messaging;
 
 /// <summary>
-/// Publishes an integration event to its handlers in the same process (ADR 0018): one after another, in registration order, each in
-/// its own async DI scope, so every consumer gets its own <c>DbContext</c> and a failed save of one cannot leak into another. Every
-/// handler runs even when an earlier one throws; afterwards one failure is rethrown as it is and several as an
-/// <see cref="AggregateException"/>, so the outbox retries the publishing domain event handler and the consumers that already succeeded
-/// skip the repeat through their inbox. Cancellation is rethrown at once, unwrapped.
+/// Publishes an integration event to its handlers in the same process (ADR 0018): one after another, in registration order, each
+/// created and run in its own async DI scope, so every consumer gets its own <c>DbContext</c> and a failure of one, including a failure
+/// to create it, cannot stop or leak into another. Every handler runs even when an earlier one throws; afterwards one failure is
+/// rethrown as it is and several as an <see cref="AggregateException"/>, so the outbox retries the publishing domain event handler and
+/// the consumers that already succeeded skip the repeat through their inbox. Cancellation is rethrown at once, unwrapped.
 /// </summary>
 /// <remarks>
-/// DI cannot resolve a single implementation out of several registrations, so each scope resolves the whole handler list and runs the
-/// handler at its position. Handler constructors therefore run once per handler and scope; like any DI constructor they must be cheap
-/// and free of side effects.
+/// The handlers are the ones <c>AddApplicationHandlers</c> recorded as <see cref="IntegrationEventHandlerRegistration"/>s; each is
+/// resolved as its own type, so a scope creates only the handler it runs.
 /// </remarks>
-internal sealed class InProcessIntegrationEventPublisher(IServiceScopeFactory scopeFactory) : IIntegrationEventPublisher
+internal sealed class InProcessIntegrationEventPublisher(
+    IServiceScopeFactory scopeFactory,
+    IEnumerable<IntegrationEventHandlerRegistration> registrations) : IIntegrationEventPublisher
 {
+    private readonly ILookup<Type, Type> _handlerTypes = registrations.ToLookup(
+        registration => registration.EventType,
+        registration => registration.HandlerType);
+
     public async Task PublishAsync<TEvent>(TEvent integrationEvent, CancellationToken cancellationToken)
         where TEvent : IIntegrationEvent
     {
         ArgumentNullException.ThrowIfNull(integrationEvent);
 
         var failures = new List<Exception>();
-        for (var index = 0; ; index++)
+        foreach (var handlerType in _handlerTypes[typeof(TEvent)])
         {
             await using var scope = scopeFactory.CreateAsyncScope();
-            var handlers = scope.ServiceProvider.GetServices<IIntegrationEventHandler<TEvent>>().ToArray();
-
-            if (index < handlers.Length)
+            try
             {
-                try
-                {
-                    await handlers[index].HandleAsync(integrationEvent, cancellationToken);
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-                {
-                    failures.Add(exception);
-                }
+                var handler = (IIntegrationEventHandler<TEvent>)scope.ServiceProvider.GetRequiredService(handlerType);
+                await handler.HandleAsync(integrationEvent, cancellationToken);
             }
-
-            if (index >= handlers.Length - 1)
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                break;
+                failures.Add(exception);
             }
         }
 

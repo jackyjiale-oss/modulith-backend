@@ -24,6 +24,9 @@ public sealed class InProcessIntegrationEventPublisherTests
         calls.Entries.ShouldAllBe(entry => entry.Event == Event);
         calls.Entries[0].Scope.ShouldNotBeSameAs(calls.Entries[1].Scope);
 
+        // Each scope creates only the handler it runs.
+        calls.Constructions.ShouldBe(2);
+
         // Each scope is disposed once its handler has run.
         calls.Entries.ShouldAllBe(entry => entry.Scope.IsDisposed);
     }
@@ -38,6 +41,34 @@ public sealed class InProcessIntegrationEventPublisherTests
 
         exception.Message.ShouldBe(ThrowingHandler.Message);
         calls.Entries.Select(entry => entry.Handler).ShouldBe([nameof(ThrowingHandler), nameof(SecondRecordingHandler)]);
+    }
+
+    [Fact]
+    public async Task Handler_that_cannot_be_created_does_not_stop_the_others()
+    {
+        var calls = new HandlerCalls();
+        await using var provider = BuildProvider(calls, typeof(UnconstructibleHandler), typeof(FirstRecordingHandler));
+
+        var exception = await Should.ThrowAsync<InvalidOperationException>(() => Publisher(provider).PublishAsync(Event, Ct));
+
+        exception.Message.ShouldBe(UnconstructibleHandler.Message);
+        calls.Entries.Select(entry => entry.Handler).ShouldBe([nameof(FirstRecordingHandler)]);
+    }
+
+    [Fact]
+    public async Task Handlers_scanned_by_AddApplicationHandlers_run_once_each()
+    {
+        // Scanning the same assembly twice must not run a handler twice.
+        await using var provider = new ServiceCollection()
+            .AddApplicationHandlers(typeof(PingPublishedIntegrationEventHandler).Assembly)
+            .AddApplicationHandlers(typeof(PingPublishedIntegrationEventHandler).Assembly)
+            .AddSingleton<IIntegrationEventPublisher, InProcessIntegrationEventPublisher>()
+            .BuildServiceProvider();
+        var pingPublished = new PingPublishedIntegrationEvent(Event.Id, Event.OccurredAt, []);
+
+        await Publisher(provider).PublishAsync(pingPublished, Ct);
+
+        pingPublished.Handlers.ShouldBe([nameof(PingPublishedIntegrationEventHandler)]);
     }
 
     [Fact]
@@ -87,7 +118,7 @@ public sealed class InProcessIntegrationEventPublisherTests
 
         foreach (var handlerType in handlerTypes)
         {
-            services.AddScoped(typeof(IIntegrationEventHandler<TestIntegrationEvent>), handlerType);
+            services.AddIntegrationEventHandler(typeof(TestIntegrationEvent), handlerType);
         }
 
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
@@ -116,24 +147,57 @@ public sealed class InProcessIntegrationEventPublisherTests
         public List<HandlerCall> Entries { get; } = [];
 
         public CancellationTokenSource? ToCancel { get; init; }
+
+        /// <summary>How many recording handlers were created.</summary>
+        public int Constructions { get; set; }
     }
 
-    private sealed class FirstRecordingHandler(HandlerCalls calls, ScopeMarker scope) : IIntegrationEventHandler<TestIntegrationEvent>
+    private sealed class FirstRecordingHandler : IIntegrationEventHandler<TestIntegrationEvent>
     {
+        private readonly HandlerCalls _calls;
+        private readonly ScopeMarker _scope;
+
+        public FirstRecordingHandler(HandlerCalls calls, ScopeMarker scope)
+        {
+            _calls = calls;
+            _scope = scope;
+            calls.Constructions++;
+        }
+
         public Task HandleAsync(TestIntegrationEvent integrationEvent, CancellationToken cancellationToken)
         {
-            calls.Entries.Add(new HandlerCall(nameof(FirstRecordingHandler), integrationEvent, scope));
+            _calls.Entries.Add(new HandlerCall(nameof(FirstRecordingHandler), integrationEvent, _scope));
             return Task.CompletedTask;
         }
     }
 
-    private sealed class SecondRecordingHandler(HandlerCalls calls, ScopeMarker scope) : IIntegrationEventHandler<TestIntegrationEvent>
+    private sealed class SecondRecordingHandler : IIntegrationEventHandler<TestIntegrationEvent>
     {
+        private readonly HandlerCalls _calls;
+        private readonly ScopeMarker _scope;
+
+        public SecondRecordingHandler(HandlerCalls calls, ScopeMarker scope)
+        {
+            _calls = calls;
+            _scope = scope;
+            calls.Constructions++;
+        }
+
         public Task HandleAsync(TestIntegrationEvent integrationEvent, CancellationToken cancellationToken)
         {
-            calls.Entries.Add(new HandlerCall(nameof(SecondRecordingHandler), integrationEvent, scope));
+            _calls.Entries.Add(new HandlerCall(nameof(SecondRecordingHandler), integrationEvent, _scope));
             return Task.CompletedTask;
         }
+    }
+
+    /// <summary>A consumer whose construction fails, as with an invalid option or a throwing factory.</summary>
+    private sealed class UnconstructibleHandler : IIntegrationEventHandler<TestIntegrationEvent>
+    {
+        public const string Message = "Consumer could not be created.";
+
+        public UnconstructibleHandler() => throw new InvalidOperationException(Message);
+
+        public Task HandleAsync(TestIntegrationEvent integrationEvent, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private sealed class ThrowingHandler(HandlerCalls calls, ScopeMarker scope) : IIntegrationEventHandler<TestIntegrationEvent>

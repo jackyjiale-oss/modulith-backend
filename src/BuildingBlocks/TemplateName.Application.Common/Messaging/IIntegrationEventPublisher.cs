@@ -9,9 +9,9 @@ namespace TemplateName.Application.Common.Messaging;
 public interface IIntegrationEventPublisher
 {
     /// <summary>
-    /// Runs every handler of <typeparamref name="TEvent"/>, one after another, each in its own DI scope. Every handler runs even when
-    /// an earlier one throws; afterwards a single failure is rethrown as it is and several as an <see cref="AggregateException"/>.
-    /// Cancellation stops at once and is rethrown unwrapped.
+    /// Runs every handler of <typeparamref name="TEvent"/>, one after another, each created and run in its own DI scope. Every handler
+    /// runs even when an earlier one throws or cannot be created; afterwards a single failure is rethrown as it is and several as an
+    /// <see cref="AggregateException"/>. Cancellation stops at once and is rethrown unwrapped.
     /// </summary>
     Task PublishAsync<TEvent>(TEvent integrationEvent, CancellationToken cancellationToken)
         where TEvent : IIntegrationEvent;
