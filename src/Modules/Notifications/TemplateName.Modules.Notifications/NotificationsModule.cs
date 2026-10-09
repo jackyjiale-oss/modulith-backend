@@ -40,6 +40,7 @@ public static class NotificationsModule
         services.AddScoped<IHubTicketRepository, HubTicketRepository>();
         services.AddScoped<IUnitOfWork>(serviceProvider => serviceProvider.GetRequiredService<NotificationsDbContext>());
 
+        services.AddSingleton<INotificationTypeSource, AuthNotificationTypeSource>();
         services.AddSingleton<NotificationCatalog>();
         services.AddHostedService<NotificationCatalogStartupCheck>();
 

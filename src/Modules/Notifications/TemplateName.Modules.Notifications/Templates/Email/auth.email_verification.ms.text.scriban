@@ -1,0 +1,7 @@
+Helo {{ display_name }},
+
+Sila sahkan alamat e-mel anda dengan membuka pautan ini:
+
+{{ action_url }}
+
+Pautan ini hanya boleh digunakan sekali dan tamat tempoh dalam {{ expires_in_minutes }} minit. Jika anda tidak mendaftar, anda boleh mengabaikan e-mel ini.

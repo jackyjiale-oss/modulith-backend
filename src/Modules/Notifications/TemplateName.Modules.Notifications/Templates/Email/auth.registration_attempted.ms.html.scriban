@@ -1,0 +1,3 @@
+<p>Helo {{ display_name }},</p>
+<p>Seseorang cuba mencipta akaun menggunakan alamat e-mel anda, tetapi anda sudah mempunyai akaun.</p>
+<p>Jika itu anda, log masuk dengan kata laluan anda, atau tetapkan semula jika anda terlupa. Jika bukan anda, anda boleh mengabaikan e-mel ini.</p>

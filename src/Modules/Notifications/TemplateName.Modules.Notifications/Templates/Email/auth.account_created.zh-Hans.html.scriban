@@ -1,0 +1,5 @@
+<p>{{ display_name }}，您好：</p>
+<p>管理员已为您创建了账户。</p>
+<p><a href="{{ action_url }}" style="display:inline-block;padding:12px 24px;background-color:#1d4ed8;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold;">设置密码</a></p>
+<p>如果按钮无法使用，请将此地址复制到浏览器中打开：<br>{{ action_url }}</p>
+<p>此链接只能使用一次，并将在 {{ expires_in_minutes }} 分钟后失效。如果您没有预期收到此邮件，请不要使用该链接，并联系您的管理员。</p>

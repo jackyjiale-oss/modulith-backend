@@ -1,0 +1,7 @@
+Hello {{ display_name }},
+
+Please confirm your email address by opening this link:
+
+{{ action_url }}
+
+The link works once and expires in {{ expires_in_minutes }} minutes. If you did not sign up, you can ignore this email.

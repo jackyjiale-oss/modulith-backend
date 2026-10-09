@@ -1,0 +1,5 @@
+Hello {{ display_name }},
+
+Someone tried to create an account with your email address, but you already have one.
+
+If it was you, sign in with your password, or reset it if you have forgotten it. If it was not you, you can ignore this email.

@@ -1,0 +1,5 @@
+<p>Hello {{ display_name }},</p>
+<p>Please confirm your email address.</p>
+<p><a href="{{ action_url }}" style="display:inline-block;padding:12px 24px;background-color:#1d4ed8;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold;">Confirm email address</a></p>
+<p>If the button does not work, copy this address into your browser:<br>{{ action_url }}</p>
+<p>The link works once and expires in {{ expires_in_minutes }} minutes. If you did not sign up, you can ignore this email.</p>

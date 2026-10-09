@@ -1,0 +1,3 @@
+<p>Hello {{ display_name }},</p>
+<p>We signed out one of your sessions on {{ occurred_at }} ({{ time_zone }}) because its sign-in credentials were used a second time. This may mean someone else obtained them.</p>
+<p>If this was not you, reset your password now.</p>
