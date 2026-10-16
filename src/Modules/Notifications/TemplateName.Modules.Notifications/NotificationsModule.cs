@@ -16,6 +16,7 @@ using TemplateName.Modules.Notifications.Infrastructure.Channels.InApp;
 using TemplateName.Modules.Notifications.Infrastructure.Deliveries;
 using TemplateName.Modules.Notifications.Infrastructure.Observability;
 using TemplateName.Modules.Notifications.Infrastructure.Persistence;
+using TemplateName.Modules.Notifications.Endpoints;
 using TemplateName.Modules.Notifications.Infrastructure.Templates;
 using TemplateName.Modules.Notifications.Resources;
 
@@ -100,9 +101,14 @@ public static class NotificationsModule
         services.AddScoped<INotificationChannel, EmailChannel>();
     }
 
-    /// <summary>Maps the module's endpoints; <paramref name="app"/> is the host's <c>/api/v1</c> group. None yet.</summary>
+    /// <summary>
+    /// Maps the module's endpoints; <paramref name="app"/> is the host's <c>/api/v1</c> group: the signed-in user's routes
+    /// <c>notifications/inbox/...</c> (list, unread count, mark read, mark all read).
+    /// </summary>
     public static IEndpointRouteBuilder MapNotificationsEndpoints(this IEndpointRouteBuilder app)
     {
+        app.MapNotificationEndpoints();
+
         return app;
     }
 
