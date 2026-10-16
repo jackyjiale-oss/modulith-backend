@@ -39,7 +39,7 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
         await RegisterAsync(Email);
 
         Factory.IntegrationEvents.Events.ShouldBeEmpty();
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
 
         var published = Factory.IntegrationEvents.Events.ShouldHaveSingleItem().ShouldBeOfType<EmailVerificationRequestedIntegrationEvent>();
         var user = await QueryAsync(context => context.Set<User>().SingleAsync(Ct));
@@ -67,10 +67,10 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
         await RegisterAsync(Email);
         Factory.FlakySwitch.FailNext = true;
 
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         (await OutboxMessageAsync<VerificationCodeIssuedDomainEvent>()).AttemptCount.ShouldBe(1);
         Factory.Time.Advance(TimeSpan.FromSeconds(5));
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
 
         var message = await OutboxMessageAsync<VerificationCodeIssuedDomainEvent>();
         message.ProcessedAt.ShouldNotBeNull();
@@ -91,7 +91,7 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
         await ForgotAsync(Email);
 
         // Both codes were issued before the dispatch; the second invalidated the first.
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
 
         var codes = await QueryAsync(context => context.Set<VerificationCode>().OrderBy(code => code.CreatedAt).ToListAsync(Ct));
         codes.Count.ShouldBe(2);
@@ -116,7 +116,7 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
             userId = (await created.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("id").GetGuid();
         }
 
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
 
         var published = Factory.IntegrationEvents.Events.OfType<PasswordResetRequestedIntegrationEvent>().ShouldHaveSingleItem();
         published.Reason.ShouldBe(PasswordResetReason.CreatedByAdmin);
@@ -135,7 +135,7 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
             forced.StatusCode.ShouldBe(HttpStatusCode.Accepted);
         }
 
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
 
         var published = Factory.IntegrationEvents.Events.OfType<PasswordResetRequestedIntegrationEvent>().ShouldHaveSingleItem();
         published.Reason.ShouldBe(PasswordResetReason.ForcedByAdmin);
@@ -179,7 +179,7 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
             wrong.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
         }
 
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
 
         var stored = await QueryAsync(context => context.Set<User>().SingleAsync(candidate => candidate.Id == user.Id, Ct));
         var reuse = await OutboxMessageAsync<RefreshTokenReuseDetectedDomainEvent>();
@@ -225,17 +225,6 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
     }
 
     private Task<HttpResponseMessage> RefreshAsync(string refreshToken) => Client.PostAsJsonAsync(RefreshRoute, new { refreshToken }, Ct);
-
-    private async Task DispatchOutboxAsync()
-    {
-        var dispatcher = Factory.Services.GetRequiredService<OutboxDispatcher<AuthDbContext>>();
-        int claimed;
-        do
-        {
-            claimed = await dispatcher.ProcessBatchAsync(Ct);
-        }
-        while (claimed > 0);
-    }
 
     private Task<OutboxMessage> OutboxMessageAsync<TDomainEvent>()
         => QueryAsync(context => context.Set<OutboxMessage>().AsNoTracking().SingleAsync(message => message.Type == typeof(TDomainEvent).FullName, Ct));

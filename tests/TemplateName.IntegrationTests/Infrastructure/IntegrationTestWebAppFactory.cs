@@ -19,7 +19,6 @@ using TemplateName.IntegrationTests.Notifications;
 using TemplateName.IntegrationTests.Outbox;
 using TemplateName.IntegrationTests.Persistence;
 using TemplateName.Modules.Auth;
-using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Contracts.IntegrationEvents;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
 using TemplateName.Modules.Notifications.Application.Abstractions;
@@ -58,14 +57,11 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     /// <summary>A permission source tests change to declare or drop permissions before seeding again; empty at the start of every test.</summary>
     public TestPermissionSource PermissionSource { get; } = new();
 
-    /// <summary>Every email the hosts built by this factory sent, kept in memory instead of going to SMTP; empty at the start of every test.</summary>
-    internal RecordingEmailSender EmailSender { get; } = new();
-
     /// <summary>
-    /// The Notifications email channel of the hosts built by this factory, until the real one replaces it: it counts the calls instead
-    /// of sending; reset at the start of every test.
+    /// The email transport of the hosts built by this factory: the real Notifications email channel hands it every message, which it
+    /// keeps in memory instead of sending through SMTP, and it fails on demand; empty at the start of every test.
     /// </summary>
-    internal FakeEmailChannel EmailChannel { get; } = new();
+    internal RecordingEmailSender EmailSender { get; } = new();
 
     /// <summary>Every in-app push the hosts built by this factory made, kept in memory; reset at the start of every test.</summary>
     internal RecordingInAppNotificationPusher InAppPusher { get; } = new();
@@ -159,9 +155,8 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.AddSingleton<TimeProvider>(Time);
             services.RemoveAll<ICurrentUser>();
             services.AddSingleton<ICurrentUser>(CurrentUser);
-            services.RemoveAll<IEmailSender>();
-            services.AddSingleton<IEmailSender>(EmailSender);
-            services.AddSingleton<INotificationChannel>(EmailChannel);
+            services.RemoveAll<IEmailTransport>();
+            services.AddSingleton<IEmailTransport>(EmailSender);
             services.RemoveAll<IInAppNotificationPusher>();
             services.AddSingleton<IInAppNotificationPusher>(InAppPusher);
             services.AddSingleton<INotificationTypeSource, DeliveryTestTypeSource>();

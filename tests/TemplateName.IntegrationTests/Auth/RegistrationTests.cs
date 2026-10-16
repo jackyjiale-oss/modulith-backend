@@ -15,12 +15,14 @@ using TemplateName.Modules.Auth.Domain.Roles;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Domain.Verification;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+using EmailSendException = TemplateName.Modules.Notifications.Application.Abstractions.EmailSendException;
 
 namespace TemplateName.IntegrationTests.Auth;
 
 /// <summary>
-/// Registration, email confirmation and resending the confirmation through the running host. The outbox does not run by itself in tests,
-/// so every test dispatches the Auth outbox after a call and reads the emails <see cref="RecordingEmailSender"/> kept.
+/// Registration, email confirmation and resending the confirmation through the running host. Neither the outbox nor the delivery worker
+/// runs by itself in tests, so every test dispatches both after a call (<c>DispatchNotificationsAsync</c>: Auth's outbox publishes, the
+/// Notifications module renders and sends) and reads the emails <see cref="RecordingEmailSender"/> kept.
 /// </summary>
 public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)
 {
@@ -29,7 +31,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
     private const string ResendRoute = "/api/v1/auth/email/resend-confirmation";
     private const string Password = "correct horse battery staple";
     private const string ConfirmSubject = "Confirm your email address";
-    private const string AttemptSubject = "Sign-up attempt on your account";
+    private const string AttemptSubject = "Sign-up attempt with your email address";
 
     private static readonly string[] VolatileHeaders = ["X-Trace-Id", "Date"];
 
@@ -40,7 +42,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
 
         response.StatusCode.ShouldBe(HttpStatusCode.Accepted);
         (await response.Content.ReadAsByteArrayAsync(Ct)).ShouldBeEmpty();
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         var email = Factory.EmailSender.Sent.ShouldHaveSingleItem();
         email.To.ShouldBe("alice@example.com");
         email.Subject.ShouldBe(ConfirmSubject);
@@ -53,6 +55,44 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
         confirm.StatusCode.ShouldBe(HttpStatusCode.NoContent);
         (await FindUserAsync("alice@example.com")).EmailConfirmed.ShouldBeTrue();
         (await AuditEventsAsync()).ShouldBe([AuthAuditEvents.Registered, AuthAuditEvents.EmailConfirmed]);
+    }
+
+    [Fact]
+    public async Task Confirmation_email_is_written_in_the_registered_locale()
+    {
+        // The email follows the recipient's saved language, not the request's (Plan 2 sent English only).
+        using var response = await RegisterAsync("alice@example.com", locale: "ms");
+        response.StatusCode.ShouldBe(HttpStatusCode.Accepted);
+
+        await DispatchNotificationsAsync();
+
+        var email = Factory.EmailSender.Sent.ShouldHaveSingleItem();
+        email.Subject.ShouldBe("Sahkan alamat e-mel anda");
+        email.TextBody.ShouldStartWith("Helo Alice,");
+        email.HtmlBody.ShouldNotBeNull().ShouldContain("lang=\"ms\"");
+        using var confirm = await ConfirmAsync(Factory.EmailSender.LastLinkToken("alice@example.com"));
+        confirm.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+    }
+
+    [Fact]
+    public async Task Smtp_outage_delays_the_confirmation_email_without_failing_the_outbox()
+    {
+        // The Auth outbox only publishes; the SMTP server is the delivery worker's concern, which retries on its own schedule.
+        using var response = await RegisterAsync("alice@example.com");
+        response.StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        Factory.EmailSender.FailNext(new EmailSendException(isPermanent: false, "connection_failed"));
+
+        await DispatchNotificationsAsync();
+
+        Factory.EmailSender.Sent.ShouldBeEmpty();
+        (await QueryAsync(context => context.Set<OutboxMessage>().ToListAsync(Ct)))
+            .ShouldAllBe(message => message.ProcessedAt != null && message.Error == null);
+
+        Factory.Time.Advance(TimeSpan.FromMinutes(1));
+        await DispatchNotificationsAsync();
+
+        Factory.EmailSender.Sent.ShouldHaveSingleItem().Subject.ShouldBe(ConfirmSubject);
+        Factory.EmailSender.AttemptsTo("alice@example.com").ShouldBe(2);
     }
 
     [Fact]
@@ -161,7 +201,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
             resend.StatusCode.ShouldBe(HttpStatusCode.Accepted);
         }
 
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         Factory.EmailSender.Sent.Count.ShouldBe(2);
         var second = Factory.EmailSender.LastLinkToken("alice@example.com");
         second.ShouldNotBe(first);
@@ -188,7 +228,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
 
         response.StatusCode.ShouldBe(HttpStatusCode.Accepted);
         (await response.Content.ReadAsByteArrayAsync(Ct)).ShouldBeEmpty();
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         var notice = Factory.EmailSender.Sent.ShouldHaveSingleItem();
         notice.To.ShouldBe("alice@example.com");
         notice.Subject.ShouldBe(AttemptSubject);
@@ -262,7 +302,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
             second.StatusCode.ShouldBe(HttpStatusCode.Accepted);
         }
 
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         var user = (await QueryAsync(context => context.Set<User>().ToListAsync(Ct))).ShouldHaveSingleItem();
         user.Email.ShouldBe("Alice@Example.com");
         user.NormalizedEmail.ShouldBe("ALICE@EXAMPLE.COM");
@@ -277,7 +317,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
             resend.StatusCode.ShouldBe(HttpStatusCode.Accepted);
         }
 
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         Factory.EmailSender.Sent.Count.ShouldBe(3);
         Factory.EmailSender.Sent[^1].Subject.ShouldBe(ConfirmSubject);
     }
@@ -291,13 +331,13 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
         await AssertResendAcceptedAsync("alice@example.com");
         Factory.Time.Advance(TimeSpan.FromSeconds(59));
         await AssertResendAcceptedAsync("alice@example.com");
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         Factory.EmailSender.Sent.ShouldBeEmpty();
 
         // The cooldown is 60 seconds from the last code: exactly then, a new one goes out.
         Factory.Time.Advance(TimeSpan.FromSeconds(1));
         await AssertResendAcceptedAsync("alice@example.com");
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         Factory.EmailSender.Sent.ShouldHaveSingleItem().Subject.ShouldBe(ConfirmSubject);
     }
 
@@ -306,7 +346,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
     {
         await AssertResendAcceptedAsync("nobody@example.com");
 
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         Factory.EmailSender.Sent.ShouldBeEmpty();
         (await QueryAsync(context => context.Set<VerificationCode>().CountAsync(Ct))).ShouldBe(0);
     }
@@ -325,7 +365,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
 
         await AssertResendAcceptedAsync("alice@example.com");
 
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         Factory.EmailSender.Sent.ShouldBeEmpty();
     }
 
@@ -460,19 +500,8 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
     {
         using var response = await RegisterAsync(email);
         response.StatusCode.ShouldBe(HttpStatusCode.Accepted);
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         return Factory.EmailSender.LastLinkToken(email);
-    }
-
-    private async Task DispatchOutboxAsync()
-    {
-        var dispatcher = Factory.Services.GetRequiredService<OutboxDispatcher<AuthDbContext>>();
-        int claimed;
-        do
-        {
-            claimed = await dispatcher.ProcessBatchAsync(Ct);
-        }
-        while (claimed > 0);
     }
 
     private Task<User> FindUserAsync(string email)

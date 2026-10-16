@@ -23,6 +23,8 @@ public sealed class ChannelSendResultTests
     [InlineData("a_code_of_exactly_fifty_one_characters_long_xxxxxxx", false)]
     [InlineData("550_rejected", false)]
     [InlineData("<bob@example.org>", false)]
+    [InlineData("smtp_550\n", false)]
+    [InlineData("smtp_550\r\n", false)]
     [InlineData(null, false)]
     public void IsReasonCode_accepts_only_short_codes(string? reason, bool isReasonCode)
         => ChannelSendResult.IsReasonCode(reason).ShouldBe(isReasonCode);

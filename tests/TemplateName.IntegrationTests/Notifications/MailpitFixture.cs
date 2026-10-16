@@ -3,21 +3,26 @@ using System.Text.Json.Serialization;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 
-namespace TemplateName.IntegrationTests.Auth;
+namespace TemplateName.IntegrationTests.Notifications;
 
 /// <summary>
 /// Runs Mailpit (a disposable SMTP server with a REST API) in a container. The image tag is pinned and matches the one in
-/// <c>docker-compose.yml</c>; a test keeps the two in step.
+/// <c>docker-compose.yml</c>; a test keeps the two in step. It accepts only recipients at <c>example.com</c>
+/// (<c>MP_SMTP_ALLOWED_RECIPIENTS</c>) and rejects every other one at <c>RCPT TO</c>, the way a real server rejects an unknown mailbox.
 /// </summary>
 public sealed class MailpitFixture : IAsyncLifetime
 {
     /// <summary>The pinned image. Change it together with <c>docker-compose.yml</c>.</summary>
     public const string Image = "axllent/mailpit:v1.31.4";
 
+    /// <summary>An address the server rejects at <c>RCPT TO</c>: it is not at <c>example.com</c>.</summary>
+    public const string RejectedRecipient = "nobody@rejected.example.net";
+
     private const int SmtpContainerPort = 1025;
     private const int HttpContainerPort = 8025;
 
     private readonly IContainer _container = new ContainerBuilder(Image)
+        .WithEnvironment("MP_SMTP_ALLOWED_RECIPIENTS", @"@example\.com$")
         .WithPortBinding(SmtpContainerPort, assignRandomHostPort: true)
         .WithPortBinding(HttpContainerPort, assignRandomHostPort: true)
         .WithWaitStrategy(Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(request => request.ForPort(HttpContainerPort).ForPath("/livez")))

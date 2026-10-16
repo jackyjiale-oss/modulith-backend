@@ -1,14 +1,15 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace TemplateName.Modules.Auth.Infrastructure.Email;
+namespace TemplateName.Modules.Notifications.Infrastructure.Channels.Email;
 
 /// <summary>
-/// The SMTP server and sender identity (section <c>Auth:Email</c>). <see cref="Username"/> and <see cref="Password"/> are empty in the
-/// files; set them with user secrets or environment variables.
+/// The SMTP server and sender identity (section <c>Notifications:Email</c>; Plan 2's <c>Auth:Email</c> with the same keys, defaults and
+/// ranges, D15). <see cref="Username"/> and <see cref="Password"/> are empty in the files; set them with user secrets or environment
+/// variables.
 /// </summary>
 internal sealed class EmailOptions
 {
-    internal const string SectionName = "Auth:Email";
+    internal const string SectionName = "Notifications:Email";
 
     /// <summary>The SMTP host. The default is Mailpit from <c>docker-compose.yml</c>.</summary>
     [Required(AllowEmptyStrings = false)]
@@ -21,7 +22,7 @@ internal sealed class EmailOptions
     /// <summary>Whether to upgrade the connection with STARTTLS. Turn it on for every real server.</summary>
     public bool UseTls { get; set; }
 
-    /// <summary>The account name. When empty the sender does not authenticate.</summary>
+    /// <summary>The account name. When empty the transport does not authenticate.</summary>
     public string Username { get; set; } = string.Empty;
 
     /// <summary>The account password. Secrets only, never in a file.</summary>

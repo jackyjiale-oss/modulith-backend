@@ -26,7 +26,6 @@ using TemplateName.Modules.Auth.Contracts.Users;
 using TemplateName.Modules.Auth.Endpoints;
 using TemplateName.Modules.Auth.Infrastructure.Authorization;
 using TemplateName.Modules.Auth.Infrastructure.Contracts;
-using TemplateName.Modules.Auth.Infrastructure.Email;
 using TemplateName.Modules.Auth.Infrastructure.Observability;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
 using TemplateName.Modules.Auth.Infrastructure.Security;
@@ -44,7 +43,7 @@ public static class AuthModule
     /// <summary>
     /// Registers the module's context (schema <c>auth</c>), outbox, handlers and validators, repositories, audit writer, the user
     /// administration's SuperAdmin rules and reset-link issuer, the role administration's cache invalidator, the contact directory other modules call (<c>IUserContactDirectory</c> from the Contracts project), error messages
-    /// (<c>AuthErrorMessages</c>), the SMTP email sender with <c>Auth:Links</c> and <c>Auth:Verification</c>, the sign-in settings
+    /// (<c>AuthErrorMessages</c>), the link and verification settings <c>Auth:Links</c> and <c>Auth:Verification</c>, the sign-in settings
     /// <c>Auth:RefreshToken</c> and <c>Auth:Lockout</c>, the counters of the <c>TemplateName.Auth</c> meter (added to OpenTelemetry), the
     /// access tokens with the JWT bearer handler as the default authentication scheme, the permission checker with its cache, the
     /// permission source and the seeder, and the Data Protection key ring stored in <c>auth.DataProtectionKeys</c>. Call it after
@@ -84,15 +83,10 @@ public static class AuthModule
         services.AddHttpClient(HibpBreachedPasswordChecker.HttpClientName, client => client.Timeout = HibpBreachedPasswordChecker.RequestBudget);
         services.AddSingleton<IBreachedPasswordChecker, HibpBreachedPasswordChecker>();
 
-        services.AddOptions<EmailOptions>()
-            .Bind(configuration.GetSection(EmailOptions.SectionName))
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
         services.AddOptions<LinksOptions>()
             .Bind(configuration.GetSection(LinksOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
-        services.AddSingleton<IEmailSender, SmtpEmailSender>();
         services.AddOptions<VerificationOptions>()
             .Bind(configuration.GetSection(VerificationOptions.SectionName))
             .ValidateDataAnnotations()

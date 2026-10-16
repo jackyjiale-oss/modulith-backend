@@ -162,12 +162,11 @@ The endpoint decides which OpenTelemetry services are registered, so it is **rea
 | `AdminEmail` | empty (`admin@localhost.test` in `appsettings.Development.json`) | when seeding: a plain email address, up to 256 characters | The first administrator's email. |
 | `AdminPassword` | empty | when seeding: within `Auth:Password:MinLength`/`MaxLength` | The first administrator's password. **Never in a file**: `dotnet user-secrets set "Auth:Seed:AdminPassword" "…" --project src/Host/TemplateName.Api` or `Auth__Seed__AdminPassword`. Without it no administrator is seeded. **Remove it after the first start**: the account then exists, and an account with that email, even a soft-deleted one, is never re-created (each start logs a warning while the key is still set). |
 
-The Auth module reads the sections below, each with its keys, defaults and ranges in the [Auth module](../modules/auth.md#configuration) document. Seven of them are validated on start (`Auth:Password`, `Auth:Email`, `Auth:Links`, `Auth:Verification`, `Auth:RefreshToken`, `Auth:Lockout` and `Auth:Jwt`), so an out-of-range value or a bad signing key stops the host. `Auth:DataProtection` is read as it is (a missing name falls back to `TemplateName`), and `Auth:Seed` is checked when the seeder runs.
+The Auth module reads the sections below, each with its keys, defaults and ranges in the [Auth module](../modules/auth.md#configuration) document. Six of them are validated on start (`Auth:Password`, `Auth:Links`, `Auth:Verification`, `Auth:RefreshToken`, `Auth:Lockout` and `Auth:Jwt`), so an out-of-range value or a bad signing key stops the host. `Auth:DataProtection` is read as it is (a missing name falls back to `TemplateName`), and `Auth:Seed` is checked when the seeder runs.
 
 | Section | Holds |
 |---|---|
 | `Auth:Password` | Length limits, history count, the breached-password check. |
-| `Auth:Email` | The SMTP sender (Mailpit locally); `Username` and `Password` only from user secrets or the environment. |
 | `Auth:Links` | The front-end URLs the confirmation and reset links open. |
 | `Auth:Verification` | Lifetimes of the confirmation and reset links, the resend cooldown. |
 | `Auth:RefreshToken` | Sliding and absolute session lifetimes. |
@@ -175,6 +174,21 @@ The Auth module reads the sections below, each with its keys, defaults and range
 | `Auth:Jwt` | Issuer, audience, lifetime, skew and the signing keys (required outside Development and Testing). |
 | `Auth:DataProtection` | The Data Protection application name. |
 | `Auth:Seed` | Above. |
+
+### `Notifications:Email`
+
+The SMTP server the Notifications email channel sends through ([Notifications module](../modules/notifications.md#email-channel)); Mailpit locally. Validated on start. Until Plan 3 these keys were `Auth:Email`: the host **refuses to start** while any `Auth:Email` key is still set, in any source (a settings file, user secrets, `Auth__Email__*` in the environment), with `Auth:Email has moved to Notifications:Email (see docs/modules/notifications.md#configuration).` (D15). Rename the keys; their values and meaning are unchanged.
+
+| Key | Default | Validation (on start) | Meaning |
+|---|---|---|---|
+| `Host` | `localhost` | required | The SMTP host. `appsettings.Development.json` points at Mailpit (`localhost:1025`, no TLS). |
+| `Port` | `1025` | 1 to 65535 | The SMTP port. |
+| `UseTls` | `false` | — | STARTTLS. Turn it on for every real server; with `false` and a `Username` the credentials travel in clear. |
+| `Username` | empty | — | The SMTP account; empty means no authentication. **Never in a file**: user secrets or `Notifications__Email__Username`. |
+| `Password` | empty | — | The SMTP password. **Never in a file**: user secrets or `Notifications__Email__Password`. |
+| `From` | `no-reply@localhost.test` | an email address | The sender address. |
+| `FromName` | `TemplateName` | required, at most 100 characters | The display name next to the sender address. |
+| `Timeout` | `00:00:30` | `00:00:01` to `00:05:00` | How long connecting and sending may each take. |
 
 ### `Notifications:Delivery`
 

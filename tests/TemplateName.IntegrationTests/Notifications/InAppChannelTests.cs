@@ -49,7 +49,7 @@ public sealed class InAppChannelTests(IntegrationTestWebAppFactory factory) : In
         var (userId, payload) = Factory.InAppPusher.Pushes.ShouldHaveSingleItem();
         userId.ShouldBe(user.Id);
         payload.ShouldBe(new InAppNotificationPushed(deliveryId, row.TypeCode, row.Category, row.Title, row.Body, row.CreatedAt));
-        Factory.EmailChannel.Calls.ShouldBeEmpty();
+        Factory.EmailSender.Attempts.ShouldBeEmpty();
     }
 
     [Fact]

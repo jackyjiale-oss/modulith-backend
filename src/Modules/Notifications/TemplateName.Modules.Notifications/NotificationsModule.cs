@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using OpenTelemetry.Metrics;
 using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
@@ -10,6 +11,7 @@ using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
 using TemplateName.Modules.Notifications.Application.Scheduling;
 using TemplateName.Modules.Notifications.Infrastructure.Catalog;
+using TemplateName.Modules.Notifications.Infrastructure.Channels.Email;
 using TemplateName.Modules.Notifications.Infrastructure.Channels.InApp;
 using TemplateName.Modules.Notifications.Infrastructure.Deliveries;
 using TemplateName.Modules.Notifications.Infrastructure.Observability;
@@ -28,10 +30,10 @@ public static class NotificationsModule
     /// <see cref="NotificationScheduler"/> they share, the counters (meter <c>TemplateName.Notifications</c>, added to OpenTelemetry),
     /// error messages (<c>NotificationsErrorMessages</c>), the <see cref="NotificationCatalog"/> (a singleton over every
     /// <see cref="INotificationTypeSource"/>), the hosted service that validates it when the host starts, the template renderer with
-    /// its options (<c>Notifications:Templates</c>), and the delivery worker (<see cref="DeliveryDispatcher"/>, its hosted service and
-    /// options <c>Notifications:Delivery</c>) with the in-app channel and its pusher (<c>NullInAppNotificationPusher</c> until the hub
-    /// exists). Call it after <c>AddAuthModule</c> (whose <c>IUserContactDirectory</c> the scheduler uses) and before
-    /// <c>AddApplicationDecorators</c>.
+    /// its options (<c>Notifications:Templates</c>), the delivery worker (<see cref="DeliveryDispatcher"/>, its hosted service and
+    /// options <c>Notifications:Delivery</c>), the email channel (see <see cref="AddEmailChannel"/>), and the in-app channel with its
+    /// pusher (<c>NullInAppNotificationPusher</c> until the hub exists). Call it after <c>AddAuthModule</c> (whose
+    /// <c>IUserContactDirectory</c> the scheduler uses) and before <c>AddApplicationDecorators</c>.
     /// </summary>
     public static IServiceCollection AddNotificationsModule(this IServiceCollection services, IConfiguration configuration)
     {
@@ -76,8 +78,26 @@ public static class NotificationsModule
         services.AddScoped<DeliverySaveCallbacks>();
         services.AddScoped<INotificationChannel, InAppChannel>();
         services.AddSingleton<IInAppNotificationPusher, NullInAppNotificationPusher>();
+        AddEmailChannel(services, configuration);
 
         return services;
+    }
+
+    /// <summary>
+    /// Registers the email channel (<c>EmailChannel</c>, scoped like every channel) over the SMTP transport (<c>SmtpEmailTransport</c>,
+    /// a singleton behind <c>IEmailTransport</c>) and its options <c>Notifications:Email</c>, validated on start together with
+    /// <c>LegacyEmailSettingsCheck</c>: a host that still has any <c>Auth:Email</c> key in <paramref name="configuration"/> does not
+    /// start (D15).
+    /// </summary>
+    internal static void AddEmailChannel(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<EmailOptions>()
+            .Bind(configuration.GetSection(EmailOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<EmailOptions>>(new LegacyEmailSettingsCheck(configuration));
+        services.AddSingleton<IEmailTransport, SmtpEmailTransport>();
+        services.AddScoped<INotificationChannel, EmailChannel>();
     }
 
     /// <summary>Maps the module's endpoints; <paramref name="app"/> is the host's <c>/api/v1</c> group. None yet.</summary>

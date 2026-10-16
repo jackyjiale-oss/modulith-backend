@@ -19,8 +19,9 @@ using TemplateName.Modules.Auth.Infrastructure.Persistence;
 namespace TemplateName.IntegrationTests.Auth;
 
 /// <summary>
-/// <c>POST /api/v1/auth/password/forgot</c>, <c>/reset</c> and <c>/change</c> through the running host. The outbox does not run by
-/// itself in tests, so the tests dispatch it and read the reset links <see cref="RecordingEmailSender"/> kept.
+/// <c>POST /api/v1/auth/password/forgot</c>, <c>/reset</c> and <c>/change</c> through the running host. Neither the outbox nor
+/// the delivery worker runs by itself in tests, so the tests dispatch both (<c>DispatchNotificationsAsync</c>) and read the reset links
+/// <see cref="RecordingEmailSender"/> kept.
 /// </summary>
 public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)
 {
@@ -73,7 +74,7 @@ public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : Integr
         }
 
         Factory.EmailSender.Sent.ShouldBeEmpty();
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
 
         var email = Factory.EmailSender.Sent.ShouldHaveSingleItem();
         email.To.ShouldBe(Email);
@@ -209,7 +210,7 @@ public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : Integr
             register.StatusCode.ShouldBe(HttpStatusCode.Accepted);
         }
 
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         var confirmToken = Factory.EmailSender.LastLinkToken(Email);
 
         using var response = await ResetAsync(confirmToken, NewPassword);
@@ -372,13 +373,13 @@ public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : Integr
         await AssertForgotAcceptedAsync(Email);
         Factory.Time.Advance(TimeSpan.FromSeconds(59));
         await AssertForgotAcceptedAsync(Email);
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         Factory.EmailSender.Sent.ShouldHaveSingleItem().Subject.ShouldBe(ResetSubject);
 
         // The cooldown is 60 seconds from the last code: exactly then, a new one goes out.
         Factory.Time.Advance(TimeSpan.FromSeconds(1));
         await AssertForgotAcceptedAsync(Email);
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         Factory.EmailSender.Sent.Count.ShouldBe(2);
     }
 
@@ -585,7 +586,7 @@ public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : Integr
     private async Task<string> ForgotAndReadTokenAsync(string email)
     {
         await AssertForgotAcceptedAsync(email);
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         return Factory.EmailSender.LastLinkToken(email);
     }
 
@@ -607,17 +608,6 @@ public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : Integr
             Factory.Time.GetUtcNow()));
         await context.SaveChangesAsync(Ct);
         return token.Value;
-    }
-
-    private async Task DispatchOutboxAsync()
-    {
-        var dispatcher = Factory.Services.GetRequiredService<OutboxDispatcher<AuthDbContext>>();
-        int claimed;
-        do
-        {
-            claimed = await dispatcher.ProcessBatchAsync(Ct);
-        }
-        while (claimed > 0);
     }
 
     private Task<User> FindUserAsync(string email)

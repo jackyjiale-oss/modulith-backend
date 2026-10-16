@@ -847,7 +847,6 @@
       "templatename.modules.auth": {
         "type": "Project",
         "dependencies": {
-          "MailKit": "[4.18.1, )",
           "Microsoft.AspNetCore.Authentication.JwtBearer": "[10.0.12, )",
           "Microsoft.AspNetCore.DataProtection.EntityFrameworkCore": "[10.0.12, )",
           "Microsoft.Extensions.Caching.Hybrid": "[10.10.0, )",
@@ -868,6 +867,7 @@
       "templatename.modules.notifications": {
         "type": "Project",
         "dependencies": {
+          "MailKit": "[4.18.1, )",
           "Scriban": "[7.5.0, )",
           "TemplateName.Application.Common": "[0.0.0, )",
           "TemplateName.Infrastructure.Common": "[0.0.0, )",

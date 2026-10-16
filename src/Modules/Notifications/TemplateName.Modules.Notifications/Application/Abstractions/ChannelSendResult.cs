@@ -41,6 +41,7 @@ internal sealed partial record ChannelSendResult(ChannelSendOutcome Outcome, str
                 $"A reason is a code of lowercase letters, digits and underscores, starting with a letter, at most {MaxReasonLength} characters.",
                 nameof(reason));
 
-    [GeneratedRegex("^[a-z][a-z0-9_]*$", RegexOptions.CultureInvariant)]
+    // \z, not $: $ also matches before a final line break, which would let "smtp_550\n" through.
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z", RegexOptions.CultureInvariant)]
     private static partial Regex ReasonCodePattern();
 }
