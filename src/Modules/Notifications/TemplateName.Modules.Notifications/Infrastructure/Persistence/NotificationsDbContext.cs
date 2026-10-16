@@ -1,3 +1,4 @@
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using TemplateName.Infrastructure.Common.Inbox;
 using TemplateName.Infrastructure.Common.Persistence;
@@ -27,6 +28,27 @@ internal sealed class NotificationsDbContext(DbContextOptions<NotificationsDbCon
             return false;
         }
     }
+
+    public async Task<bool> SaveChangesUnlessConflictAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (Exception exception) when (IsConflict(exception))
+        {
+            // The save ran in one transaction, which was rolled back; drop what was tracked so the retry starts from fresh reads.
+            ChangeTracker.Clear();
+            return false;
+        }
+    }
+
+    // SQL Server errors 2627 (primary key or unique constraint) and 2601 (duplicate key in a unique index), or a row that an update or
+    // delete expected and did not find or whose row version changed.
+    private static bool IsConflict(Exception exception)
+        => exception is DbUpdateConcurrencyException
+            || exception is DbUpdateException { InnerException: SqlException { Number: 2627 or 2601 } };
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
         => configurationBuilder.ApplyDefaultConventions();

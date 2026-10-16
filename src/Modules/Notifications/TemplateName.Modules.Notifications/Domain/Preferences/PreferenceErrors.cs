@@ -5,10 +5,13 @@ namespace TemplateName.Modules.Notifications.Domain.Preferences;
 /// <summary>The preference errors. Each code has a message in <c>Resources/NotificationsErrorMessages.resx</c> and its translations.</summary>
 internal static class PreferenceErrors
 {
-    /// <summary>Quiet hours that start and end at the same time would mean either all day or never.</summary>
+    /// <summary>
+    /// Quiet hours with only one of the two times, or that start and end at the same time (which would mean either all day or never).
+    /// Both times null is not an error: it clears the window.
+    /// </summary>
     public static readonly Error InvalidQuietHours = Error.Validation(
         "notifications.invalid_quiet_hours",
-        "The quiet hours must start and end at different times.");
+        "Quiet hours need both a start and an end time, and the two must differ. Send both as null to clear them.");
 
     public static Error UnknownType(string typeCode) =>
         Error.Validation("notifications.unknown_type", $"Notification type '{typeCode}' does not exist.")

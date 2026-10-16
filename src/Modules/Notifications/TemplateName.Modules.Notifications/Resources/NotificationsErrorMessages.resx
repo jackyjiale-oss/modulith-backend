@@ -52,7 +52,7 @@
     <value>Notification '{id}' was not found.</value>
   </data>
   <data name="notifications.invalid_quiet_hours" xml:space="preserve">
-    <value>The quiet hours must start and end at different times.</value>
+    <value>Quiet hours need both a start and an end time, and the two must differ. Send both as null to clear them.</value>
   </data>
   <data name="notifications.unknown_type" xml:space="preserve">
     <value>Notification type '{typeCode}' does not exist.</value>

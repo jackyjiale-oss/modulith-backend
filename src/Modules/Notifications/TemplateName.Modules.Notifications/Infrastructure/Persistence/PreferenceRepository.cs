@@ -19,4 +19,6 @@ internal sealed class PreferenceRepository(NotificationsDbContext context) : IPr
     public void Add(UserPreference preference) => context.Set<UserPreference>().Add(preference);
 
     public void Add(UserNotificationProfile profile) => context.Set<UserNotificationProfile>().Add(profile);
+
+    public void Remove(UserPreference preference) => context.Set<UserPreference>().Remove(preference);
 }

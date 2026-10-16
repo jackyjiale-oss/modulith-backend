@@ -13,4 +13,7 @@ internal interface IPreferenceRepository
     void Add(UserPreference preference);
 
     void Add(UserNotificationProfile profile);
+
+    /// <summary>Deletes a stored preference (one returned by <see cref="ListAsync"/>): a choice back at the default has no row.</summary>
+    void Remove(UserPreference preference);
 }
