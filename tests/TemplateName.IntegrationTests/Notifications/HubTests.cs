@@ -3,16 +3,12 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
-using System.Net.WebSockets;
 using System.Security.Cryptography;
-using System.Text.Json;
-using System.Threading.Channels;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Connections;
-using Microsoft.AspNetCore.Http.Connections.Client;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
@@ -50,7 +46,6 @@ public sealed class HubTests(IntegrationTestWebAppFactory factory) : Integration
     private const string HubPath = "/hubs/notifications";
     private const string NegotiatePath = "/hubs/notifications/negotiate?negotiateVersion=1";
     private const string TicketsPath = "/api/v1/notifications/hub-tickets";
-    private const string NotificationReceived = "notificationReceived";
 
     // Upper bounds for waits that end as soon as their event happens; generous, so a slow runner or a first, cold run does not flake.
     private static readonly TimeSpan ReceiveTimeout = TimeSpan.FromSeconds(30);
@@ -73,12 +68,12 @@ public sealed class HubTests(IntegrationTestWebAppFactory factory) : Integration
     {
         var user = await SignInAsync();
         var calls = 0;
-        await using var connection = Connect(Factory.Server, () =>
+        await using var connection = NotificationHubClient.Connect(Factory.Server, () =>
         {
             Interlocked.Increment(ref calls);
             return TicketFor(Client);
         });
-        var received = Receive(connection);
+        var received = NotificationHubClient.Receive(connection);
 
         await connection.StartAsync(Ct);
 
@@ -91,7 +86,7 @@ public sealed class HubTests(IntegrationTestWebAppFactory factory) : Integration
         await PublishPasswordChangedAsync(user.UserId);
         await DispatchNotificationsAsync();
 
-        var payload = await ReadAsync(received);
+        var payload = await NotificationHubClient.ReadAsync(received, Ct);
         var row = await InAppRowAsync(user.UserId);
         payload.GetProperty("id").GetGuid().ShouldBe(row.Id);
         payload.GetProperty("typeCode").GetString().ShouldBe("auth.password_changed");
@@ -106,8 +101,8 @@ public sealed class HubTests(IntegrationTestWebAppFactory factory) : Integration
     {
         var other = await CreateUserAsync("bob@example.com");
         var user = await SignInAsync();
-        await using var connection = Connect(Factory.Server, () => TicketFor(Client));
-        var received = Receive(connection);
+        await using var connection = NotificationHubClient.Connect(Factory.Server, () => TicketFor(Client));
+        var received = NotificationHubClient.Receive(connection);
         await connection.StartAsync(Ct);
 
         // The other user's push is sent first; a push reaches a connection in order, so it would arrive before the user's own.
@@ -116,7 +111,7 @@ public sealed class HubTests(IntegrationTestWebAppFactory factory) : Integration
         await PublishPasswordChangedAsync(user.UserId);
         await DispatchNotificationsAsync();
 
-        var payload = await ReadAsync(received);
+        var payload = await NotificationHubClient.ReadAsync(received, Ct);
         payload.GetProperty("id").GetGuid().ShouldBe((await InAppRowAsync(user.UserId)).Id);
         received.TryRead(out _).ShouldBeFalse();
         Factory.InAppPusher.Pushes.Select(push => push.UserId).ShouldBe([other.Id, user.UserId]);
@@ -133,7 +128,7 @@ public sealed class HubTests(IntegrationTestWebAppFactory factory) : Integration
         Factory.Time.Advance(TimeSpan.FromSeconds(31));
 
         (await NegotiateAsync(bearer: expired)).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
-        await using var connection = Connect(Factory.Server, () => Task.FromResult<string?>(expired));
+        await using var connection = NotificationHubClient.Connect(Factory.Server, () => Task.FromResult<string?>(expired));
         var failure = await Should.ThrowAsync<HttpRequestException>(() => connection.StartAsync(Ct));
         failure.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
         (await TicketsAsync()).Count(ticket => ticket.ConsumedAt == null).ShouldBe(1);
@@ -146,7 +141,7 @@ public sealed class HubTests(IntegrationTestWebAppFactory factory) : Integration
         var ticket = await IssueTicketAsync(Client);
 
         // The client reuses one ticket for both requests: negotiate consumes it, so the WebSocket request is refused.
-        await using var connection = Connect(Factory.Server, () => Task.FromResult<string?>(ticket));
+        await using var connection = NotificationHubClient.Connect(Factory.Server, () => Task.FromResult<string?>(ticket));
         var failure = await Should.ThrowAsync<Exception>(() => connection.StartAsync(Ct));
 
         failure.Message.ShouldContain("401");
@@ -261,7 +256,7 @@ public sealed class HubTests(IntegrationTestWebAppFactory factory) : Integration
         var expiry = TimeProvider.System.GetUtcNow() + ExpiryMargin;
         Factory.Time.AdjustTime(expiry - lifetime);
         await RenewAccessTokenAsync();
-        await using var connection = Connect(Factory.Server, () => TicketFor(Client));
+        await using var connection = NotificationHubClient.Connect(Factory.Server, () => TicketFor(Client));
         var closedAt = new TaskCompletionSource<DateTimeOffset>(TaskCreationOptions.RunContinuationsAsynchronously);
         connection.Closed += _ =>
         {
@@ -342,7 +337,7 @@ public sealed class HubTests(IntegrationTestWebAppFactory factory) : Integration
         await SignInAsync();
         using var client = await CreateClientAsync(host);
         var tickets = new ConcurrentQueue<string>();
-        await using var connection = Connect(host.Server, async () =>
+        await using var connection = NotificationHubClient.Connect(host.Server, async () =>
         {
             var ticket = await IssueTicketAsync(client);
             tickets.Enqueue(ticket);
@@ -374,40 +369,6 @@ public sealed class HubTests(IntegrationTestWebAppFactory factory) : Integration
             activities.ShouldAllBe(activity => !activity.TagObjects.Any(tag => tag.Value != null && tag.Value.ToString()!.Contains(ticket, StringComparison.Ordinal)));
             activities.ShouldAllBe(activity => !activity.DisplayName.Contains(ticket, StringComparison.Ordinal));
         }
-    }
-
-    private static HubConnection Connect(TestServer server, Func<Task<string?>> accessTokenProvider)
-        => new HubConnectionBuilder()
-            .WithUrl(new Uri(server.BaseAddress, HubPath.TrimStart('/')), HttpTransportType.WebSockets, options =>
-            {
-                options.HttpMessageHandlerFactory = _ => server.CreateHandler();
-                options.AccessTokenProvider = accessTokenProvider;
-                options.WebSocketFactory = (context, cancellationToken) => ConnectWebSocketAsync(server, context, cancellationToken);
-            })
-            .Build();
-
-    /// <summary>What a browser client does: a fresh provider call, sent as <c>access_token</c> because a browser WebSocket has no headers.</summary>
-    private static async ValueTask<WebSocket> ConnectWebSocketAsync(TestServer server, WebSocketConnectionContext context, CancellationToken cancellationToken)
-    {
-        var token = await context.Options.AccessTokenProvider!();
-        var query = context.Uri.Query.TrimStart('?');
-        var uri = new UriBuilder(context.Uri) { Query = $"{query}&access_token={Uri.EscapeDataString(token!)}" }.Uri;
-
-        return await server.CreateWebSocketClient().ConnectAsync(uri, cancellationToken);
-    }
-
-    private static ChannelReader<JsonElement> Receive(HubConnection connection)
-    {
-        var received = Channel.CreateUnbounded<JsonElement>();
-        connection.On<JsonElement>(NotificationReceived, payload => received.Writer.TryWrite(payload));
-        return received.Reader;
-    }
-
-    private static async Task<JsonElement> ReadAsync(ChannelReader<JsonElement> received)
-    {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Ct);
-        timeout.CancelAfter(ReceiveTimeout);
-        return await received.ReadAsync(timeout.Token);
     }
 
     private static async Task<T> EventuallyAsync<T>(Func<T> read, Func<T, bool> done)

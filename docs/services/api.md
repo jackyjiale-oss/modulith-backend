@@ -214,7 +214,11 @@ The notification hub and its single-use tickets ([Notifications module](../modul
 | `ConnectionLifetime` | `00:10:00` | `00:01:00` to `01:00:00` | How long a connection opened with a ticket stays open; then the hub closes it and the client reconnects with new tickets. |
 | `TicketsPerMinute` | `30` | 1 to 1000 | Tickets one user may get per minute (fixed window per `user:{sub}`, on top of the global limiter); a connection takes two. Beyond it, 429 `rate_limit.exceeded`. |
 
-`Notifications:Templates:ProductName` (default `TemplateName`, required, at most 100 characters) is described with the [templates](../modules/notifications.md#configuration).
+### `Notifications:Templates`
+
+| Key | Default | Validation (on start) | Meaning |
+|---|---|---|---|
+| `ProductName` | `TemplateName` | required, at most 100 characters | The product's name as recipients know it: `{{ product_name }}` in every notification template and the email footer ([Notifications module](../modules/notifications.md#templates-and-rendering)). |
 
 ### Other keys
 
@@ -227,7 +231,7 @@ The notification hub and its single-use tickets ([Notifications module](../modul
 | Endpoint | Checks | Use |
 |---|---|---|
 | `GET /health/live` | none: 200 while the process serves requests | Liveness probe |
-| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `auth`, `sample`, plus one per added module) | Readiness probe, load balancer |
+| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `auth`, `notify`, `sample`, plus one per added module) | Readiness probe, load balancer |
 
 Both are anonymous, exempt from rate limiting, logged at `Verbose` when healthy, and left out of traces.
 
@@ -269,6 +273,10 @@ HTTP security:
 - IPv6 and IPv4-mapped addresses are partition keys as plain strings, so one client can appear as two addresses.
 - The limiter keeps its counters in memory per instance: with N instances a client gets up to N × `GlobalPermitLimit` (a Redis-backed limiter is Plan 5).
 - A bare `Accept-Language: zh` gets English, because `zh` is not a supported culture and `zh-Hans` is its child, not its parent.
+
+Notifications:
+- The SignalR hub pushes only to the connections on the instance that delivered the notification, and the per-user hub ticket limit is counted per instance (no Redis backplane until Plan 5); the inbox endpoints are always complete. More: [Notifications: Operations and known limits](../modules/notifications.md#operations-and-known-limits).
+- A rejected sender address (a wrong `Notifications:Email:From`) dead-letters every email at once: watch the dead-letter metric.
 
 Observability:
 - `OpenTelemetry.Instrumentation.EntityFrameworkCore` is `1.19.1-beta.1`, the only prerelease dependency: no stable release exists ([ADR 0013](../adr/0013-prerelease-ef-core-opentelemetry-instrumentation.md)). The SqlClient instrumentation is stable.
