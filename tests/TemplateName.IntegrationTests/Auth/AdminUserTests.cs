@@ -12,6 +12,7 @@ using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Infrastructure.Authorization;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+using TemplateName.Modules.Notifications.Application;
 
 namespace TemplateName.IntegrationTests.Auth;
 
@@ -415,8 +416,11 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
     [Fact]
     public async Task Assigning_a_role_grants_access_on_the_next_request()
     {
-        // The actor holds every permission of Admin, so it may grant the role (the grant rule).
-        await SignInAsync([AuthPermissions.UserAssignRoles, .. AuthSeeder.AdminDefaultPermissions], AuthTestHarness.DefaultLocale);
+        // The actor holds every permission of Admin (the Auth defaults and the Notifications ones the role is flagged to get), so it may
+        // grant the role (the grant rule).
+        await SignInAsync(
+            [AuthPermissions.UserAssignRoles, .. AuthSeeder.AdminDefaultPermissions, NotificationsPermissions.DeliveryView, NotificationsPermissions.DeliveryRetry],
+            AuthTestHarness.DefaultLocale);
         var target = await CreateUserAsync("target@example.com");
         var tokens = await LoginAsync("target@example.com", Password);
 

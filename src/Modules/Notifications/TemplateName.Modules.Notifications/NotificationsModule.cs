@@ -7,12 +7,15 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using OpenTelemetry.Metrics;
+using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common.Inbox;
 using TemplateName.Infrastructure.Common.Persistence;
+using TemplateName.Modules.Notifications.Application;
 using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
 using TemplateName.Modules.Notifications.Application.Scheduling;
@@ -41,7 +44,8 @@ public static class NotificationsModule
     /// <see cref="INotificationTypeSource"/>), the hosted service that validates it when the host starts, the template renderer with
     /// its options (<c>Notifications:Templates</c>), the delivery worker (<see cref="DeliveryDispatcher"/>, its hosted service and
     /// options <c>Notifications:Delivery</c>), the email channel (see <see cref="AddEmailChannel"/>), the in-app channel, and the
-    /// notification hub with its tickets and the in-app pusher (see <see cref="AddHub"/>). Call it after <c>AddAuthModule</c> (whose
+    /// notification hub with its tickets and the in-app pusher (see <see cref="AddHub"/>), and the module's permission source
+    /// (<see cref="NotificationsPermissionSource"/>), which the Auth seeder syncs like every <c>IPermissionSource</c>. Call it after <c>AddAuthModule</c> (whose
     /// <c>IUserContactDirectory</c> the scheduler uses) and before <c>AddApplicationDecorators</c>.
     /// </summary>
     public static IServiceCollection AddNotificationsModule(this IServiceCollection services, IConfiguration configuration)
@@ -52,6 +56,9 @@ public static class NotificationsModule
         services.AddInbox<NotificationsDbContext>();
         services.AddApplicationHandlers(typeof(NotificationsModule).Assembly);
         services.AddErrorMessages<NotificationsErrorMessages>();
+
+        // The Auth seeder collects every registered source; this module never references Auth.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IPermissionSource, NotificationsPermissionSource>());
 
         services.AddScoped<IInbox, ModuleInbox>();
         services.AddScoped<INotificationRepository, NotificationRepository>();
@@ -134,11 +141,13 @@ public static class NotificationsModule
 
     /// <summary>
     /// Maps the module's endpoints; <paramref name="app"/> is the host's <c>/api/v1</c> group: the signed-in user's routes
-    /// <c>notifications/...</c> (the inbox, the hub ticket, preferences and quiet hours).
+    /// <c>notifications/...</c> (the inbox, the hub ticket, preferences and quiet hours) and the delivery administration in
+    /// <c>admin/notifications/deliveries</c> (<c>GET</c> list and <c>POST .../{id}/retry</c>, each behind its permission).
     /// </summary>
     public static IEndpointRouteBuilder MapNotificationsEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapNotificationEndpoints();
+        app.MapAdminDeliveryEndpoints();
 
         return app;
     }

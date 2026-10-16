@@ -95,6 +95,7 @@ namespace TemplateName.Modules.Notifications.Infrastructure.Persistence.Migratio
                         .HasColumnType("datetime2(3)");
 
                     b.Property<byte>("Status")
+                        .IsConcurrencyToken()
                         .HasColumnType("tinyint");
 
                     b.HasKey("Id");
@@ -108,6 +109,9 @@ namespace TemplateName.Modules.Notifications.Infrastructure.Persistence.Migratio
                         .HasFilter("[Status] = 0");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("Status", "NextAttemptAt"), new[] { "Channel", "LockedUntil" });
+
+                    b.HasIndex("Status", "CreatedAt", "Id")
+                        .IsDescending(false, true, true);
 
                     b.ToTable("Deliveries", "notify");
                 });
@@ -230,6 +234,8 @@ namespace TemplateName.Modules.Notifications.Infrastructure.Persistence.Migratio
                         .HasColumnType("nvarchar(100)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("RecipientUserId");
 
                     b.HasIndex("SourceMessageId", "TypeCode", "RecipientUserId")
                         .IsUnique();

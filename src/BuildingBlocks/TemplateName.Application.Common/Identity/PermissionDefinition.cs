@@ -8,4 +8,8 @@ namespace TemplateName.Application.Common.Identity;
 /// <param name="Module">The module that owns the permission (the first segment of the code).</param>
 /// <param name="Name">A short English name for administration screens.</param>
 /// <param name="Description">What the permission allows, in English.</param>
-public sealed record PermissionDefinition(string Code, string Module, string Name, string Description);
+/// <param name="AdminDefault">
+/// Whether the <c>Admin</c> system role gets the permission when it is first declared: the Auth seeder grants it in the run that inserts
+/// the code, and never again (an administrator may have removed it; <c>SuperAdmin</c> always holds every permission regardless).
+/// </param>
+public sealed record PermissionDefinition(string Code, string Module, string Name, string Description, bool AdminDefault = false);

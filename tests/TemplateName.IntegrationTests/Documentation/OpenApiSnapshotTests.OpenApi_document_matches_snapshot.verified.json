@@ -2414,6 +2414,194 @@
         ]
       }
     },
+    "/api/v1/admin/notifications/deliveries": {
+      "get": {
+        "tags": [
+          "Notifications administration"
+        ],
+        "operationId": "ListDeliveries",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/DeliveryStatus"
+            }
+          },
+          {
+            "name": "channel",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/NotificationChannel"
+            }
+          },
+          {
+            "name": "typeCode",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "recipientUserId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "includeTotalCount",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CursorPageOfDeliveryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/notifications/deliveries/{id}/retry": {
+      "post": {
+        "tags": [
+          "Notifications administration"
+        ],
+        "operationId": "RetryDelivery",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/sample/leave-requests": {
       "post": {
         "tags": [
@@ -2988,6 +3176,53 @@
           }
         }
       },
+      "CursorPageOfDeliveryResponse": {
+        "required": [
+          "items",
+          "pageSize",
+          "nextCursor",
+          "previousCursor",
+          "totalCount"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryResponse"
+            }
+          },
+          "pageSize": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "nextCursor": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "previousCursor": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
       "CursorPageOfInAppNotificationResponse": {
         "required": [
           "items",
@@ -3269,6 +3504,100 @@
             "format": "int64"
           }
         }
+      },
+      "DeliveryResponse": {
+        "required": [
+          "id",
+          "notificationId",
+          "typeCode",
+          "recipientUserId",
+          "channel",
+          "destination",
+          "status",
+          "attemptCount",
+          "nextAttemptAt",
+          "lastError",
+          "createdAt",
+          "sentAt",
+          "deadLetteredAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "notificationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "typeCode": {
+            "type": "string"
+          },
+          "recipientUserId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/NotificationChannel"
+          },
+          "destination": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/DeliveryStatus"
+          },
+          "attemptCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "nextAttemptAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "lastError": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sentAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "deadLetteredAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "DeliveryStatus": {
+        "enum": [
+          "Pending",
+          "Sent",
+          "DeadLettered",
+          "Expired"
+        ]
       },
       "ForgotPasswordRequest": {
         "required": [
@@ -4222,6 +4551,9 @@
     },
     {
       "name": "Notifications"
+    },
+    {
+      "name": "Notifications administration"
     },
     {
       "name": "Sample"

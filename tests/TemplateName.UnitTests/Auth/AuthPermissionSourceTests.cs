@@ -33,4 +33,22 @@ public sealed partial class AuthPermissionSourceTests
 
         new AuthPermissionSource().Permissions.Select(p => p.Code).ShouldBe(declared, ignoreOrder: true);
     }
+
+    [Fact]
+    public void AuthPermissionSource_flags_exactly_the_eight_admin_defaults()
+    {
+        // The Admin role's Auth defaults, spelled out: a change here is a change of what every new installation's Admin can do.
+        new AuthPermissionSource().Permissions.Where(permission => permission.AdminDefault).Select(permission => permission.Code).ShouldBe(
+            [
+                "auth.user.view",
+                "auth.user.create",
+                "auth.user.lock",
+                "auth.user.reset_password",
+                "auth.user.revoke_sessions",
+                "auth.role.view",
+                "auth.permission.view",
+                "auth.audit.view",
+            ],
+            ignoreOrder: true);
+    }
 }

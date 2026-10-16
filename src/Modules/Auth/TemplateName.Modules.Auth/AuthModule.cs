@@ -121,10 +121,11 @@ public static class AuthModule
     /// <summary>
     /// Seeds the module in one transaction: the system roles (<c>SuperAdmin</c>, <c>Admin</c>, <c>User</c>); the permissions every
     /// registered <c>IPermissionSource</c> declares (new ones inserted, names and descriptions updated, undeclared ones deprecated, never
-    /// deleted; an invalid definition fails the run); every non-deprecated permission for <c>SuperAdmin</c> on each run; the default
-    /// permissions for <c>Admin</c> only when the role is created; and, when <c>Auth:Seed:AdminEmail</c> and <c>Auth:Seed:AdminPassword</c>
-    /// are both set and no user has that email, a confirmed <c>SuperAdmin</c> user. Idempotent. The host calls it after the migration
-    /// step when <c>Auth:Seed:RunOnStartup</c> is on; the test harness calls it after each database reset.
+    /// deleted; an invalid definition fails the run); every non-deprecated permission for <c>SuperAdmin</c> on each run; the permissions
+    /// flagged <c>AdminDefault</c> for <c>Admin</c> when the role is created and, later, each such code in the run that first inserts it
+    /// (never again, so an administrator's removal sticks); and, when <c>Auth:Seed:AdminEmail</c> and <c>Auth:Seed:AdminPassword</c> are
+    /// both set and no user has that email, a confirmed <c>SuperAdmin</c> user. Idempotent. The host calls it after the migration step
+    /// when <c>Auth:Seed:RunOnStartup</c> is on; the test harness calls it after each database reset.
     /// </summary>
     /// <exception cref="InvalidOperationException">A permission definition or an <c>Auth:Seed</c> setting is invalid.</exception>
     public static async Task SeedAuthModuleAsync(this IServiceProvider services, CancellationToken cancellationToken)
