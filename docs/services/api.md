@@ -17,7 +17,7 @@ Order matters; `Program.cs` marks it with comments.
 | 7 | `AddHealthChecks()` | Health checks; each module context adds its own `ready` check |
 | 8 | `AddHttpSecurity(configuration)` | CORS, the global rate limiter, the `auth-strict` rate-limit policy, forwarded headers |
 | 9 | `AddPermissionAuthorization()` | The permission authorization handler behind `RequirePermission(code)` and the **fallback policy**: every endpoint requires an authenticated user unless it says `.AllowAnonymous()` ([web-common](../building-blocks/web-common.md)). It needs the explicit `UseAuthentication` and `UseAuthorization` of the pipeline (slots 1a and 10): without them `WebApplication` adds `UseAuthorization` ahead of `UseRouting` by itself, where no endpoint is known and the fallback policy answers 401 to every request. |
-| 10 | `AddAuthModule(configuration)`, `AddSampleModule()` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme (the default authentication scheme), the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)) |
+| 10 | `AddAuthModule(configuration)`, `AddNotificationsModule(configuration)`, `AddSampleModule()` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme (the default authentication scheme), the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)); the Notifications module also its delivery worker, SignalR, the `HubTicket` authentication scheme (not a default scheme: only the hub's policy uses it) and the rate-limit policy of its ticket route ([Notifications module](../modules/notifications.md)) |
 | 11 | `AddOptions<KestrelServerOptions>()…Bind("Kestrel")` | Binds the whole `Kestrel` section lazily, so `Kestrel:Limits:*` apply and test overrides work |
 | 12 | `AddApplicationDecorators()` | Validation and logging decorators around every handler registered above; always last |
 
@@ -40,13 +40,13 @@ Before the pipeline serves requests, the host runs two steps, in this order:
 | 4 | `UseTraceIdHeader` | `X-Trace-Id` = the W3C trace id, also the `traceId` of every problem response. |
 | 5 | `UseSecurityHeaders` | `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`. |
 | 6 | `UseHsts` + `UseHttpsRedirection` | Every environment except Development. |
-| 7 | `UseRequestLogging` | One Serilog event per request with `UserId`; health checks at `Verbose`, failures (exception or 5xx) at `Error`. |
+| 7 | `UseRequestLogging` | One Serilog event per request with `UserId`; health checks at `Verbose`, failures (exception or 5xx) at `Error`. `RequestPath` is the path without the query string, so a hub ticket sent as `access_token` never reaches it; `access_token` values are also masked in every other log event and in traces ([web-common](../building-blocks/web-common.md#observability)). |
 | 8 | `UseRouting` | |
 | 9 | `UseCors` | Default policy from `Cors:AllowedOrigins`. Before authorization, so a preflight (which carries no token) is answered without a 401. |
 | 9a | `UseRateLimiter` | Global fixed-window limiter, plus the `auth-strict` policy on the endpoints that ask for it; 429 `rate_limit.exceeded` with `Retry-After`. After routing (the endpoint's rate-limit metadata is known) and authentication (the `user:{sub}` partition sees the signed-in user), and before authorization, so the 401 and 403 responses that slot 10 produces are counted too. |
 | 10 | `UseAuthorization` | After routing, so it reads the endpoint's metadata. An endpoint with `.AllowAnonymous()` passes; one with `RequirePermission(code)` needs that permission (403 for a signed-in caller without it); every other endpoint, and a request that matched no endpoint, falls under the fallback policy and needs an authenticated user. An anonymous caller gets 401 `http.401` (localized, with `traceId` and `WWW-Authenticate: Bearer`). |
 | 11 | `UseIdempotency` | `Idempotency-Key` on endpoints marked `WithIdempotency()`; after routing because it reads endpoint metadata. |
-| 12 | Endpoints | `/health/live`, `/health/ready` (both anonymous and exempt from rate limiting), OpenAPI and Scalar outside Production (anonymous), then the `/api/v1` group with every module's endpoints, and the Auth module's anonymous `GET /.well-known/jwks.json` at the root (`MapAuthWellKnownEndpoints`). Everything else is protected by the fallback policy. |
+| 12 | Endpoints | `/health/live`, `/health/ready` (both anonymous and exempt from rate limiting), OpenAPI and Scalar outside Production (anonymous), then the `/api/v1` group with every module's endpoints, the Auth module's anonymous `GET /.well-known/jwks.json` at the root (`MapAuthWellKnownEndpoints`), and the Notifications SignalR hub at `/hubs/notifications` (`MapNotificationsHub`: WebSockets only, authorized by the JWT bearer scheme or a single-use hub ticket, [Notifications module](../modules/notifications.md#realtime-hub)). Slots 1a to 10 apply to the hub's negotiate and WebSocket requests like to any endpoint. Everything else is protected by the fallback policy. |
 
 Slots 4 and 5 register their headers with `Response.OnStarting` before the rest of the pipeline runs, so they are written when the response starts and survive the exception handler clearing the response headers. `Content-Language` is the exception: responses written by the exception handler (500, malformed body, concurrency conflict) do not carry it, although their `detail` is still localized (ADR 0009).
 
@@ -96,6 +96,8 @@ The first request with a key holds it as a lease for `InProgressTimeout`; duplic
 | `AllowedOrigins` | `[]` (no cross-origin caller) | `*` is rejected | Origins allowed to call with credentials, e.g. `https://app.example.com`. Any header and method are allowed for them. |
 
 The policy exposes `X-Trace-Id`, `Location`, `Retry-After` and `Idempotency-Replayed` (`Access-Control-Expose-Headers`), so browser code on an allowed origin can read them.
+
+**The notification hub.** A browser on an allowed origin calls `POST /api/v1/notifications/hub-tickets` and the hub's negotiate request through this policy like any route. Browsers do not apply CORS to the WebSocket request itself, and the hub does not check its `Origin`: the hub accepts no cookie, so there is no ambient credential for a hostile page to use (cross-site WebSocket hijacking), and a page cannot get a ticket without the user's access token ([ADR 0021](../adr/0021-signalr-hub-tickets.md)).
 
 ### `RateLimiting`
 
@@ -201,6 +203,16 @@ The Notifications delivery worker ([Notifications module](../modules/notificatio
 | `BatchSize` | `10` | 1 to 100 | Most deliveries one worker claims per batch; a full batch is followed at once by the next. |
 | `MaxAttempts` | `5` | 1 to 10 | Attempts before a delivery is dead-lettered. Retries are due 1 min, 5 min, 15 min and 1 h after failed attempts 1 to 4; with the default the 5th failure dead-letters, and the 6 h step is used only when `MaxAttempts` is raised. |
 | `LeaseDuration` | `00:05:00` | `00:00:30` to `01:00:00` | How long a claimed batch stays hidden from other workers; keep it longer than the slowest batch of sends. |
+
+### `Notifications:Hub`
+
+The notification hub and its single-use tickets ([Notifications module](../modules/notifications.md#realtime-hub), [ADR 0021](../adr/0021-signalr-hub-tickets.md)). Validated on start.
+
+| Key | Default | Validation (on start) | Meaning |
+|---|---|---|---|
+| `TicketLifetime` | `00:00:30` | `00:00:05` to `00:05:00` | How long a ticket from `POST /api/v1/notifications/hub-tickets` can be used, once. |
+| `ConnectionLifetime` | `00:10:00` | `00:01:00` to `01:00:00` | How long a connection opened with a ticket stays open; then the hub closes it and the client reconnects with new tickets. |
+| `TicketsPerMinute` | `30` | 1 to 1000 | Tickets one user may get per minute (fixed window per `user:{sub}`, on top of the global limiter); a connection takes two. Beyond it, 429 `rate_limit.exceeded`. |
 
 `Notifications:Templates:ProductName` (default `TemplateName`, required, at most 100 characters) is described with the [templates](../modules/notifications.md#configuration).
 

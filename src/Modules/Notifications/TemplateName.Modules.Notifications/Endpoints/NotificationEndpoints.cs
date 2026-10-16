@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Application.Common.Pagination;
+using TemplateName.Modules.Notifications.Application.HubTickets.Issue;
 using TemplateName.Modules.Notifications.Application.Inbox.List;
 using TemplateName.Modules.Notifications.Application.Inbox.MarkAllRead;
 using TemplateName.Modules.Notifications.Application.Inbox.MarkRead;
@@ -14,6 +15,7 @@ using TemplateName.Modules.Notifications.Application.Preferences.GetQuietHours;
 using TemplateName.Modules.Notifications.Application.Preferences.Update;
 using TemplateName.Modules.Notifications.Application.Preferences.UpdateQuietHours;
 using TemplateName.Web.Common.Results;
+using TemplateName.Web.Common.Security;
 
 namespace TemplateName.Modules.Notifications.Endpoints;
 
@@ -57,6 +59,16 @@ internal static class NotificationEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status404NotFound);
+
+        // The ticket is a bearer secret: never stored by a cache, and limited per user because each one is a row until Plan 5's cleanup.
+        group.MapPost("hub-tickets", IssueHubTicketAsync)
+            .WithName("IssueNotificationHubTicket")
+            .RequireAuthorization()
+            .RequireRateLimiting(HubTicketRateLimit.PolicyName)
+            .WithNoStore()
+            .Produces<HubTicketResponse>()
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
         group.MapGet("preferences", GetPreferencesAsync)
             .WithName("GetNotificationPreferences")
@@ -127,6 +139,16 @@ internal static class NotificationEndpoints
         var result = await handler.HandleAsync(new MarkAllReadCommand(), cancellationToken);
 
         return result.IsSuccess ? TypedResults.NoContent() : result.ToProblem();
+    }
+
+    // 200 { ticket, expiresAt }: a single-use ticket for one request to /hubs/notifications, valid for Notifications:Hub:TicketLifetime.
+    private static async Task<IResult> IssueHubTicketAsync(
+        ICommandHandler<IssueHubTicketCommand, HubTicketResponse> handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new IssueHubTicketCommand(), cancellationToken);
+
+        return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
     }
 
     // 200 { types: [{ typeCode, category, channels: [{ channel, enabled, mandatory }] }] }: every notification type, by code, not paged.

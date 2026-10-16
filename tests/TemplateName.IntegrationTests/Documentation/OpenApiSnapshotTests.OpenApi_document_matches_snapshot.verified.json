@@ -2173,6 +2173,51 @@
         ]
       }
     },
+    "/api/v1/notifications/hub-tickets": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "operationId": "IssueNotificationHubTicket",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HubTicketResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/notifications/preferences": {
       "get": {
         "tags": [
@@ -3280,6 +3325,22 @@
                 "type": "string"
               }
             }
+          }
+        }
+      },
+      "HubTicketResponse": {
+        "required": [
+          "ticket",
+          "expiresAt"
+        ],
+        "type": "object",
+        "properties": {
+          "ticket": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },

@@ -3,8 +3,8 @@ using TemplateName.Modules.Notifications.Application.Abstractions;
 namespace TemplateName.IntegrationTests.Infrastructure;
 
 /// <summary>
-/// The in-app pusher of the integration test hosts: it records every push instead of sending it, and throws on demand
-/// (<see cref="FailWith"/>). Thread-safe.
+/// The in-app pusher of the integration test hosts: it records every push, throws on demand (<see cref="FailWith"/>) and, through
+/// <see cref="ForwardingTo"/>, then hands the push to the host's real SignalR pusher. Thread-safe.
 /// </summary>
 internal sealed class RecordingInAppNotificationPusher : IInAppNotificationPusher
 {
@@ -55,5 +55,20 @@ internal sealed class RecordingInAppNotificationPusher : IInAppNotificationPushe
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A pusher for one host that records each push here (failing as <see cref="FailWith"/> says) and then hands it to
+    /// <paramref name="live"/>, the host's real SignalR pusher, so hub clients of that host receive it too.
+    /// </summary>
+    public IInAppNotificationPusher ForwardingTo(IInAppNotificationPusher live) => new Forwarding(this, live);
+
+    private sealed class Forwarding(RecordingInAppNotificationPusher recorder, IInAppNotificationPusher live) : IInAppNotificationPusher
+    {
+        public async Task PushAsync(Guid userId, InAppNotificationPushed payload, CancellationToken cancellationToken)
+        {
+            await recorder.PushAsync(userId, payload, cancellationToken);
+            await live.PushAsync(userId, payload, cancellationToken);
+        }
     }
 }

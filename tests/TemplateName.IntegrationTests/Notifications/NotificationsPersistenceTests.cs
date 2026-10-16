@@ -247,6 +247,22 @@ public sealed class NotificationsPersistenceTests(IntegrationTestWebAppFactory f
     }
 
     [Fact]
+    public async Task Hub_ticket_lookup_refuses_a_hash_that_is_not_32_bytes()
+    {
+        // The parameter is varbinary(32): a longer value would be cut to its first 32 bytes and could match a stored ticket.
+        var hash = Hash(9);
+        await SaveAsync(HubTicket.Issue(Guid.NewGuid(), hash, TimeSpan.FromSeconds(30), Now));
+        var repository = NewScope().GetRequiredService<IHubTicketRepository>();
+
+        await Should.ThrowAsync<ArgumentException>(() => repository.TryConsumeAsync([.. hash, 0x01], Now, Ct));
+        await Should.ThrowAsync<ArgumentException>(() => repository.TryConsumeAsync(hash[..31], Now, Ct));
+        await Should.ThrowAsync<ArgumentException>(() => repository.TryConsumeAsync([], Now, Ct));
+
+        var stored = await NewScope().GetRequiredService<NotificationsDbContext>().Set<HubTicket>().SingleAsync(Ct);
+        stored.ConsumedAt.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task Expired_hub_ticket_is_not_consumed()
     {
         var userId = Guid.NewGuid();

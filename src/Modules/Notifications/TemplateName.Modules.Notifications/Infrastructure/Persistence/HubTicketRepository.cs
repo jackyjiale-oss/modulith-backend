@@ -25,6 +25,12 @@ internal sealed class HubTicketRepository(NotificationsDbContext context) : IHub
     {
         ArgumentNullException.ThrowIfNull(tokenHash);
 
+        // The parameter is varbinary(32): SqlClient would silently cut a longer value to its first 32 bytes, which could match a ticket.
+        if (tokenHash.Length != HubTicket.TokenHashLength)
+        {
+            throw new ArgumentException($"A ticket hash is {HubTicket.TokenHashLength} bytes (SHA-256), not {tokenHash.Length}.", nameof(tokenHash));
+        }
+
         var rows = await context.Database
             .SqlQueryRaw<ConsumedTicketRow>(
                 TryConsumeSql,

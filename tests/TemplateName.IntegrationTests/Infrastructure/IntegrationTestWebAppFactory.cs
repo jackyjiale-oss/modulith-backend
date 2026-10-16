@@ -23,6 +23,7 @@ using TemplateName.Modules.Auth.Contracts.IntegrationEvents;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
 using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
+using TemplateName.Modules.Notifications.Infrastructure.Hubs;
 using TemplateName.SharedKernel;
 using Testcontainers.MsSql;
 
@@ -63,7 +64,10 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     /// </summary>
     internal RecordingEmailSender EmailSender { get; } = new();
 
-    /// <summary>Every in-app push the hosts built by this factory made, kept in memory; reset at the start of every test.</summary>
+    /// <summary>
+    /// Every in-app push the hosts built by this factory made, kept in memory; reset at the start of every test. Each push also goes on
+    /// to the host's real SignalR pusher, so a hub client connected to that host receives it.
+    /// </summary>
     internal RecordingInAppNotificationPusher InAppPusher { get; } = new();
 
     /// <summary>The events the outbox test handlers have received.</summary>
@@ -157,8 +161,10 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.AddSingleton<ICurrentUser>(CurrentUser);
             services.RemoveAll<IEmailTransport>();
             services.AddSingleton<IEmailTransport>(EmailSender);
+            // Each host records its pushes in the shared recorder, then pushes them through its own hub to that host's clients.
             services.RemoveAll<IInAppNotificationPusher>();
-            services.AddSingleton<IInAppNotificationPusher>(InAppPusher);
+            services.AddSingleton<IInAppNotificationPusher>(
+                serviceProvider => InAppPusher.ForwardingTo(ActivatorUtilities.CreateInstance<SignalRInAppNotificationPusher>(serviceProvider)));
             services.AddSingleton<INotificationTypeSource, DeliveryTestTypeSource>();
 
             // Production keeps the Identity default iteration count and has no setting for it; tests hash far more often.

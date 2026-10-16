@@ -1,0 +1,36 @@
+# 0021. SignalR hub authenticated by single-use tickets
+
+- Status: Accepted
+- Date: 2026-10-16
+- Deciders: Lee Jia Le
+
+## Context
+Plan 3 pushes new in-app notifications to the signed-in user through a SignalR hub (`/hubs/notifications`). The API authenticates with short-lived ES256 access tokens in the `Authorization` header (ADR 0015), but a browser's WebSocket API cannot set headers, so SignalR's JavaScript client sends the value of its `accessTokenFactory` as `?access_token=` on the WebSocket request. Blueprint review 2.10: a JWT there ends up in request logs, in proxy and load-balancer access logs and in traces, where anyone who reads them can replay it against **every** API route until it expires (10 minutes). The application can mask its own logs and traces, but not the logs of whatever runs in front of it.
+
+The two SignalR clients were checked against their source at `v10.0.12` (the version the template uses) and the .NET client against the running host (`HubTests`):
+
+- The **.NET client** calls `AccessTokenProvider` once for negotiate (`AccessTokenHttpMessageHandler` always asks again for a negotiate request) and once more when the WebSockets transport connects (its default `WebSocketFactory`), and sends both values as `Authorization: Bearer` (on WebAssembly, the WebSocket value goes into `access_token`). `Dotnet_client_fetches_a_new_ticket_for_negotiate_and_for_the_websocket` runs the unmodified client over Kestrel with a counting provider: two calls, two tickets consumed, connected.
+- The **JavaScript client** (`@microsoft/signalr`) calls `accessTokenFactory` for negotiate (`AccessTokenHttpClient`, `Authorization` header) and again in `WebSocketTransport.connect`, which appends `access_token=` in a browser (Node.js and React Native send the header). With `skipNegotiation: true` and the WebSockets transport it makes one call and one request.
+
+So a connection is two requests and each asks the factory for a fresh value. The plan recorded this as an unverified assumption; it holds for both clients.
+
+## Options considered
+1. **JWT in the query string, masked wherever we can.** Configure the JWT bearer handler to read `access_token` on the hub path and mask the parameter in our logs and traces. Least work, but the token remains a 10-minute credential for the whole API in every URL, and masking in proxies, CDNs and WAFs in front of the API is outside the template's control.
+2. **A cookie for the hub.** Issue an HTTP-only cookie scoped to `/hubs`. Cookies are ambient: a WebSocket handshake carries no CORS check, so every cookie-authenticated hub must validate `Origin` against an allow-list to stop cross-site WebSocket hijacking, and the API would gain a second authentication model (issuance, renewal, `SameSite`, logout) next to bearer tokens.
+3. **Single-use tickets.** A signed-in client exchanges its bearer token for a short-lived, single-use ticket that only the hub accepts.
+
+## Decision
+We chose option 3 (decision D12 of Plan 3).
+
+- `POST /api/v1/notifications/hub-tickets` (bearer token required, `Cache-Control: no-store`) answers `{ ticket, expiresAt }`: 32 bytes from `RandomNumberGenerator` in base64url without padding. Only the SHA-256 of those bytes is stored (`notify.HubTickets`); the ticket is never logged, stored, put in an exception message or in a metric tag. It lives `Notifications:Hub:TicketLifetime` (30 seconds).
+- The `HubTicket` authentication scheme reads a ticket only on `/hubs/notifications` and below (case-insensitive), from `access_token`, else from `Authorization: Bearer`, and consumes it with one conditional `UPDATE ... OUTPUT inserted.UserId`, so two requests racing with one ticket cannot both win and a request consumes at most one (the authentication handler runs once per request). Success gives a principal with `sub` only, expiring `Notifications:Hub:ConnectionLifetime` (10 minutes) later. Unknown, used and expired tickets fail alike. It is not a default scheme and ignores every other path, so a ticket authenticates nothing but the hub.
+- The hub's policy accepts the JWT bearer scheme or `HubTicket`. The JWT bearer handler reads the `Authorization` header only (no `OnMessageReceived`), so a client that can send headers may use its access token there, and a JWT in the query string is refused (`Jwt_in_query_string_is_rejected`). A connection closes when its authentication expires (`CloseOnAuthenticationExpiration`): at the ticket principal's expiry, or at the access token's.
+- WebSockets only: long polling and server-sent events make a request per poll or send, which a single-use credential cannot cover. Stateful reconnect stays off (its resend buffer is the subject of CVE-2026-70159, fixed in the 10.0.13 runtime). Clients cannot call the hub; it only sends `notificationReceived`.
+- A ticket that does reach a log is spent and dies within 30 seconds; we still keep it out: Serilog's request event logs the path only, a Serilog enricher masks `access_token` values in every event (ASP.NET Core's own `Request starting` line, when it is turned on), and the ASP.NET Core trace instrumentation masks query values by default, on top of which the host masks `access_token` in `url.query` (`Ticket_value_is_not_logged_or_traced`).
+- Each user may get `Notifications:Hub:TicketsPerMinute` (30) tickets per minute (a fixed window per `sub`, besides the global limiter): a connection takes two, and every ticket is a row until it is cleaned up.
+- No `Origin` allow-list on the WebSocket handshake. Cross-site WebSocket hijacking needs a credential the browser attaches by itself; the hub accepts none (no cookie). A hostile page cannot obtain a ticket, because the ticket endpoint wants the victim's bearer token, which that page cannot read. Negotiate is an ordinary request, answered by the CORS middleware with the `Cors:AllowedOrigins` policy.
+
+## Consequences
+- Positive: no reusable credential in any URL; a leaked ticket is worth one request for at most 30 seconds, on one path. The ticket store is the database, so the instance that issued a ticket and the one that consumes it may differ.
+- **Negative / trade-offs accepted:** opening a connection costs two extra round trips (one ticket per request), and every client must fetch a fresh ticket in its token factory; a factory that returns a cached value fails the WebSocket request with 401. Clients that cannot use WebSockets (some old proxies) cannot connect; they read the inbox instead. The connection closes every `ConnectionLifetime` and the client reconnects with new tickets. Consumed and expired ticket rows stay in `notify.HubTickets` until Plan 5's hourly cleanup job; the per-user limit bounds the growth. Live pushes reach only the connections on the instance that delivered the notification (D13): a Redis backplane is Plan 5. SignalR compares a connection's expiry with the system clock, not `TimeProvider`.
+- Follow-up actions: Plan 5 adds the cleanup job and, if wanted, Redis for the backplane and the tickets. Deployments keep `access_token` out of the access logs of their proxies as good practice, although a ticket there is already spent.
