@@ -3,7 +3,8 @@ using TemplateName.Modules.Notifications.Application.Abstractions;
 namespace TemplateName.IntegrationTests.Infrastructure;
 
 /// <summary>
-/// The in-app pusher of the integration test hosts: it records every push, throws on demand (<see cref="FailWith"/>) and, through
+/// The in-app pusher of the integration test hosts: it records every push, throws on demand (<see cref="FailWith"/>), never answers on
+/// demand (<see cref="HoldForever"/>) and, through
 /// <see cref="ForwardingTo"/>, then hands the push to the host's real SignalR pusher. Thread-safe.
 /// </summary>
 internal sealed class RecordingInAppNotificationPusher : IInAppNotificationPusher
@@ -11,6 +12,7 @@ internal sealed class RecordingInAppNotificationPusher : IInAppNotificationPushe
     private readonly Lock _lock = new();
     private readonly List<(Guid UserId, InAppNotificationPushed Payload)> _pushes = [];
     private Exception? _failure;
+    private TaskCompletionSource? _held;
 
     /// <summary>A snapshot of the pushes so far, oldest first.</summary>
     public IReadOnlyList<(Guid UserId, InAppNotificationPushed Payload)> Pushes
@@ -33,12 +35,26 @@ internal sealed class RecordingInAppNotificationPusher : IInAppNotificationPushe
         }
     }
 
+    /// <summary>
+    /// Makes every push hang for ever, ignoring its cancellation token, like a hub client that stopped reading, until <see cref="Reset"/>.
+    /// The task completes when the first such push has started.
+    /// </summary>
+    public Task HoldForever()
+    {
+        lock (_lock)
+        {
+            _held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            return _held.Task;
+        }
+    }
+
     public void Reset()
     {
         lock (_lock)
         {
             _pushes.Clear();
             _failure = null;
+            _held = null;
         }
     }
 
@@ -49,6 +65,12 @@ internal sealed class RecordingInAppNotificationPusher : IInAppNotificationPushe
             if (_failure is not null)
             {
                 throw _failure;
+            }
+
+            if (_held is not null)
+            {
+                _held.TrySetResult();
+                return new TaskCompletionSource().Task;
             }
 
             _pushes.Add((userId, payload));

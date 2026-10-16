@@ -52,7 +52,12 @@ public sealed class HubTests(IntegrationTestWebAppFactory factory) : Integration
     private const string TicketsPath = "/api/v1/notifications/hub-tickets";
     private const string NotificationReceived = "notificationReceived";
 
-    private static readonly TimeSpan ReceiveTimeout = TimeSpan.FromSeconds(10);
+    // Upper bounds for waits that end as soon as their event happens; generous, so a slow runner or a first, cold run does not flake.
+    private static readonly TimeSpan ReceiveTimeout = TimeSpan.FromSeconds(30);
+
+    // How far ahead of the real now the expiring connection's authentication ends: room for a token refresh, two tickets, negotiate,
+    // the WebSocket upgrade and the handshake, on a cold run.
+    private static readonly TimeSpan ExpiryMargin = TimeSpan.FromSeconds(8);
 
     public override async ValueTask InitializeAsync()
     {
@@ -250,24 +255,30 @@ public sealed class HubTests(IntegrationTestWebAppFactory factory) : Integration
     public async Task Connection_closes_when_the_ticket_principal_expires()
     {
         // The principal expires ConnectionLifetime after the ticket is consumed by the host's clock; set that clock so the expiry falls
-        // two seconds from the real now, which SignalR's scan (once a second, on the system clock) compares with.
+        // ExpiryMargin after the real now, which SignalR's scan (once a second, on the system clock) compares with.
         var lifetime = Factory.Services.GetRequiredService<IOptions<HubOptions>>().Value.ConnectionLifetime;
         await SignInAsync();
-        Factory.Time.AdjustTime(TimeProvider.System.GetUtcNow() - lifetime + TimeSpan.FromSeconds(2));
+        var expiry = TimeProvider.System.GetUtcNow() + ExpiryMargin;
+        Factory.Time.AdjustTime(expiry - lifetime);
         await RenewAccessTokenAsync();
         await using var connection = Connect(Factory.Server, () => TicketFor(Client));
-        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var closedAt = new TaskCompletionSource<DateTimeOffset>(TaskCreationOptions.RunContinuationsAsynchronously);
         connection.Closed += _ =>
         {
-            closed.TrySetResult();
+            closedAt.TrySetResult(TimeProvider.System.GetUtcNow());
             return Task.CompletedTask;
         };
 
         await connection.StartAsync(Ct);
         connection.State.ShouldBe(HubConnectionState.Connected);
 
-        await closed.Task.WaitAsync(TimeSpan.FromSeconds(15), Ct);
+        // Event-driven: the wait ends as soon as the hub closes the connection, and only fails after 30 seconds.
+        var closed = await closedAt.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
         connection.State.ShouldBe(HubConnectionState.Disconnected);
+
+        // Closed because the authentication expired, not earlier. AuthenticationProperties keeps ExpiresUtc to the whole second ("r"
+        // format), so the expiry SignalR sees is up to a second before the one set here.
+        closed.ShouldBeGreaterThanOrEqualTo(expiry - TimeSpan.FromSeconds(1));
     }
 
     [Fact]

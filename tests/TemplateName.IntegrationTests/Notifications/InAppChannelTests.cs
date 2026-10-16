@@ -1,11 +1,15 @@
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using TemplateName.IntegrationTests.Infrastructure;
 using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Scheduling;
 using TemplateName.Modules.Notifications.Domain.Deliveries;
 using TemplateName.Modules.Notifications.Domain.InApp;
 using TemplateName.Modules.Notifications.Domain.Notifications;
+using TemplateName.Modules.Notifications.Infrastructure.Channels.InApp;
 using TemplateName.Modules.Notifications.Infrastructure.Deliveries;
 using TemplateName.Modules.Notifications.Infrastructure.Persistence;
 
@@ -102,6 +106,43 @@ public sealed class InAppChannelTests(IntegrationTestWebAppFactory factory) : In
         delivery.Status.ShouldBe(DeliveryStatus.Sent);
         delivery.LastError.ShouldBeNull();
         Factory.InAppPusher.Pushes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Push_that_never_completes_is_abandoned_after_the_timeout()
+    {
+        // A host whose only logger records everything, so the Warning and the absence of the rendered text can be checked.
+        var logs = new RecordingLoggerProvider();
+        await using var host = Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<ILoggerFactory>();
+            services.AddSingleton<ILoggerFactory>(_ => new LoggerFactory([logs]));
+        }));
+        var user = await CreateUserAsync("alice@example.com");
+        var (_, deliveryId) = await ScheduleInAppAsync(user.Id);
+        var parked = Factory.InAppPusher.HoldForever();
+
+        var batch = host.Services.GetRequiredService<DeliveryDispatcher>().ProcessBatchAsync(Ct);
+        await parked.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+
+        // The outcome is saved before the push starts.
+        (await DeliveryAsync(deliveryId)).Status.ShouldBe(DeliveryStatus.Sent);
+
+        // The bound runs on the injected clock: just short of it the worker still waits; at it, it gives up on the push and moves on.
+        await Task.Delay(TimeSpan.FromMilliseconds(200), Ct);
+        Factory.Time.Advance(InAppChannel.PushTimeout - TimeSpan.FromMilliseconds(1));
+        await Task.Delay(TimeSpan.FromMilliseconds(200), Ct);
+        batch.IsCompleted.ShouldBeFalse();
+        Factory.Time.Advance(TimeSpan.FromMilliseconds(1));
+
+        (await batch.WaitAsync(TimeSpan.FromSeconds(30), Ct)).ShouldBe(1);
+        var delivery = await DeliveryAsync(deliveryId);
+        delivery.Status.ShouldBe(DeliveryStatus.Sent);
+        delivery.LastError.ShouldBeNull();
+        logs.Entries.ShouldContain(entry => entry.StartsWith("Warning", StringComparison.Ordinal)
+            && entry.Contains("timed out", StringComparison.Ordinal)
+            && entry.Contains(deliveryId.ToString(), StringComparison.Ordinal));
+        logs.Entries.ShouldAllBe(entry => !entry.Contains("Test notice for Test user", StringComparison.Ordinal));
     }
 
     private async Task<(Guid NotificationId, Guid DeliveryId)> ScheduleInAppAsync(Guid userId)
