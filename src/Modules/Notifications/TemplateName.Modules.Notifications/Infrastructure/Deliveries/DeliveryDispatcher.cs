@@ -62,6 +62,12 @@ internal sealed partial class DeliveryDispatcher(
     /// <summary>The delivery was claimed again after its last allowed attempt ended without an outcome.</summary>
     internal const string AttemptsExhausted = "attempts_exhausted";
 
+    /// <summary>What is stored and logged instead of a channel's reason that is not a short code (it could quote an address or a link).</summary>
+    internal const string UnknownReason = "unknown";
+
+    /// <summary>The ceiling on saving an outcome, which is not cancelled by shutdown (see <c>ProcessAsync</c>).</summary>
+    internal static readonly TimeSpan OutcomeSaveTimeout = TimeSpan.FromSeconds(30);
+
     // UPDLOCK + READPAST: concurrent claims skip each other's rows instead of waiting or taking the same ones. The lease (LockedUntil)
     // keeps the claimed rows hidden after this statement commits; it expires if the claiming process dies. The attempt is counted here.
     // Status = 0 (Pending) is a literal, not a parameter, so the filtered index IX_Deliveries_Status_NextAttemptAt serves the claim.
@@ -85,7 +91,8 @@ internal sealed partial class DeliveryDispatcher(
     /// <summary>
     /// Claims up to <see cref="DeliveryOptions.BatchSize"/> due deliveries and processes each in its own scope, stopping early once the
     /// lease has run out (the rest are re-claimed later). A delivery that fails unexpectedly (a database error) is logged and left to its
-    /// lease; the others go on.
+    /// lease; the others go on. Cancelling <paramref name="cancellationToken"/> (shutdown) stops before the next delivery and interrupts a
+    /// send in progress, but never the save of an outcome the channel has already given.
     /// </summary>
     /// <returns>The number of deliveries claimed.</returns>
     public async Task<int> ProcessBatchAsync(CancellationToken cancellationToken)
@@ -95,6 +102,8 @@ internal sealed partial class DeliveryDispatcher(
 
         foreach (var claim in claimed)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             // Past the lease another worker may own these deliveries already; leave them untouched for it.
             if (timeProvider.GetUtcNow().UtcDateTime >= claim.LockedUntil)
             {
@@ -171,7 +180,10 @@ internal sealed partial class DeliveryDispatcher(
             result = Settle(delivery, sendResult, subject, claim.AttemptCount, now);
         }
 
-        if (!await SaveAsync(context, notifications, claim, subject, now, cancellationToken))
+        // Once the channel has answered, the message may be out: the outcome is saved even when the host is stopping, because cancelling
+        // the save would leave the delivery leased and send it again after the lease. A fixed ceiling bounds the save instead.
+        using var saveTimeout = new CancellationTokenSource(OutcomeSaveTimeout, timeProvider);
+        if (!await SaveAsync(context, notifications, claim, subject, now, saveTimeout.Token))
         {
             return;
         }
@@ -242,7 +254,9 @@ internal sealed partial class DeliveryDispatcher(
 
     private DeliveryResult Settle(Delivery delivery, ChannelSendResult sendResult, string? subject, int attempt, DateTimeOffset now)
     {
-        var reason = sendResult.Reason ?? "unknown";
+        // A channel can build a result around the factories' check (the record's constructor, a with expression); LastError and the
+        // logs get only a short code.
+        var reason = ChannelSendResult.IsReasonCode(sendResult.Reason) ? sendResult.Reason : UnknownReason;
         switch (sendResult.Outcome)
         {
             case ChannelSendOutcome.Sent:

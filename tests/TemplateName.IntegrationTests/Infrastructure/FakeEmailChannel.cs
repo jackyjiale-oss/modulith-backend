@@ -6,7 +6,8 @@ namespace TemplateName.IntegrationTests.Infrastructure;
 /// <summary>
 /// The email channel of the integration test hosts until the real one exists: it keeps every call in memory instead of sending. It
 /// counts the calls per delivery id, fails on demand (<see cref="FailNext"/>, <see cref="FailAlways"/>) and can park one call
-/// (<see cref="Hold"/>) so a test can let a lease run out mid-send. Thread-safe, because dispatchers send concurrently.
+/// (<see cref="Hold"/>) so a test can let a lease run out, or stop the host, mid-send. A parked call ignores cancellation: it stands for a
+/// server that has already accepted the message. Thread-safe, because dispatchers send concurrently.
 /// </summary>
 internal sealed class FakeEmailChannel : INotificationChannel
 {
@@ -110,7 +111,8 @@ internal sealed class FakeEmailChannel : INotificationChannel
             }
         }
 
-        await held.WaitAsync(cancellationToken);
+        // Not cancellable: a parked call models a message the server has already accepted.
+        await held;
         return result;
     }
 }

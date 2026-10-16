@@ -344,6 +344,75 @@ public sealed class DeliveryDispatcherTests(IntegrationTestWebAppFactory factory
         delivery.AttemptCount.ShouldBe(Options.MaxAttempts + 1);
     }
 
+    [Fact]
+    public async Task Shutdown_after_the_channel_answered_still_saves_the_outcome()
+    {
+        var user = await CreateUserAsync(Email);
+        var firstId = await ScheduleAsync(DeliveryTestTypeSource.Email, user.Id);
+        var secondId = await ScheduleAsync(DeliveryTestTypeSource.Email, user.Id);
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+
+        // The host starts stopping while the server is accepting the first message.
+        var entered = Factory.EmailChannel.Hold();
+        var dispatching = Task.Run(() => Dispatcher.ProcessBatchAsync(stopping.Token), Ct);
+        var sentId = await entered.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        await stopping.CancelAsync();
+        Factory.EmailChannel.Release();
+
+        // The worker stops before the next delivery, but the answered one is recorded: not left leased to be sent again.
+        await Should.ThrowAsync<OperationCanceledException>(() => dispatching.WaitAsync(TimeSpan.FromSeconds(30), Ct));
+        var sent = await DeliveryAsync(sentId);
+        sent.Status.ShouldBe(DeliveryStatus.Sent);
+        sent.SentAt.ShouldBe(Now);
+        sent.LockedUntil.ShouldBeNull();
+        var notStartedId = sentId == firstId ? secondId : firstId;
+        var notStarted = await DeliveryAsync(notStartedId);
+        notStarted.Status.ShouldBe(DeliveryStatus.Pending);
+        notStarted.LockedUntil.ShouldNotBeNull();
+
+        // After the lease the other delivery is sent; the first is never sent again.
+        Factory.Time.Advance(Options.LeaseDuration + TimeSpan.FromSeconds(1));
+        (await Dispatcher.ProcessBatchAsync(Ct)).ShouldBe(1);
+        Factory.EmailChannel.CallsFor(sentId).ShouldBe(1);
+        Factory.EmailChannel.CallsFor(notStartedId).ShouldBe(1);
+        (await DeliveryAsync(notStartedId)).Status.ShouldBe(DeliveryStatus.Sent);
+    }
+
+    [Fact]
+    public async Task Free_text_reason_is_stored_and_logged_as_unknown()
+    {
+        // A channel that builds its result around the factories' check, with a server message quoting an address and a link.
+        const string ServerMessage = "550 5.1.1 <bob@example.org> rejected, see https://mail.example.test/help";
+        var logs = new RecordingLoggerProvider();
+        await using var host = Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<ILoggerFactory>();
+            services.AddSingleton<ILoggerFactory>(_ => new LoggerFactory([logs]));
+        }));
+        var dispatcher = host.Services.GetRequiredService<DeliveryDispatcher>();
+        var user = await CreateUserAsync(Email);
+        var deliveryId = await ScheduleAsync(DeliveryTestTypeSource.Email, user.Id);
+        Factory.EmailChannel.FailNext(new ChannelSendResult(ChannelSendOutcome.TransientFailure, ServerMessage));
+        Factory.EmailChannel.FailNext(ChannelSendResult.Permanent("smtp_550") with { Reason = ServerMessage });
+
+        (await dispatcher.ProcessBatchAsync(Ct)).ShouldBe(1);
+        var retried = await DeliveryAsync(deliveryId);
+        retried.Status.ShouldBe(DeliveryStatus.Pending);
+        retried.LastError.ShouldBe("unknown");
+
+        Factory.Time.Advance(TimeSpan.FromMinutes(1));
+        (await dispatcher.ProcessBatchAsync(Ct)).ShouldBe(1);
+        var deadLettered = await DeliveryAsync(deliveryId);
+        deadLettered.Status.ShouldBe(DeliveryStatus.DeadLettered);
+        deadLettered.LastError.ShouldBe("unknown");
+
+        var entries = logs.Entries;
+        entries.ShouldContain(entry => entry.Contains(deliveryId.ToString(), StringComparison.Ordinal) && entry.Contains("unknown", StringComparison.Ordinal));
+        entries.ShouldAllBe(entry => !entry.Contains("bob@example.org", StringComparison.Ordinal)
+            && !entry.Contains("mail.example.test", StringComparison.Ordinal)
+            && !entry.Contains("5.1.1", StringComparison.Ordinal));
+    }
+
     private static async Task<int> DrainAsync(DeliveryDispatcher dispatcher)
     {
         var total = 0;
