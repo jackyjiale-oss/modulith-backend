@@ -492,3 +492,6 @@ coverage/
 
 # Controller scratch workspace
 .superpowers/
+
+# appsettings.json is used for local development settings and should not be committed to source control
+**/[Aa]ppsettings.[Dd]evelopment.json
