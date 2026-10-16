@@ -1,13 +1,18 @@
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Modules.Auth;
 using TemplateName.Modules.Auth.Domain.Users;
+using TemplateName.Modules.Auth.Infrastructure.Persistence;
+using TemplateName.Modules.Notifications.Infrastructure.Deliveries;
 
 namespace TemplateName.IntegrationTests.Infrastructure;
 
 /// <summary>
 /// Base class for tests that call the running API through <see cref="Client"/>. Each test starts with empty databases seeded with the
 /// Auth module's system roles and the permissions every module declares, the clock at its start instant, an anonymous client and user,
-/// no extra declared permissions, no recorded domain or integration events or emails and handlers that neither fail nor wait. Only the
+/// no extra declared permissions, no recorded domain or integration events, emails, channel calls or in-app pushes, and handlers and
+/// channels that neither fail nor wait. Only the
 /// Data Protection key ring (<c>auth.DataProtectionKeys</c>) is kept from earlier tests, because the hosts keep it in memory.
 /// </summary>
 public abstract class IntegrationTestBase(IntegrationTestWebAppFactory factory) : IAsyncLifetime
@@ -33,6 +38,8 @@ public abstract class IntegrationTestBase(IntegrationTestWebAppFactory factory) 
         Factory.IntegrationEvents.Clear();
         Factory.MessageContextRecorder.Clear();
         Factory.EmailSender.Clear();
+        Factory.EmailChannel.Reset();
+        Factory.InAppPusher.Reset();
         Factory.FlakySwitch.Reset();
         Factory.HandlerGate.Reset();
     }
@@ -41,6 +48,30 @@ public abstract class IntegrationTestBase(IntegrationTestWebAppFactory factory) 
     {
         Client.Dispose();
         return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Runs what the background services would: the Auth outbox dispatcher (which publishes Auth's integration events to the
+    /// Notifications consumers), then the Notifications delivery worker, again and again until neither finds anything due. The clock does
+    /// not move, so a delivery rescheduled after a failure, or deferred by quiet hours, waits for the test to move it.
+    /// </summary>
+    protected async Task DispatchNotificationsAsync()
+    {
+        const int MaxRounds = 100;
+        var outbox = Factory.Services.GetRequiredService<OutboxDispatcher<AuthDbContext>>();
+        var deliveries = Factory.Services.GetRequiredService<DeliveryDispatcher>();
+
+        for (var round = 0; round < MaxRounds; round++)
+        {
+            var published = await outbox.ProcessBatchAsync(Ct);
+            var delivered = await deliveries.ProcessBatchAsync(Ct);
+            if (published == 0 && delivered == 0)
+            {
+                return;
+            }
+        }
+
+        throw new InvalidOperationException($"Notifications were still being dispatched after {MaxRounds} rounds.");
     }
 
     /// <summary>

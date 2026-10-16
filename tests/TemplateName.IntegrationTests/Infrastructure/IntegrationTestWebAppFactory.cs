@@ -15,12 +15,15 @@ using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common.Inbox;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
+using TemplateName.IntegrationTests.Notifications;
 using TemplateName.IntegrationTests.Outbox;
 using TemplateName.IntegrationTests.Persistence;
 using TemplateName.Modules.Auth;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Contracts.IntegrationEvents;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+using TemplateName.Modules.Notifications.Application.Abstractions;
+using TemplateName.Modules.Notifications.Application.Catalog;
 using TemplateName.SharedKernel;
 using Testcontainers.MsSql;
 
@@ -57,6 +60,15 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
 
     /// <summary>Every email the hosts built by this factory sent, kept in memory instead of going to SMTP; empty at the start of every test.</summary>
     internal RecordingEmailSender EmailSender { get; } = new();
+
+    /// <summary>
+    /// The Notifications email channel of the hosts built by this factory, until the real one replaces it: it counts the calls instead
+    /// of sending; reset at the start of every test.
+    /// </summary>
+    internal FakeEmailChannel EmailChannel { get; } = new();
+
+    /// <summary>Every in-app push the hosts built by this factory made, kept in memory; reset at the start of every test.</summary>
+    internal RecordingInAppNotificationPusher InAppPusher { get; } = new();
 
     /// <summary>The events the outbox test handlers have received.</summary>
     public EventRecorder EventRecorder { get; } = new();
@@ -134,6 +146,9 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             {
                 ["Outbox:Enabled"] = "false",
 
+                // Tests run the delivery worker by hand (DispatchNotificationsAsync, or the dispatcher itself).
+                ["Notifications:Delivery:Enabled"] = "false",
+
                 // Keep test output to problems: no per-request or host-lifetime lines.
                 ["Serilog:MinimumLevel:Default"] = "Warning",
             }));
@@ -146,6 +161,10 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.AddSingleton<ICurrentUser>(CurrentUser);
             services.RemoveAll<IEmailSender>();
             services.AddSingleton<IEmailSender>(EmailSender);
+            services.AddSingleton<INotificationChannel>(EmailChannel);
+            services.RemoveAll<IInAppNotificationPusher>();
+            services.AddSingleton<IInAppNotificationPusher>(InAppPusher);
+            services.AddSingleton<INotificationTypeSource, DeliveryTestTypeSource>();
 
             // Production keeps the Identity default iteration count and has no setting for it; tests hash far more often.
             services.Configure<PasswordHasherOptions>(options => options.IterationCount = TestPasswordHashIterations);

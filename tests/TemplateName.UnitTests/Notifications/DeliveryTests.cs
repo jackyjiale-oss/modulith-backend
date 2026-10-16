@@ -144,5 +144,25 @@ public sealed class DeliveryTests
 
         Should.Throw<InvalidOperationException>(() => sent.DeadLetter("smtp_550", Now));
         Should.Throw<InvalidOperationException>(() => sent.MarkSent("Subject", Now));
+        Should.Throw<InvalidOperationException>(() => sent.ScheduleRetry("smtp_451", Now.AddMinutes(1).UtcDateTime));
+    }
+
+    [Fact]
+    public void ScheduleRetry_keeps_the_delivery_pending_with_the_reason_and_releases_the_lease()
+    {
+        var delivery = NewDelivery();
+        var nextAttemptAt = Now.AddMinutes(1).UtcDateTime;
+
+        delivery.ScheduleRetry("smtp_451", nextAttemptAt);
+
+        delivery.Status.ShouldBe(DeliveryStatus.Pending);
+        delivery.NextAttemptAt.ShouldBe(nextAttemptAt);
+        delivery.LastError.ShouldBe("smtp_451");
+        delivery.LockedUntil.ShouldBeNull();
+        delivery.AttemptCount.ShouldBe(0);
+        delivery.DeadLetteredAt.ShouldBeNull();
+
+        delivery.ScheduleRetry(new string('x', 500), nextAttemptAt);
+        delivery.LastError!.Length.ShouldBe(Delivery.MaxLastErrorLength);
     }
 }

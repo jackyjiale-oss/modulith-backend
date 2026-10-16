@@ -12,11 +12,14 @@ internal sealed class NotificationRepository(NotificationsDbContext context) : I
     // The notification is loaded with all its deliveries, so the delivery is tracked together with its notification and siblings.
     public async Task<Delivery?> GetDeliveryAsync(Guid deliveryId, CancellationToken cancellationToken)
     {
-        var notification = await context.Set<Notification>()
-            .Include(candidate => candidate.Deliveries)
-            .AsSingleQuery()
-            .SingleOrDefaultAsync(candidate => candidate.Deliveries.Any(delivery => delivery.Id == deliveryId), cancellationToken);
+        var notification = await GetByDeliveryIdAsync(deliveryId, cancellationToken);
 
         return notification?.Deliveries.Single(delivery => delivery.Id == deliveryId);
     }
+
+    public Task<Notification?> GetByDeliveryIdAsync(Guid deliveryId, CancellationToken cancellationToken)
+        => context.Set<Notification>()
+            .Include(candidate => candidate.Deliveries)
+            .AsSingleQuery()
+            .SingleOrDefaultAsync(candidate => candidate.Deliveries.Any(delivery => delivery.Id == deliveryId), cancellationToken);
 }

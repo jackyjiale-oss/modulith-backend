@@ -17,6 +17,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The templates of DeliveryTestTypeSource, under the names a module's own Templates folder gets. -->
+    <EmbeddedResource Include="Notifications\Templates\Email\*.scriban" LogicalName="$(AssemblyName).Templates.Email.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Notifications\Templates\InApp\*.scriban" LogicalName="$(AssemblyName).Templates.InApp.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- One repository-root locator and one document-path derivation for both test projects. -->
     <Compile Include="..\TemplateName.ArchitectureTests\RepositoryPaths.cs" Link="Documentation\RepositoryPaths.cs" />
     <Compile Include="..\TemplateName.ArchitectureTests\DocumentPaths.cs" Link="Documentation\DocumentPaths.cs" />

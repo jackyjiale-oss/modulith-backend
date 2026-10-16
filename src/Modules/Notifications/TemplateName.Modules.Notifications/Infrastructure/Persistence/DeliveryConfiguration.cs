@@ -19,6 +19,10 @@ internal sealed class DeliveryConfiguration : IEntityTypeConfiguration<Delivery>
         builder.Property(delivery => delivery.LastError).HasMaxLength(Delivery.MaxLastErrorLength);
         builder.Property(delivery => delivery.RenderedSubject).HasMaxLength(Delivery.MaxRenderedSubjectLength);
 
+        // The lease is the concurrency token: an update saves only while LockedUntil still holds the value that was read, so a worker
+        // whose lease ran out (and was re-claimed by another) cannot overwrite the new owner's outcome. The schema does not change.
+        builder.Property(delivery => delivery.LockedUntil).IsConcurrencyToken();
+
         // The delivery worker's claim: the oldest due pending deliveries. Filtered to the pending rows, so it stays small however many
         // settled deliveries pile up, and covering the columns the claim reads besides the key.
         builder.HasIndex(delivery => new { delivery.Status, delivery.NextAttemptAt })

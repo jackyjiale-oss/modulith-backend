@@ -176,6 +176,20 @@ The Auth module reads the sections below, each with its keys, defaults and range
 | `Auth:DataProtection` | The Data Protection application name. |
 | `Auth:Seed` | Above. |
 
+### `Notifications:Delivery`
+
+The Notifications delivery worker ([Notifications module](../modules/notifications.md#background-processing)). Validated on start.
+
+| Key | Default | Validation (on start) | Meaning |
+|---|---|---|---|
+| `Enabled` | `true` | — | Runs the delivery worker. Integration tests set `false` and dispatch by hand. |
+| `PollingInterval` | `00:00:05` | `00:00:01` to `01:00:00` | Pause between polls once the due deliveries are drained. |
+| `BatchSize` | `10` | 1 to 100 | Most deliveries one worker claims per batch; a full batch is followed at once by the next. |
+| `MaxAttempts` | `5` | 1 to 10 | Attempts before a delivery is dead-lettered; retries are due 1 min, 5 min, 15 min, 1 h and 6 h after failed attempts 1 to 5. |
+| `LeaseDuration` | `00:05:00` | `00:00:30` to `01:00:00` | How long a claimed batch stays hidden from other workers; keep it longer than the slowest batch of sends. |
+
+`Notifications:Templates:ProductName` (default `TemplateName`, required, at most 100 characters) is described with the [templates](../modules/notifications.md#configuration).
+
 ### Other keys
 
 | Key | Default | Meaning |

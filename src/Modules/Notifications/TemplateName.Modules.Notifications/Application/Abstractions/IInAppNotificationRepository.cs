@@ -4,6 +4,9 @@ namespace TemplateName.Modules.Notifications.Application.Abstractions;
 
 internal interface IInAppNotificationRepository
 {
+    /// <summary>Stages a new in-app notification; saved with the caller's other changes.</summary>
+    void Add(InAppNotification notification);
+
     /// <summary>The tracked in-app notification, only when it belongs to <paramref name="userId"/>; <see langword="null"/> otherwise.</summary>
     Task<InAppNotification?> GetForUserAsync(Guid id, Guid userId, CancellationToken cancellationToken);
 

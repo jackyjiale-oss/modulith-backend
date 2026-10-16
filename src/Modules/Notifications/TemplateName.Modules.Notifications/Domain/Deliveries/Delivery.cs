@@ -9,8 +9,9 @@ namespace TemplateName.Modules.Notifications.Domain.Deliveries;
 /// dead-lettered delivery can return to pending, through <see cref="Retry"/>. Created through <see cref="Notification.AddDelivery"/>.
 /// </summary>
 /// <remarks>
-/// The delivery worker claims and settles deliveries with lease-guarded SQL (ADR 0018, D14). <see cref="AttemptCount"/> and
-/// <see cref="LockedUntil"/> belong to that claim, so the transitions below do not count attempts; they clear the schedule and the lease.
+/// The delivery worker claims deliveries with lease-guarded SQL (D14) that counts the attempt and sets <see cref="LockedUntil"/>, then
+/// settles each through the transitions below, saved only while <see cref="LockedUntil"/> still holds the lease it claimed (a concurrency
+/// token). The transitions therefore never count attempts; they release the lease.
 /// </remarks>
 internal sealed class Delivery : Entity<Guid>
 {
@@ -40,7 +41,7 @@ internal sealed class Delivery : Entity<Guid>
 
     public DeliveryStatus Status { get; private set; }
 
-    /// <summary>The attempts started so far; reset to 0 by <see cref="Retry"/>.</summary>
+    /// <summary>The attempts started so far, counted when the worker claims the delivery; reset to 0 by <see cref="Retry"/>.</summary>
     public int AttemptCount { get; private set; }
 
     /// <summary>When the next attempt is due (UTC); <see langword="null"/> unless <see cref="DeliveryStatus.Pending"/>.</summary>
@@ -133,6 +134,21 @@ internal sealed class Delivery : Entity<Guid>
         DeadLetteredAt = now.UtcDateTime;
         LastError = BoundedText.Cut(reason, MaxLastErrorLength);
         Settle();
+    }
+
+    /// <summary>
+    /// Keeps a pending delivery pending after a transient failure: the next attempt is due at <paramref name="nextAttemptAt"/> (from
+    /// <see cref="DeliveryRetryPolicy"/>), and <paramref name="reason"/>, a reason code cut to <see cref="MaxLastErrorLength"/>, is
+    /// recorded. The lease is released; the attempt was already counted when the worker claimed the delivery.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The delivery is not pending.</exception>
+    public void ScheduleRetry(string reason, DateTime nextAttemptAt)
+    {
+        EnsurePending();
+
+        NextAttemptAt = nextAttemptAt;
+        LastError = BoundedText.Cut(reason, MaxLastErrorLength);
+        LockedUntil = null;
     }
 
     /// <summary>Settles a pending delivery as expired: the notification is too old to be worth sending.</summary>

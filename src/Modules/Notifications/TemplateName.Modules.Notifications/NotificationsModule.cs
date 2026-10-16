@@ -10,6 +10,8 @@ using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
 using TemplateName.Modules.Notifications.Application.Scheduling;
 using TemplateName.Modules.Notifications.Infrastructure.Catalog;
+using TemplateName.Modules.Notifications.Infrastructure.Channels.InApp;
+using TemplateName.Modules.Notifications.Infrastructure.Deliveries;
 using TemplateName.Modules.Notifications.Infrastructure.Observability;
 using TemplateName.Modules.Notifications.Infrastructure.Persistence;
 using TemplateName.Modules.Notifications.Infrastructure.Templates;
@@ -25,9 +27,11 @@ public static class NotificationsModule
     /// repositories and unit of work, handlers and validators (including the consumers of Auth's integration events), the
     /// <see cref="NotificationScheduler"/> they share, the counters (meter <c>TemplateName.Notifications</c>, added to OpenTelemetry),
     /// error messages (<c>NotificationsErrorMessages</c>), the <see cref="NotificationCatalog"/> (a singleton over every
-    /// <see cref="INotificationTypeSource"/>), the hosted service that validates it when the host starts, and the template renderer with
-    /// its options (<c>Notifications:Templates</c>). Call it after <c>AddAuthModule</c> (whose <c>IUserContactDirectory</c> the scheduler
-    /// uses) and before <c>AddApplicationDecorators</c>.
+    /// <see cref="INotificationTypeSource"/>), the hosted service that validates it when the host starts, the template renderer with
+    /// its options (<c>Notifications:Templates</c>), and the delivery worker (<see cref="DeliveryDispatcher"/>, its hosted service and
+    /// options <c>Notifications:Delivery</c>) with the in-app channel and its pusher (<c>NullInAppNotificationPusher</c> until the hub
+    /// exists). Call it after <c>AddAuthModule</c> (whose <c>IUserContactDirectory</c> the scheduler uses) and before
+    /// <c>AddApplicationDecorators</c>.
     /// </summary>
     public static IServiceCollection AddNotificationsModule(this IServiceCollection services, IConfiguration configuration)
     {
@@ -60,6 +64,18 @@ public static class NotificationsModule
             .ValidateOnStart();
         services.AddSingleton<EmbeddedTemplateStore>();
         services.AddSingleton<INotificationRenderer, ScribanNotificationRenderer>();
+
+        // The delivery worker: a singleton dispatcher polled by a hosted service while Notifications:Delivery:Enabled is set. Channels
+        // are resolved per delivery in the worker's scope, next to the after-save work they may queue.
+        services.AddOptions<DeliveryOptions>()
+            .Bind(configuration.GetSection(DeliveryOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddSingleton<DeliveryDispatcher>();
+        services.AddHostedService<DeliveryBackgroundService>();
+        services.AddScoped<DeliverySaveCallbacks>();
+        services.AddScoped<INotificationChannel, InAppChannel>();
+        services.AddSingleton<IInAppNotificationPusher, NullInAppNotificationPusher>();
 
         return services;
     }

@@ -13,4 +13,10 @@ internal interface INotificationRepository
     /// into the same context; <see langword="null"/> when there is none.
     /// </summary>
     Task<Delivery?> GetDeliveryAsync(Guid deliveryId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The notification that owns the delivery with <paramref name="deliveryId"/>, tracked, with all its deliveries; <see langword="null"/>
+    /// when there is none. For a caller that needs the notification's data as well as the delivery.
+    /// </summary>
+    Task<Notification?> GetByDeliveryIdAsync(Guid deliveryId, CancellationToken cancellationToken);
 }

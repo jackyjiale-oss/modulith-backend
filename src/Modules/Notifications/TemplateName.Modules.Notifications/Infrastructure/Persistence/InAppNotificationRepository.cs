@@ -6,6 +6,8 @@ namespace TemplateName.Modules.Notifications.Infrastructure.Persistence;
 
 internal sealed class InAppNotificationRepository(NotificationsDbContext context) : IInAppNotificationRepository
 {
+    public void Add(InAppNotification notification) => context.Set<InAppNotification>().Add(notification);
+
     public Task<InAppNotification?> GetForUserAsync(Guid id, Guid userId, CancellationToken cancellationToken)
         => context.Set<InAppNotification>().SingleOrDefaultAsync(notification => notification.Id == id && notification.UserId == userId, cancellationToken);
 

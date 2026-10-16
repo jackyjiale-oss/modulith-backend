@@ -75,6 +75,7 @@ namespace TemplateName.Modules.Notifications.Infrastructure.Persistence.Migratio
                         .HasColumnType("nvarchar(200)");
 
                     b.Property<DateTime?>("LockedUntil")
+                        .IsConcurrencyToken()
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)");
 
