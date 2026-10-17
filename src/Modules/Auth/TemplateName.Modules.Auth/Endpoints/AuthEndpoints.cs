@@ -158,6 +158,9 @@ internal static class AuthEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
+        // Two-step verification: auth/mfa/..., in the same group and tag.
+        group.MapMfaEndpoints();
+
         return app;
     }
 

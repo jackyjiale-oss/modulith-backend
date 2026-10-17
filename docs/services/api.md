@@ -110,7 +110,7 @@ The policy exposes `X-Trace-Id`, `Location`, `Retry-After` and `Idempotency-Repl
 
 The global partition is `user:{sub}` for an authenticated caller, else `ip:{remote address}`; the `auth-strict` partition is always `ip:{remote address}`. The address is the one left by the forwarded-headers middleware, so a spoofed `X-Forwarded-For` cannot choose a partition. An `auth-strict` endpoint is also under the global limiter. Requests over a limit are rejected at once (no queue).
 
-**Sizing `auth-strict` behind NAT.** The `auth-strict` budget is **one bucket per client address shared by all eight routes** above (refresh included), 10 per minute by default. Many users behind one NAT or carrier-grade NAT address (an office, a campus, a mobile network) share that bucket, so their logins and token refreshes together can exhaust it and get 429s. For such deployments raise `RateLimiting:AuthStrictPermitLimit` (and make sure the forwarded-headers settings give the real client address). A separate, larger policy for refresh is a planned follow-up.
+**Sizing `auth-strict` behind NAT.** The `auth-strict` budget is **one bucket per client address shared by all nine routes** above (refresh included), 10 per minute by default. Many users behind one NAT or carrier-grade NAT address (an office, a campus, a mobile network) share that bucket, so their logins and token refreshes together can exhaust it and get 429s. For such deployments raise `RateLimiting:AuthStrictPermitLimit` (and make sure the forwarded-headers settings give the real client address). A separate, larger policy for refresh is a planned follow-up.
 
 ### `ForwardedHeaders`
 
