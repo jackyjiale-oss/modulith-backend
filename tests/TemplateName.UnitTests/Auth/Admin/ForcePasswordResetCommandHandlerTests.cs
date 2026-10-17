@@ -3,6 +3,7 @@ using TemplateName.Modules.Auth.Application.Admin.Users.ForcePasswordReset;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Verification;
+using TemplateName.Modules.Auth.Domain.Verification.Events;
 using TemplateName.SharedKernel;
 
 namespace TemplateName.UnitTests.Auth.Admin;
@@ -22,7 +23,7 @@ public sealed class ForcePasswordResetCommandHandlerTests : AdminHandlerTestBase
         var target = GivenUser(UserRole);
         var sessions = GivenActiveSessions(target, 2);
         var pending = VerificationCode.Issue(
-            target.Id, VerificationPurpose.PasswordReset, target.NormalizedEmail, new byte[32], "old", TimeSpan.FromMinutes(30), null, Now.AddMinutes(-5));
+            target.Id, VerificationPurpose.PasswordReset, VerificationTrigger.SelfService, target.NormalizedEmail, new byte[32], "old", TimeSpan.FromMinutes(30), null, Now.AddMinutes(-5));
         VerificationCodes.GetPendingAsync(target.Id, VerificationPurpose.PasswordReset, Now, Arg.Any<CancellationToken>()).Returns([pending]);
 
         var result = await _sut.HandleAsync(new ForcePasswordResetCommand(ActorId, target.Id), Ct);
@@ -32,6 +33,7 @@ public sealed class ForcePasswordResetCommandHandlerTests : AdminHandlerTestBase
         var code = IssuedCodes.ShouldHaveSingleItem();
         code.Purpose.ShouldBe(VerificationPurpose.PasswordReset);
         code.ExpiresAt.ShouldBe(Now.AddMinutes(30));
+        code.DomainEvents.OfType<VerificationCodeIssuedDomainEvent>().ShouldHaveSingleItem().Trigger.ShouldBe(VerificationTrigger.ForcedByAdmin);
         sessions.ShouldAllBe(session => session.RevokedReason == SessionRevokedReason.AdminRevoked);
         var audit = AuditEntries.ShouldHaveSingleItem();
         audit.EventType.ShouldBe(AuthAuditEvents.AdminPasswordResetForced);

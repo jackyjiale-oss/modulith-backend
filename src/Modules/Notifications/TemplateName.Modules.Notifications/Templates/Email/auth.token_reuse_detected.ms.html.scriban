@@ -1,0 +1,3 @@
+<p>Helo {{ display_name }},</p>
+<p>Kami menamatkan salah satu sesi anda pada {{ occurred_at }} ({{ time_zone }}) kerana kelayakan log masuknya digunakan buat kali kedua. Ini mungkin bermakna orang lain telah memperolehnya.</p>
+<p>Jika ini bukan anda, tetapkan semula kata laluan anda sekarang.</p>

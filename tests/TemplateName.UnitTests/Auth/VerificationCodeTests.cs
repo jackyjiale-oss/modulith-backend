@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TemplateName.Modules.Auth.Domain.Verification;
 using TemplateName.Modules.Auth.Domain.Verification.Events;
 using TemplateName.SharedKernel;
@@ -18,7 +19,7 @@ public sealed class VerificationCodeTests
         VerificationPurpose purpose = VerificationPurpose.EmailVerify,
         Guid? userId = null,
         string? createdIp = "203.0.113.7") =>
-        VerificationCode.Issue(userId ?? Guid.NewGuid(), purpose, Target, Hash(1), ProtectedToken, Lifetime, createdIp, Now);
+        VerificationCode.Issue(userId ?? Guid.NewGuid(), purpose, VerificationTrigger.SelfService, Target, Hash(1), ProtectedToken, Lifetime, createdIp, Now);
 
     [Fact]
     public void Issue_raises_event_with_protected_token_and_expiry()
@@ -39,14 +40,61 @@ public sealed class VerificationCodeTests
         code.CreatedIp.ShouldBe("203.0.113.7");
         code.IsPending(Now).ShouldBeTrue();
         code.DomainEvents.ShouldHaveSingleItem()
-            .ShouldBe(new VerificationCodeIssuedDomainEvent(code.Id, userId, VerificationPurpose.PasswordReset, Target, ProtectedToken));
+            .ShouldBe(new VerificationCodeIssuedDomainEvent(
+                code.Id, userId, VerificationPurpose.PasswordReset, Target, ProtectedToken, VerificationTrigger.SelfService));
+    }
+
+    [Theory]
+    [InlineData(nameof(VerificationTrigger.CreatedByAdmin))]
+    [InlineData(nameof(VerificationTrigger.ForcedByAdmin))]
+    public void Issue_carries_the_trigger_of_a_reset_in_its_event(string trigger)
+    {
+        var expected = Enum.Parse<VerificationTrigger>(trigger);
+
+        var code = VerificationCode.Issue(
+            Guid.NewGuid(), VerificationPurpose.PasswordReset, expected, Target, Hash(1), ProtectedToken, Lifetime, null, Now);
+
+        code.DomainEvents.OfType<VerificationCodeIssuedDomainEvent>().ShouldHaveSingleItem().Trigger.ShouldBe(expected);
+    }
+
+    [Theory]
+    [InlineData(nameof(VerificationTrigger.CreatedByAdmin))]
+    [InlineData(nameof(VerificationTrigger.ForcedByAdmin))]
+    public void Issue_rejects_an_administrator_trigger_for_an_email_confirmation(string trigger)
+    {
+        Should.Throw<ArgumentException>(() => VerificationCode.Issue(
+            Guid.NewGuid(), VerificationPurpose.EmailVerify, Enum.Parse<VerificationTrigger>(trigger), Target, Hash(1), ProtectedToken, Lifetime, null, Now));
+    }
+
+    [Fact]
+    public void Issued_event_saved_before_the_trigger_existed_reads_as_self_service()
+    {
+        // An outbox row written before the trigger was added has no Trigger member; the dispatcher reads it with the same call.
+        var codeId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var content = $$"""{"CodeId":"{{codeId}}","UserId":"{{userId}}","Purpose":2,"Target":"{{Target}}","ProtectedToken":"{{ProtectedToken}}"}""";
+
+        var issued = JsonSerializer.Deserialize(content, typeof(VerificationCodeIssuedDomainEvent));
+
+        issued.ShouldBe(new VerificationCodeIssuedDomainEvent(codeId, userId, VerificationPurpose.PasswordReset, Target, ProtectedToken, VerificationTrigger.SelfService));
+    }
+
+    [Fact]
+    public void Issued_event_round_trips_its_trigger_through_the_outbox_serializer()
+    {
+        var issued = new VerificationCodeIssuedDomainEvent(
+            Guid.NewGuid(), Guid.NewGuid(), VerificationPurpose.PasswordReset, Target, ProtectedToken, VerificationTrigger.ForcedByAdmin);
+
+        var content = JsonSerializer.Serialize(issued, typeof(VerificationCodeIssuedDomainEvent));
+
+        JsonSerializer.Deserialize(content, typeof(VerificationCodeIssuedDomainEvent)).ShouldBe(issued);
     }
 
     [Fact]
     public void Issue_rejects_a_non_positive_lifetime()
     {
         Should.Throw<ArgumentOutOfRangeException>(() =>
-            VerificationCode.Issue(Guid.NewGuid(), VerificationPurpose.EmailVerify, Target, Hash(1), ProtectedToken, TimeSpan.Zero, null, Now));
+            VerificationCode.Issue(Guid.NewGuid(), VerificationPurpose.EmailVerify, VerificationTrigger.SelfService, Target, Hash(1), ProtectedToken, TimeSpan.Zero, null, Now));
     }
 
     [Fact]

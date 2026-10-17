@@ -10,6 +10,7 @@ using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Domain.Roles;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+using TemplateName.Modules.Notifications.Application;
 using TemplateName.Modules.Sample.Application;
 
 namespace TemplateName.IntegrationTests.Auth;
@@ -22,22 +23,33 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
 
     private static readonly PermissionDefinition Widget = new("test.widget.view", "test", "View widgets", "Read widgets.");
 
+    private static readonly PermissionDefinition FlaggedWidget = new("test.widget.edit", "test", "Edit widgets", "Change widgets.", AdminDefault: true);
+
+    // Spelled out, not read from the source: what a new installation's Admin role holds from the Auth module.
+    private static readonly string[] AuthAdminDefaults =
+    [
+        "auth.user.view",
+        "auth.user.create",
+        "auth.user.lock",
+        "auth.user.reset_password",
+        "auth.user.revoke_sessions",
+        "auth.role.view",
+        "auth.permission.view",
+        "auth.audit.view",
+    ];
+
+    // The Auth defaults plus the two Notifications permissions, which are flagged AdminDefault too.
     private static readonly string[] AdminDefaults =
     [
-        AuthPermissions.UserView,
-        AuthPermissions.UserCreate,
-        AuthPermissions.UserLock,
-        AuthPermissions.UserResetPassword,
-        AuthPermissions.UserRevokeSessions,
-        AuthPermissions.RoleView,
-        AuthPermissions.PermissionView,
-        AuthPermissions.AuditView,
+        .. AuthAdminDefaults,
+        NotificationsPermissions.DeliveryView,
+        NotificationsPermissions.DeliveryRetry,
     ];
 
     private readonly List<AsyncServiceScope> _scopes = [];
 
-    /// <summary>The codes the modules declare: the Auth module's own and the Sample module's (through its <c>IPermissionSource</c>).</summary>
-    private static IEnumerable<string> ModuleCodes => new IPermissionSource[] { new AuthPermissionSource(), new SamplePermissionSource() }
+    /// <summary>The codes the modules declare: those of the Auth, Sample and Notifications modules (through their <c>IPermissionSource</c>).</summary>
+    private static IEnumerable<string> ModuleCodes => new IPermissionSource[] { new AuthPermissionSource(), new SamplePermissionSource(), new NotificationsPermissionSource() }
         .SelectMany(source => source.Permissions)
         .Select(permission => permission.Code);
 
@@ -98,6 +110,109 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
         await Factory.Services.SeedAuthModuleAsync(Ct);
 
         (await GrantedCodesAsync(SystemRoles.Admin)).ShouldBe([AuthPermissions.UserView]);
+    }
+
+    [Fact]
+    public async Task Auth_admin_defaults_are_unchanged()
+    {
+        // The Admin role holds exactly the eight Auth permissions it always did: nothing was added to or taken from them.
+        var admin = await GrantedCodesAsync(SystemRoles.Admin);
+
+        admin.Where(code => code.StartsWith("auth.", StringComparison.Ordinal)).ShouldBe(AuthAdminDefaults, ignoreOrder: true);
+        admin.ShouldNotContain(AuthPermissions.UserAssignRoles);
+        admin.ShouldNotContain(AuthPermissions.RoleManage);
+
+        // The only additions are the other modules' flagged permissions (Notifications here; Sample flags none).
+        admin.Where(code => !code.StartsWith("auth.", StringComparison.Ordinal)).ShouldBe(
+            [NotificationsPermissions.DeliveryView, NotificationsPermissions.DeliveryRetry],
+            ignoreOrder: true);
+        (await GrantedCodesAsync(SystemRoles.User)).ShouldBeEmpty();
+        (await GrantedCodesAsync(SystemRoles.SuperAdmin)).ShouldBe(ModuleCodes, ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task Notifications_permissions_are_declared_and_held_by_admin_and_super_admin()
+    {
+        foreach (var code in new[] { NotificationsPermissions.DeliveryView, NotificationsPermissions.DeliveryRetry })
+        {
+            var permission = await PermissionAsync(code);
+            permission.Module.ShouldBe("notifications");
+            permission.IsDeprecated.ShouldBeFalse();
+            (await GrantedCodesAsync(SystemRoles.Admin)).ShouldContain(code);
+            (await GrantedCodesAsync(SystemRoles.SuperAdmin)).ShouldContain(code);
+            (await GrantedCodesAsync(SystemRoles.User)).ShouldNotContain(code);
+        }
+    }
+
+    [Fact]
+    public async Task Admin_receives_flagged_permission_when_first_declared_but_not_after_removal()
+    {
+        // A flagged and an unflagged code appear in one run: Admin, which already exists, gets only the flagged one.
+        Factory.PermissionSource.Declare(FlaggedWidget, Widget);
+        await Factory.Services.SeedAuthModuleAsync(Ct);
+
+        var admin = await GrantedCodesAsync(SystemRoles.Admin);
+        admin.ShouldBe([.. AdminDefaults, FlaggedWidget.Code], ignoreOrder: true);
+        admin.ShouldNotContain(Widget.Code);
+        (await GrantedCodesAsync(SystemRoles.SuperAdmin)).ShouldBe([.. ModuleCodes, FlaggedWidget.Code, Widget.Code], ignoreOrder: true);
+
+        // An administrator takes the flagged permission away; later runs, with the code still declared, never give it back.
+        await RemoveFromAdminAsync(FlaggedWidget.Code);
+
+        await Factory.Services.SeedAuthModuleAsync(Ct);
+        await Factory.Services.SeedAuthModuleAsync(Ct);
+
+        (await GrantedCodesAsync(SystemRoles.Admin)).ShouldBe(AdminDefaults, ignoreOrder: true);
+        (await GrantedCodesAsync(SystemRoles.SuperAdmin)).ShouldContain(FlaggedWidget.Code);
+    }
+
+    [Fact]
+    public async Task A_new_admin_role_starts_with_every_flagged_permission()
+    {
+        // The first start: no role, no permission. The Admin role created in the run that inserts the codes gets all flagged ones.
+        await Factory.ResetDatabasesAsync(Ct);
+        Factory.PermissionSource.Declare(FlaggedWidget, Widget);
+
+        await Factory.Services.SeedAuthModuleAsync(Ct);
+
+        (await GrantedCodesAsync(SystemRoles.Admin)).ShouldBe([.. AdminDefaults, FlaggedWidget.Code], ignoreOrder: true);
+        (await GrantedCodesAsync(SystemRoles.SuperAdmin)).ShouldBe([.. ModuleCodes, FlaggedWidget.Code, Widget.Code], ignoreOrder: true);
+        (await GrantedCodesAsync(SystemRoles.User)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_flagged_permission_declared_again_after_being_deprecated_is_not_given_to_admin_again()
+    {
+        Factory.PermissionSource.Declare(FlaggedWidget);
+        await Factory.Services.SeedAuthModuleAsync(Ct);
+        await RemoveFromAdminAsync(FlaggedWidget.Code);
+
+        // Withdrawn, then declared again: the code is not inserted again, so Admin does not get it back.
+        Factory.PermissionSource.Reset();
+        await Factory.Services.SeedAuthModuleAsync(Ct);
+        (await PermissionAsync(FlaggedWidget.Code)).IsDeprecated.ShouldBeTrue();
+        Factory.PermissionSource.Declare(FlaggedWidget);
+        await Factory.Services.SeedAuthModuleAsync(Ct);
+
+        (await PermissionAsync(FlaggedWidget.Code)).IsDeprecated.ShouldBeFalse();
+        (await GrantedCodesAsync(SystemRoles.Admin)).ShouldBe(AdminDefaults, ignoreOrder: true);
+        (await GrantedCodesAsync(SystemRoles.SuperAdmin)).ShouldContain(FlaggedWidget.Code);
+    }
+
+    [Fact]
+    public async Task Admin_keeps_the_grants_it_holds_when_a_flagged_permission_is_added()
+    {
+        // The grants an administrator chose stay: the new code is added to them, not instead of them.
+        var userView = await PermissionAsync(AuthPermissions.UserView);
+        var scope = NewScope();
+        var role = (await scope.GetRequiredService<IRoleRepository>().GetByNormalizedNameAsync("ADMIN", Ct)).ShouldNotBeNull();
+        role.SetPermissions([userView.Id]).IsSuccess.ShouldBeTrue();
+        await scope.GetRequiredService<IUnitOfWork>().SaveChangesAsync(Ct);
+
+        Factory.PermissionSource.Declare(FlaggedWidget);
+        await Factory.Services.SeedAuthModuleAsync(Ct);
+
+        (await GrantedCodesAsync(SystemRoles.Admin)).ShouldBe([AuthPermissions.UserView, FlaggedWidget.Code], ignoreOrder: true);
     }
 
     [Fact]
@@ -286,6 +401,15 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
 
     private Task<Permission> PermissionAsync(string code)
         => Context().Set<Permission>().AsNoTracking().SingleAsync(permission => permission.Code == code, Ct);
+
+    private async Task RemoveFromAdminAsync(string code)
+    {
+        var permission = await PermissionAsync(code);
+        var scope = NewScope();
+        var admin = (await scope.GetRequiredService<IRoleRepository>().GetByNormalizedNameAsync("ADMIN", Ct)).ShouldNotBeNull();
+        admin.SetPermissions([.. admin.Permissions.Select(grant => grant.PermissionId).Where(id => id != permission.Id)]).IsSuccess.ShouldBeTrue();
+        await scope.GetRequiredService<IUnitOfWork>().SaveChangesAsync(Ct);
+    }
 
     private async Task<Guid> GrantToAdminAsync(Guid permissionId)
     {

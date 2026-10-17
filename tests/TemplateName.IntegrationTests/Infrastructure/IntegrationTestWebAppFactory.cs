@@ -12,13 +12,19 @@ using Respawn;
 using Respawn.Graph;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Messaging;
+using TemplateName.Infrastructure.Common.Inbox;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
+using TemplateName.IntegrationTests.Notifications;
 using TemplateName.IntegrationTests.Outbox;
 using TemplateName.IntegrationTests.Persistence;
 using TemplateName.Modules.Auth;
-using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Contracts.IntegrationEvents;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+using TemplateName.Modules.Notifications.Application.Abstractions;
+using TemplateName.Modules.Notifications.Application.Catalog;
+using TemplateName.Modules.Notifications.Infrastructure.Hubs;
+using TemplateName.SharedKernel;
 using Testcontainers.MsSql;
 
 namespace TemplateName.IntegrationTests.Infrastructure;
@@ -52,13 +58,31 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     /// <summary>A permission source tests change to declare or drop permissions before seeding again; empty at the start of every test.</summary>
     public TestPermissionSource PermissionSource { get; } = new();
 
-    /// <summary>Every email the hosts built by this factory sent, kept in memory instead of going to SMTP; empty at the start of every test.</summary>
+    /// <summary>
+    /// The email transport of the hosts built by this factory: the real Notifications email channel hands it every message, which it
+    /// keeps in memory instead of sending through SMTP, and it fails on demand; empty at the start of every test.
+    /// </summary>
     internal RecordingEmailSender EmailSender { get; } = new();
+
+    /// <summary>
+    /// Every in-app push the hosts built by this factory made, kept in memory; reset at the start of every test. Each push also goes on
+    /// to the host's real SignalR pusher, so a hub client connected to that host receives it.
+    /// </summary>
+    internal RecordingInAppNotificationPusher InAppPusher { get; } = new();
 
     /// <summary>The events the outbox test handlers have received.</summary>
     public EventRecorder EventRecorder { get; } = new();
 
-    /// <summary>Makes the flaky outbox test handler fail.</summary>
+    /// <summary>
+    /// The Auth integration events the hosts built by this factory published, recorded by
+    /// <see cref="RecordingIntegrationEventHandler{TEvent}"/> next to the consuming modules' own consumers; empty at the start of every test.
+    /// </summary>
+    public IntegrationEventRecorder IntegrationEvents { get; } = new();
+
+    /// <summary>The outbox message contexts the message context test handler has read.</summary>
+    public MessageContextRecorder MessageContextRecorder { get; } = new();
+
+    /// <summary>Makes the flaky outbox test handlers fail.</summary>
     public FlakySwitch FlakySwitch { get; } = new();
 
     /// <summary>Parks the gate outbox test handler inside a message.</summary>
@@ -122,6 +146,9 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             {
                 ["Outbox:Enabled"] = "false",
 
+                // Tests run the delivery worker by hand (DispatchNotificationsAsync, or the dispatcher itself).
+                ["Notifications:Delivery:Enabled"] = "false",
+
                 // Keep test output to problems: no per-request or host-lifetime lines.
                 ["Serilog:MinimumLevel:Default"] = "Warning",
             }));
@@ -132,22 +159,44 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.AddSingleton<TimeProvider>(Time);
             services.RemoveAll<ICurrentUser>();
             services.AddSingleton<ICurrentUser>(CurrentUser);
-            services.RemoveAll<IEmailSender>();
-            services.AddSingleton<IEmailSender>(EmailSender);
+            services.RemoveAll<IEmailTransport>();
+            services.AddSingleton<IEmailTransport>(EmailSender);
+            // Each host records its pushes in the shared recorder, then pushes them through its own hub to that host's clients.
+            services.RemoveAll<IInAppNotificationPusher>();
+            services.AddSingleton<IInAppNotificationPusher>(
+                serviceProvider => InAppPusher.ForwardingTo(ActivatorUtilities.CreateInstance<SignalRInAppNotificationPusher>(serviceProvider)));
+            services.AddSingleton<INotificationTypeSource, DeliveryTestTypeSource>();
 
             // Production keeps the Identity default iteration count and has no setting for it; tests hash far more often.
             services.Configure<PasswordHasherOptions>(options => options.IterationCount = TestPasswordHashIterations);
             services.AddModuleDbContext<TestDbContext>(TestDbContext.Schema, PersistenceTestsConnectionStringName, includeInMigrations: false);
+
+            // A recording consumer for each Auth integration event, after the Notifications consumers the host registers and before the
+            // scanned test handlers.
+            AddRecordingIntegrationEventHandler<EmailVerificationRequestedIntegrationEvent>(services);
+            AddRecordingIntegrationEventHandler<PasswordResetRequestedIntegrationEvent>(services);
+            AddRecordingIntegrationEventHandler<RegistrationAttemptedIntegrationEvent>(services);
+            AddRecordingIntegrationEventHandler<PasswordChangedIntegrationEvent>(services);
+            AddRecordingIntegrationEventHandler<UserLockedOutIntegrationEvent>(services);
+            AddRecordingIntegrationEventHandler<RefreshTokenReuseDetectedIntegrationEvent>(services);
+            services.AddSingleton(IntegrationEvents);
             services.AddApplicationHandlers(typeof(IntegrationTestWebAppFactory).Assembly);
             services.AddOutbox<TestDbContext>(typeof(IntegrationTestWebAppFactory).Assembly);
+            services.AddInbox<TestDbContext>();
             services.AddSingleton<IPermissionSource>(PermissionSource);
             services.AddSingleton(EventRecorder);
+            services.AddSingleton(MessageContextRecorder);
             services.AddSingleton(FlakySwitch);
             services.AddSingleton(HandlerGate);
             services.AddSingleton<IStartupFilter, ProtectedTestEndpointStartupFilter>();
             services.AddSingleton<IStartupFilter, TestClientAddressStartupFilter>();
         });
     }
+
+    /// <summary>Registers the recording consumer of <typeparamref name="TEvent"/> as <c>AddApplicationHandlers</c> registers a scanned one.</summary>
+    private static void AddRecordingIntegrationEventHandler<TEvent>(IServiceCollection services)
+        where TEvent : IIntegrationEvent
+        => services.AddIntegrationEventHandler(typeof(TEvent), typeof(RecordingIntegrationEventHandler<TEvent>));
 
     private ResettableDatabase TestsDatabase
         => _testsDatabase ?? throw new InvalidOperationException("The SQL Server container has not been started.");

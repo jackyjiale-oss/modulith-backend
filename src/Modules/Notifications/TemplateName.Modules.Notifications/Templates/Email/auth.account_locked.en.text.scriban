@@ -1,0 +1,5 @@
+Hello {{ display_name }},
+
+Your account was locked after too many failed sign-in attempts. It stays locked until {{ locked_until }} ({{ time_zone }}); then the lock lifts by itself.
+
+If this was not you, reset your password.

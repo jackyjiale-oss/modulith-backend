@@ -58,7 +58,7 @@ internal sealed class ForgotPasswordCommandHandler(
             return await IgnoreAsync(user.Id, CooldownReason, attemptedIdentifier, now, cancellationToken);
         }
 
-        await linkIssuer.IssueAsync(user, now, cancellationToken);
+        await linkIssuer.IssueAsync(user, VerificationTrigger.SelfService, now, cancellationToken);
         auditWriter.Record(AuthAuditLog.Create(
             AuthAuditEvents.PasswordForgotRequested,
             succeeded: true,

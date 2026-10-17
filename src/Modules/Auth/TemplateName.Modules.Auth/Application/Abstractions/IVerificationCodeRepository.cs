@@ -5,6 +5,9 @@ namespace TemplateName.Modules.Auth.Application.Abstractions;
 /// <summary>Loads and adds <see cref="VerificationCode"/> aggregates.</summary>
 internal interface IVerificationCodeRepository
 {
+    /// <summary>Finds a code by its id, whatever its state.</summary>
+    Task<VerificationCode?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
+
     /// <summary>Finds a code by its token hash, whatever its state.</summary>
     Task<VerificationCode?> GetByTokenHashAsync(byte[] tokenHash, CancellationToken cancellationToken);
 

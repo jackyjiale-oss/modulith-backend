@@ -39,12 +39,14 @@ internal sealed class VerificationCode : AggregateRoot<Guid>
     public string? CreatedIp { get; private set; }
 
     /// <summary>
-    /// Issues a code and raises <see cref="VerificationCodeIssuedDomainEvent"/> carrying the protected token for the email. An address
-    /// longer than <see cref="MaxCreatedIpLength"/> is cut to it.
+    /// Issues a code and raises <see cref="VerificationCodeIssuedDomainEvent"/> carrying the protected token for the email and the
+    /// <paramref name="trigger"/>, which only the event keeps. An address longer than <see cref="MaxCreatedIpLength"/> is cut to it.
     /// </summary>
+    /// <exception cref="ArgumentException">An administrator <paramref name="trigger"/> for a code that is not a password reset.</exception>
     public static VerificationCode Issue(
         Guid userId,
         VerificationPurpose purpose,
+        VerificationTrigger trigger,
         string target,
         byte[] tokenHash,
         string protectedToken,
@@ -53,6 +55,10 @@ internal sealed class VerificationCode : AggregateRoot<Guid>
         DateTimeOffset now)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(lifetime, TimeSpan.Zero);
+        if (trigger != VerificationTrigger.SelfService && purpose != VerificationPurpose.PasswordReset)
+        {
+            throw new ArgumentException($"Only a password reset can be issued by an administrator, not {purpose}.", nameof(trigger));
+        }
 
         var code = new VerificationCode
         {
@@ -66,7 +72,7 @@ internal sealed class VerificationCode : AggregateRoot<Guid>
             CreatedIp = createdIp is { Length: > MaxCreatedIpLength } ip ? ip[..MaxCreatedIpLength] : createdIp,
         };
 
-        code.Raise(new VerificationCodeIssuedDomainEvent(code.Id, userId, purpose, target, protectedToken));
+        code.Raise(new VerificationCodeIssuedDomainEvent(code.Id, userId, purpose, target, protectedToken, trigger));
 
         return code;
     }

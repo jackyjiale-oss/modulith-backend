@@ -6,6 +6,7 @@ using TemplateName.Modules.Auth.Application.Me.Update;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Roles;
 using TemplateName.Modules.Auth.Domain.Users;
+using TemplateName.Modules.Auth.Domain.Verification;
 using TemplateName.SharedKernel;
 
 namespace TemplateName.Modules.Auth.Application.Admin.Users.Create;
@@ -56,7 +57,7 @@ internal sealed class CreateUserCommandHandler(
         }
 
         users.Add(user);
-        await linkIssuer.IssueAsync(user, now, cancellationToken);
+        await linkIssuer.IssueAsync(user, VerificationTrigger.CreatedByAdmin, now, cancellationToken);
         auditWriter.Record(AdminAudit.Succeeded(AuthAuditEvents.AdminUserCreated, user.Id, command.ActorId, now));
 
         // One save: the user, its roles, the reset code, the audit entry and the outbox rows. A refusal by the email index means another

@@ -9,17 +9,19 @@ namespace TemplateName.Modules.Auth.Infrastructure.Authorization;
 /// <summary>
 /// Syncs the permissions every registered <see cref="IPermissionSource"/> declares into <c>auth.Permissions</c>: a new code is inserted,
 /// a known one gets the declared name and description and is no longer deprecated, and a code no source declares any more is
-/// deprecated, never deleted. Every definition is validated first; one bad definition fails the whole sync and changes nothing.
+/// deprecated, never deleted. Every definition is validated first; one bad definition fails the whole sync and changes nothing. The
+/// result also names the permissions flagged <see cref="PermissionDefinition.AdminDefault"/>, and which of them this run inserted.
 /// </summary>
 internal sealed partial class PermissionSynchronizer(IEnumerable<IPermissionSource> sources, IPermissionRepository permissions)
 {
-    /// <summary>Syncs the declarations and returns every permission that is not deprecated. The caller saves the changes.</summary>
+    /// <summary>Syncs the declarations and returns what the seeder needs to grant. The caller saves the changes.</summary>
     /// <exception cref="InvalidOperationException">A definition is invalid; the message names the code and the source.</exception>
-    public async Task<IReadOnlyList<Permission>> SyncAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    public async Task<PermissionSyncResult> SyncAsync(DateTimeOffset now, CancellationToken cancellationToken)
     {
         var declared = Validate(sources);
         var existing = await permissions.ListAsync(cancellationToken);
         var byCode = existing.ToDictionary(permission => permission.Code, StringComparer.Ordinal);
+        var inserted = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var definition in declared)
         {
@@ -33,6 +35,7 @@ internal sealed partial class PermissionSynchronizer(IEnumerable<IPermissionSour
                 permission = Permission.Create(definition.Code, definition.Module, definition.Name, definition.Description, now);
                 permissions.Add(permission);
                 byCode.Add(permission.Code, permission);
+                inserted.Add(permission.Code);
             }
         }
 
@@ -42,7 +45,13 @@ internal sealed partial class PermissionSynchronizer(IEnumerable<IPermissionSour
             permission.SetDeprecated(true);
         }
 
-        return [.. byCode.Values.Where(permission => !permission.IsDeprecated)];
+        var adminDefaultCodes = declared.Where(definition => definition.AdminDefault).Select(definition => definition.Code).ToHashSet(StringComparer.Ordinal);
+        var active = byCode.Values.Where(permission => !permission.IsDeprecated).ToList();
+
+        return new PermissionSyncResult(
+            active,
+            [.. active.Where(permission => adminDefaultCodes.Contains(permission.Code))],
+            [.. active.Where(permission => adminDefaultCodes.Contains(permission.Code) && inserted.Contains(permission.Code))]);
     }
 
     /// <summary>

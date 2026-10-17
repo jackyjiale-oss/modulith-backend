@@ -1,0 +1,3 @@
+<p>Helo {{ display_name }},</p>
+<p>Akaun anda dikunci selepas terlalu banyak percubaan log masuk yang gagal. Akaun kekal dikunci sehingga {{ locked_until }} ({{ time_zone }}); selepas itu kunci akan ditamatkan dengan sendirinya.</p>
+<p>Jika ini bukan anda, tetapkan semula kata laluan anda.</p>

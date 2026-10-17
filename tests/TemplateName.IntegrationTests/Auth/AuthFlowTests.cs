@@ -30,7 +30,7 @@ public sealed class AuthFlowTests(IntegrationTestWebAppFactory factory) : Integr
             register.StatusCode.ShouldBe(HttpStatusCode.Accepted);
         }
 
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         var confirmationToken = Factory.EmailSender.LastLinkToken(Email);
 
         // Before confirmation the right password is not enough.
@@ -90,7 +90,7 @@ public sealed class AuthFlowTests(IntegrationTestWebAppFactory factory) : Integr
             forgot.StatusCode.ShouldBe(HttpStatusCode.Accepted);
         }
 
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         var resetToken = Factory.EmailSender.LastLinkToken(Email);
         resetToken.ShouldNotBe(confirmationToken);
 
@@ -183,17 +183,6 @@ public sealed class AuthFlowTests(IntegrationTestWebAppFactory factory) : Integr
         }
 
         return Client.SendAsync(request, Ct);
-    }
-
-    private async Task DispatchOutboxAsync()
-    {
-        var dispatcher = Factory.Services.GetRequiredService<OutboxDispatcher<AuthDbContext>>();
-        int claimed;
-        do
-        {
-            claimed = await dispatcher.ProcessBatchAsync(Ct);
-        }
-        while (claimed > 0);
     }
 
     private sealed record Tokens(string AccessToken, string RefreshToken, Guid SessionId);

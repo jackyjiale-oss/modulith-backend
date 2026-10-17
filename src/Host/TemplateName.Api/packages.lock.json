@@ -494,11 +494,6 @@
         "resolved": "8.0.1",
         "contentHash": "BVYuec3jV23EMRDeR7Dr1/qhx7369dZzJ9IWy2xylvb4YfXsrUxspWc4UWYid/tj4zZK58uGZqn2WQiaDMhmAg=="
       },
-      "System.Security.Cryptography.Pkcs": {
-        "type": "Transitive",
-        "resolved": "10.0.0",
-        "contentHash": "UPWqLSygJlFerRi9XNIuM0a1VC8gHUIufyP24xQ0sc+XimqUAEcjpOz9DhKpyDjH+5B/wO3RpC0KpkEeDj/ddg=="
-      },
       "System.Security.Cryptography.ProtectedData": {
         "type": "Transitive",
         "resolved": "9.0.11",
@@ -527,13 +522,32 @@
       "templatename.modules.auth": {
         "type": "Project",
         "dependencies": {
-          "MailKit": "[4.18.1, )",
           "Microsoft.AspNetCore.Authentication.JwtBearer": "[10.0.12, )",
           "Microsoft.AspNetCore.DataProtection.EntityFrameworkCore": "[10.0.12, )",
           "Microsoft.Extensions.Caching.Hybrid": "[10.10.0, )",
           "OpenTelemetry.Extensions.Hosting": "[1.19.1, )",
           "TemplateName.Application.Common": "[0.0.0, )",
           "TemplateName.Infrastructure.Common": "[0.0.0, )",
+          "TemplateName.Modules.Auth.Contracts": "[0.0.0, )",
+          "TemplateName.SharedKernel": "[0.0.0, )",
+          "TemplateName.Web.Common": "[0.0.0, )"
+        }
+      },
+      "templatename.modules.auth.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "TemplateName.SharedKernel": "[0.0.0, )"
+        }
+      },
+      "templatename.modules.notifications": {
+        "type": "Project",
+        "dependencies": {
+          "MailKit": "[4.18.1, )",
+          "Microsoft.AspNetCore.Authentication.JwtBearer": "[10.0.12, )",
+          "Scriban": "[7.5.0, )",
+          "TemplateName.Application.Common": "[0.0.0, )",
+          "TemplateName.Infrastructure.Common": "[0.0.0, )",
+          "TemplateName.Modules.Auth.Contracts": "[0.0.0, )",
           "TemplateName.SharedKernel": "[0.0.0, )",
           "TemplateName.Web.Common": "[0.0.0, )"
         }
@@ -704,6 +718,12 @@
           "OpenTelemetry.Api.ProviderBuilderExtensions": "[1.19.0, 2.0.0)"
         }
       },
+      "Scriban": {
+        "type": "CentralTransitive",
+        "requested": "[7.5.0, )",
+        "resolved": "7.5.0",
+        "contentHash": "5Dk6VXG6dimWQFRtCs202cYYkdE1GeOqpUgCwNSp4C4NhpjeMaVNssxe6Ifb1Z3HCfabvrbk9XLbvQXeZXG91w=="
+      },
       "Scrutor": {
         "type": "CentralTransitive",
         "requested": "[7.0.0, )",
@@ -747,6 +767,12 @@
           "Grpc.Net.Client": "2.70.0",
           "Serilog": "4.2.0"
         }
+      },
+      "System.Security.Cryptography.Pkcs": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.13, )",
+        "resolved": "10.0.13",
+        "contentHash": "a+EovgC1fBnwdlQ6cn3j4JFBfKqiFaFvoAhjisOoSvazLAcIznaBzPQP0oYnvccmeXfqUH1KebVZOxSeH6rMaw=="
       }
     }
   }

@@ -20,9 +20,9 @@ dotnet ef migrations add {Verb}{What} \
 
 ## Where things go
 
-- A module has `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/`, `Resources/` and `{Module}Module.cs`; the layout is fixed.
+- A module has `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/`, `Resources/` and `{Module}Module.cs`; the layout is fixed. A module that declares notification types adds `Templates/` (embedded Scriban files) at the project root, as Notifications does.
 - Each command or query gets its own folder under `Application/{Aggregates}/{UseCase}/` holding the message, handler and validator.
-- Modules talk to each other only through `*.Contracts` (integration events and public interfaces). Never reference another module's project or read its tables.
+- Modules talk to each other only through `*.Contracts` (integration events and public interfaces). Never reference another module's project or read its tables. Messages to users go through the Notifications module (an integration event in, email and in-app out); a module never sends mail itself. Today only Auth's types exist; see `docs/modules/notifications.md` before adding one.
 - Tests mirror the source: `tests/{TestProject}/{Module or Area}/{Subject}Tests.cs`.
 
 ## Definition of done

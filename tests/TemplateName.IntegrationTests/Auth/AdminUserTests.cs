@@ -12,6 +12,7 @@ using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Infrastructure.Authorization;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+using TemplateName.Modules.Notifications.Application;
 
 namespace TemplateName.IntegrationTests.Auth;
 
@@ -26,7 +27,8 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
     private const string ResetRoute = "/api/v1/auth/password/reset";
     private const string Password = AuthTestHarness.Password;
     private const string NewPassword = "a brand new passphrase";
-    private const string ResetSubject = "Reset your password";
+    private const string AccountCreatedMalaySubject = "Akaun anda sedia: tetapkan kata laluan anda";
+    private const string ForcedResetSubject = "An administrator asked you to set a new password";
 
     private static readonly string[] AllUserPermissions =
     [
@@ -272,10 +274,10 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
             await AssertProblemAsync(duplicate, HttpStatusCode.Conflict, "auth.email_taken");
         }
 
-        await DispatchOutboxAsync();
+        await DispatchNotificationsAsync();
         var email = Factory.EmailSender.Sent.ShouldHaveSingleItem();
         email.To.ShouldBe("New.Person@Example.com");
-        email.Subject.ShouldBe(ResetSubject);
+        email.Subject.ShouldBe(AccountCreatedMalaySubject);
         var token = Factory.EmailSender.LastLinkToken("New.Person@Example.com");
         var contents = await QueryAsync(context => context.Set<OutboxMessage>().Select(message => message.Content).ToListAsync(Ct));
         contents.ShouldAllBe(content => !content.Contains(token));
@@ -377,8 +379,8 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
         var session = await QueryAsync(context => context.Set<UserSession>().SingleAsync(candidate => candidate.Id == tokens.SessionId, Ct));
         session.RevokedReason.ShouldBe(SessionRevokedReason.AdminRevoked);
 
-        await DispatchOutboxAsync();
-        Factory.EmailSender.Sent.ShouldHaveSingleItem().Subject.ShouldBe(ResetSubject);
+        await DispatchNotificationsAsync();
+        Factory.EmailSender.Sent.ShouldHaveSingleItem().Subject.ShouldBe(ForcedResetSubject);
         var token = Factory.EmailSender.LastLinkToken("target@example.com");
         using (var reset = await PostAnonymousAsync(ResetRoute, new { token, newPassword = NewPassword }))
         {
@@ -414,8 +416,11 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
     [Fact]
     public async Task Assigning_a_role_grants_access_on_the_next_request()
     {
-        // The actor holds every permission of Admin, so it may grant the role (the grant rule).
-        await SignInAsync([AuthPermissions.UserAssignRoles, .. AuthSeeder.AdminDefaultPermissions], AuthTestHarness.DefaultLocale);
+        // The actor holds every permission of Admin (the Auth defaults and the Notifications ones the role is flagged to get), so it may
+        // grant the role (the grant rule).
+        await SignInAsync(
+            [AuthPermissions.UserAssignRoles, .. AuthSeeder.AdminDefaultPermissions, NotificationsPermissions.DeliveryView, NotificationsPermissions.DeliveryRetry],
+            AuthTestHarness.DefaultLocale);
         var target = await CreateUserAsync("target@example.com");
         var tokens = await LoginAsync("target@example.com", Password);
 
@@ -631,17 +636,6 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
         using var response = await Client.GetAsync(UsersRoute + query, Ct);
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         return await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
-    }
-
-    private async Task DispatchOutboxAsync()
-    {
-        var dispatcher = Factory.Services.GetRequiredService<OutboxDispatcher<AuthDbContext>>();
-        int claimed;
-        do
-        {
-            claimed = await dispatcher.ProcessBatchAsync(Ct);
-        }
-        while (claimed > 0);
     }
 
     private async Task<Guid> CreateDeletedRoleAsync()

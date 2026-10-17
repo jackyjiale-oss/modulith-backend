@@ -1,0 +1,1 @@
+We signed out a session on {{ occurred_at }} ({{ time_zone }}) because its sign-in credentials were used a second time. If this was not you, reset your password now.
