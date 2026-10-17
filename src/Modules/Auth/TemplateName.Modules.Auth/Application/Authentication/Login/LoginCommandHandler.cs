@@ -34,9 +34,6 @@ internal sealed class LoginCommandHandler(
     /// <summary>The audit failure reason of a correct password on a locked account.</summary>
     internal const string LockedFailureReason = "locked";
 
-    /// <summary>The <c>amr</c> value of a password sign-in.</summary>
-    private const string PasswordAuthMethod = "pwd";
-
     private const string DefaultDeviceName = "Unknown";
 
     public async Task<Result<LoginResponse>> HandleAsync(LoginCommand command, CancellationToken cancellationToken)
@@ -172,7 +169,7 @@ internal sealed class LoginCommandHandler(
         var refreshTokens = refreshTokenOptions.Value;
         var (session, firstToken) = UserSession.Start(
             user.Id,
-            PasswordAuthMethod,
+            AuthenticationMethods.Password,
             command.DeviceName ?? DefaultDeviceName,
             clientContext.UserAgent,
             clientContext.IpAddress,
@@ -183,7 +180,7 @@ internal sealed class LoginCommandHandler(
             now);
         sessions.Add(session);
 
-        var accessToken = accessTokenIssuer.Issue(new AccessTokenRequest(user.Id, session.Id, user.SecurityStamp, PasswordAuthMethod, now, user.Locale));
+        var accessToken = accessTokenIssuer.Issue(new AccessTokenRequest(user.Id, session.Id, user.SecurityStamp, AuthenticationMethods.Password, now, user.Locale));
 
         auditWriter.Record(AuthAuditLog.Create(
             AuthAuditEvents.LoginSucceeded,
