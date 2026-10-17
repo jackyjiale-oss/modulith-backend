@@ -76,9 +76,10 @@ internal sealed class RefreshTokenCommandHandler(
             return await RejectAsync(session, rotated.Error, revokedNow: false, now);
         }
 
-        // amr and auth_time describe the sign-in, so they come from the session, not from this refresh.
+        // amr and auth_time describe the latest proof of identity (the sign-in or a step-up), so they come from the session, not from
+        // this refresh.
         var accessToken = accessTokenIssuer.Issue(
-            new AccessTokenRequest(user.Id, session.Id, session.SecurityStamp, session.AuthMethods, session.CreatedAt, user.Locale));
+            new AccessTokenRequest(user.Id, session.Id, session.SecurityStamp, session.AuthMethods, session.AuthenticatedAt, user.Locale));
 
         auditWriter.Record(AuthAuditLog.Create(AuthAuditEvents.TokenRefreshed, succeeded: true, now, userId: user.Id, sessionId: session.Id));
 

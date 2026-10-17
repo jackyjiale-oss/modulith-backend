@@ -52,6 +52,19 @@ public sealed class AuthMetricsTests : IDisposable
         _measurements.ShouldAllBe(measurement => measurement.Value == 1 && measurement.Tags.Length == 0);
     }
 
+    [Theory]
+    [InlineData(true, "succeeded")]
+    [InlineData(false, "failed")]
+    public void Step_up_counts_one_with_only_the_result_tag(bool succeeded, string result)
+    {
+        _sut.RecordStepUp(succeeded);
+
+        var measurement = _measurements.ShouldHaveSingleItem();
+        measurement.Instrument.ShouldBe("auth.step_ups");
+        measurement.Value.ShouldBe(1);
+        measurement.Tags.ShouldBe([new KeyValuePair<string, object?>("result", result)]);
+    }
+
     public void Dispose()
     {
         _listener.Dispose();

@@ -16,6 +16,7 @@ internal sealed class AuthMetrics : IAuthMetrics
     private readonly Counter<long> _logins;
     private readonly Counter<long> _registrations;
     private readonly Counter<long> _tokenReuses;
+    private readonly Counter<long> _stepUps;
 
     public AuthMetrics(IMeterFactory meterFactory)
     {
@@ -23,6 +24,7 @@ internal sealed class AuthMetrics : IAuthMetrics
         _logins = meter.CreateCounter<long>("auth.logins", unit: "{attempt}", description: "Login attempts, by result.");
         _registrations = meter.CreateCounter<long>("auth.registrations", unit: "{request}", description: "Accepted registration requests, new and existing addresses alike.");
         _tokenReuses = meter.CreateCounter<long>("auth.token_reuse_detected", unit: "{token}", description: "Refresh tokens presented again after use; each revokes its session.");
+        _stepUps = meter.CreateCounter<long>("auth.step_ups", unit: "{attempt}", description: "Step-up attempts that reached a decision, by result.");
     }
 
     public void RecordLogin(LoginOutcome outcome) => _logins.Add(1, new KeyValuePair<string, object?>(ResultTag, ResultOf(outcome)));
@@ -30,6 +32,9 @@ internal sealed class AuthMetrics : IAuthMetrics
     public void RecordRegistration() => _registrations.Add(1);
 
     public void RecordTokenReuse() => _tokenReuses.Add(1);
+
+    public void RecordStepUp(bool succeeded) =>
+        _stepUps.Add(1, new KeyValuePair<string, object?>(ResultTag, succeeded ? "succeeded" : "failed"));
 
     private static string ResultOf(LoginOutcome outcome) => outcome switch
     {

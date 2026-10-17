@@ -22,6 +22,7 @@ using TemplateName.Modules.Auth.Application.Admin.Users;
 using TemplateName.Modules.Auth.Application.Authentication;
 using TemplateName.Modules.Auth.Application.Mfa;
 using TemplateName.Modules.Auth.Application.Passwords;
+using TemplateName.Modules.Auth.Application.StepUp;
 using TemplateName.Modules.Auth.Application.Verification;
 using TemplateName.Modules.Auth.Contracts.Users;
 using TemplateName.Modules.Auth.Endpoints;
@@ -47,7 +48,8 @@ public static class AuthModule
     /// (<c>AuthErrorMessages</c>), the link and verification settings <c>Auth:Links</c> and <c>Auth:Verification</c>, the sign-in settings
     /// <c>Auth:RefreshToken</c> and <c>Auth:Lockout</c>, the counters of the <c>TemplateName.Auth</c> meter (added to OpenTelemetry), the
     /// access tokens with the JWT bearer handler as the default authentication scheme, the permission checker with its cache, the
-    /// permission source and the seeder, two-step verification (<c>Auth:Mfa</c>, the TOTP secret protector and the MFA repositories),
+    /// permission source and the seeder, two-step verification (<c>Auth:Mfa</c>, the TOTP secret protector, the MFA repositories and
+    /// the factor verifier), step-up (<c>Auth:StepUp</c> and its policy),
     /// and the Data Protection key ring stored in <c>auth.DataProtectionKeys</c>. Call it after
     /// <c>AddInfrastructureCommon</c> and before <c>AddApplicationDecorators</c>.
     /// </summary>
@@ -140,7 +142,7 @@ public static class AuthModule
     /// <summary>
     /// Maps the module's endpoints; <paramref name="app"/> is the host's <c>/api/v1</c> group. The self-service routes live in its
     /// <c>auth</c> group: <c>POST auth/register</c>, <c>POST auth/email/confirm</c>, <c>POST auth/email/resend-confirmation</c>,
-    /// <c>POST auth/login</c>, <c>POST auth/token/refresh</c>, <c>GET auth/me</c>, <c>PUT auth/me</c>, <c>GET auth/sessions</c>, <c>DELETE auth/sessions/{id}</c>, <c>POST auth/logout</c>, <c>POST auth/logout-all</c>,
+    /// <c>POST auth/login</c>, <c>POST auth/token/refresh</c>, <c>POST auth/step-up</c>, <c>GET auth/me</c>, <c>PUT auth/me</c>, <c>GET auth/sessions</c>, <c>DELETE auth/sessions/{id}</c>, <c>POST auth/logout</c>, <c>POST auth/logout-all</c>,
     /// <c>POST auth/password/forgot</c>, <c>POST auth/password/reset</c> and <c>POST auth/password/change</c>. The user administration
     /// routes live in its <c>admin/auth/users</c> group, each behind its permission: <c>GET</c> (list) and <c>POST</c> (create) on the
     /// group, <c>GET admin/auth/users/{id}</c>, <c>POST .../{id}/lock</c>, <c>/unlock</c>, <c>/force-password-reset</c>,
@@ -193,8 +195,9 @@ public static class AuthModule
 
     /// <summary>
     /// Registers two-step verification: <c>Auth:Mfa</c> (validated on start), the TOTP secret protector with its own Data Protection
-    /// purpose (a singleton over the module's key ring, plan decision D4) and the repositories of the methods, recovery codes,
-    /// challenges and trusted devices.
+    /// purpose (a singleton over the module's key ring, plan decision D4), the repositories of the methods, recovery codes,
+    /// challenges and trusted devices, the factor verifier, and step-up: <c>Auth:StepUp</c> (validated on start) and the
+    /// <see cref="StepUpPolicy"/> sensitive handlers check.
     /// </summary>
     internal static void AddMfa(IServiceCollection services, IConfiguration configuration)
     {
@@ -207,6 +210,13 @@ public static class AuthModule
         services.AddScoped<IRecoveryCodeRepository, RecoveryCodeRepository>();
         services.AddScoped<IMfaChallengeRepository, MfaChallengeRepository>();
         services.AddScoped<ITrustedDeviceRepository, TrustedDeviceRepository>();
+        services.AddScoped<MfaFactorVerifier>();
+
+        services.AddOptions<StepUpOptions>()
+            .Bind(configuration.GetSection(StepUpOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddScoped<StepUpPolicy>();
     }
 
     /// <summary>

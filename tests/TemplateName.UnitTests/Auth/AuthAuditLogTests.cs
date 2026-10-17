@@ -134,7 +134,9 @@ public sealed class AuthAuditLogTests
             .Select(f => (string)f.GetRawConstantValue()!)
             .ToList();
 
-        values.Count.ShouldBe(30);
+        values.Count.ShouldBe(32);
+        values.ShouldContain("auth.step_up_succeeded");
+        values.ShouldContain("auth.step_up_failed");
         values.ShouldAllBe(v => !string.IsNullOrWhiteSpace(v));
         values.Distinct().Count().ShouldBe(values.Count);
     }

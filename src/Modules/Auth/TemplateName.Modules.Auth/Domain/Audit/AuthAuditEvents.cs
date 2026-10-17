@@ -25,6 +25,8 @@ internal static class AuthAuditEvents
     public const string PasswordChanged = "auth.password_changed";
     public const string PasswordChangeFailed = "auth.password_change_failed";
     public const string ProfileUpdated = "auth.profile_updated";
+    public const string StepUpSucceeded = "auth.step_up_succeeded";
+    public const string StepUpFailed = "auth.step_up_failed";
     public const string AdminUserCreated = "auth.admin_user_created";
     public const string AdminUserLocked = "auth.admin_user_locked";
     public const string AdminUserUnlocked = "auth.admin_user_unlocked";
