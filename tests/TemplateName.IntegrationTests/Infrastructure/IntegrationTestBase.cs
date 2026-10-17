@@ -104,6 +104,13 @@ public abstract class IntegrationTestBase(IntegrationTestWebAppFactory factory) 
         string locale = AuthTestHarness.DefaultLocale)
         => AuthTestHarness.CreateUserAsync(Factory.Services, email, password, confirmed, suspended, locale, Ct);
 
+    /// <summary>
+    /// Turns two-step verification on for <paramref name="userId"/> directly in the database: a confirmed TOTP method that has used no
+    /// time step yet and ten recovery codes. Returns the plain secret (compute a code with <see cref="TotpEnrollment.CodeAt"/>) and the
+    /// codes as shown to the user. The user's security stamp, sessions and access token stay as they are.
+    /// </summary>
+    protected Task<TotpEnrollment> EnrollTotpAsync(Guid userId) => AuthTestHarness.EnrollTotpAsync(Factory.Services, userId, Ct);
+
     /// <summary>Makes <see cref="Client"/> anonymous again; the user and session stay in the database.</summary>
     protected void SignOut()
     {

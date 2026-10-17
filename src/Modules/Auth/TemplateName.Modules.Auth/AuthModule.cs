@@ -20,6 +20,7 @@ using TemplateName.Modules.Auth.Application.Admin;
 using TemplateName.Modules.Auth.Application.Admin.Roles;
 using TemplateName.Modules.Auth.Application.Admin.Users;
 using TemplateName.Modules.Auth.Application.Authentication;
+using TemplateName.Modules.Auth.Application.Mfa;
 using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Application.Verification;
 using TemplateName.Modules.Auth.Contracts.Users;
@@ -46,7 +47,8 @@ public static class AuthModule
     /// (<c>AuthErrorMessages</c>), the link and verification settings <c>Auth:Links</c> and <c>Auth:Verification</c>, the sign-in settings
     /// <c>Auth:RefreshToken</c> and <c>Auth:Lockout</c>, the counters of the <c>TemplateName.Auth</c> meter (added to OpenTelemetry), the
     /// access tokens with the JWT bearer handler as the default authentication scheme, the permission checker with its cache, the
-    /// permission source and the seeder, and the Data Protection key ring stored in <c>auth.DataProtectionKeys</c>. Call it after
+    /// permission source and the seeder, two-step verification (<c>Auth:Mfa</c>, the TOTP secret protector and the MFA repositories),
+    /// and the Data Protection key ring stored in <c>auth.DataProtectionKeys</c>. Call it after
     /// <c>AddInfrastructureCommon</c> and before <c>AddApplicationDecorators</c>.
     /// </summary>
     public static IServiceCollection AddAuthModule(this IServiceCollection services, IConfiguration configuration)
@@ -106,6 +108,7 @@ public static class AuthModule
 
         AddAccessTokens(services, configuration);
         AddPermissions(services, configuration);
+        AddMfa(services, configuration);
 
         // One key ring for every instance, so an outbox event protected by one instance can be read by another (ADR 0017).
         var applicationName = configuration["Auth:DataProtection:ApplicationName"] is { Length: > 0 } configuredName
@@ -186,6 +189,24 @@ public static class AuthModule
                 bearer.MapInboundClaims = false;
                 bearer.TokenValidationParameters = JwtValidation.CreateParameters(jwt.Value, keys, timeProvider);
             });
+    }
+
+    /// <summary>
+    /// Registers two-step verification: <c>Auth:Mfa</c> (validated on start), the TOTP secret protector with its own Data Protection
+    /// purpose (a singleton over the module's key ring, plan decision D4) and the repositories of the methods, recovery codes,
+    /// challenges and trusted devices.
+    /// </summary>
+    internal static void AddMfa(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<MfaOptions>()
+            .Bind(configuration.GetSection(MfaOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddSingleton<IMfaSecretProtector, DataProtectionMfaSecretProtector>();
+        services.AddScoped<IMfaMethodRepository, MfaMethodRepository>();
+        services.AddScoped<IRecoveryCodeRepository, RecoveryCodeRepository>();
+        services.AddScoped<IMfaChallengeRepository, MfaChallengeRepository>();
+        services.AddScoped<ITrustedDeviceRepository, TrustedDeviceRepository>();
     }
 
     /// <summary>

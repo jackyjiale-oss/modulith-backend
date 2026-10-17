@@ -33,9 +33,9 @@ internal sealed class UserSessionConfiguration : IEntityTypeConfiguration<UserSe
         builder.HasIndex(session => new { session.UserId, session.LastSeenAt, session.Id });
         builder.HasIndex(session => new { session.UserId, session.CreatedAt, session.Id });
 
-        // TODO(Plan 4 Task 4): the column and its migration arrive with the MFA persistence; until then the property is not mapped, so
-        // the table, the model snapshot and the existing integration tests are unchanged. Task 4 replaces this line with the mapping.
-        builder.Ignore(session => session.AuthenticatedAt);
+        // When the user last proved their identity in the session (sign-in or step-up), the auth_time of its access tokens. Not null:
+        // migration AddMultiFactorAuthentication filled it from CreatedAt for the sessions that existed before it.
+        builder.Property(session => session.AuthenticatedAt);
 
         builder.Ignore(session => session.DomainEvents);
     }

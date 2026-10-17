@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Domain.Mfa;
 using TemplateName.Modules.Auth.Domain.Roles;
 using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Users;
@@ -24,6 +25,7 @@ internal static class AuthTestHarness
     private const string AuthMethods = "pwd";
     private const string DeviceName = "Integration tests";
     private const string HarnessDescription = "Created by the integration test harness.";
+    private const string TotpLabel = "Harness authenticator";
 
     private static readonly TimeSpan SlidingLifetime = TimeSpan.FromDays(14);
     private static readonly TimeSpan AbsoluteLifetime = TimeSpan.FromDays(90);
@@ -117,6 +119,46 @@ internal static class AuthTestHarness
         await context.SaveChangesAsync(cancellationToken);
 
         return user;
+    }
+
+    /// <summary>
+    /// Turns two-step verification on for <paramref name="userId"/> without the enrollment routes: it writes a confirmed TOTP method
+    /// whose secret is protected by the host's own <see cref="IMfaSecretProtector"/> (<c>LastUsedTimeStep</c> and <c>LastUsedAt</c> null,
+    /// so the code of any step counts once) and <see cref="RecoveryCodeFormat.Count"/> recovery codes (only their hashes stored) straight
+    /// to the Auth tables, and returns the plain secret and the codes as shown to the user. The user's security stamp is not changed.
+    /// </summary>
+    internal static async Task<TotpEnrollment> EnrollTotpAsync(IServiceProvider services, Guid userId, CancellationToken cancellationToken)
+    {
+        await using var scope = services.CreateAsyncScope();
+        var provider = scope.ServiceProvider;
+        var context = provider.GetRequiredService<AuthDbContext>();
+        var now = provider.GetRequiredService<TimeProvider>().GetUtcNow();
+
+        var secret = Totp.NewSecret();
+        var method = UserMfaMethod.StartTotp(userId, TotpLabel, provider.GetRequiredService<IMfaSecretProtector>().Protect(secret), now);
+        var confirmed = method.Confirm(Totp.TimeStepAt(now), now);
+        if (confirmed.IsFailure)
+        {
+            throw new InvalidOperationException($"The harness method could not be confirmed: {confirmed.Error.Code}.");
+        }
+
+        context.Add(method);
+
+        // Confirm records the step it verified; an enrollment made by the harness has used none.
+        var entry = context.Entry(method);
+        entry.Property(enrolled => enrolled.LastUsedTimeStep).CurrentValue = null;
+        entry.Property(enrolled => enrolled.LastUsedAt).CurrentValue = null;
+
+        var recoveryCodes = new List<string>(RecoveryCodeFormat.Count);
+        for (var index = 0; index < RecoveryCodeFormat.Count; index++)
+        {
+            var code = RecoveryCodeFormat.Generate();
+            context.Add(RecoveryCode.Create(userId, RecoveryCodeFormat.Hash(code), now));
+            recoveryCodes.Add(RecoveryCodeFormat.Display(code));
+        }
+
+        await context.SaveChangesAsync(cancellationToken);
+        return new TotpEnrollment(method.Id, secret, recoveryCodes);
     }
 
     /// <summary>
