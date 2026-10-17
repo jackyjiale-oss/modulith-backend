@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using TemplateName.Modules.Notifications;
@@ -22,6 +23,18 @@ public sealed class TemplateCompletenessTests
     private static readonly TemplateCompletenessChecker TestSource = new(new NotificationCatalog([new TestNotificationTypeSource()]));
 
     public static TheoryData<string> ProductionTypeCodes => new(ProductionCatalog.All.Select(type => type.Code).Order(StringComparer.Ordinal));
+
+    // The types whose email carries a single-use link (a secret variable).
+    public static TheoryData<string> LinkTypeCodes => new(ProductionCatalog.All
+        .Where(type => type.SecretVariables.Count > 0)
+        .Select(type => type.Code)
+        .Order(StringComparer.Ordinal));
+
+    // Security notices whose sentences (what happened, what to do if it was not you) must survive in every language.
+    private static readonly string[] SecurityNotices =
+        [AuthNotificationTypes.PasswordChanged, AuthNotificationTypes.TokenReuseDetected, AuthNotificationTypes.AccountLocked];
+
+    public static TheoryData<string> SecurityNoticeTypeCodes => new(SecurityNotices);
 
     [Fact]
     public void Production_catalog_is_not_empty()
@@ -63,6 +76,53 @@ public sealed class TemplateCompletenessTests
         var problems = Production.SecretVariableMisuse(typeCode);
 
         problems.ShouldBeEmpty(string.Join(Environment.NewLine, problems));
+    }
+
+    [Fact]
+    public void Link_and_security_notice_types_are_in_the_production_catalog()
+    {
+        LinkTypeCodes.Count.ShouldBe(4);
+        SecurityNotices.ShouldAllBe(code => ProductionCatalog.Find(code) != null);
+    }
+
+    [Theory]
+    [MemberData(nameof(LinkTypeCodes))]
+    public void Every_culture_of_a_link_email_has_the_link_in_an_href_and_the_expiry(string typeCode)
+    {
+        // Structure only: the button's href is exactly the secret placeholder, the text part has the link on a line of its own, and
+        // both parts state the expiry. Nothing here reads the language.
+        var type = ProductionCatalog.Find(typeCode).ShouldNotBeNull();
+        type.Variables.ShouldContain(ExpiresInMinutes);
+        foreach (var culture in RecipientCulture.Supported)
+        {
+            foreach (var secret in type.SecretVariables)
+            {
+                Part(typeCode, culture, "html").ShouldContain($"<a href=\"{{{{ {secret} }}}}\"", customMessage: $"{typeCode} {culture} html");
+                Part(typeCode, culture, "text").Split('\n').Select(line => line.Trim()).ShouldContain($"{{{{ {secret} }}}}", $"{typeCode} {culture} text");
+            }
+
+            Part(typeCode, culture, "html").ShouldContain($"{{{{ {ExpiresInMinutes} }}}}", customMessage: $"{typeCode} {culture} html");
+            Part(typeCode, culture, "text").ShouldContain($"{{{{ {ExpiresInMinutes} }}}}", customMessage: $"{typeCode} {culture} text");
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(SecurityNoticeTypeCodes))]
+    public void Every_culture_of_a_security_notice_keeps_the_paragraphs_and_placeholders_of_en(string typeCode)
+    {
+        // A dropped sentence shows as a missing paragraph or placeholder; the paragraphs are counted, not read.
+        foreach (var part in new[] { "text", "html" })
+        {
+            var english = Part(typeCode, RecipientCulture.Default, part);
+            var englishParagraphs = Paragraphs(english, part);
+            englishParagraphs.ShouldBeGreaterThan(1);
+            foreach (var culture in RecipientCulture.Supported.Where(culture => culture != RecipientCulture.Default))
+            {
+                var translated = Part(typeCode, culture, part);
+                Paragraphs(translated, part).ShouldBe(englishParagraphs, $"{typeCode} {culture} {part}");
+                Placeholders(translated).ShouldBe(Placeholders(english), ignoreOrder: true, $"{typeCode} {culture} {part}");
+            }
+        }
     }
 
     [Fact]
@@ -157,6 +217,27 @@ public sealed class TemplateCompletenessTests
         checker.OrphanResources([testAssembly, EmbeddedTemplateStore.LayoutAssembly]).ShouldBe(
             [$"{testAssembly.GetName().Name}.Templates.InApp.test.undeclared.en.title.scriban belongs to no declared type, channel and culture, and is not a layout"]);
     }
+
+    private const string ExpiresInMinutes = "expires_in_minutes";
+
+    // The raw template text of one email part, read in its exact culture (no en fallback).
+    private static string Part(string typeCode, string culture, string part)
+    {
+        var assembly = ProductionCatalog.TemplateAssemblyOf(typeCode);
+        var resourceName = EmbeddedTemplateStore.PartResourceName(assembly, NotificationChannel.Email, typeCode, culture, part);
+        using var stream = assembly.GetManifestResourceStream(resourceName).ShouldNotBeNull(resourceName);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd().Replace("\r\n", "\n", StringComparison.Ordinal);
+    }
+
+    // Text: blocks separated by a blank line. HTML: <p> elements.
+    private static int Paragraphs(string template, string part) => part == "html"
+        ? Regex.Count(template, @"<p[\s>]")
+        : template.Trim().Split("\n\n", StringSplitOptions.RemoveEmptyEntries).Length;
+
+    // Every placeholder occurrence, in order (a repeated one counts each time).
+    private static List<string> Placeholders(string template) =>
+        [.. Regex.Matches(template, @"\{\{\s*([a-z_]+)\s*\}\}").Select(match => match.Groups[1].Value)];
 
     private static List<string> ScribanResources(Assembly assembly) =>
         assembly.GetManifestResourceNames().Where(name => name.EndsWith(EmbeddedTemplateStore.FileExtension, StringComparison.Ordinal)).ToList();

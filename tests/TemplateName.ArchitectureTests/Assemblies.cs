@@ -64,7 +64,10 @@ public static class Assemblies
         typeof(SampleErrorMessages),
     ];
 
-    /// <summary>Every <c>TemplateName.*</c> assembly under <c>src</c>.</summary>
+    /// <summary>
+    /// Every <c>TemplateName.*</c> assembly under <c>src</c> except the <c>*.Contracts</c> assemblies, which are in <see cref="Contracts"/>.
+    /// The Async, CancellationToken-last and forbidden-suffix rules (<c>NamingConventionTests</c>) run over both; <c>ContractsTests</c> checks the contracts.
+    /// </summary>
     public static IReadOnlyList<Assembly> All { get; } =
     [
         .. BuildingBlocks,

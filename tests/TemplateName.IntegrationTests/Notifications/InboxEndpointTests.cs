@@ -75,6 +75,47 @@ public sealed class InboxEndpointTests(IntegrationTestWebAppFactory factory) : I
     }
 
     [Fact]
+    public async Task A_user_id_in_the_query_or_the_body_is_ignored_by_the_inbox_routes()
+    {
+        // The routes take the owner from the token alone: another user's id, wherever it is put, changes nothing.
+        var alice = await SignInAsync();
+        var bob = Guid.NewGuid();
+        var mine = await InsertAsync(alice.UserId, Now.AddMinutes(-1));
+        var bobs = new List<Guid> { await InsertAsync(bob, Now.AddMinutes(-2)), await InsertAsync(bob, Now.AddMinutes(-3)) };
+
+        using (var count = await Client.GetAsync($"{UnreadCountRoute}?userId={bob}", Ct))
+        {
+            count.StatusCode.ShouldBe(HttpStatusCode.OK);
+            (await count.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("count").GetInt32().ShouldBe(1);
+        }
+
+        using (var unreadOnly = await Client.GetAsync($"{InboxRoute}?unreadOnly=true&userId={bob}", Ct))
+        {
+            unreadOnly.StatusCode.ShouldBe(HttpStatusCode.OK);
+            var items = (await unreadOnly.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("items");
+            items.EnumerateArray().Select(item => item.GetProperty("id").GetGuid()).ShouldBe([mine]);
+        }
+
+        using (var readAll = await Client.PostAsync($"{ReadAllRoute}?userId={bob}", JsonContent.Create(new { userId = bob }), Ct))
+        {
+            readAll.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        }
+
+        (await ReadAtOfAsync(mine)).ShouldNotBeNull();
+        foreach (var id in bobs)
+        {
+            (await ReadAtOfAsync(id)).ShouldBeNull();
+        }
+
+        using (var readOne = await Client.PostAsync($"{InboxRoute}/{bobs[0]}/read?userId={bob}", JsonContent.Create(new { userId = bob }), Ct))
+        {
+            readOne.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        }
+
+        (await ReadAtOfAsync(bobs[0])).ShouldBeNull();
+    }
+
+    [Fact]
     public async Task Unread_only_filter_and_cursor_mismatch()
     {
         var alice = await SignInAsync();

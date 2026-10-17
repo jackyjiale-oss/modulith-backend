@@ -116,7 +116,7 @@ public sealed class NamingConventionTests
 
         foreach (var suffix in ForbiddenSuffixes)
         {
-            var result = Types.InAssemblies(Assemblies.All).ShouldNot().HaveNameEndingWith(suffix).GetResult();
+            var result = Types.InAssemblies(SourceAssemblies).ShouldNot().HaveNameEndingWith(suffix).GetResult();
             failingTypeNames.AddRange(result.FailingTypeNames ?? []);
         }
 
@@ -153,9 +153,12 @@ public sealed class NamingConventionTests
         failingMethods.ShouldBeEmpty();
     }
 
+    /// <summary>Every assembly under <c>src</c>, the <c>*.Contracts</c> assemblies included: the rules below hold for the public surface too.</summary>
+    private static IReadOnlyList<Assembly> SourceAssemblies { get; } = [.. Assemblies.All, .. Assemblies.Contracts];
+
     /// <summary>Methods and constructors declared in <c>src</c>, minus compiler-generated ones (lambdas, local functions, state machines, top-level statements).</summary>
     private static IEnumerable<MethodBase> DeclaredMethods() =>
-        Assemblies.All.SelectMany(assembly => assembly.GetTypes()
+        SourceAssemblies.SelectMany(assembly => assembly.GetTypes()
             .Where(type => !IsCompilerGenerated(type))
             .SelectMany(type => type.GetMethods(DeclaredMembers).Cast<MethodBase>().Concat(type.GetConstructors(DeclaredMembers)))
             .Where(method => !IsCompilerGenerated(method))

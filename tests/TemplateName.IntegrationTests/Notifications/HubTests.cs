@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
+using System.Text.Json;
+using System.Threading.Channels;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
@@ -97,24 +99,62 @@ public sealed class HubTests(IntegrationTestWebAppFactory factory) : Integration
     }
 
     [Fact]
-    public async Task Another_users_notification_is_not_received()
+    public async Task Client_that_skips_negotiate_connects_with_one_ticket()
     {
-        var other = await CreateUserAsync("bob@example.com");
+        // What the JavaScript example in docs/modules/notifications.md does (skipNegotiation with the WebSockets transport): one request,
+        // so one provider call and one ticket, whatever the client's caching does.
         var user = await SignInAsync();
-        await using var connection = NotificationHubClient.Connect(Factory.Server, () => TicketFor(Client));
+        var calls = 0;
+        await using var connection = NotificationHubClient.Connect(
+            Factory.Server,
+            () =>
+            {
+                Interlocked.Increment(ref calls);
+                return TicketFor(Client);
+            },
+            skipNegotiation: true);
         var received = NotificationHubClient.Receive(connection);
+
         await connection.StartAsync(Ct);
 
-        // The other user's push is sent first; a push reaches a connection in order, so it would arrive before the user's own.
-        await PublishPasswordChangedAsync(other.Id);
-        await DispatchNotificationsAsync();
+        connection.State.ShouldBe(HubConnectionState.Connected);
+        calls.ShouldBe(1);
+        (await TicketsAsync()).ShouldHaveSingleItem().ConsumedAt.ShouldNotBeNull();
+
         await PublishPasswordChangedAsync(user.UserId);
         await DispatchNotificationsAsync();
+        (await NotificationHubClient.ReadAsync(received, Ct)).GetProperty("id").GetGuid().ShouldBe((await InAppRowAsync(user.UserId)).Id);
+    }
 
-        var payload = await NotificationHubClient.ReadAsync(received, Ct);
-        payload.GetProperty("id").GetGuid().ShouldBe((await InAppRowAsync(user.UserId)).Id);
-        received.TryRead(out _).ShouldBeFalse();
-        Factory.InAppPusher.Pushes.Select(push => push.UserId).ShouldBe([other.Id, user.UserId]);
+    [Fact]
+    public async Task Another_users_notification_is_not_received()
+    {
+        // Alice and Bob are both connected, each with a client of their own.
+        var alice = await SignInAsync();
+        using var aliceClient = Factory.CreateClient();
+        AuthTestHarness.Authorize(aliceClient, alice.AccessToken);
+        var bob = await SignInAsync();
+        await using var aliceConnection = NotificationHubClient.Connect(Factory.Server, () => TicketFor(aliceClient));
+        await using var bobConnection = NotificationHubClient.Connect(Factory.Server, () => TicketFor(Client));
+        var aliceReceived = NotificationHubClient.Receive(aliceConnection);
+        var bobReceived = NotificationHubClient.Receive(bobConnection);
+        await aliceConnection.StartAsync(Ct);
+        await bobConnection.StartAsync(Ct);
+
+        // Pushes alternate Bob, Alice, Bob, Alice. A push reaches a connection in order, so one that leaked to the wrong user would
+        // arrive between that user's own two and break the order below; no wait on the clock is needed to see it.
+        foreach (var userId in new[] { bob.UserId, alice.UserId, bob.UserId, alice.UserId })
+        {
+            await PublishPasswordChangedAsync(userId);
+            await DispatchNotificationsAsync();
+        }
+
+        var pushes = Factory.InAppPusher.Pushes;
+        pushes.Select(push => push.UserId).ShouldBe([bob.UserId, alice.UserId, bob.UserId, alice.UserId]);
+        (await ReadIdsAsync(aliceReceived, 2)).ShouldBe(pushes.Where(push => push.UserId == alice.UserId).Select(push => push.Payload.Id));
+        (await ReadIdsAsync(bobReceived, 2)).ShouldBe(pushes.Where(push => push.UserId == bob.UserId).Select(push => push.Payload.Id));
+        aliceReceived.TryRead(out _).ShouldBeFalse();
+        bobReceived.TryRead(out _).ShouldBeFalse();
     }
 
     [Fact]
@@ -406,6 +446,18 @@ public sealed class HubTests(IntegrationTestWebAppFactory factory) : Integration
         }
 
         return await client.SendAsync(request, Ct);
+    }
+
+    // The ids of the next pushes to a connection, in the order they arrive; each wait ends as soon as its push does.
+    private static async Task<List<Guid>> ReadIdsAsync(ChannelReader<JsonElement> received, int count)
+    {
+        var ids = new List<Guid>();
+        for (var i = 0; i < count; i++)
+        {
+            ids.Add((await NotificationHubClient.ReadAsync(received, Ct)).GetProperty("id").GetGuid());
+        }
+
+        return ids;
     }
 
     private async Task PublishPasswordChangedAsync(Guid userId)

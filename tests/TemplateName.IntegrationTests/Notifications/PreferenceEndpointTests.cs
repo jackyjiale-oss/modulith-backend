@@ -207,6 +207,68 @@ public sealed class PreferenceEndpointTests(IntegrationTestWebAppFactory factory
     }
 
     [Fact]
+    public async Task A_user_id_in_the_query_or_the_body_is_ignored_by_the_preference_routes()
+    {
+        // The routes take the owner from the token alone: another user's id, wherever it is put, reads and changes the caller's data.
+        var alice = await SignInAsync();
+        var bob = Guid.NewGuid();
+        await InsertPreferenceAsync(bob, PasswordChanged, NotificationChannel.InApp);
+        await InsertQuietHoursAsync(bob, new TimeOnly(20, 0), new TimeOnly(8, 0));
+
+        using (var read = await Client.GetAsync($"{PreferencesRoute}?userId={bob}", Ct))
+        {
+            read.StatusCode.ShouldBe(HttpStatusCode.OK);
+            Channels(await read.Content.ReadFromJsonAsync<JsonElement>(Ct), PasswordChanged).ShouldBe([("Email", true, true), ("InApp", true, false)]);
+        }
+
+        using (var update = await Client.PutAsJsonAsync(
+            $"{PreferencesRoute}?userId={bob}", new { userId = bob, items = new[] { Item(PasswordChanged, "InApp", false) } }, Ct))
+        {
+            update.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+
+        (await StoredAsync()).ShouldBe(
+            [(bob, PasswordChanged, NotificationChannel.InApp, false), (alice.UserId, PasswordChanged, NotificationChannel.InApp, false)],
+            ignoreOrder: true);
+
+        using (var readQuietHours = await Client.GetAsync($"{QuietHoursRoute}?userId={bob}", Ct))
+        {
+            (await ReadQuietHoursAsync(readQuietHours)).ShouldBe(new QuietHoursBody(null, null, "UTC"));
+        }
+
+        using (var updateQuietHours = await Client.PutAsync(
+            $"{QuietHoursRoute}?userId={bob}", Json($$"""{"userId":"{{bob}}","start":"23:00","end":"06:00"}"""), Ct))
+        {
+            (await ReadQuietHoursAsync(updateQuietHours)).ShouldBe(new QuietHoursBody("23:00", "06:00", "UTC"));
+        }
+
+        (await ProfileRowsAsync()).ShouldBe(
+            [(bob, new TimeOnly(20, 0), new TimeOnly(8, 0)), (alice.UserId, new TimeOnly(23, 0), new TimeOnly(6, 0))],
+            ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task Quiet_hours_of_one_user_are_not_visible_to_or_changed_by_another()
+    {
+        var alice = await SignInAsync();
+        (await PutQuietHoursAsync("""{"start":"22:00","end":"07:00"}""")).ShouldBe(new QuietHoursBody("22:00", "07:00", "UTC"));
+
+        // Bob, signed in on the same client, sees no window and sets his own, then clears it; Alice's stays as she set it.
+        var bob = await SignInAsync();
+        (await GetQuietHoursAsync()).ShouldBe(new QuietHoursBody(null, null, "UTC"));
+        (await PutQuietHoursAsync("""{"start":"01:00","end":"05:00"}""")).ShouldBe(new QuietHoursBody("01:00", "05:00", "UTC"));
+        (await PutQuietHoursAsync("""{"start":null,"end":null}""")).ShouldBe(new QuietHoursBody(null, null, "UTC"));
+
+        (await ProfileRowsAsync()).ShouldBe(
+            [(alice.UserId, (TimeOnly?)new TimeOnly(22, 0), (TimeOnly?)new TimeOnly(7, 0)), (bob.UserId, (TimeOnly?)null, (TimeOnly?)null)],
+            ignoreOrder: true);
+
+        // Alice still reads her own window.
+        AuthTestHarness.Authorize(Client, alice.AccessToken);
+        (await GetQuietHoursAsync()).ShouldBe(new QuietHoursBody("22:00", "07:00", "UTC"));
+    }
+
+    [Fact]
     public async Task Concurrent_updates_of_the_same_item_do_not_fail()
     {
         var user = await SignInAsync();
@@ -539,6 +601,16 @@ public sealed class PreferenceEndpointTests(IntegrationTestWebAppFactory factory
         await using var scope = Factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<NotificationsDbContext>();
         context.Add(UserPreference.Create(userId, typeCode, channel, isEnabled: false, Now));
+        await context.SaveChangesAsync(Ct);
+    }
+
+    private async Task InsertQuietHoursAsync(Guid userId, TimeOnly start, TimeOnly end)
+    {
+        await using var scope = Factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<NotificationsDbContext>();
+        var profile = UserNotificationProfile.Create(userId, Now);
+        profile.SetQuietHours(QuietHours.Create(start, end).Value, Now);
+        context.Add(profile);
         await context.SaveChangesAsync(Ct);
     }
 

@@ -23,11 +23,15 @@ internal static class NotificationHubClient
     // The upper bound of a wait that ends as soon as its event happens; generous, so a slow runner or a cold first run does not flake.
     private static readonly TimeSpan ReceiveTimeout = TimeSpan.FromSeconds(30);
 
-    /// <summary>A connection (not started) that calls <paramref name="accessTokenProvider"/> once for negotiate and once for the WebSocket.</summary>
-    internal static HubConnection Connect(TestServer server, Func<Task<string?>> accessTokenProvider)
+    /// <summary>
+    /// A connection (not started) that calls <paramref name="accessTokenProvider"/> once for negotiate and once for the WebSocket, or,
+    /// with <paramref name="skipNegotiation"/>, only once: for the WebSocket, its one request.
+    /// </summary>
+    internal static HubConnection Connect(TestServer server, Func<Task<string?>> accessTokenProvider, bool skipNegotiation = false)
         => new HubConnectionBuilder()
             .WithUrl(new Uri(server.BaseAddress, HubPath), HttpTransportType.WebSockets, options =>
             {
+                options.SkipNegotiation = skipNegotiation;
                 options.HttpMessageHandlerFactory = _ => server.CreateHandler();
                 options.AccessTokenProvider = accessTokenProvider;
                 options.WebSocketFactory = (context, cancellationToken) => ConnectWebSocketAsync(server, context, cancellationToken);
