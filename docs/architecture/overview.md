@@ -140,3 +140,4 @@ The rules for when a boundary is crossed:
 | [0019](../adr/0019-embedded-scriban-notification-templates.md) | Notification templates as Scriban files embedded in the declaring assembly |
 | [0020](../adr/0020-secrets-in-cross-module-events.md) | Single-use links cross module boundaries encrypted |
 | [0021](../adr/0021-signalr-hub-tickets.md) | SignalR hub authenticated by single-use tickets, never a JWT in the query string |
+| [0022](../adr/0022-totp-secrets-and-replay-protection.md) | Own RFC 6238 TOTP with a monotonic replay guard, an Auth-only secret purpose and 80-bit recovery codes |
