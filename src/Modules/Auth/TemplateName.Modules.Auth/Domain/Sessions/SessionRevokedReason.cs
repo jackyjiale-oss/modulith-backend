@@ -9,4 +9,7 @@ internal enum SessionRevokedReason
     AdminRevoked = 3,
     TokenReuse = 4,
     Expired = 5,
+
+    /// <summary>The user changed their two-step verification in another session, so every other session ended.</summary>
+    MfaChanged = 6,
 }

@@ -114,7 +114,9 @@ The seeded system roles hold: `SuperAdmin` every permission that is not deprecat
 
 `UserSession` (`Domain/Sessions/`) is one sign-in on one device, and also the refresh-token family (decision D2: there is no `FamilyId`). Its id is the `sid` claim of the access tokens. It owns its `RefreshToken` chain; a token stores only the SHA-256 hash (`TokenHash`), never the token.
 
-- **Start:** `UserSession.Start(userId, authMethods, deviceName, userAgent, ipAddress, securityStamp, firstTokenHash, slidingLifetime, absoluteLifetime, now)` creates the session and its first token. `SecurityStamp` is a **snapshot** of the user's stamp at sign-in; `ExpiresAt` is absolute (`now + absoluteLifetime`) and sliding refresh never moves it. Tokens expire at `min(now + slidingLifetime, session.ExpiresAt)`, so no token outlives the session. `IsActive(now)` is true while the session is not revoked and `now < ExpiresAt`. The device name, user agent and address are client-supplied, so `Start` cuts them to their columns (`UserSession.MaxDeviceNameLength` 200, `MaxUserAgentLength` 512, `MaxIpAddressLength` 45) instead of letting a long header fail the sign-in.
+- **Start:** `UserSession.Start(userId, authMethods, deviceName, userAgent, ipAddress, securityStamp, firstTokenHash, slidingLifetime, absoluteLifetime, now)` creates the session and its first token. `SecurityStamp` is a **snapshot** of the user's stamp at sign-in; `ExpiresAt` is absolute (`now + absoluteLifetime`) and sliding refresh never moves it. Tokens expire at `min(now + slidingLifetime, session.ExpiresAt)`, so no token outlives the session. `IsActive(now)` is true while the session is not revoked and `now < ExpiresAt`. The device name, user agent and address are client-supplied, so `Start` cuts them to their columns (`UserSession.MaxDeviceNameLength` 200, `MaxUserAgentLength` 512, `MaxIpAddressLength` 45) instead of letting a long header fail the sign-in (the same `UserSession.Cut` cuts the copies of the device name and user agent that the MFA challenge and the trusted device keep). `Start` also sets `AuthenticatedAt` to `now`: when the user last proved their identity in the session, the `auth_time` of its access tokens once Plan 4 reads it.
+- **Step-up:** `StepUp(authMethods, now)` sets `AuthMethods` to what the step-up proved (it replaces the sign-in's methods, because `amr` describes the authentication at `AuthenticatedAt`) and `AuthenticatedAt` to `now`; a blank value is an `ArgumentException` and a session that is not active (revoked, or at or past `ExpiresAt`) an `InvalidOperationException`, so a dead session never gets a fresh proof. The caller has verified the factor; nothing calls this yet.
+- **New device:** `NoteNewDevice()` raises `NewDeviceSignedInDomainEvent(UserId, SessionId, IpAddress)` and changes nothing; the caller decides that the device is new.
 - **Rotate:** `Rotate(presentedTokenHash, newTokenHash, currentSecurityStamp, slidingLifetime, now)` is checked in this order. The caller saves the aggregate on every outcome, because some failures revoke the session.
 
   | Presented token | Result | Effect on the session |
@@ -131,7 +133,7 @@ The seeded system roles hold: `SuperAdmin` every permission that is not deprecat
 - **Revoke:** `Revoke(reason, now)` ends the session and revokes every token that is not yet revoked. It is idempotent: a second call keeps the first time and reason.
 - **AdoptSecurityStamp:** `AdoptSecurityStamp(securityStamp)` replaces the session's stamp snapshot with the user's new stamp, so the session from which the password was changed keeps refreshing while every other session (still holding the old stamp) is refused. A revoked session is left as it is; a blank stamp is a programming error.
 
-`SessionRevokedReason` is persisted by its numeric value (`Logout`, `LogoutAll`, `PasswordChanged`, `AdminRevoked`, `TokenReuse`, `Expired`), so a new reason is appended and existing values are never renumbered.
+`SessionRevokedReason` is persisted by its numeric value (`Logout` 0, `LogoutAll` 1, `PasswordChanged` 2, `AdminRevoked` 3, `TokenReuse` 4, `Expired` 5, `MfaChanged` 6: the user changed their two-step verification in another session), so a new reason is appended and existing values are never renumbered.
 
 ```mermaid
 stateDiagram-v2
@@ -161,6 +163,51 @@ stateDiagram-v2
 ```
 
 `AuthAuditLog` (`Domain/Audit/`) is one line of the append-only audit log. It is a plain entity with a `bigint` identity key, not an aggregate, and raises no domain events. `AuthAuditLog.Create(eventType, succeeded, now, userId, failureReason, attemptedIdentifier, sessionId, details)` leaves the client fields empty; the audit writer calls `SetClientInfo(ipAddress, userAgent, traceId)` from the request, which cuts the values to their columns (45, 512 and 64 characters). `AttemptedIdentifier` is cut to 256 characters. `Details` is JSON text that the domain neither validates nor bounds. `MaskIdentifier` makes an identifier safe to log: `alice@example.com` becomes `a****@example.com`, a value without `@` keeps its first character (`a****`), and null or blank gives null.
+
+### Two-step verification domain
+
+Plan 4 adds the two-step verification domain (`Domain/Mfa/`, `Domain/TrustedDevices/`, and members of `User` and `UserSession`). Only the domain exists so far: no table, repository, route or handler uses it yet, and `UserSession.AuthenticatedAt` is deliberately not mapped to a column until the persistence task adds it (with a backfill from `CreatedAt` for existing sessions). The decisions are in the plan (D6, D9 to D14, D18 to D20) and ADR 0022. Every type is `internal`; the numeric values of the enums are persisted or serialized, so a new value is appended and existing values are never renumbered.
+
+| Type | What it is |
+|---|---|
+| `UserMfaMethod` (aggregate) | One authenticator app of a user: `Type` (`MfaMethodType.Totp` = 1), `Label` (at most `MaxLabelLength` = 100), `SecretEncrypted` (the output of the Auth secret protector, at most `MaxSecretEncryptedLength` = 512; never the secret), `CreatedAt`, `ConfirmedAt`, `LastUsedAt`, `LastUsedTimeStep` and `IsConfirmed` |
+| `RecoveryCode` (entity) | One single-use code of a user: `CodeHash` (SHA-256 of the normalized code, 32 bytes, validated), `CreatedAt`, `UsedAt`. Regenerating replaces the whole set, so there is no batch id |
+| `MfaChallenge` (aggregate) | The state between a correct password and a correct second factor: `TokenHash` (32 bytes), `SecurityStamp` (snapshot), `DeviceName` (cut to `UserSession.MaxDeviceNameLength`), `CreatedAt`, `ExpiresAt`, `ConsumedAt`, `FailedAttempts` |
+| `TrustedDevice` (aggregate) | A device remembered after a second factor: `TokenHash` (32 bytes), `DeviceName`, `UserAgent` (cut to 512), `SecurityStamp` (snapshot), `CreatedAt`, `ExpiresAt`, `LastUsedAt`, `RevokedAt` |
+| `MfaChange` | What changed, carried by `MfaChangedDomainEvent`: `Enabled` 0, `Disabled` 1, `RecoveryCodesRegenerated` 2, `ResetByAdmin` 3, `RecoveryCodeUsed` 4 |
+
+- **`UserMfaMethod`:** `StartTotp(userId, label, secretEncrypted, now)` creates a **pending** method. `RestartSetup(label, secretEncrypted, now)` replaces the secret of a pending method (a user who lost the QR code) and restarts `CreatedAt`; on a confirmed method it throws `InvalidOperationException` (replacing an authenticator means removing it first). `Confirm(timeStep, now)` turns a pending method into a confirmed one, sets `ConfirmedAt` and `LastUsedAt` to `now` and `LastUsedTimeStep` to the verified step, so the same code cannot be used again at once; on a confirmed method it returns `auth.mfa_already_enabled` and changes nothing. A blank label or secret, or one longer than its column, is an `ArgumentException` (the application validator refuses a label first). The aggregate never compares time steps: the replay guard is one conditional update of `LastUsedTimeStep` in the repository (persistence task).
+- **`MfaChallenge`:** `Issue(userId, tokenHash, securityStamp, deviceName, lifetime, now)` sets `ExpiresAt` to `now + lifetime`. `CanUse(currentSecurityStamp, now, maxAttempts)` is true only while the challenge is not consumed, `now < ExpiresAt` (so it ends exactly at `ExpiresAt`), `FailedAttempts < maxAttempts` and the user's current stamp equals the snapshot (ordinal comparison), so a password change, an MFA change or a suspension between the two steps ends the challenge. It changes nothing: the wrong-code counter and the consumption are conditional updates in the repository, in the same rule. A token hash that is not 32 bytes, a blank stamp and a lifetime that is not positive are programming errors (`ArgumentException`, `ArgumentOutOfRangeException`).
+- **`TrustedDevice`:** `Trust(userId, tokenHash, deviceName, userAgent, securityStamp, lifetime, now)`; `IsUsable(currentSecurityStamp, now)` is true while the device is not revoked, `now < ExpiresAt` and the stamp equals the snapshot (ordinal), so every event that rotates the stamp forgets every device. `MarkUsed(now)` sets `LastUsedAt` and never extends the absolute expiry. `Revoke(now)` is idempotent and keeps the first time.
+- **`User`:** `ChangeMfa(change, now)` rotates `SecurityStamp` (ending the other sessions, pending challenges and trusted devices at their next check) and raises `MfaChangedDomainEvent(UserId, Change)`; `RecoveryCodeUsed` is an `ArgumentException` there, and a value that is not defined an `ArgumentOutOfRangeException`. `NoteRecoveryCodeUsed()` raises the same event with `RecoveryCodeUsed` and changes nothing, in particular not the stamp (the code is single-use already, and a rotation would end the session just created). Neither event carries a code, secret or address.
+
+`UserMfaMethod` has two states; the secret is replaced only while it is pending.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: StartTotp
+    Pending --> Pending: RestartSetup
+    Pending --> Confirmed: Confirm(timeStep)
+    Confirmed --> Confirmed: Confirm refused (auth.mfa_already_enabled)
+    Confirmed --> [*]: removed
+    Pending --> [*]: removed
+```
+
+`MfaChallenge` has no setter for its end states; the repository's conditional updates and the clock decide, and `CanUse` reads them.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Issued: Issue
+    Issued --> Issued: wrong code (FailedAttempts + 1)
+    Issued --> Consumed: right code (ConsumedAt)
+    Issued --> Expired: now reaches ExpiresAt
+    Issued --> Exhausted: FailedAttempts reaches the maximum
+    Issued --> StampChanged: user's SecurityStamp changes
+    Consumed --> [*]
+    Expired --> [*]
+    Exhausted --> [*]
+    StampChanged --> [*]
+```
 
 ### Audit events
 
@@ -203,8 +250,20 @@ The event types are the constants of `AuthAuditEvents` (stored as text, never re
 | `auth.last_super_admin` | 409 | — | The last active SuperAdmin cannot be locked or lose the SuperAdmin role. |
 | `auth.cannot_manage_super_admin` | 403 | — | Only a SuperAdmin can manage a SuperAdmin account or grant the SuperAdmin role. |
 | `auth.role_assignment_not_allowed` | 403 | — | You may not assign roles, so a new account can only get the default role. |
+| `auth.invalid_mfa_challenge` | 400 | — | The sign-in attempt is invalid or has expired. Sign in again. |
+| `auth.invalid_mfa_code` | 400 | — | The verification code is incorrect. |
+| `auth.mfa_already_enabled` | 409 | — | Two-step verification is already turned on. |
+| `auth.mfa_not_enabled` | 409 | — | Two-step verification is not turned on. |
+| `auth.mfa_setup_not_pending` | 409 | — | There is no authenticator setup to confirm. Start the setup again. |
+| `auth.mfa_method_not_found` | 404 | `id` | Verification method '{id}' was not found. |
+| `auth.step_up_required` | 403 | — | Confirm your identity again to continue. |
+| `auth.step_up_method_not_allowed` | 400 | — | This way of confirming your identity is not available for your account. |
+| `auth.cannot_reset_own_mfa` | 400 | — | You cannot reset your own two-step verification here. |
+| `auth.trusted_device_not_found` | 404 | `id` | Trusted device '{id}' was not found. |
 
 The user codes are declared in `Domain/Users/UserErrors.cs`, the role and permission codes in `Domain/Roles/RoleErrors.cs` and the session codes in `Domain/Sessions/SessionErrors.cs` and `auth.invalid_token` in `Domain/Verification/VerificationErrors.cs` (one answer for an unknown, used, replaced, expired or wrong-purpose token). Their messages are in `Resources/AuthErrorMessages.resx` (English) with `AuthErrorMessages.ms.resx` and `AuthErrorMessages.zh-Hans.resx` (drafts awaiting native review); every further code is added to all three files in the same change that introduces it. A locked account answers with `auth.invalid_credentials`, never a distinct code (it would reveal that the email exists). `auth.email_taken` is answered only to an administrator creating an account, never on a self-service route.
+
+The two-step verification codes are declared in `Domain/Mfa/MfaErrors.cs` (the first eight codes of that group), `auth.cannot_reset_own_mfa` in `Domain/Users/UserErrors.cs` and `auth.trusted_device_not_found` in `Domain/TrustedDevices/TrustedDeviceErrors.cs`. They are defined, translated and documented now; no route returns them yet. The statuses are the ones the plan fixes: a wrong or reused code, and an unknown, expired, used or exhausted challenge, are **400** (`auth.invalid_mfa_code`, `auth.invalid_mfa_challenge`), never 401, so a client asks for a new code instead of refreshing its token; `auth.invalid_mfa_challenge` is one answer for every reason the challenge cannot be used, so the response does not tell which.
 
 ## Events
 
@@ -219,6 +278,8 @@ The user codes are declared in `Domain/Users/UserErrors.cs`, the role and permis
 | `RegistrationAttemptedDomainEvent(UserId, Email, Locale)` | Domain | Someone registers an address that already has an account | `PublishRegistrationAttemptedDomainEventHandler`: publishes `RegistrationAttemptedIntegrationEvent` |
 | `RefreshTokenReuseDetectedDomainEvent(UserId, SessionId)` | Domain | A used or revoked refresh token is presented again, or a refresh loses the claim of its token to a simultaneous refresh (not to a revocation), and the session is revoked (`UserSession.ReportTokenReuse`) | `PublishRefreshTokenReuseDetectedDomainEventHandler`: publishes `RefreshTokenReuseDetectedIntegrationEvent` |
 | `VerificationCodeIssuedDomainEvent(CodeId, UserId, Purpose, Target, ProtectedToken, Trigger)` | Domain | A verification code is issued; `ProtectedToken` is the encrypted token for the email link, `Trigger` who caused it (the last member, defaulting to `SelfService`, so an outbox row written before it existed still reads) | `PublishVerificationCodeIssuedDomainEventHandler`: decrypts the token, builds the link (`Auth:Links:ConfirmEmailUrl` for `EmailVerify`, `Auth:Links:ResetPasswordUrl` for `PasswordReset`) and publishes it, encrypted, as `EmailVerificationRequestedIntegrationEvent` or `PasswordResetRequestedIntegrationEvent` (see [Publishing](#publishing)) |
+| `MfaChangedDomainEvent(UserId, Change)` | Domain | `User.ChangeMfa` (the change is `Enabled`, `Disabled`, `RecoveryCodesRegenerated` or `ResetByAdmin`, and the security stamp rotates) or `User.NoteRecoveryCodeUsed` (`RecoveryCodeUsed`, no state change). `Change` is an `MfaChange`, serialized by its number | None yet: raised but not published or consumed. No handler, route or integration event exists; Plan 4's later tasks add them |
+| `NewDeviceSignedInDomainEvent(UserId, SessionId, IpAddress)` | Domain | `UserSession.NoteNewDevice`, for a sign-in from a device none of the user's earlier sessions came from. `IpAddress` is the server-observed address (null when unknown); no client-supplied text | None yet: raised but not published or consumed; nothing calls `NoteNewDevice` yet |
 
 The events are declared in `Domain/Users/Events/`, `Domain/Sessions/Events/` and `Domain/Verification/Events/`. Domain events are written to `auth.OutboxMessages` in the same save as the aggregate and dispatched by the module outbox (ADR 0007), also when the aggregate itself did not change (`NoteRegistrationAttempt` raises an event on an unchanged user; `DomainEventsToOutboxInterceptor` reads every tracked aggregate, whatever its state, which `OutboxTests.Event_raised_by_an_unchanged_tracked_aggregate_is_written_to_the_outbox` pins). The `Publish*DomainEventHandler`s (`Application/IntegrationEvents/`), run by the same outbox, turn six of them into the integration events below ([Publishing](#publishing)); the Notifications module consumes all six and turns them into notifications ([notifications.md](notifications.md#events)). **Auth sends no email itself**: every email it causes (the confirmation and reset links, the set-password link of an administrator-created account, the registration-attempt notice, and the password-changed, lockout and token-reuse notices) is rendered from the Notifications templates in the recipient's saved language and delivered, with retries, by the Notifications delivery worker ([Email channel](notifications.md#email-channel)).
 
@@ -484,7 +545,7 @@ Refused actions are not audited, and neither is a permission set that did not ch
 
 <!-- Two-step verification: TOTP authenticator apps and recovery codes (Plan 4). -->
 
-Plan 4 adds two-step verification with an authenticator app (TOTP) and single-use recovery codes. So far only the primitives below exist, in `Domain/Mfa/`; no route, table, setting or handler uses them yet. The decisions are ADR 0022.
+Plan 4 adds two-step verification with an authenticator app (TOTP) and single-use recovery codes. So far only the primitives below (in `Domain/Mfa/`) and the aggregates built on them ([Two-step verification domain](#two-step-verification-domain)) exist; no route, table, setting or handler uses them yet. The decisions are ADR 0022.
 
 ### TOTP and recovery codes
 

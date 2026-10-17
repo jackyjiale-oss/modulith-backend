@@ -1,4 +1,5 @@
 using System.Globalization;
+using TemplateName.Modules.Auth.Domain.Mfa;
 using TemplateName.Modules.Auth.Domain.Users.Events;
 using TemplateName.SharedKernel;
 
@@ -274,6 +275,37 @@ internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
 
         return Result.Success();
     }
+
+    /// <summary>
+    /// Records a change of the two-step verification of this user: the security stamp changes (so every other session, pending MFA
+    /// challenge and trusted device stops matching) and <see cref="MfaChangedDomainEvent"/> is raised. The methods and recovery codes
+    /// themselves are separate aggregates that the caller changes in the same save.
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="change"/> is <see cref="MfaChange.RecoveryCodeUsed"/>, which changes nothing: use <see cref="NoteRecoveryCodeUsed"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="change"/> is not a defined value.</exception>
+    public void ChangeMfa(MfaChange change, DateTimeOffset now)
+    {
+        if (!Enum.IsDefined(change))
+        {
+            throw new ArgumentOutOfRangeException(nameof(change), change, "Not a change of two-step verification.");
+        }
+
+        if (change == MfaChange.RecoveryCodeUsed)
+        {
+            throw new ArgumentException("Using a recovery code changes no state; call NoteRecoveryCodeUsed.", nameof(change));
+        }
+
+        SecurityStamp = NewSecurityStamp();
+        Raise(new MfaChangedDomainEvent(Id, change));
+    }
+
+    /// <summary>
+    /// Raises <see cref="MfaChangedDomainEvent"/> for a sign-in with a recovery code, so the owner can be told. Changes no state: the
+    /// security stamp stays, because the code is already single-use and a rotation would end the session that was just created.
+    /// </summary>
+    public void NoteRecoveryCodeUsed() => Raise(new MfaChangedDomainEvent(Id, MfaChange.RecoveryCodeUsed));
 
     /// <summary>
     /// Records that someone tried to register this address again. Nothing changes; the event lets a handler tell the owner, so the

@@ -47,6 +47,13 @@ internal sealed class UserSession : AggregateRoot<Guid>
 
     public DateTimeOffset LastSeenAt { get; private set; }
 
+    /// <summary>
+    /// When the user last proved their identity in this session: the sign-in or the latest <see cref="StepUp"/>. It is the
+    /// <c>auth_time</c> claim of every access token of the session, refreshed tokens included, and <see cref="AuthMethods"/> describes
+    /// that moment.
+    /// </summary>
+    public DateTimeOffset AuthenticatedAt { get; private set; }
+
     /// <summary>The absolute expiry; sliding refresh never extends it.</summary>
     public DateTimeOffset ExpiresAt { get; private set; }
 
@@ -80,11 +87,12 @@ internal sealed class UserSession : AggregateRoot<Guid>
             Id = SequentialGuid.Create(now),
             UserId = userId,
             AuthMethods = authMethods,
-            DeviceName = Truncate(deviceName, MaxDeviceNameLength),
-            UserAgent = Truncate(userAgent, MaxUserAgentLength),
-            IpAddress = Truncate(ipAddress, MaxIpAddressLength),
+            DeviceName = Cut(deviceName, MaxDeviceNameLength),
+            UserAgent = Cut(userAgent, MaxUserAgentLength),
+            IpAddress = Cut(ipAddress, MaxIpAddressLength),
             SecurityStamp = securityStamp,
             CreatedAt = now,
+            AuthenticatedAt = now,
             LastSeenAt = now,
             ExpiresAt = now + absoluteLifetime,
         };
@@ -192,6 +200,30 @@ internal sealed class UserSession : AggregateRoot<Guid>
         SecurityStamp = securityStamp;
     }
 
+    /// <summary>
+    /// Records a fresh proof of identity: <see cref="AuthMethods"/> becomes <paramref name="authMethods"/> (what the step-up proved, not
+    /// what the sign-in proved) and <see cref="AuthenticatedAt"/> becomes <paramref name="now"/>. The caller has verified the factor.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The session is not active (revoked or past its absolute expiry).</exception>
+    /// <exception cref="ArgumentException"><paramref name="authMethods"/> is blank.</exception>
+    public void StepUp(string authMethods, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(authMethods);
+        if (!IsActive(now))
+        {
+            throw new InvalidOperationException("A session that is revoked or expired cannot be stepped up.");
+        }
+
+        AuthMethods = authMethods;
+        AuthenticatedAt = now;
+    }
+
+    /// <summary>
+    /// Raises <see cref="NewDeviceSignedInDomainEvent"/> for a sign-in from a device the user has not signed in from before. The
+    /// caller decides that (it compares the device with the stored sessions); this changes no state.
+    /// </summary>
+    public void NoteNewDevice() => Raise(new NewDeviceSignedInDomainEvent(UserId, Id, IpAddress));
+
     /// <summary>Ends the session and every token it still holds. Idempotent: a second call keeps the first time and reason.</summary>
     public void Revoke(SessionRevokedReason reason, DateTimeOffset now)
     {
@@ -208,12 +240,16 @@ internal sealed class UserSession : AggregateRoot<Guid>
         }
     }
 
-    private static DateTimeOffset Min(DateTimeOffset left, DateTimeOffset right) => left <= right ? left : right;
-
-    // Client-supplied values (the User-Agent header, the device name) are cut to their columns rather than failing the save.
+    /// <summary>
+    /// Returns <paramref name="value"/> cut to <paramref name="maxLength"/> characters. Client-supplied values (the User-Agent header,
+    /// the device name) are cut to their columns rather than failing the save; the MFA challenge and the trusted device cut their
+    /// copies of the device name and user agent with this too, so the three never disagree.
+    /// </summary>
     [return: NotNullIfNotNull(nameof(value))]
-    private static string? Truncate(string? value, int maxLength) =>
+    internal static string? Cut(string? value, int maxLength) =>
         value is { } text && text.Length > maxLength ? text[..maxLength] : value;
+
+    private static DateTimeOffset Min(DateTimeOffset left, DateTimeOffset right) => left <= right ? left : right;
 
     private RefreshToken IssueToken(byte[] tokenHash, TimeSpan slidingLifetime, DateTimeOffset now)
     {

@@ -1,3 +1,5 @@
+using System.Text.Json;
+using TemplateName.Modules.Auth.Domain.Mfa;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Domain.Users.Events;
 using TemplateName.SharedKernel;
@@ -361,6 +363,79 @@ public sealed class UserTests
 
         Check(notFound, "auth.user_not_found", ErrorType.NotFound);
         notFound.Parameters.ShouldNotBeNull().ShouldContainKeyAndValue("id", id);
+    }
+
+    [Theory]
+    [InlineData(nameof(MfaChange.Enabled))]
+    [InlineData(nameof(MfaChange.Disabled))]
+    [InlineData(nameof(MfaChange.RecoveryCodesRegenerated))]
+    [InlineData(nameof(MfaChange.ResetByAdmin))]
+    public void ChangeMfa_rotates_the_stamp_and_raises_the_event_for_each_change(string changeName)
+    {
+        var change = Enum.Parse<MfaChange>(changeName);
+        var user = NewConfirmedUser();
+        user.ClearDomainEvents();
+        var stamp = user.SecurityStamp;
+        var passwordHash = user.PasswordHash;
+
+        user.ChangeMfa(change, Now);
+
+        user.SecurityStamp.ShouldNotBe(stamp);
+        user.SecurityStamp.ShouldNotBeNullOrEmpty();
+        user.PasswordHash.ShouldBe(passwordHash);
+        user.DomainEvents.ShouldHaveSingleItem().ShouldBe(new MfaChangedDomainEvent(user.Id, change));
+    }
+
+    [Fact]
+    public void ChangeMfa_refuses_RecoveryCodeUsed()
+    {
+        var user = NewConfirmedUser();
+        user.ClearDomainEvents();
+        var stamp = user.SecurityStamp;
+
+        Should.Throw<ArgumentException>(() => user.ChangeMfa(MfaChange.RecoveryCodeUsed, Now));
+
+        user.SecurityStamp.ShouldBe(stamp);
+        user.DomainEvents.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void ChangeMfa_refuses_a_value_that_is_not_a_change()
+    {
+        var user = NewConfirmedUser();
+
+        Should.Throw<ArgumentOutOfRangeException>(() => user.ChangeMfa((MfaChange)99, Now));
+    }
+
+    [Fact]
+    public void NoteRecoveryCodeUsed_raises_without_changing_the_stamp()
+    {
+        var user = NewConfirmedUser();
+        user.ClearDomainEvents();
+        var stamp = user.SecurityStamp;
+
+        user.NoteRecoveryCodeUsed();
+
+        user.SecurityStamp.ShouldBe(stamp);
+        user.AccessFailedCount.ShouldBe(0);
+        user.DomainEvents.ShouldHaveSingleItem().ShouldBe(new MfaChangedDomainEvent(user.Id, MfaChange.RecoveryCodeUsed));
+    }
+
+    [Fact]
+    public void Mfa_changed_event_survives_the_outbox_round_trip()
+    {
+        var domainEvent = new MfaChangedDomainEvent(Guid.NewGuid(), MfaChange.ResetByAdmin);
+
+        var content = JsonSerializer.Serialize(domainEvent, typeof(MfaChangedDomainEvent));
+
+        JsonSerializer.Deserialize(content, typeof(MfaChangedDomainEvent)).ShouldBe(domainEvent);
+    }
+
+    [Fact]
+    public void CannotResetOwnMfa_is_a_validation_error()
+    {
+        Check(UserErrors.CannotResetOwnMfa, "auth.cannot_reset_own_mfa", ErrorType.Validation);
+        UserErrors.CannotResetOwnMfa.Message.ShouldBe("You cannot reset your own two-step verification here.");
     }
 
     private static void Check(Error error, string code, ErrorType type)

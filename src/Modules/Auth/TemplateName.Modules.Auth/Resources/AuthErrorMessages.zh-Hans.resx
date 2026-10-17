@@ -105,4 +105,34 @@
   <data name="auth.role_assignment_not_allowed" xml:space="preserve">
     <value>您无权分配角色，因此新账户只能获得默认角色。</value>
   </data>
+  <data name="auth.invalid_mfa_challenge" xml:space="preserve">
+    <value>登录尝试无效或已过期，请重新登录。</value>
+  </data>
+  <data name="auth.invalid_mfa_code" xml:space="preserve">
+    <value>验证码不正确。</value>
+  </data>
+  <data name="auth.mfa_already_enabled" xml:space="preserve">
+    <value>两步验证已开启。</value>
+  </data>
+  <data name="auth.mfa_not_enabled" xml:space="preserve">
+    <value>两步验证尚未开启。</value>
+  </data>
+  <data name="auth.mfa_setup_not_pending" xml:space="preserve">
+    <value>没有待确认的验证器设置，请重新开始设置。</value>
+  </data>
+  <data name="auth.mfa_method_not_found" xml:space="preserve">
+    <value>未找到验证方式“{id}”。</value>
+  </data>
+  <data name="auth.step_up_required" xml:space="preserve">
+    <value>请再次确认您的身份后继续。</value>
+  </data>
+  <data name="auth.step_up_method_not_allowed" xml:space="preserve">
+    <value>您的账户不能使用这种方式确认身份。</value>
+  </data>
+  <data name="auth.cannot_reset_own_mfa" xml:space="preserve">
+    <value>您不能在此重置自己的两步验证。</value>
+  </data>
+  <data name="auth.trusted_device_not_found" xml:space="preserve">
+    <value>未找到受信任的设备“{id}”。</value>
+  </data>
 </root>
