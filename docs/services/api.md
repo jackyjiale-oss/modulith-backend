@@ -202,7 +202,7 @@ The Notifications delivery worker ([Notifications module](../modules/notificatio
 | `PollingInterval` | `00:00:05` | `00:00:01` to `01:00:00` | Pause between polls once the due deliveries are drained. |
 | `BatchSize` | `10` | 1 to 100 | Most deliveries one worker claims per batch; a full batch is followed at once by the next. |
 | `MaxAttempts` | `5` | 1 to 10 | Attempts before a delivery is dead-lettered. Retries are due 1 min, 5 min, 15 min and 1 h after failed attempts 1 to 4; with the default the 5th failure dead-letters, and the 6 h step is used only when `MaxAttempts` is raised. |
-| `LeaseDuration` | `00:05:00` | `00:00:30` to `01:00:00` | How long a claimed batch stays hidden from other workers; keep it longer than the slowest batch of sends. |
+| `LeaseDuration` | `00:05:00` | `00:00:30` to `01:00:00` | How long a claimed batch stays hidden from other workers; keep it longer than the slowest batch of sends. No delivery starts with less than a fifth of it left (at least 30 seconds, at most half); the unstarted rest of the batch is released. |
 
 ### `Notifications:Hub`
 

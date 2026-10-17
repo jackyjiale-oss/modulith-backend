@@ -21,8 +21,9 @@ namespace TemplateName.Modules.Notifications.Infrastructure.Deliveries;
 /// <summary>
 /// The delivery worker (D14): claims due deliveries and sends each through the channel registered for it. Several workers (threads or
 /// app instances) can run at once with the outbox's pattern (ADR 0007): each claims a batch under a lease with one statement, so no
-/// transaction is held while it sends, and settles each delivery only while it still holds that lease. A worker whose lease has run
-/// out starts no further delivery, and its save fails if another worker re-claimed the delivery, so it never overwrites that outcome.
+/// transaction is held while it sends, and settles each delivery only while it still holds that lease. A worker starts no delivery once
+/// less than <see cref="DeliveryOptions.LeaseSafetyMargin"/> of its lease is left, and on that or on shutdown it releases the deliveries
+/// it claimed but did not start; its save fails if another worker re-claimed a delivery, so it never overwrites that outcome.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -33,8 +34,8 @@ namespace TemplateName.Modules.Notifications.Infrastructure.Deliveries;
 /// same save as the outcome, and its after-save work (the live push) runs only once that save succeeded.
 /// </para>
 /// <para>
-/// Attempts are counted when a delivery is claimed, so an attempt that ends without an outcome (the process dies mid-send, the lease
-/// runs out) still counts, and a delivery claimed again after <see cref="DeliveryOptions.MaxAttempts"/> is dead-lettered
+/// Attempts are counted when a delivery is claimed, so an attempt that ends without an outcome (the process dies mid-send) still
+/// counts, while a released delivery gets its attempt back; a delivery claimed again after <see cref="DeliveryOptions.MaxAttempts"/> is dead-lettered
 /// (<c>attempts_exhausted</c>) instead of being sent for ever. Delivery is at least once for email (a crash after the server accepted
 /// the message sends it again) and exactly once for in-app (the row's key is the delivery id).
 /// </para>
@@ -68,6 +69,9 @@ internal sealed partial class DeliveryDispatcher(
     /// <summary>The ceiling on saving an outcome, which is not cancelled by shutdown (see <c>ProcessAsync</c>).</summary>
     internal static readonly TimeSpan OutcomeSaveTimeout = TimeSpan.FromSeconds(30);
 
+    /// <summary>The ceiling on releasing the unstarted rest of a batch, which is not cancelled by shutdown either.</summary>
+    internal static readonly TimeSpan ReleaseTimeout = TimeSpan.FromSeconds(10);
+
     // UPDLOCK + READPAST: concurrent claims skip each other's rows instead of waiting or taking the same ones. The lease (LockedUntil)
     // keeps the claimed rows hidden after this statement commits; it expires if the claiming process dies. The attempt is counted here.
     // Status = 0 (Pending) is a literal, not a parameter, so the filtered index IX_Deliveries_Status_NextAttemptAt serves the claim.
@@ -82,45 +86,65 @@ internal sealed partial class DeliveryDispatcher(
         OUTPUT inserted.Id, inserted.AttemptCount, inserted.LockedUntil;
         """;
 
+    // Gives claimed-but-unstarted deliveries back: no lease, and the attempt the claim counted is undone. Only rows that are still pending
+    // under this worker's lease are touched, so a delivery another worker has re-claimed (or settled) is left alone.
+    private const string ReleaseSqlTemplate = """
+        UPDATE {deliveries} SET LockedUntil = NULL, AttemptCount = AttemptCount - 1
+        WHERE Id IN ({ids}) AND LockedUntil = @LeaseUntil AND Status = 0;
+        """;
+
     private const int UniqueConstraintViolation = 2627;
     private const int UniqueIndexViolation = 2601;
 
     private readonly DeliveryOptions _options = options.Value;
-    private string? _claimSql;
+    private string? _deliveriesTable;
 
     /// <summary>
-    /// Claims up to <see cref="DeliveryOptions.BatchSize"/> due deliveries and processes each in its own scope, stopping early once the
-    /// lease has run out (the rest are re-claimed later). A delivery that fails unexpectedly (a database error) is logged and left to its
-    /// lease; the others go on. Cancelling <paramref name="cancellationToken"/> (shutdown) stops before the next delivery and interrupts a
-    /// send in progress, but never the save of an outcome the channel has already given.
+    /// Claims up to <see cref="DeliveryOptions.BatchSize"/> due deliveries and processes each in its own scope, stopping early once less
+    /// than <see cref="DeliveryOptions.LeaseSafetyMargin"/> of the lease is left. A delivery that fails unexpectedly (a database error) is
+    /// logged and left to its lease; the others go on. Cancelling <paramref name="cancellationToken"/> (shutdown) stops before the next
+    /// delivery and interrupts a send in progress, but never the save of an outcome the channel has already given. Whenever the batch
+    /// stops early, the deliveries it did not start are released (see <c>ReleaseAsync</c>), so the next poll claims them at once.
     /// </summary>
     /// <returns>The number of deliveries claimed.</returns>
     public async Task<int> ProcessBatchAsync(CancellationToken cancellationToken)
     {
         var claimed = await ClaimBatchAsync(cancellationToken);
         var unavailableChannels = new HashSet<NotificationChannel>();
+        var started = 0;
 
-        foreach (var claim in claimed)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            while (started < claimed.Count)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var claim = claimed[started];
 
-            // Past the lease another worker may own these deliveries already; leave them untouched for it.
-            if (timeProvider.GetUtcNow().UtcDateTime >= claim.LockedUntil)
-            {
-                LogLeaseExpired(logger, claim.Id);
-                break;
-            }
+                // Too little lease left to finish a send before another worker may re-claim the delivery: give the rest back.
+                if (claim.LockedUntil - timeProvider.GetUtcNow().UtcDateTime < _options.LeaseSafetyMargin)
+                {
+                    LogLeaseEnding(logger, claim.Id, claimed.Count - started);
+                    break;
+                }
 
-            try
-            {
-                await ProcessAsync(claim, unavailableChannels, cancellationToken);
-            }
-            catch (Exception exception) when (!IsCancellation(exception, cancellationToken))
-            {
-                LogDeliveryFailed(logger, exception, claim.Id, claim.AttemptCount);
+                started++;
+                try
+                {
+                    await ProcessAsync(claim, unavailableChannels, cancellationToken);
+                }
+                catch (Exception exception) when (!IsCancellation(exception, cancellationToken))
+                {
+                    LogDeliveryFailed(logger, exception, claim.Id, claim.AttemptCount);
+                }
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await ReleaseAsync(claimed, started);
+            throw;
+        }
 
+        await ReleaseAsync(claimed, started);
         return claimed.Count;
     }
 
@@ -128,16 +152,50 @@ internal sealed partial class DeliveryDispatcher(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<NotificationsDbContext>();
-        _claimSql ??= BuildClaimSql(context);
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
         return await context.Database
             .SqlQueryRaw<ClaimedDelivery>(
-                _claimSql,
+                ClaimSqlTemplate.Replace("{deliveries}", DeliveriesTable(context), StringComparison.Ordinal),
                 new SqlParameter("@BatchSize", SqlDbType.Int) { Value = _options.BatchSize },
                 new SqlParameter("@Now", SqlDbType.DateTime2) { Scale = 3, Value = now },
                 new SqlParameter("@LeaseUntil", SqlDbType.DateTime2) { Scale = 3, Value = now + _options.LeaseDuration })
             .ToListAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Releases the claimed deliveries from <paramref name="firstUnstarted"/> on, in one statement: they become claimable at once and
+    /// get back the attempt their claim counted. Like an outcome's save it is not cancelled by shutdown, only bounded by
+    /// <see cref="ReleaseTimeout"/>; a failure is logged (without values) and ignored, because the lease still expires on its own.
+    /// </summary>
+    private async Task ReleaseAsync(List<ClaimedDelivery> claimed, int firstUnstarted)
+    {
+        if (firstUnstarted >= claimed.Count)
+        {
+            return;
+        }
+
+        var unstarted = claimed[firstUnstarted..];
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var context = scope.ServiceProvider.GetRequiredService<NotificationsDbContext>();
+            var parameters = unstarted
+                .Select((claim, index) => new SqlParameter($"@Id{index}", SqlDbType.UniqueIdentifier) { Value = claim.Id })
+                .Append(new SqlParameter("@LeaseUntil", SqlDbType.DateTime2) { Scale = 3, Value = unstarted[0].LockedUntil })
+                .ToArray<object>();
+            var sql = ReleaseSqlTemplate
+                .Replace("{deliveries}", DeliveriesTable(context), StringComparison.Ordinal)
+                .Replace("{ids}", string.Join(", ", unstarted.Select((_, index) => $"@Id{index}")), StringComparison.Ordinal);
+
+            using var timeout = new CancellationTokenSource(ReleaseTimeout, timeProvider);
+            await context.Database.ExecuteSqlRawAsync(sql, parameters, timeout.Token);
+            LogReleased(logger, unstarted.Count);
+        }
+        catch (Exception exception)
+        {
+            LogReleaseFailed(logger, unstarted.Count, exception.GetType().Name);
+        }
     }
 
     private async Task ProcessAsync(ClaimedDelivery claim, HashSet<NotificationChannel> unavailableChannels, CancellationToken cancellationToken)
@@ -366,13 +424,17 @@ internal sealed partial class DeliveryDispatcher(
         }
     }
 
-    private static string BuildClaimSql(NotificationsDbContext context)
+    // The deliveries table as the model maps it, delimited (for example [notify].[Deliveries]).
+    private string DeliveriesTable(NotificationsDbContext context)
     {
-        var entityType = context.Model.FindEntityType(typeof(Delivery))
-            ?? throw new InvalidOperationException($"{nameof(NotificationsDbContext)} does not map the deliveries.");
-        var deliveries = context.GetService<ISqlGenerationHelper>().DelimitIdentifier(entityType.GetTableName()!, entityType.GetSchema());
+        if (_deliveriesTable is null)
+        {
+            var entityType = context.Model.FindEntityType(typeof(Delivery))
+                ?? throw new InvalidOperationException($"{nameof(NotificationsDbContext)} does not map the deliveries.");
+            _deliveriesTable = context.GetService<ISqlGenerationHelper>().DelimitIdentifier(entityType.GetTableName()!, entityType.GetSchema());
+        }
 
-        return ClaimSqlTemplate.Replace("{deliveries}", deliveries, StringComparison.Ordinal);
+        return _deliveriesTable;
     }
 
     private static bool IsDuplicateInAppRow(DbUpdateException exception)
@@ -415,8 +477,14 @@ internal sealed partial class DeliveryDispatcher(
     [LoggerMessage(Level = LogLevel.Error, Message = "Delivery {DeliveryId} could not be processed, attempt {Attempt}; it is retried once its lease runs out")]
     private static partial void LogDeliveryFailed(ILogger logger, Exception exception, Guid deliveryId, int attempt);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Delivery lease expired before delivery {DeliveryId}; leaving the rest of the batch to be re-claimed")]
-    private static partial void LogLeaseExpired(ILogger logger, Guid deliveryId);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Delivery lease ends too soon to start delivery {DeliveryId}; releasing the {Count} deliveries of the batch not started")]
+    private static partial void LogLeaseEnding(ILogger logger, Guid deliveryId, int count);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Released {Count} claimed deliveries that were not started")]
+    private static partial void LogReleased(ILogger logger, int count);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Releasing {Count} claimed deliveries that were not started failed ({ExceptionType}); they are claimed again once their lease runs out")]
+    private static partial void LogReleaseFailed(ILogger logger, int count, string exceptionType);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Delivery lease on delivery {DeliveryId} was lost to another worker; its outcome stands")]
     private static partial void LogLeaseLost(ILogger logger, Guid deliveryId);

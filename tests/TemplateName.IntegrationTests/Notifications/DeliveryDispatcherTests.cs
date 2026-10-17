@@ -437,17 +437,101 @@ public sealed class DeliveryDispatcherTests(IntegrationTestWebAppFactory factory
         var sent = await DeliveryAsync(sentId);
         sent.Status.ShouldBe(DeliveryStatus.Sent);
         sent.SentAt.ShouldBe(Now);
+        sent.AttemptCount.ShouldBe(1);
         sent.LockedUntil.ShouldBeNull();
-        var notStarted = await DeliveryAsync(notStartedId);
-        notStarted.Status.ShouldBe(DeliveryStatus.Pending);
-        notStarted.LockedUntil.ShouldNotBeNull();
 
-        // After the lease the other delivery is sent; the first is never sent again.
+        // Later the other delivery is sent; the first is never sent again (the release of the other: see the next test).
         Factory.Time.Advance(Options.LeaseDuration + TimeSpan.FromSeconds(1));
         (await Dispatcher.ProcessBatchAsync(Ct)).ShouldBe(1);
         Factory.EmailSender.AttemptsTo(sentAddress).ShouldBe(1);
         Factory.EmailSender.AttemptsTo(notStartedAddress).ShouldBe(1);
         (await DeliveryAsync(notStartedId)).Status.ShouldBe(DeliveryStatus.Sent);
+    }
+
+    [Fact]
+    public async Task Unprocessed_claims_are_released_when_the_batch_is_cancelled()
+    {
+        // Both deliveries are claimed in one batch; the host stops while the first is being sent.
+        var user = await CreateUserAsync(Email);
+        var firstId = await ScheduleAsync(DeliveryTestTypeSource.Email, user.Id, FirstAddress);
+        var secondId = await ScheduleAsync(DeliveryTestTypeSource.Email, user.Id, SecondAddress);
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        var entered = Factory.EmailSender.Hold();
+        var dispatching = Task.Run(() => Dispatcher.ProcessBatchAsync(stopping.Token), Ct);
+        var heldAddress = await entered.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        await stopping.CancelAsync();
+        Factory.EmailSender.Release();
+        await Should.ThrowAsync<OperationCanceledException>(() => dispatching.WaitAsync(TimeSpan.FromSeconds(30), Ct));
+
+        // The started delivery keeps the existing rules (its answered outcome is saved); the unstarted one gets its claim back.
+        var (heldId, otherId, otherAddress) = heldAddress == FirstAddress ? (firstId, secondId, SecondAddress) : (secondId, firstId, FirstAddress);
+        await ShouldBeSentOnceAsync(heldId, heldAddress);
+        await ShouldBeReleasedAsync(otherId, otherAddress);
+
+        // Released, it is due at once: the next batch sends it, once, without waiting for the lease.
+        await ShouldBeSentByTheNextBatchAsync(otherId, otherAddress);
+        Factory.EmailSender.AttemptsTo(heldAddress).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Unprocessed_claims_are_released_when_the_lease_runs_out()
+    {
+        var user = await CreateUserAsync(Email);
+        var firstId = await ScheduleAsync(DeliveryTestTypeSource.Email, user.Id, FirstAddress);
+        var secondId = await ScheduleAsync(DeliveryTestTypeSource.Email, user.Id, SecondAddress);
+
+        // The first send outlasts the lease; nobody else re-claims, so its outcome is saved, but the second is not started.
+        var entered = Factory.EmailSender.Hold();
+        var dispatching = Task.Run(() => Dispatcher.ProcessBatchAsync(Ct), Ct);
+        var heldAddress = await entered.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        Factory.Time.Advance(Options.LeaseDuration + TimeSpan.FromSeconds(1));
+        Factory.EmailSender.Release();
+        (await dispatching.WaitAsync(TimeSpan.FromSeconds(30), Ct)).ShouldBe(2);
+
+        var (heldId, otherId, otherAddress) = heldAddress == FirstAddress ? (firstId, secondId, SecondAddress) : (secondId, firstId, FirstAddress);
+        await ShouldBeSentOnceAsync(heldId, heldAddress);
+        await ShouldBeReleasedAsync(otherId, otherAddress);
+        await ShouldBeSentByTheNextBatchAsync(otherId, otherAddress);
+        Factory.EmailSender.AttemptsTo(heldAddress).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task No_delivery_is_started_inside_the_safety_margin()
+    {
+        var user = await CreateUserAsync(Email);
+        var firstId = await ScheduleAsync(DeliveryTestTypeSource.Email, user.Id, FirstAddress);
+        var secondId = await ScheduleAsync(DeliveryTestTypeSource.Email, user.Id, SecondAddress);
+
+        // The lease has not run out yet, but less than the margin is left: too little to start another send.
+        var entered = Factory.EmailSender.Hold();
+        var dispatching = Task.Run(() => Dispatcher.ProcessBatchAsync(Ct), Ct);
+        var heldAddress = await entered.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        Factory.Time.Advance(Options.LeaseDuration - Options.LeaseSafetyMargin + TimeSpan.FromSeconds(1));
+        Factory.EmailSender.Release();
+        (await dispatching.WaitAsync(TimeSpan.FromSeconds(30), Ct)).ShouldBe(2);
+
+        var (heldId, otherId, otherAddress) = heldAddress == FirstAddress ? (firstId, secondId, SecondAddress) : (secondId, firstId, FirstAddress);
+        await ShouldBeSentOnceAsync(heldId, heldAddress);
+        await ShouldBeReleasedAsync(otherId, otherAddress);
+        await ShouldBeSentByTheNextBatchAsync(otherId, otherAddress);
+    }
+
+    [Fact]
+    public async Task Delivery_is_started_while_more_than_the_safety_margin_is_left()
+    {
+        var user = await CreateUserAsync(Email);
+        await ScheduleAsync(DeliveryTestTypeSource.Email, user.Id, FirstAddress);
+        await ScheduleAsync(DeliveryTestTypeSource.Email, user.Id, SecondAddress);
+
+        var entered = Factory.EmailSender.Hold();
+        var dispatching = Task.Run(() => Dispatcher.ProcessBatchAsync(Ct), Ct);
+        await entered.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        Factory.Time.Advance(Options.LeaseDuration - Options.LeaseSafetyMargin - TimeSpan.FromSeconds(1));
+        Factory.EmailSender.Release();
+        (await dispatching.WaitAsync(TimeSpan.FromSeconds(30), Ct)).ShouldBe(2);
+
+        Factory.EmailSender.Sent.Select(message => message.To).ShouldBe([FirstAddress, SecondAddress], ignoreOrder: true);
+        (await DeliveriesAsync()).ShouldAllBe(delivery => delivery.Status == DeliveryStatus.Sent && delivery.AttemptCount == 1);
     }
 
     [Fact]
@@ -499,6 +583,34 @@ public sealed class DeliveryDispatcherTests(IntegrationTestWebAppFactory factory
         }
 
         return total;
+    }
+
+    private async Task ShouldBeSentOnceAsync(Guid deliveryId, string address)
+    {
+        var delivery = await DeliveryAsync(deliveryId);
+        delivery.Status.ShouldBe(DeliveryStatus.Sent);
+        delivery.AttemptCount.ShouldBe(1);
+        delivery.LockedUntil.ShouldBeNull();
+        Factory.EmailSender.AttemptsTo(address).ShouldBe(1);
+    }
+
+    // Claimed but never started: pending again, with no lease and the claim's attempt given back.
+    private async Task ShouldBeReleasedAsync(Guid deliveryId, string address)
+    {
+        var delivery = await DeliveryAsync(deliveryId);
+        delivery.Status.ShouldBe(DeliveryStatus.Pending);
+        delivery.LockedUntil.ShouldBeNull();
+        delivery.AttemptCount.ShouldBe(0);
+        delivery.LastError.ShouldBeNull();
+        Factory.EmailSender.AttemptsTo(address).ShouldBe(0);
+    }
+
+    // Without moving the clock: a released delivery does not wait for the lease it had.
+    private async Task ShouldBeSentByTheNextBatchAsync(Guid deliveryId, string address)
+    {
+        (await Dispatcher.ProcessBatchAsync(Ct)).ShouldBe(1);
+        (await Dispatcher.ProcessBatchAsync(Ct)).ShouldBe(0);
+        await ShouldBeSentOnceAsync(deliveryId, address);
     }
 
     private async Task<Guid> ScheduleAsync(string typeCode, Guid userId, string? emailOverride = null)

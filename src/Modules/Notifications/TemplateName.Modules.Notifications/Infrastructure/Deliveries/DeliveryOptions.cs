@@ -24,8 +24,30 @@ internal sealed class DeliveryOptions
 
     /// <summary>
     /// How long a claimed batch stays hidden from other workers. Keep it longer than the slowest batch takes (a batch of slow SMTP
-    /// sends): a worker stops starting deliveries once it has run out, and another worker re-claims what is left.
+    /// sends): a worker stops starting deliveries once less than <see cref="LeaseSafetyMargin"/> is left and releases the rest of the
+    /// batch, which the next poll claims again.
     /// </summary>
     [Range(typeof(TimeSpan), "00:00:30", "01:00:00")]
     public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// How much of the lease must be left for the worker to start another delivery: a fifth of <see cref="LeaseDuration"/>, at least
+    /// 30 seconds but never more than half the lease (one minute with the default lease). A delivery started closer to the end could
+    /// still be sending when the lease runs out and another worker re-claims it; the worker releases the rest of its batch instead.
+    /// </summary>
+    public TimeSpan LeaseSafetyMargin
+    {
+        get
+        {
+            var margin = LeaseDuration / 5;
+            if (margin < MinLeaseSafetyMargin)
+            {
+                margin = MinLeaseSafetyMargin;
+            }
+
+            return margin > LeaseDuration / 2 ? LeaseDuration / 2 : margin;
+        }
+    }
+
+    private static TimeSpan MinLeaseSafetyMargin => TimeSpan.FromSeconds(30);
 }

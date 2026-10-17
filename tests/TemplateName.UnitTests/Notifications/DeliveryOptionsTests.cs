@@ -63,6 +63,19 @@ public sealed class DeliveryOptionsTests
         Validate(options).ShouldNotBeEmpty();
     }
 
+    [Theory]
+    [InlineData("00:00:30", "00:00:15")]
+    [InlineData("00:01:00", "00:00:30")]
+    [InlineData("00:02:30", "00:00:30")]
+    [InlineData("00:05:00", "00:01:00")]
+    [InlineData("01:00:00", "00:12:00")]
+    public void Lease_safety_margin_is_a_fifth_of_the_lease_between_30_seconds_and_half_the_lease(string leaseDuration, string expected)
+    {
+        var options = new DeliveryOptions { LeaseDuration = TimeSpan.Parse(leaseDuration, System.Globalization.CultureInfo.InvariantCulture) };
+
+        options.LeaseSafetyMargin.ShouldBe(TimeSpan.Parse(expected, System.Globalization.CultureInfo.InvariantCulture));
+    }
+
     [Fact]
     public async Task Disabled_background_service_returns_at_once_without_polling()
     {
