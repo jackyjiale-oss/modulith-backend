@@ -61,6 +61,49 @@ public sealed class EmailOptionsTests
         Validate(new EmailOptions { FromName = new string('x', 101) }).ShouldNotBeEmpty();
     }
 
+    [Fact]
+    public void Username_without_tls_is_refused_for_a_remote_host_without_echoing_a_value()
+    {
+        var options = new EmailOptions { Host = "smtp.mail-provider.test", Username = "mailer-account", Password = "pa55-value-91" };
+
+        var error = Validate(options).ShouldHaveSingleItem();
+
+        error.ErrorMessage.ShouldNotBeNull().ShouldContain("Notifications:Email:UseTls");
+        error.ErrorMessage.ShouldContain("Notifications:Email:Username");
+        error.ErrorMessage.ShouldNotContain("smtp.mail-provider.test");
+        error.ErrorMessage.ShouldNotContain("mailer-account");
+        error.ErrorMessage.ShouldNotContain("pa55-value-91");
+        error.MemberNames.ShouldBe([nameof(EmailOptions.UseTls)]);
+    }
+
+    [Theory]
+    [InlineData("localhost")]
+    [InlineData("LocalHost")]
+    [InlineData("127.0.0.1")]
+    [InlineData("::1")]
+    public void Username_without_tls_is_allowed_on_a_loopback_host(string host)
+    {
+        Validate(new EmailOptions { Host = host, Username = "mailer-account", Password = "pa55-value-91" }).ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("smtp.mail-provider.test", "mailer-account", true)]
+    [InlineData("smtp.mail-provider.test", "", false)]
+    [InlineData("10.0.0.5", "", false)]
+    public void Tls_or_no_username_is_allowed_for_a_remote_host(string host, string username, bool useTls)
+    {
+        Validate(new EmailOptions { Host = host, Username = username, UseTls = useTls }).ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("10.0.0.5")]
+    [InlineData("localhost.mail-provider.test")]
+    [InlineData("127.0.0.1.mail-provider.test")]
+    public void Username_without_tls_is_refused_for_a_host_that_only_looks_local(string host)
+    {
+        Validate(new EmailOptions { Host = host, Username = "mailer-account" }).ShouldHaveSingleItem();
+    }
+
     private static List<ValidationResult> Validate(EmailOptions options)
     {
         var results = new List<ValidationResult>();

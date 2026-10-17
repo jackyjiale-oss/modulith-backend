@@ -73,6 +73,31 @@ public sealed class SmtpEmailTransportTests(MailpitFixture mailpit) : IClassFixt
     }
 
     [Fact]
+    public async Task Refused_sender_is_classified_transient()
+    {
+        // A 5xx reply to MAIL FROM (a wrong or unauthorised From) is a configuration fault: retried, so it can be fixed in the window.
+        await mailpit.ClearAsync(Ct);
+        await mailpit.RefuseSendersAsync(550, Ct);
+        try
+        {
+            var exception = await Should.ThrowAsync<EmailSendException>(() => TransportFor(mailpit.Host, mailpit.SmtpPort).SendAsync(
+                new EmailMessage("alice@example.com", "Never delivered", "text", null),
+                Ct));
+
+            exception.IsPermanent.ShouldBeFalse();
+            exception.Reason.ShouldBe("smtp_550");
+            exception.InnerException.ShouldBeNull();
+            (await mailpit.ListAsync(Ct)).ShouldBeEmpty();
+            _logs.Entries.ShouldHaveSingleItem().ShouldContain("smtp_550");
+            AssertNoLogMentions("alice@example.com", "no-reply@localhost.test");
+        }
+        finally
+        {
+            await mailpit.RefuseSendersAsync(null, CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task Malformed_recipient_is_classified_permanent_invalid_address()
     {
         var exception = await Should.ThrowAsync<EmailSendException>(() => TransportFor(mailpit.Host, mailpit.SmtpPort).SendAsync(

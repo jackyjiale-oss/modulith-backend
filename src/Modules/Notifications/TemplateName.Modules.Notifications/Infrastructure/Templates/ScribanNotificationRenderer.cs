@@ -164,10 +164,22 @@ internal sealed class ScribanNotificationRenderer(EmbeddedTemplateStore store, I
         return BoundedText.Cut(line.ToString().Trim(), MaxSubjectLength);
     }
 
+    // The variables include an email's decrypted link: ToString prints the codes and the variable names only.
     private sealed record RenderRequest(
         string TypeCode,
         NotificationChannel Channel,
         string Culture,
         IReadOnlyDictionary<string, string> Variables,
-        string ProductName);
+        string ProductName)
+    {
+        private bool PrintMembers(StringBuilder builder)
+        {
+            builder.Append("TypeCode = ").Append(TypeCode)
+                .Append(", Channel = ").Append(Channel)
+                .Append(", Culture = ").Append(Culture)
+                .Append(", Variables = [").AppendJoin(", ", Variables.Keys.Order(StringComparer.Ordinal))
+                .Append(']');
+            return true;
+        }
+    }
 }

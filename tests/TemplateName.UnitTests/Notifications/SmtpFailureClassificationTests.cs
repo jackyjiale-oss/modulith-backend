@@ -8,7 +8,8 @@ using TemplateName.Modules.Notifications.Infrastructure.Channels.Email;
 namespace TemplateName.UnitTests.Notifications;
 
 /// <summary>
-/// How <c>SmtpEmailTransport</c> turns a MailKit, socket or I/O failure into a reason code, permanent only when retrying cannot help.
+/// How <c>SmtpEmailTransport</c> turns a MailKit, socket or I/O failure into a reason code, permanent only when retrying cannot help:
+/// a recipient refused with a 5xx reply. A refused sender is a configuration fault, so it stays transient and keeps the retry window.
 /// The integration tests cover the same rules against a real server (Mailpit).
 /// </summary>
 public sealed class SmtpFailureClassificationTests
@@ -18,12 +19,13 @@ public sealed class SmtpFailureClassificationTests
     [Theory]
     [InlineData(SmtpErrorCode.RecipientNotAccepted, SmtpStatusCode.MailboxUnavailable, true, "smtp_550")]
     [InlineData(SmtpErrorCode.RecipientNotAccepted, SmtpStatusCode.MailboxNameNotAllowed, true, "smtp_553")]
-    [InlineData(SmtpErrorCode.SenderNotAccepted, SmtpStatusCode.MailboxUnavailable, true, "smtp_550")]
+    [InlineData(SmtpErrorCode.SenderNotAccepted, SmtpStatusCode.MailboxUnavailable, false, "smtp_550")]
+    [InlineData(SmtpErrorCode.SenderNotAccepted, SmtpStatusCode.MailboxNameNotAllowed, false, "smtp_553")]
     [InlineData(SmtpErrorCode.RecipientNotAccepted, SmtpStatusCode.MailboxBusy, false, "smtp_450")]
     [InlineData(SmtpErrorCode.RecipientNotAccepted, SmtpStatusCode.InsufficientStorage, false, "smtp_452")]
     [InlineData(SmtpErrorCode.MessageNotAccepted, SmtpStatusCode.TransactionFailed, false, "smtp_554")]
     [InlineData(SmtpErrorCode.UnexpectedStatusCode, SmtpStatusCode.ServiceNotAvailable, false, "smtp_421")]
-    public void Smtp_replies_keep_their_code_and_only_a_refused_mailbox_is_permanent(
+    public void Smtp_replies_keep_their_code_and_only_a_refused_recipient_is_permanent(
         SmtpErrorCode errorCode, SmtpStatusCode statusCode, bool isPermanent, string reason)
     {
         // The server's text quotes the address; it must not survive the classification.

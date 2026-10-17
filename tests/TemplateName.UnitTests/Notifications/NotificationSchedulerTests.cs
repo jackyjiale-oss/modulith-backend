@@ -216,7 +216,49 @@ public sealed class NotificationSchedulerTests
 
         var outcome = await ScheduleAsync(PasswordReset(), contactVariables: null);
 
-        await AssertRefusedAsync(outcome, plaintext);
+        await AssertRefusedAsync(outcome, plaintext, "unsafe_url");
+    }
+
+    [Theory]
+    [InlineData("https://attacker@app.example.test/reset?token=secret-token")]
+    [InlineData("http://user:secret-password@app.example.test/reset?token=secret-token")]
+    [InlineData("https://app.example.test@evil.example.test/reset?token=secret-token")]
+    public async Task Link_with_user_info_is_refused_and_creates_nothing(string plaintext)
+    {
+        _harness.AddContact(_userId);
+        _harness.Decrypts(Ciphertext, plaintext);
+
+        var outcome = await ScheduleAsync(PasswordReset(), contactVariables: null);
+
+        await AssertRefusedAsync(outcome, plaintext, "unsafe_url");
+    }
+
+    [Fact]
+    public async Task Link_longer_than_2048_characters_is_refused_and_creates_nothing()
+    {
+        var plaintext = LinkOfLength(2049);
+        _harness.AddContact(_userId);
+        _harness.Decrypts(Ciphertext, plaintext);
+
+        var outcome = await ScheduleAsync(PasswordReset(), contactVariables: null);
+
+        await AssertRefusedAsync(outcome, plaintext, "unsafe_url");
+    }
+
+    [Theory]
+    [InlineData("2048 characters")]
+    [InlineData("HTTPS://App.Example.Test/reset?token=secret-token")]
+    [InlineData("Http://app.example.test:8080/reset?token=secret-token")]
+    public async Task Link_of_2048_characters_or_with_an_uppercase_scheme_is_accepted(string plaintext)
+    {
+        _harness.AddContact(_userId);
+        _harness.Decrypts(Ciphertext, plaintext == "2048 characters" ? LinkOfLength(2048) : plaintext);
+
+        var outcome = await ScheduleAsync(PasswordReset(), contactVariables: null);
+
+        outcome.ShouldBe(ScheduleOutcome.Scheduled);
+        _harness.Added.ShouldHaveSingleItem();
+        _harness.Logger.Entries.ShouldBeEmpty();
     }
 
     [Fact]
@@ -227,7 +269,7 @@ public sealed class NotificationSchedulerTests
 
         var outcome = await ScheduleAsync(PasswordReset(), contactVariables: null);
 
-        await AssertRefusedAsync(outcome, plaintext: null);
+        await AssertRefusedAsync(outcome, plaintext: null, "undecryptable");
     }
 
     [Fact]
@@ -405,7 +447,14 @@ public sealed class NotificationSchedulerTests
     private Delivery Delivery(NotificationChannel channel)
         => _harness.Added.ShouldHaveSingleItem().Deliveries.Single(delivery => delivery.Channel == channel);
 
-    private async Task AssertRefusedAsync(ScheduleOutcome outcome, string? plaintext)
+    // An absolute https link of exactly the given length (at least 64 characters).
+    private static string LinkOfLength(int length)
+    {
+        const string Prefix = "https://app.example.test/reset?token=";
+        return Prefix + new string('a', length - Prefix.Length);
+    }
+
+    private async Task AssertRefusedAsync(ScheduleOutcome outcome, string? plaintext, string reason)
     {
         outcome.ShouldBe(ScheduleOutcome.Refused);
         _harness.Added.ShouldBeEmpty();
@@ -417,7 +466,8 @@ public sealed class NotificationSchedulerTests
         warning.Level.ShouldBe(LogLevel.Warning);
         warning.Message.ShouldContain(_messageId.ToString());
         warning.Message.ShouldContain(AuthNotificationTypes.PasswordReset);
-        warning.Properties.Keys.Where(key => key != "{OriginalFormat}").Order(StringComparer.Ordinal).ShouldBe(["MessageId", "TypeCode"]);
+        warning.Properties.Keys.Where(key => key != "{OriginalFormat}").Order(StringComparer.Ordinal).ShouldBe(["MessageId", "Reason", "TypeCode"]);
+        warning.Properties["Reason"].ShouldBe(reason);
         warning.Message.ShouldNotContain(Ciphertext);
         warning.Message.ShouldNotContain("alice@example.com");
         if (!string.IsNullOrEmpty(plaintext))

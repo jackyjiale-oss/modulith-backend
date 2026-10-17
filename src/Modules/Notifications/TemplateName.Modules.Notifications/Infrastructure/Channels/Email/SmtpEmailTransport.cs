@@ -16,8 +16,9 @@ namespace TemplateName.Modules.Notifications.Infrastructure.Channels.Email;
 /// to retry:
 /// <list type="bullet">
 /// <item>an address <see cref="MailboxAddress"/> cannot parse: permanent <c>invalid_address</c> (nothing is sent);</item>
-/// <item>the server refuses the recipient or the sender with a 5xx reply: permanent <c>smtp_{code}</c>, such as <c>smtp_550</c>;</item>
-/// <item>any other SMTP reply: transient <c>smtp_{code}</c>, such as <c>smtp_451</c>;</item>
+/// <item>the server refuses the recipient with a 5xx reply: permanent <c>smtp_{code}</c>, such as <c>smtp_550</c>;</item>
+/// <item>any other SMTP reply: transient <c>smtp_{code}</c>, such as <c>smtp_451</c>, including a refused sender (a 5xx reply to
+/// <c>MAIL FROM</c>): that is a configuration fault (<c>Notifications:Email:From</c>), so the retry window leaves time to fix it;</item>
 /// <item>a timeout: transient <c>timeout</c>; a socket error (refused, reset, unreachable): transient <c>connection_failed</c>; a broken
 /// SMTP conversation: transient <c>smtp_error</c>; anything else: transient, the exception type in snake case
 /// (<c>ssl_handshake_exception</c>).</item>
@@ -83,8 +84,9 @@ internal sealed partial class SmtpEmailTransport(IOptions<EmailOptions> options,
         if (exception is SmtpCommandException command)
         {
             var code = (int)command.StatusCode;
-            var refusedMailbox = command.ErrorCode is SmtpErrorCode.RecipientNotAccepted or SmtpErrorCode.SenderNotAccepted;
-            return new EmailSendException(isPermanent: refusedMailbox && code is >= 500 and <= 599, $"smtp_{code}");
+            // Only the recipient is the message's own fault; a refused sender fails every message alike and is fixed in the configuration.
+            var refusedRecipient = command.ErrorCode is SmtpErrorCode.RecipientNotAccepted;
+            return new EmailSendException(isPermanent: refusedRecipient && code is >= 500 and <= 599, $"smtp_{code}");
         }
 
         if (IsTimeout(exception))

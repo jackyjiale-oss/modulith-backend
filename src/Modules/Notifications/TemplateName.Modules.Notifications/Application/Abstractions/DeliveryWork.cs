@@ -1,3 +1,4 @@
+using System.Text;
 using TemplateName.Modules.Notifications.Domain.Notifications;
 
 namespace TemplateName.Modules.Notifications.Application.Abstractions;
@@ -5,7 +6,8 @@ namespace TemplateName.Modules.Notifications.Application.Abstractions;
 /// <summary>
 /// One rendered message the delivery worker hands to an <see cref="INotificationChannel"/>. It lives only in memory for the attempt: an
 /// email's <see cref="RenderedMessage"/> may hold a decrypted single-use link, so a channel never stores or logs it (it stores only what
-/// it must deliver, such as the in-app title and body, which never contain a secret).
+/// it must deliver, such as the in-app title and body, which never contain a secret). <c>ToString</c> prints the ids, the type and the
+/// category only: never the destination or the message.
 /// </summary>
 /// <param name="DeliveryId">The delivery being attempted; the in-app row's key.</param>
 /// <param name="NotificationId">The notification the delivery belongs to.</param>
@@ -21,4 +23,15 @@ internal sealed record DeliveryWork(
     string TypeCode,
     NotificationCategory Category,
     string? Destination,
-    RenderedMessage Message);
+    RenderedMessage Message)
+{
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append("DeliveryId = ").Append(DeliveryId)
+            .Append(", NotificationId = ").Append(NotificationId)
+            .Append(", RecipientUserId = ").Append(RecipientUserId)
+            .Append(", TypeCode = ").Append(TypeCode)
+            .Append(", Category = ").Append(Category);
+        return true;
+    }
+}

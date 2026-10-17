@@ -1,13 +1,15 @@
 using System.ComponentModel.DataAnnotations;
+using System.Net;
 
 namespace TemplateName.Modules.Notifications.Infrastructure.Channels.Email;
 
 /// <summary>
 /// The SMTP server and sender identity (section <c>Notifications:Email</c>; Plan 2's <c>Auth:Email</c> with the same keys, defaults and
 /// ranges, D15). <see cref="Username"/> and <see cref="Password"/> are empty in the files; set them with user secrets or environment
-/// variables.
+/// variables. Start-up refuses a <see cref="Username"/> without <see cref="UseTls"/> unless <see cref="Host"/> is a loopback address
+/// (<c>localhost</c>, <c>127.0.0.1</c>, <c>::1</c>), because the credentials would travel in clear.
 /// </summary>
-internal sealed class EmailOptions
+internal sealed class EmailOptions : IValidatableObject
 {
     internal const string SectionName = "Notifications:Email";
 
@@ -41,4 +43,20 @@ internal sealed class EmailOptions
     /// <summary>How long connecting and sending may each take before the attempt fails.</summary>
     [Range(typeof(TimeSpan), "00:00:01", "00:05:00")]
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        // The message names the keys only: never the host, the account or the password.
+        if (Username.Length > 0 && !UseTls && !IsLoopback(Host))
+        {
+            yield return new ValidationResult(
+                $"{SectionName}:{nameof(UseTls)} must be true when {SectionName}:{nameof(Username)} is set, unless {SectionName}:{nameof(Host)} "
+                    + "is a loopback address (localhost, 127.0.0.1, ::1): without TLS the SMTP credentials travel in clear.",
+                [nameof(UseTls)]);
+        }
+    }
+
+    private static bool IsLoopback(string host)
+        => string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
+            || (IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address));
 }

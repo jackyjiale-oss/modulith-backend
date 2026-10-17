@@ -1,7 +1,10 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Application.Common.Security;
 using TemplateName.Infrastructure.Common.Inbox;
@@ -137,6 +140,34 @@ public sealed class AuthEventConsumptionTests(IntegrationTestWebAppFactory facto
 
         (await NotificationsAsync()).ShouldBeEmpty();
         (await InboxAsync(verification.Id)).ShouldHaveSingleItem();
+    }
+
+    [Theory]
+    [InlineData(null, "undecryptable")]
+    [InlineData("http://admin:hunter-pass@localhost:3000/confirm-email?token=" + Token, "unsafe_url")]
+    public async Task Refused_link_is_logged_with_a_fixed_reason_and_no_value(string? link, string reason)
+    {
+        // The real Data Protection: a value that is not even Base64Url is undecryptable, like a tampered one.
+        var logs = new RecordingLoggerProvider();
+        await using var host = Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<ILoggerFactory>();
+            services.AddSingleton<ILoggerFactory>(_ => new LoggerFactory([logs]));
+        }));
+        var user = await CreateUserAsync(Email);
+        var protectedLink = link is null ? "not-a-protected-value" : host.Services.GetRequiredService<ISecretProtector>().Protect(link);
+        var verification = new EmailVerificationRequestedIntegrationEvent(Guid.NewGuid(), Now, user.Id, Email, protectedLink, Now.AddHours(1));
+
+        await host.Services.GetRequiredService<IIntegrationEventPublisher>().PublishAsync(verification, Ct);
+
+        (await NotificationsAsync()).ShouldBeEmpty();
+        var refusal = logs.Entries.Where(entry => entry.Contains("Refused integration event", StringComparison.Ordinal)).ShouldHaveSingleItem();
+        refusal.ShouldContain(verification.Id.ToString());
+        refusal.ShouldContain($"({reason})");
+        logs.Entries.ShouldAllBe(entry => !entry.Contains(Token, StringComparison.Ordinal)
+            && !entry.Contains("hunter-pass", StringComparison.Ordinal)
+            && !entry.Contains(protectedLink, StringComparison.Ordinal)
+            && !entry.Contains(Email, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

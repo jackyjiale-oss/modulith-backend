@@ -528,7 +528,7 @@ The output (`-----BEGIN PRIVATE KEY-----` ...) is the `PrivateKeyPem` of `Auth:J
 
 ### Links
 
-Auth builds the links its emails carry; the Notifications module sends them. `LinksOptions` (`Application/Verification/`) turns the `Auth:Links` templates into links with `ConfirmEmailLink(token)` and `ResetPasswordLink(token)`, replacing `{token}` with the URL-encoded token; a template that is not an absolute `http` or `https` address holding `{token}` stops the host at start. The publishing handler encrypts the whole link before it leaves the module (ADR 0020), and the Notifications scheduler refuses one that does not decrypt to an absolute `http` or `https` URL. The SMTP settings, the transport and Mailpit are described in the [Notifications module](notifications.md#email-channel).
+Auth builds the links its emails carry; the Notifications module sends them. `LinksOptions` (`Application/Verification/`) turns the `Auth:Links` templates into links with `ConfirmEmailLink(token)` and `ResetPasswordLink(token)`, replacing `{token}` with the URL-encoded token; a template that is not an absolute `http` or `https` address holding `{token}` stops the host at start. The publishing handler encrypts the whole link before it leaves the module (ADR 0020), and the Notifications scheduler refuses one that does not decrypt to an absolute `http` or `https` URL with a host, no user info and at most 2048 characters. The SMTP settings, the transport and Mailpit are described in the [Notifications module](notifications.md#email-channel).
 
 ### Permission checks
 
@@ -707,7 +707,7 @@ What the module deliberately leaves out, or only approximates. None of these is 
 
 **Email and runtime**
 
-- The emails Auth causes are sent asynchronously by the Notifications module: a request returns before its email is sent, and an SMTP outage delays the email (retried for about 81 minutes, then dead-lettered), so a link can expire before it arrives ([Notifications module](notifications.md#background-processing)). `Notifications:Email:UseTls=false` with a `Username` sends the credentials in clear: use it for Mailpit only.
+- The emails Auth causes are sent asynchronously by the Notifications module: a request returns before its email is sent, and an SMTP outage delays the email (retried for about 81 minutes, then dead-lettered), so a link can expire before it arrives ([Notifications module](notifications.md#background-processing)). The host refuses to start with a `Notifications:Email:Username` and `UseTls=false` unless the SMTP host is a loopback address, so the credentials never travel in clear.
 - The base `appsettings.json` has development defaults that every other environment must override: `Notifications:Email:UseTls` is `false` (and the host `localhost`), and `Auth:Links:ConfirmEmailUrl` and `ResetPasswordUrl` point at `http://localhost:3000`, so links would lead nowhere ([Configuration](#configuration)). Nothing refuses to start with them.
 - Locales and time zones are validated with the runtime's culture and time-zone data, which needs **ICU** and, on Linux, **tzdata**. An image with `InvariantGlobalization` on, or without `tzdata`, rejects every locale and IANA time zone but the invariant ones and `UTC` (`PUT /api/v1/auth/me` then fails for everyone). The repository does not enable invariant globalization; Plan 6's image must carry ICU and `tzdata` ([Sessions and profile](#sessions-and-profile)).
 - The Data Protection key ring in `auth.DataProtectionKeys` is not encrypted at rest yet (Plan 6, ADR 0017).

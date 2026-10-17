@@ -9,6 +9,7 @@ namespace TemplateName.IntegrationTests.Notifications;
 /// Runs Mailpit (a disposable SMTP server with a REST API) in a container. The image tag is pinned and matches the one in
 /// <c>docker-compose.yml</c>; a test keeps the two in step. It accepts only recipients at <c>example.com</c>
 /// (<c>MP_SMTP_ALLOWED_RECIPIENTS</c>) and rejects every other one at <c>RCPT TO</c>, the way a real server rejects an unknown mailbox.
+/// Its chaos feature (<c>MP_ENABLE_CHAOS</c>) is on, so a test can make it refuse the sender (<see cref="RefuseSendersAsync"/>).
 /// </summary>
 public sealed class MailpitFixture : IAsyncLifetime
 {
@@ -23,6 +24,7 @@ public sealed class MailpitFixture : IAsyncLifetime
 
     private readonly IContainer _container = new ContainerBuilder(Image)
         .WithEnvironment("MP_SMTP_ALLOWED_RECIPIENTS", @"@example\.com$")
+        .WithEnvironment("MP_ENABLE_CHAOS", "true")
         .WithPortBinding(SmtpContainerPort, assignRandomHostPort: true)
         .WithPortBinding(HttpContainerPort, assignRandomHostPort: true)
         .WithWaitStrategy(Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(request => request.ForPort(HttpContainerPort).ForPath("/livez")))
@@ -54,6 +56,22 @@ public sealed class MailpitFixture : IAsyncLifetime
     public async Task ClearAsync(CancellationToken cancellationToken)
     {
         using var response = await Http.DeleteAsync("api/v1/messages", cancellationToken);
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// Makes Mailpit answer every <c>MAIL FROM</c> with <paramref name="errorCode"/> (<c>PUT /api/v1/chaos</c>), or, with
+    /// <see langword="null"/>, accept senders again. Chaos is server-wide: reset it before the test ends.
+    /// </summary>
+    public async Task RefuseSendersAsync(int? errorCode, CancellationToken cancellationToken)
+    {
+        var triggers = new
+        {
+            Sender = new { ErrorCode = errorCode ?? 451, Probability = errorCode is null ? 0 : 100 },
+            Recipient = new { ErrorCode = 451, Probability = 0 },
+            Authentication = new { ErrorCode = 535, Probability = 0 },
+        };
+        using var response = await Http.PutAsJsonAsync("api/v1/chaos", triggers, cancellationToken);
         response.EnsureSuccessStatusCode();
     }
 

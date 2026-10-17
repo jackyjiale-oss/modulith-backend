@@ -1,7 +1,10 @@
+using System.Text;
+
 namespace TemplateName.Modules.Notifications.Application.Scheduling;
 
 /// <summary>
-/// What a consumer asks <see cref="NotificationScheduler"/> to create for one integration event.
+/// What a consumer asks <see cref="NotificationScheduler"/> to create for one integration event. <c>ToString</c> prints the ids, the
+/// type, the consumer and the variable names, never a variable value or the address.
 /// </summary>
 /// <param name="TypeCode">The catalog code of the notification type.</param>
 /// <param name="RecipientUserId">The user to notify; the scheduler looks up the contact details.</param>
@@ -25,4 +28,18 @@ internal sealed record NotificationRequest(
     IReadOnlyDictionary<string, string> Variables,
     IReadOnlyDictionary<string, string> ProtectedVariables,
     string? EmailOverride,
-    DateTimeOffset? ExpiresAt);
+    DateTimeOffset? ExpiresAt)
+{
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append("TypeCode = ").Append(TypeCode)
+            .Append(", RecipientUserId = ").Append(RecipientUserId)
+            .Append(", SourceMessageId = ").Append(SourceMessageId)
+            .Append(", Consumer = ").Append(Consumer)
+            .Append(", Variables = [").AppendJoin(", ", Variables.Keys.Order(StringComparer.Ordinal))
+            .Append("], ProtectedVariables = [").AppendJoin(", ", ProtectedVariables.Keys.Order(StringComparer.Ordinal))
+            .Append("], HasEmailOverride = ").Append(EmailOverride is not null)
+            .Append(", ExpiresAt = ").Append(ExpiresAt?.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        return true;
+    }
+}

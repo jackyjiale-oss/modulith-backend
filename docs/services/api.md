@@ -185,7 +185,7 @@ The SMTP server the Notifications email channel sends through ([Notifications mo
 |---|---|---|---|
 | `Host` | `localhost` | required | The SMTP host. The default (`localhost:1025`, no TLS) is Mailpit from `docker-compose.yml`. |
 | `Port` | `1025` | 1 to 65535 | The SMTP port. |
-| `UseTls` | `false` | — | STARTTLS. Turn it on for every real server; with `false` and a `Username` the credentials travel in clear. |
+| `UseTls` | `false` | must be `true` when `Username` is set, unless `Host` is a loopback address (`localhost`, `127.0.0.1`, `::1`) | STARTTLS. Turn it on for every real server; the start-up check keeps the credentials from travelling in clear. |
 | `Username` | empty | — | The SMTP account; empty means no authentication. **Never in a file**: user secrets or `Notifications__Email__Username`. |
 | `Password` | empty | — | The SMTP password. **Never in a file**: user secrets or `Notifications__Email__Password`. |
 | `From` | `no-reply@localhost.test` | an email address | The sender address. |
@@ -276,7 +276,7 @@ HTTP security:
 
 Notifications:
 - The SignalR hub pushes only to the connections on the instance that delivered the notification, and the per-user hub ticket limit is counted per instance (no Redis backplane until Plan 5); the inbox endpoints are always complete. More: [Notifications: Operations and known limits](../modules/notifications.md#operations-and-known-limits).
-- A rejected sender address (a wrong `Notifications:Email:From`) dead-letters every email at once: watch the dead-letter metric.
+- A rejected sender address (a wrong `Notifications:Email:From`) fails every email; it is retried for about 81 minutes before the emails are dead-lettered: watch the retry Warnings and the dead-letter metric.
 
 Observability:
 - `OpenTelemetry.Instrumentation.EntityFrameworkCore` is `1.19.1-beta.1`, the only prerelease dependency: no stable release exists ([ADR 0013](../adr/0013-prerelease-ef-core-opentelemetry-instrumentation.md)). The SqlClient instrumentation is stable.

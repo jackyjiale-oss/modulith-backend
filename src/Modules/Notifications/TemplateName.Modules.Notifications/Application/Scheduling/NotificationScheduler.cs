@@ -18,10 +18,12 @@ namespace TemplateName.Modules.Notifications.Application.Scheduling;
 /// <item>An unknown type code, or secret variables other than the type's, throw <see cref="InvalidOperationException"/> (a programming error).</item>
 /// <item>An event the consumer has already processed returns <see cref="ScheduleOutcome.AlreadyProcessed"/> at once.</item>
 /// <item>
-/// Every protected value is decrypted in memory, only to check that it is an absolute <c>http</c> or <c>https</c> URL: a template puts
-/// it in an <c>href</c>, where HTML encoding does not stop a <c>javascript:</c> link. The plaintext is dropped at once; what is stored
-/// is the event's ciphertext, unchanged. An unreadable or unsafe value records the event and returns
-/// <see cref="ScheduleOutcome.Refused"/> (a Warning names only the event id and type), so a poison event is not retried for ever.
+/// Every protected value is decrypted in memory, only to check that it is an absolute <c>http</c> or <c>https</c> URL with a host, no
+/// user info and at most <see cref="MaxLinkLength"/> characters: a template puts it in an <c>href</c>, where HTML encoding does not stop
+/// a <c>javascript:</c> link, and <c>https://app.example@evil.example/</c> reads like the app's own host. The plaintext is dropped at
+/// once; what is stored is the event's ciphertext, unchanged. An unreadable or unsafe value records the event and returns
+/// <see cref="ScheduleOutcome.Refused"/> (a Warning names only the event id, the type and a fixed reason, <c>undecryptable</c> or
+/// <c>unsafe_url</c>), so a poison event is not retried for ever.
 /// </item>
 /// <item>The recipient is looked up once in <see cref="IUserContactDirectory"/>; none records the event and returns <see cref="ScheduleOutcome.RecipientNotFound"/>.</item>
 /// <item>
@@ -58,6 +60,15 @@ internal sealed partial class NotificationScheduler(
     TimeProvider timeProvider,
     ILogger<NotificationScheduler> logger)
 {
+    /// <summary>The longest protected link accepted, in characters of the decrypted text.</summary>
+    internal const int MaxLinkLength = 2048;
+
+    /// <summary>The refusal reason when a protected value does not decrypt.</summary>
+    internal const string UndecryptableReason = "undecryptable";
+
+    /// <summary>The refusal reason when a protected value decrypts to something other than a safe absolute link.</summary>
+    internal const string UnsafeUrlReason = "unsafe_url";
+
     private const string DisplayNameVariable = "display_name";
 
     public async Task<ScheduleOutcome> ScheduleAsync(
@@ -76,9 +87,9 @@ internal sealed partial class NotificationScheduler(
             return ScheduleOutcome.AlreadyProcessed;
         }
 
-        if (!request.ProtectedVariables.Values.All(IsSafeLink))
+        if (request.ProtectedVariables.Values.Select(LinkRefusalReason).FirstOrDefault(reason => reason is not null) is { } refusalReason)
         {
-            LogRefusedLink(logger, request.SourceMessageId, type.Code);
+            LogRefusedLink(logger, request.SourceMessageId, type.Code, refusalReason);
             return await RecordOnlyAsync(request, ScheduleOutcome.Refused, cancellationToken);
         }
 
@@ -175,9 +186,10 @@ internal sealed partial class NotificationScheduler(
     private static string Serialize(IReadOnlyDictionary<string, string> values)
         => JsonSerializer.Serialize(new SortedDictionary<string, string>(values.ToDictionary(), StringComparer.Ordinal));
 
-    // Decrypts in memory only to check the scheme. The plaintext never leaves this method: it is not stored, logged or put in an
-    // exception (a CryptographicException message carries no plaintext, and it is not rethrown).
-    private bool IsSafeLink(string ciphertext)
+    // Decrypts in memory only to check the link; null when it is safe, else a fixed reason code. The plaintext never leaves this method:
+    // it is not stored, logged or put in an exception (a CryptographicException message carries no plaintext, and it is not rethrown).
+    // Data Protection turns a malformed ciphertext (not Base64Url) into a CryptographicException too.
+    private string? LinkRefusalReason(string ciphertext)
     {
         string link;
         try
@@ -186,12 +198,15 @@ internal sealed partial class NotificationScheduler(
         }
         catch (CryptographicException)
         {
-            return false;
+            return UndecryptableReason;
         }
 
-        return Uri.TryCreate(link, UriKind.Absolute, out var uri)
+        var isSafe = link.Length <= MaxLinkLength
+            && Uri.TryCreate(link, UriKind.Absolute, out var uri)
             && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
-            && uri.Host.Length > 0;
+            && uri.Host.Length > 0
+            && uri.UserInfo.Length == 0;
+        return isSafe ? null : UnsafeUrlReason;
     }
 
     private async Task<List<(NotificationChannel Channel, string? Destination)>> DeliveriesAsync(
@@ -253,8 +268,8 @@ internal sealed partial class NotificationScheduler(
         return await unitOfWork.SaveChangesUnlessInboxDuplicateAsync(cancellationToken) ? outcome : ScheduleOutcome.AlreadyProcessed;
     }
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Refused integration event {MessageId} for notification type {TypeCode}: a protected link is unreadable or not an absolute http or https URL")]
-    private static partial void LogRefusedLink(ILogger logger, Guid messageId, string typeCode);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Refused integration event {MessageId} for notification type {TypeCode} ({Reason}): a protected link is unreadable or not a safe absolute http or https URL")]
+    private static partial void LogRefusedLink(ILogger logger, Guid messageId, string typeCode, string reason);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Created no notification for user {UserId}: the user does not exist")]
     private static partial void LogRecipientNotFound(ILogger logger, Guid userId);
