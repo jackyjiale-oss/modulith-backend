@@ -50,10 +50,10 @@ Every type plays one of these roles. Its name follows the role's pattern, and it
 |---|---|---|---|
 | Aggregate / entity | singular noun | `LeaveRequest` | review |
 | Value object | singular noun, `record` | `DateRange`, `EmailAddress` | review |
-| Domain event | `{Noun}{PastTenseVerb}DomainEvent` | `LeaveRequestApprovedDomainEvent` | architecture test |
+| Domain event | `{Noun}{PastTenseVerb}DomainEvent` | `LeaveRequestApprovedDomainEvent` | architecture test (suffix); review (the rest) |
 | Integration event | `{Noun}{PastTenseVerb}IntegrationEvent` (in `*.Contracts`) | `PasswordChangedIntegrationEvent` | architecture test (`ContractsTests`: the `IntegrationEvent` suffix, `IIntegrationEvent`, `Guid Id, DateTimeOffset OccurredAt` first); review (the noun and past-tense form) |
-| Command | `{Verb}{Noun}Command` | `ApproveLeaveRequestCommand` | architecture test |
-| Query | `Get{Noun}Query`, `List{Nouns}Query`, `Search{Nouns}Query` | `GetLeaveRequestByIdQuery` | architecture test |
+| Command | `{Verb}{Noun}Command` | `ApproveLeaveRequestCommand` | architecture test (suffix); review (the rest) |
+| Query | `Get{Noun}Query`, `List{Nouns}Query`, `Search{Nouns}Query` | `GetLeaveRequestByIdQuery` | architecture test (suffix); review (the rest) |
 | Handler (command/query/event) | `{MessageName}Handler` | `ApproveLeaveRequestCommandHandler`, `LeaveRequestSubmittedDomainEventHandler` | architecture test |
 | Validator | `{MessageName}Validator` | `SubmitLeaveRequestCommandValidator` | architecture test |
 | Read model / response | `{Noun}Response` | `LeaveRequestResponse` | review |
@@ -155,7 +155,7 @@ Every type plays one of these roles. Its name follows the role's pattern, and it
 | Runbooks | kebab-case | `docs/runbooks/rotate-jwt-signing-keys.md` |
 | Scripts | kebab-case | `build/scripts/check-commit-msg.sh`, `deploy-iis.ps1` |
 | GitHub workflows | kebab-case `.yml`; reusable workflows prefixed `_` | `ci.yml`, `_reusable-dotnet-build.yml` |
-| App settings | `appsettings.json`, `appsettings.{Environment}.json` | `appsettings.Development.json` |
+| App settings | `appsettings.json`, `appsettings.{Environment}.json`; Development settings are local and git-ignored (`appsettings.Development.json` is never committed) | `appsettings.Production.json` |
 | Resources | `{Marker}.resx`, `{Marker}.{culture}.resx` | `SampleErrorMessages.zh-Hans.resx` |
 | EF migrations | PascalCase `{Verb}{What}`; the first one in a module is `Initial{Module}` | `InitialSample`, `AddApproverIdToLeaveRequests` |
 | Load tests | kebab-case `.js` | `tests/load/submit-leave-request.js` |

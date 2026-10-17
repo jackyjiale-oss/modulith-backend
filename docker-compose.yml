@@ -1,6 +1,6 @@
 # Local development dependencies. Copy .env.example to .env first: `docker compose up -d`.
 # Ports are published on loopback only: the SA password is a local default, the dashboard allows anonymous access and Mailpit has no login.
-# Mailpit catches every email the Auth module sends (SMTP on 1025, inbox UI at http://localhost:8025); nothing leaves the machine.
+# Mailpit catches every email the API sends (Notifications module) (SMTP on 1025, inbox UI at http://localhost:8025); nothing leaves the machine.
 services:
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest

@@ -45,7 +45,7 @@ builder.Services.AddApplicationDecorators();
 
 var app = builder.Build();
 
-// Migrate on start only when Database:ApplyMigrationsOnStartup is set (Development); production uses the API's migrate mode (ADR 0006).
+// Migrate on start only when Database:ApplyMigrationsOnStartup is set (locally, for development); production uses the API's migrate mode (ADR 0006).
 if (app.Services.GetRequiredService<IOptions<DatabaseOptions>>().Value.ApplyMigrationsOnStartup)
 {
     await app.Services.MigrateModuleDatabasesAsync(app.Lifetime.ApplicationStopping);

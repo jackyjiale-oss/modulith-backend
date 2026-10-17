@@ -1,6 +1,6 @@
 # API host (`TemplateName.Api`)
 
-The one deployable process: `src/Host/TemplateName.Api`. `Program.cs` registers the building blocks and modules, builds the middleware pipeline, maps health checks, OpenAPI and the module endpoints under `/api/v1`, (in Development) migrates the databases on start, and seeds the Auth module's roles and permissions. This page lists what the host does and every setting it reads. Architecture: [`docs/architecture/overview.md`](../architecture/overview.md).
+The one deployable process: `src/Host/TemplateName.Api`. `Program.cs` registers the building blocks and modules, builds the middleware pipeline, maps health checks, OpenAPI and the module endpoints under `/api/v1`, migrates the databases on start when told to (local development), and seeds the Auth module's roles and permissions. This page lists what the host does and every setting it reads. Architecture: [`docs/architecture/overview.md`](../architecture/overview.md).
 
 ## Service registration
 
@@ -25,7 +25,7 @@ Order matters; `Program.cs` marks it with comments.
 
 Before the pipeline serves requests, the host runs two steps, in this order:
 
-1. **Migrations**, when `Database:ApplyMigrationsOnStartup` is on (Development; see [Migrations](#migrations)).
+1. **Migrations**, when `Database:ApplyMigrationsOnStartup` is on (off by default; set it locally for development: user secrets, an environment variable, or a git-ignored `appsettings.Development.json`; see [Migrations](#migrations)).
 2. **Auth seeding**, when `Auth:Seed:RunOnStartup` is on (the default in every environment): `SeedAuthModuleAsync` creates the system roles, syncs the permissions every module declares, keeps `SuperAdmin` on every permission and, when `Auth:Seed:AdminEmail` and `Auth:Seed:AdminPassword` are both set, creates the first administrator. It is idempotent and runs under a database lock, so several instances may start together. An invalid permission declaration or an invalid `Auth:Seed` value stops the host with a message naming it. The database must already be migrated: outside Development, run the `migrate` mode first (Plan 6) or turn the key off and seed from there. Details: [Auth module](../modules/auth.md#background-processing).
 
 ## Pipeline
@@ -66,7 +66,7 @@ A module context can name another entry (`AddModuleDbContext<T>(schema, connecti
 
 | Key | Default | Validation | Meaning |
 |---|---|---|---|
-| `ApplyMigrationsOnStartup` | `false` (`true` in `appsettings.Development.json`) | none | Migrate every module database before the pipeline starts. Development only. |
+| `ApplyMigrationsOnStartup` | `false`; set `true` locally (user secrets, an environment variable, or a git-ignored `appsettings.Development.json`) | none | Migrate every module database before the pipeline starts. Local development only. |
 
 ### `Outbox`
 
@@ -134,7 +134,7 @@ Read with `ReadFrom.Configuration`, so every Serilog setting works here.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `MinimumLevel:Default` | `Information` (`Debug` in Development) | Minimum level. |
+| `MinimumLevel:Default` | `Information`; `Debug` if set locally (user secrets, an environment variable, or a git-ignored `appsettings.Development.json`) | Minimum level. |
 | `MinimumLevel:Override` | `Microsoft.AspNetCore`, `Microsoft.EntityFrameworkCore`, `System`: `Warning` | Per-source levels. |
 
 Console output is a readable template in Development and compact JSON (`RenderedCompactJsonFormatter`) elsewhere. Every event carries `Application` and `Environment`; destructured objects have values of properties named like `password`, `token`, `secret`, `otp` or `apikey` replaced by `***`.
@@ -143,7 +143,7 @@ Console output is a readable template in Development and compact JSON (`Rendered
 
 | Key | Default | Meaning |
 |---|---|---|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset (`http://localhost:4317` in `appsettings.Development.json`, the Aspire dashboard from `docker-compose.yml`) | When set, logs, traces and metrics are exported over OTLP. Environment variable or configuration key. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset; set locally (user secrets, an environment variable, or a git-ignored `appsettings.Development.json`) to `http://localhost:4317`, the Aspire dashboard from `docker-compose.yml` | When set, logs, traces and metrics are exported over OTLP. Environment variable or configuration key. |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | gRPC | `http/protobuf` switches to HTTP; Serilog then posts logs to `{endpoint}/v1/logs`. |
 
 The endpoint decides which OpenTelemetry services are registered, so it is **read once, when the host is configured**; `WebApplicationFactory` overrides cannot change it. The protocol is read lazily when Serilog is configured. Traces cover ASP.NET Core (without `/health`), `HttpClient`, SqlClient and EF Core; metrics cover ASP.NET Core, `HttpClient` and the runtime.
@@ -161,7 +161,7 @@ The endpoint decides which OpenTelemetry services are registered, so it is **rea
 | Key | Default | Validation | Meaning |
 |---|---|---|---|
 | `RunOnStartup` | `true` | none | Seed the Auth module after the migration step ([Start-up](#start-up)). The integration tests set `false` and seed from the harness. |
-| `AdminEmail` | empty (`admin@localhost.test` in `appsettings.Development.json`) | when seeding: a plain email address, up to 256 characters | The first administrator's email. |
+| `AdminEmail` | empty; `admin@localhost.test` set locally (user secrets, an environment variable, or a git-ignored `appsettings.Development.json`) | when seeding: a plain email address, up to 256 characters | The first administrator's email. |
 | `AdminPassword` | empty | when seeding: within `Auth:Password:MinLength`/`MaxLength` | The first administrator's password. **Never in a file**: `dotnet user-secrets set "Auth:Seed:AdminPassword" "…" --project src/Host/TemplateName.Api` or `Auth__Seed__AdminPassword`. Without it no administrator is seeded. **Remove it after the first start**: the account then exists, and an account with that email, even a soft-deleted one, is never re-created (each start logs a warning while the key is still set). |
 
 The Auth module reads the sections below, each with its keys, defaults and ranges in the [Auth module](../modules/auth.md#configuration) document. Six of them are validated on start (`Auth:Password`, `Auth:Links`, `Auth:Verification`, `Auth:RefreshToken`, `Auth:Lockout` and `Auth:Jwt`), so an out-of-range value or a bad signing key stops the host. `Auth:DataProtection` is read as it is (a missing name falls back to `TemplateName`), and `Auth:Seed` is checked when the seeder runs.
@@ -183,7 +183,7 @@ The SMTP server the Notifications email channel sends through ([Notifications mo
 
 | Key | Default | Validation (on start) | Meaning |
 |---|---|---|---|
-| `Host` | `localhost` | required | The SMTP host. `appsettings.Development.json` points at Mailpit (`localhost:1025`, no TLS). |
+| `Host` | `localhost` | required | The SMTP host. The default (`localhost:1025`, no TLS) is Mailpit from `docker-compose.yml`. |
 | `Port` | `1025` | 1 to 65535 | The SMTP port. |
 | `UseTls` | `false` | — | STARTTLS. Turn it on for every real server; with `false` and a `Username` the credentials travel in clear. |
 | `Username` | empty | — | The SMTP account; empty means no authentication. **Never in a file**: user secrets or `Notifications__Email__Username`. |
@@ -244,13 +244,13 @@ Outside Production (Development, Testing, and any other non-Production environme
 | | Development | Testing | Production |
 |---|---|---|---|
 | Used by | `dotnet run` (`launchSettings.json`) | the integration tests (`WebApplicationFactory`) | deployments |
-| Migrations on start | yes | no (the test harness migrates once) | no (`migrate` mode, Plan 6) |
-| Log output | readable console, `Debug` | compact JSON, `Warning` (set by the tests) | compact JSON, `Information` |
-| OTLP export | to `http://localhost:4317` | off | when `OTEL_EXPORTER_OTLP_ENDPOINT` is set |
+| Migrations on start | when `Database:ApplyMigrationsOnStartup` is set locally | no (the test harness migrates once) | no (`migrate` mode, Plan 6) |
+| Log output | readable console, `Information` (`Debug` when set locally) | compact JSON, `Warning` (set by the tests) | compact JSON, `Information` |
+| OTLP export | when `OTEL_EXPORTER_OTLP_ENDPOINT` is set locally (`http://localhost:4317`) | off | when `OTEL_EXPORTER_OTLP_ENDPOINT` is set |
 | HSTS + HTTPS redirection | no | yes | yes |
 | `exceptionDetails` in 500 responses | yes | no | no |
 | OpenAPI + Scalar | yes | yes | no |
-| Auth seeding on start | yes; the administrator `admin@localhost.test` once its password is in user secrets | no (the test harness seeds after each reset) | yes (roles and permissions; an administrator only when both settings are supplied) |
+| Auth seeding on start | yes; the administrator once `Auth:Seed:AdminEmail` and `Auth:Seed:AdminPassword` are set locally (the README uses `admin@localhost.test`) | no (the test harness seeds after each reset) | yes (roles and permissions; an administrator only when both settings are supplied) |
 | JWT signing key (`Auth:Jwt:SigningKeys`) | an ephemeral key when none is configured | an ephemeral key when none is configured | required: the host does not start without one ([Auth module](../modules/auth.md#access-tokens)) |
 
 Local URLs: `https://localhost:5001` and `http://localhost:5000`.
@@ -259,7 +259,7 @@ Local URLs: `https://localhost:5001` and `http://localhost:5000`.
 
 `MigrateModuleDatabasesAsync` applies the pending migrations of every context registered with `AddModuleDbContext` (`includeInMigrations: true`, the default), in registration order: `platform` first, then each module. It validates `ConnectionStrings:Database` first, so a missing connection string fails with the options error.
 
-- **Development:** `Database:ApplyMigrationsOnStartup` is `true`, so the host migrates before it starts serving.
+- **Local development:** `Database:ApplyMigrationsOnStartup` is `false` in `appsettings.json`; set it to `true` locally (user secrets, an environment variable, or a git-ignored `appsettings.Development.json`) and the host migrates before it starts serving. Without it, a fresh database stops the host at Auth seeding (`Invalid object name`).
 - **Production:** never on start. The API's `migrate` command-line mode (`dotnet TemplateName.Api.dll migrate`, Plan 6) runs the same method, optionally with a DDL-privileged connection string. There are no EF migration bundles (ADR 0006).
 - **Adding a migration:** `dotnet ef migrations add {Verb}{What} --project src/Modules/{Module}/TemplateName.Modules.{Module} --startup-project src/Host/TemplateName.Api --context {Module}DbContext --output-dir Infrastructure/Persistence/Migrations`. Never edit a migration that has been applied; add a new one.
 
