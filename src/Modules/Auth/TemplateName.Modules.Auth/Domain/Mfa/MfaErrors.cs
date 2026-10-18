@@ -35,8 +35,11 @@ internal static class MfaErrors
         "auth.step_up_method_not_allowed",
         "This way of confirming your identity is not available for your account.");
 
+    /// <summary>The code of <see cref="MethodNotFound"/>, so an endpoint can tell it from the user-not-found error it answers as a 401.</summary>
+    public const string MethodNotFoundCode = "auth.mfa_method_not_found";
+
     public static Error MethodNotFound(Guid id) =>
-        Error.NotFound("auth.mfa_method_not_found", $"Verification method '{id}' was not found.")
+        Error.NotFound(MethodNotFoundCode, $"Verification method '{id}' was not found.")
         with
         {
             Parameters = new Dictionary<string, object?> { ["id"] = id },

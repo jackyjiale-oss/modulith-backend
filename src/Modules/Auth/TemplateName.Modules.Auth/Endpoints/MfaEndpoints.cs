@@ -5,8 +5,11 @@ using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Auth.Application.Mfa;
 using TemplateName.Modules.Auth.Application.Mfa.ConfirmTotp;
 using TemplateName.Modules.Auth.Application.Mfa.GetMethods;
+using TemplateName.Modules.Auth.Application.Mfa.RegenerateRecoveryCodes;
+using TemplateName.Modules.Auth.Application.Mfa.RemoveMethod;
 using TemplateName.Modules.Auth.Application.Mfa.SetUpTotp;
 using TemplateName.Modules.Auth.Application.Mfa.Verify;
+using TemplateName.Modules.Auth.Domain.Mfa;
 using TemplateName.SharedKernel;
 using TemplateName.Web.Common.Results;
 using TemplateName.Web.Common.Security;
@@ -59,6 +62,28 @@ internal static class MfaEndpoints
             .Produces<MfaMethodsResponse>()
             .ProducesProblem(StatusCodes.Status401Unauthorized);
 
+        // Authenticated, said explicitly (Ruling R13). Removing a confirmed method turns two-step verification off, so it needs a fresh
+        // step-up (403); a pending setup is cancelled without one. The answer has no body, so there is nothing to keep out of a cache.
+        group.MapDelete("methods/{id:guid}", RemoveMethodAsync)
+            .WithName("RemoveMfaMethod")
+            .RequireAuthorization()
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        // Authenticated, said explicitly (Ruling R13). Needs a fresh step-up (403) and answers with recovery codes shown once, so it is
+        // never stored.
+        group.MapPost("recovery-codes/regenerate", RegenerateRecoveryCodesAsync)
+            .WithName("RegenerateRecoveryCodes")
+            .RequireAuthorization()
+            .WithNoStore()
+            .Produces<RecoveryCodesResponse>()
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
         return auth;
     }
 
@@ -104,6 +129,43 @@ internal static class MfaEndpoints
         CancellationToken cancellationToken)
     {
         var result = await handler.HandleAsync(new ConfirmTotpCommand(request.Code), cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            return TypedResults.Ok(result.Value);
+        }
+
+        return result.Error.Type == ErrorType.NotFound ? TypedResults.Unauthorized() : result.ToProblem();
+    }
+
+    // 204; 404 auth.mfa_method_not_found (an unknown id and another user's id alike, whatever the caller has proved); 403
+    // auth.step_up_required (a confirmed method only); 409 concurrency.conflict when a simultaneous confirm or removal saved first. A
+    // token whose user is gone or suspended, or whose session is not the caller's active session, gets the body-less 401 of a request
+    // without a valid token, as setup does.
+    private static async Task<IResult> RemoveMethodAsync(
+        Guid id,
+        ICommandHandler<RemoveMfaMethodCommand> handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new RemoveMfaMethodCommand(id), cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            return TypedResults.NoContent();
+        }
+
+        var tokenInvalid = result.Error.Type == ErrorType.NotFound && result.Error.Code != MfaErrors.MethodNotFoundCode;
+        return tokenInvalid ? TypedResults.Unauthorized() : result.ToProblem();
+    }
+
+    // 200 with the ten new recovery codes, shown once (the old ones stop working); 403 auth.step_up_required; 409
+    // auth.mfa_not_enabled (no confirmed method), or concurrency.conflict when a simultaneous change saved first. The 401 is the same as
+    // for removal.
+    private static async Task<IResult> RegenerateRecoveryCodesAsync(
+        ICommandHandler<RegenerateRecoveryCodesCommand, RecoveryCodesResponse> handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new RegenerateRecoveryCodesCommand(), cancellationToken);
 
         if (result.IsSuccess)
         {

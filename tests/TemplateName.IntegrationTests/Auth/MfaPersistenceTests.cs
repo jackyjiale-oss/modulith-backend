@@ -199,6 +199,43 @@ public sealed class MfaPersistenceTests(IntegrationTestWebAppFactory factory) : 
     }
 
     [Fact]
+    public async Task Removal_of_a_pending_method_a_confirm_turned_on_meanwhile_is_a_concurrency_conflict()
+    {
+        var user = NewUser("alice@example.com");
+        await SaveAsync(user, UserMfaMethod.StartTotp(user.Id, "Phone", "protected-a", Now));
+        var (confirmScope, confirming) = await LoadTotpAsync(user);
+        var (removeScope, removing) = await LoadTotpAsync(user);
+
+        // The removal loaded the method while it was pending, so it did not ask for a step-up; the confirm commits first.
+        confirming.Confirm(Totp.TimeStepAt(Now), Now).IsSuccess.ShouldBeTrue();
+        await confirmScope.GetRequiredService<IUnitOfWork>().SaveChangesAsync(Ct);
+        removeScope.GetRequiredService<IMfaMethodRepository>().Remove(removing);
+
+        // The DELETE also requires the confirmation state it loaded, so a method that is now on is never deleted without a step-up.
+        await Should.ThrowAsync<DbUpdateConcurrencyException>(() => removeScope.GetRequiredService<IUnitOfWork>().SaveChangesAsync(Ct));
+
+        var stored = (await NewScope().GetRequiredService<IMfaMethodRepository>().GetTotpAsync(user.Id, Ct)).ShouldNotBeNull();
+        stored.IsConfirmed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Removal_of_a_method_another_removal_deleted_meanwhile_is_a_concurrency_conflict()
+    {
+        var user = NewUser("alice@example.com");
+        await SaveAsync(user, ConfirmedMethod(user, out _));
+        var (firstScope, first) = await LoadTotpAsync(user);
+        var (secondScope, second) = await LoadTotpAsync(user);
+
+        // A double tap on "turn off": the second DELETE finds no row, which surfaces as a conflict (409), never a 500 or a second change.
+        firstScope.GetRequiredService<IMfaMethodRepository>().Remove(first);
+        await firstScope.GetRequiredService<IUnitOfWork>().SaveChangesAsync(Ct);
+        secondScope.GetRequiredService<IMfaMethodRepository>().Remove(second);
+
+        await Should.ThrowAsync<DbUpdateConcurrencyException>(() => secondScope.GetRequiredService<IUnitOfWork>().SaveChangesAsync(Ct));
+        (await NewScope().GetRequiredService<IMfaMethodRepository>().GetTotpAsync(user.Id, Ct)).ShouldBeNull();
+    }
+
+    [Fact]
     public async Task Try_claim_time_step_succeeds_for_exactly_one_of_two_concurrent_callers()
     {
         var user = NewUser("alice@example.com");

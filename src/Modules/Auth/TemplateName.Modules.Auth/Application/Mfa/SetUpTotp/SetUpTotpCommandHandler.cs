@@ -55,25 +55,14 @@ internal sealed class SetUpTotpCommandHandler(
         }
 
         var now = timeProvider.GetUtcNow();
-        if (currentUser.UserId is not { } userId || currentUser.SessionId is not { } sessionId)
+        var caller = await CallerSession.ResolveAsync(currentUser, users, sessions, now, cancellationToken);
+        if (caller.IsFailure)
         {
-            return Result.Failure<TotpSetupResponse>(UserErrors.NotFound(currentUser.UserId ?? Guid.Empty));
+            return Result.Failure<TotpSetupResponse>(caller.Error);
         }
 
-        var user = await users.GetByIdAsync(userId, cancellationToken);
-        if (user is null || user.Status == UserStatus.Suspended)
-        {
-            return Result.Failure<TotpSetupResponse>(UserErrors.NotFound(userId));
-        }
-
-        var session = await sessions.GetByIdAsync(sessionId, cancellationToken);
-        if (session is null
-            || session.UserId != userId
-            || !session.IsActive(now)
-            || !string.Equals(session.SecurityStamp, user.SecurityStamp, StringComparison.Ordinal))
-        {
-            return Result.Failure<TotpSetupResponse>(UserErrors.NotFound(userId));
-        }
+        var (user, session) = caller.Value;
+        var userId = user.Id;
 
         var existing = await mfaMethods.GetTotpAsync(userId, cancellationToken);
         if (existing is { IsConfirmed: true })

@@ -57,26 +57,15 @@ internal sealed partial class ConfirmTotpCommandHandler(
         }
 
         var now = timeProvider.GetUtcNow();
-        if (currentUser.UserId is not { } userId || currentUser.SessionId is not { } sessionId)
-        {
-            return Result.Failure<RecoveryCodesResponse>(UserErrors.NotFound(currentUser.UserId ?? Guid.Empty));
-        }
-
-        var user = await users.GetByIdAsync(userId, cancellationToken);
-        if (user is null || user.Status == UserStatus.Suspended)
-        {
-            return Result.Failure<RecoveryCodesResponse>(UserErrors.NotFound(userId));
-        }
-
         // The kept session adopts the new stamp below, so it must be the caller's live session: never revive one that has ended.
-        var session = await sessions.GetByIdAsync(sessionId, cancellationToken);
-        if (session is null
-            || session.UserId != userId
-            || !session.IsActive(now)
-            || !string.Equals(session.SecurityStamp, user.SecurityStamp, StringComparison.Ordinal))
+        var caller = await CallerSession.ResolveAsync(currentUser, users, sessions, now, cancellationToken);
+        if (caller.IsFailure)
         {
-            return Result.Failure<RecoveryCodesResponse>(UserErrors.NotFound(userId));
+            return Result.Failure<RecoveryCodesResponse>(caller.Error);
         }
+
+        var (user, session) = caller.Value;
+        var userId = user.Id;
 
         var method = await mfaMethods.GetTotpAsync(userId, cancellationToken);
         if (method is null || method.IsConfirmed)

@@ -145,6 +145,7 @@ internal static class AuthEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
         // Authenticated, and it checks a password or a code that counts towards the lockout, so it is limited per client address too;
@@ -188,8 +189,9 @@ internal static class AuthEndpoints
         return result.IsSuccess ? TypedResults.NoContent() : result.ToProblem();
     }
 
-    // 204, or 400 auth.current_password_incorrect, auth.password_breached or auth.password_reused. A token whose user is gone or
-    // suspended gets the body-less 401 of a request without a valid token, as GET me does.
+    // 204, or 400 auth.current_password_incorrect, auth.password_breached or auth.password_reused, or 403 auth.step_up_required (an
+    // account with two-step verification on needs a fresh step-up with a code first). A token whose user is gone or suspended gets the
+    // body-less 401 of a request without a valid token, as GET me does.
     private static async Task<IResult> ChangePasswordAsync(
         ChangePasswordRequest request,
         ICommandHandler<ChangePasswordCommand> handler,

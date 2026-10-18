@@ -1,4 +1,3 @@
-using System.Data.Common;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
@@ -488,62 +487,9 @@ public sealed partial class MfaEnrollmentTests(IntegrationTestWebAppFactory fact
     private Task<HttpResponseMessage> RefreshAsync(string refreshToken)
         => Client.PostAsJsonAsync(RefreshRoute, new { refreshToken }, Ct);
 
-    /// <summary>
-    /// Every <c>schema.table.column</c> of the test database (every module's schema) whose text holds one of <paramref name="values"/>,
-    /// ignoring case. The values are letters, digits, <c>-</c>, <c>+</c> and <c>/</c>, none of which is a <c>LIKE</c> wildcard.
-    /// </summary>
-    private async Task<List<string>> TextColumnsContainingAsync(IReadOnlyList<string> values)
-    {
-        await using var scope = Factory.Services.CreateAsyncScope();
-        var connection = scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.GetDbConnection();
-        await connection.OpenAsync(Ct);
-
-        var columns = new List<(string Schema, string Table, string Column)>();
-        await using (var list = connection.CreateCommand())
-        {
-            list.CommandText = """
-                SELECT c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME
-                FROM INFORMATION_SCHEMA.COLUMNS AS c
-                INNER JOIN INFORMATION_SCHEMA.TABLES AS t ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
-                WHERE t.TABLE_TYPE = 'BASE TABLE' AND c.DATA_TYPE IN ('char', 'varchar', 'nchar', 'nvarchar', 'text', 'ntext', 'xml')
-                """;
-            await using var reader = await list.ExecuteReaderAsync(Ct);
-            while (await reader.ReadAsync(Ct))
-            {
-                columns.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2)));
-            }
-        }
-
-        columns.ShouldContain(column => column.Schema == "auth" && column.Table == "AuthAuditLogs" && column.Column == "Details");
-        columns.ShouldContain(column => column.Schema == "auth" && column.Table == "OutboxMessages" && column.Column == "Content");
-
-        var hits = new List<string>();
-        foreach (var (schema, table, column) in columns)
-        {
-            await using var command = connection.CreateCommand();
-            var conditions = values.Select((_, index) => $"CAST([{column}] AS nvarchar(max)) LIKE @p{index}");
-            command.CommandText = $"SELECT COUNT_BIG(*) FROM [{schema}].[{table}] WHERE {string.Join(" OR ", conditions)}";
-            for (var index = 0; index < values.Count; index++)
-            {
-                AddParameter(command, $"@p{index}", $"%{values[index]}%");
-            }
-
-            if ((long)(await command.ExecuteScalarAsync(Ct))! > 0)
-            {
-                hits.Add($"{schema}.{table}.{column}");
-            }
-        }
-
-        return hits;
-    }
-
-    private static void AddParameter(DbCommand command, string name, string value)
-    {
-        var parameter = command.CreateParameter();
-        parameter.ParameterName = name;
-        parameter.Value = value;
-        command.Parameters.Add(parameter);
-    }
+    /// <summary>The <c>schema.table.column</c> of every text column of the test database that holds one of <paramref name="values"/>.</summary>
+    private Task<List<string>> TextColumnsContainingAsync(IReadOnlyList<string> values)
+        => DatabaseTextScanner.ColumnsContainingAsync(Factory.Services, values, Ct);
 
     private async Task<T> QueryAsync<T>(Func<AuthDbContext, Task<T>> query)
     {

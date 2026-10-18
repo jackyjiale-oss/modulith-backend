@@ -55,27 +55,15 @@ internal sealed class StepUpCommandHandler(
     public async Task<Result<StepUpResponse>> HandleAsync(StepUpCommand command, CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
-        if (currentUser.UserId is not { } userId || currentUser.SessionId is not { } sessionId)
+        // A step-up must never mint a token for a session that was revoked, has expired, belongs to someone else or holds an outdated stamp.
+        var caller = await CallerSession.ResolveAsync(currentUser, users, sessions, now, cancellationToken);
+        if (caller.IsFailure)
         {
-            return Result.Failure<StepUpResponse>(UserErrors.NotFound(currentUser.UserId ?? Guid.Empty));
+            return Result.Failure<StepUpResponse>(caller.Error);
         }
 
-        var user = await users.GetByIdAsync(userId, cancellationToken);
-        if (user is null || user.Status == UserStatus.Suspended)
-        {
-            return Result.Failure<StepUpResponse>(UserErrors.NotFound(userId));
-        }
-
-        // The access token outlives its session (D9), so the session is checked here: a step-up must never mint a token for a session
-        // that was revoked, has expired, belongs to someone else or holds an outdated stamp (its next refresh would end it).
-        var session = await sessions.GetByIdAsync(sessionId, cancellationToken);
-        if (session is null
-            || session.UserId != userId
-            || !session.IsActive(now)
-            || !string.Equals(session.SecurityStamp, user.SecurityStamp, StringComparison.Ordinal))
-        {
-            return Result.Failure<StepUpResponse>(UserErrors.NotFound(userId));
-        }
+        var (user, session) = caller.Value;
+        var userId = user.Id;
 
         var password = NullIfBlank(command.Password);
         var proof = new MfaProof(NullIfBlank(command.Code), NullIfBlank(command.RecoveryCode));
