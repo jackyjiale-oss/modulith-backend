@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Application.Common.Pagination;
+using TemplateName.Modules.Auth.Application.Authentication;
 using TemplateName.Modules.Auth.Application.Authentication.Login;
 using TemplateName.Modules.Auth.Application.Authentication.Logout;
 using TemplateName.Modules.Auth.Application.Authentication.LogoutAll;
@@ -62,7 +63,7 @@ internal static class AuthEndpoints
             .AllowAnonymous()
             .RequireRateLimiting(RateLimitPolicies.AuthStrict)
             .WithNoStore()
-            .Produces<LoginResponse>()
+            .Produces<LoginResult>()
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -249,11 +250,12 @@ internal static class AuthEndpoints
         return result.IsSuccess ? TypedResults.NoContent() : result.ToProblem();
     }
 
-    // 401 auth.invalid_credentials for every wrong combination (unknown email, wrong password, no password set, locked account);
+    // 200 with the tokens (mfaRequired false) or, for an account with two-step verification, a challenge for POST mfa/verify (mfaRequired
+    // true); 401 auth.invalid_credentials for every wrong combination (unknown email, wrong password, no password set, locked account);
     // 403 only after a correct password.
     private static async Task<IResult> LoginAsync(
         LoginRequest request,
-        ICommandHandler<LoginCommand, LoginResponse> handler,
+        ICommandHandler<LoginCommand, LoginResult> handler,
         CancellationToken cancellationToken)
     {
         var result = await handler.HandleAsync(new LoginCommand(request.Email, request.Password, request.DeviceName), cancellationToken);

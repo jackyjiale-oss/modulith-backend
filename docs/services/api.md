@@ -105,12 +105,12 @@ The policy exposes `X-Trace-Id`, `Location`, `Retry-After` and `Idempotency-Repl
 |---|---|---|---|
 | `GlobalPermitLimit` | `300` | 1 or more | Requests per partition per window. |
 | `GlobalWindow` | `00:01:00` | `00:00:01` to `1.00:00:00` | Fixed window length. |
-| `AuthStrictPermitLimit` | `10` | 1 or more | Requests per client address per window, shared by every endpoint with the `auth-strict` policy (`RequireRateLimiting(RateLimitPolicies.AuthStrict)`): `POST /api/v1/auth/register`, `/email/confirm`, `/email/resend-confirmation`, `/login`, `/token/refresh`, `/password/forgot`, `/password/reset`, `/password/change` and `/step-up`. |
+| `AuthStrictPermitLimit` | `10` | 1 or more | Requests per client address per window, shared by every endpoint with the `auth-strict` policy (`RequireRateLimiting(RateLimitPolicies.AuthStrict)`): `POST /api/v1/auth/register`, `/email/confirm`, `/email/resend-confirmation`, `/login`, `/token/refresh`, `/password/forgot`, `/password/reset`, `/password/change`, `/step-up` and `/mfa/verify`. |
 | `AuthStrictWindow` | `00:01:00` | `00:00:01` to `1.00:00:00` | The `auth-strict` fixed window length. |
 
 The global partition is `user:{sub}` for an authenticated caller, else `ip:{remote address}`; the `auth-strict` partition is always `ip:{remote address}`. The address is the one left by the forwarded-headers middleware, so a spoofed `X-Forwarded-For` cannot choose a partition. An `auth-strict` endpoint is also under the global limiter. Requests over a limit are rejected at once (no queue).
 
-**Sizing `auth-strict` behind NAT.** The `auth-strict` budget is **one bucket per client address shared by all nine routes** above (refresh included), 10 per minute by default. Many users behind one NAT or carrier-grade NAT address (an office, a campus, a mobile network) share that bucket, so their logins and token refreshes together can exhaust it and get 429s. For such deployments raise `RateLimiting:AuthStrictPermitLimit` (and make sure the forwarded-headers settings give the real client address). A separate, larger policy for refresh is a planned follow-up.
+**Sizing `auth-strict` behind NAT.** The `auth-strict` budget is **one bucket per client address shared by all ten routes** above (refresh included), 10 per minute by default. Many users behind one NAT or carrier-grade NAT address (an office, a campus, a mobile network) share that bucket, so their logins and token refreshes together can exhaust it and get 429s. For such deployments raise `RateLimiting:AuthStrictPermitLimit` (and make sure the forwarded-headers settings give the real client address). A separate, larger policy for refresh is a planned follow-up.
 
 ### `ForwardedHeaders`
 

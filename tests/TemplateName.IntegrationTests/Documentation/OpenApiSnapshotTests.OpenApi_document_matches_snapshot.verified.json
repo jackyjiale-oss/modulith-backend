@@ -156,7 +156,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LoginResponse"
+                  "$ref": "#/components/schemas/LoginResult"
                 }
               }
             }
@@ -744,6 +744,56 @@
             "Bearer": []
           }
         ]
+      }
+    },
+    "/api/v1/auth/mfa/verify": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "VerifyMfa",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyMfaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaVerifyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/auth/mfa/totp/setup": {
@@ -4124,6 +4174,80 @@
           }
         }
       },
+      "LoginResult": {
+        "required": [
+          "mfaRequired",
+          "accessToken",
+          "accessTokenExpiresAt",
+          "refreshToken",
+          "refreshTokenExpiresAt",
+          "sessionId",
+          "challengeToken",
+          "challengeExpiresAt",
+          "methods"
+        ],
+        "type": "object",
+        "properties": {
+          "mfaRequired": {
+            "type": "boolean"
+          },
+          "accessToken": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "accessTokenExpiresAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "refreshToken": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "refreshTokenExpiresAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "sessionId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "challengeToken": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "challengeExpiresAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "methods": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "MeResponse": {
         "required": [
           "id",
@@ -4246,6 +4370,51 @@
         "enum": [
           "Totp"
         ]
+      },
+      "MfaVerifyResponse": {
+        "required": [
+          "accessToken",
+          "accessTokenExpiresAt",
+          "refreshToken",
+          "refreshTokenExpiresAt",
+          "sessionId",
+          "trustedDeviceToken",
+          "trustedDeviceExpiresAt"
+        ],
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          },
+          "accessTokenExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "refreshToken": {
+            "type": "string"
+          },
+          "refreshTokenExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "trustedDeviceToken": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "trustedDeviceExpiresAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
       },
       "NotificationCategory": {
         "enum": [
@@ -4964,6 +5133,35 @@
           "Active",
           "Suspended"
         ]
+      },
+      "VerifyMfaRequest": {
+        "required": [
+          "challengeToken"
+        ],
+        "type": "object",
+        "properties": {
+          "challengeToken": {
+            "type": "string"
+          },
+          "code": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "recoveryCode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rememberDevice": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          }
+        }
       }
     },
     "securitySchemes": {

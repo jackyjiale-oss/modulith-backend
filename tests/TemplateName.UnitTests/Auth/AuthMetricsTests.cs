@@ -1,6 +1,7 @@
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Application.Mfa;
 using TemplateName.Modules.Auth.Infrastructure.Observability;
 
 namespace TemplateName.UnitTests.Auth;
@@ -32,6 +33,7 @@ public sealed class AuthMetricsTests : IDisposable
     [InlineData(nameof(LoginOutcome.Locked), "locked")]
     [InlineData(nameof(LoginOutcome.Unverified), "unverified")]
     [InlineData(nameof(LoginOutcome.Inactive), "inactive")]
+    [InlineData(nameof(LoginOutcome.MfaRequired), "mfa_required")]
     public void Login_counts_one_with_only_the_result_tag(string outcome, string result)
     {
         _sut.RecordLogin(Enum.Parse<LoginOutcome>(outcome));
@@ -63,6 +65,22 @@ public sealed class AuthMetricsTests : IDisposable
         measurement.Instrument.ShouldBe("auth.step_ups");
         measurement.Value.ShouldBe(1);
         measurement.Tags.ShouldBe([new KeyValuePair<string, object?>("result", result)]);
+    }
+
+    [Theory]
+    [InlineData(nameof(MfaVerificationOutcome.Succeeded), nameof(MfaFactor.Totp), "succeeded", "totp")]
+    [InlineData(nameof(MfaVerificationOutcome.Succeeded), nameof(MfaFactor.RecoveryCode), "succeeded", "recovery_code")]
+    [InlineData(nameof(MfaVerificationOutcome.InvalidCode), nameof(MfaFactor.Totp), "invalid_code", "totp")]
+    [InlineData(nameof(MfaVerificationOutcome.InvalidCode), nameof(MfaFactor.RecoveryCode), "invalid_code", "recovery_code")]
+    [InlineData(nameof(MfaVerificationOutcome.InvalidChallenge), null, "invalid_challenge", "none")]
+    public void Mfa_verification_counts_one_with_the_result_and_factor_tags(string outcome, string? factor, string result, string factorTag)
+    {
+        _sut.RecordMfaVerification(Enum.Parse<MfaVerificationOutcome>(outcome), factor is null ? null : Enum.Parse<MfaFactor>(factor));
+
+        var measurement = _measurements.ShouldHaveSingleItem();
+        measurement.Instrument.ShouldBe("auth.mfa_verifications");
+        measurement.Value.ShouldBe(1);
+        measurement.Tags.ShouldBe([new KeyValuePair<string, object?>("result", result), new KeyValuePair<string, object?>("factor", factorTag)]);
     }
 
     public void Dispose()

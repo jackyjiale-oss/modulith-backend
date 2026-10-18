@@ -5,8 +5,10 @@ using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Application.Authentication;
 using TemplateName.Modules.Auth.Application.Authentication.Login;
+using TemplateName.Modules.Auth.Application.Mfa;
 using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Domain.Audit;
+using TemplateName.Modules.Auth.Domain.Mfa;
 using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Domain.Users.Events;
@@ -26,6 +28,8 @@ public sealed class LoginCommandHandlerTests
     private static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
 
     private readonly IUserRepository _users = Substitute.For<IUserRepository>();
+    private readonly IMfaMethodRepository _mfaMethods = Substitute.For<IMfaMethodRepository>();
+    private readonly IMfaChallengeRepository _challenges = Substitute.For<IMfaChallengeRepository>();
     private readonly ISessionRepository _sessions = Substitute.For<ISessionRepository>();
     private readonly IPasswordHasher _passwordHasher = Substitute.For<IPasswordHasher>();
     private readonly ISecureTokenService _tokenService = Substitute.For<ISecureTokenService>();
@@ -36,6 +40,7 @@ public sealed class LoginCommandHandlerTests
     private readonly IAuthMetrics _metrics = Substitute.For<IAuthMetrics>();
     private readonly List<AuthAuditLog> _auditEntries = [];
     private readonly List<UserSession> _addedSessions = [];
+    private readonly List<MfaChallenge> _addedChallenges = [];
     private readonly List<AccessTokenRequest> _tokenRequests = [];
     private readonly LoginCommandHandler _sut;
 
@@ -47,20 +52,22 @@ public sealed class LoginCommandHandlerTests
         _clientContext.UserAgent.Returns("UnitTests/1.0");
         _auditWriter.Record(Arg.Do<AuthAuditLog>(_auditEntries.Add));
         _sessions.Add(Arg.Do<UserSession>(_addedSessions.Add));
+        _challenges.Add(Arg.Do<MfaChallenge>(_addedChallenges.Add));
         _unitOfWork.TrySaveChangesAsync(Arg.Any<CancellationToken>()).Returns(true);
 
+        var sessionStarter = new SessionStarter(_sessions, _tokenService, _accessTokenIssuer, _clientContext, Options.Create(new RefreshTokenOptions()));
         _sut = new LoginCommandHandler(
             _users,
-            _sessions,
+            _mfaMethods,
+            _challenges,
             _passwordHasher,
             _tokenService,
-            _accessTokenIssuer,
+            sessionStarter,
             _auditWriter,
-            _clientContext,
             _unitOfWork,
             _metrics,
             Options.Create(new LockoutOptions()),
-            Options.Create(new RefreshTokenOptions()),
+            Options.Create(new MfaOptions()),
             new FakeTimeProvider(Now));
     }
 
@@ -238,7 +245,7 @@ public sealed class LoginCommandHandlerTests
 
         var response = result.Value;
         var session = _addedSessions.ShouldHaveSingleItem();
-        response.ShouldBe(new LoginResponse(AccessTokenValue, Now.AddMinutes(10), RefreshTokenValue, Now.AddDays(14), session.Id));
+        response.ShouldBe(LoginResult.Signed(new LoginResponse(AccessTokenValue, Now.AddMinutes(10), RefreshTokenValue, Now.AddDays(14), session.Id)));
         session.UserId.ShouldBe(user.Id);
         session.AuthMethods.ShouldBe("pwd");
         session.DeviceName.ShouldBe("Alice's phone");
@@ -306,13 +313,157 @@ public sealed class LoginCommandHandlerTests
         _metrics.DidNotReceive().RecordLogin(LoginOutcome.Succeeded);
     }
 
+    [Fact]
+    public async Task Mfa_account_gets_a_challenge_and_no_session()
+    {
+        var user = GivenUser();
+        GivenMfa(user);
+        _passwordHasher.Verify(StoredHash, Password).Returns(PasswordVerification.Success);
+
+        var result = await _sut.HandleAsync(Command() with { DeviceName = "Alice's phone" }, Ct);
+
+        // The challenge token is a fresh secure token, shown once; only its hash is stored, bound to the user's stamp for five minutes.
+        var response = result.Value;
+        response.MfaRequired.ShouldBeTrue();
+        response.ChallengeToken.ShouldBe(RefreshTokenValue);
+        response.ChallengeExpiresAt.ShouldBe(Now.AddMinutes(5));
+        response.Methods.ShouldBe(["totp", "recovery_code"]);
+        response.AccessToken.ShouldBeNull();
+        response.AccessTokenExpiresAt.ShouldBeNull();
+        response.RefreshToken.ShouldBeNull();
+        response.RefreshTokenExpiresAt.ShouldBeNull();
+        response.SessionId.ShouldBeNull();
+        var challenge = _addedChallenges.ShouldHaveSingleItem();
+        challenge.UserId.ShouldBe(user.Id);
+        challenge.TokenHash.ShouldBe(RefreshTokenHash);
+        challenge.SecurityStamp.ShouldBe(user.SecurityStamp);
+        challenge.DeviceName.ShouldBe("Alice's phone");
+        challenge.CreatedAt.ShouldBe(Now);
+        challenge.ExpiresAt.ShouldBe(Now.AddMinutes(5));
+        challenge.FailedAttempts.ShouldBe(0);
+
+        _sessions.DidNotReceiveWithAnyArgs().Add(default!);
+        _accessTokenIssuer.DidNotReceiveWithAnyArgs().Issue(default!);
+        user.LastLoginAt.ShouldBeNull();
+        var audit = _auditEntries.ShouldHaveSingleItem();
+        audit.EventType.ShouldBe(AuthAuditEvents.MfaChallengeIssued);
+        audit.Succeeded.ShouldBeTrue();
+        audit.UserId.ShouldBe(user.Id);
+        audit.AttemptedIdentifier.ShouldBe("a****@example.com");
+        audit.SessionId.ShouldBeNull();
+        await _unitOfWork.Received(1).TrySaveChangesAsync(Ct);
+        _metrics.Received(1).RecordLogin(LoginOutcome.MfaRequired);
+        _metrics.DidNotReceive().RecordLogin(LoginOutcome.Succeeded);
+    }
+
+    [Fact]
+    public async Task Password_step_does_not_reset_the_failure_count_of_an_mfa_account()
+    {
+        var user = GivenUser();
+        GivenMfa(user);
+        FailBeforehand(user, times: 2);
+        _passwordHasher.Verify(StoredHash, Password).Returns(PasswordVerification.Success);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        // Only a verified second factor resets the count (decision D7), or "password, four wrong codes, password again" would never end.
+        result.Value.MfaRequired.ShouldBeTrue();
+        user.AccessFailedCount.ShouldBe(2);
+        user.LockoutEnd.ShouldBeNull();
+        user.LastLoginAt.ShouldBeNull();
+        await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
+    }
+
+    [Theory]
+    [InlineData("unknown email")]
+    [InlineData("wrong password")]
+    [InlineData("no password")]
+    [InlineData("locked")]
+    [InlineData("unverified")]
+    [InlineData("suspended")]
+    public async Task Mfa_lookup_happens_only_after_a_correct_password(string state)
+    {
+        var user = GivenUser(passwordHash: state == "no password" ? null : StoredHash, confirmed: state != "unverified");
+        GivenMfa(user);
+        _passwordHasher.Verify(StoredHash, Password).Returns(state == "wrong password" ? PasswordVerification.Failed : PasswordVerification.Success);
+        var command = Command();
+        switch (state)
+        {
+            case "unknown email":
+                command = command with { Email = "nobody@example.com" };
+                break;
+            case "locked":
+                FailBeforehand(user, times: 5);
+                break;
+            case "suspended":
+                user.Suspend(Now);
+                break;
+        }
+
+        var result = await _sut.HandleAsync(command, Ct);
+
+        // Nothing two-step is read or decided before the password is right and the account may sign in, so these answers stay Plan 2's.
+        result.IsFailure.ShouldBeTrue();
+        await _mfaMethods.DidNotReceiveWithAnyArgs().HasConfirmedAsync(default, Ct);
+        _challenges.DidNotReceiveWithAnyArgs().Add(default!);
+        _tokenService.DidNotReceiveWithAnyArgs().Generate();
+        _auditEntries.ShouldAllBe(entry => entry.EventType != AuthAuditEvents.MfaChallengeIssued);
+    }
+
+    [Fact]
+    public async Task Non_mfa_account_signs_in_as_before()
+    {
+        var user = GivenUser();
+        _passwordHasher.Verify(StoredHash, Password).Returns(PasswordVerification.Success);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        var session = _addedSessions.ShouldHaveSingleItem();
+        result.Value.ShouldBe(LoginResult.Signed(new LoginResponse(AccessTokenValue, Now.AddMinutes(10), RefreshTokenValue, Now.AddDays(14), session.Id)));
+        result.Value.MfaRequired.ShouldBeFalse();
+        result.Value.ChallengeToken.ShouldBeNull();
+        result.Value.ChallengeExpiresAt.ShouldBeNull();
+        result.Value.Methods.ShouldBeNull();
+        await _mfaMethods.Received(1).HasConfirmedAsync(user.Id, Ct);
+        _challenges.DidNotReceiveWithAnyArgs().Add(default!);
+        session.AuthMethods.ShouldBe("pwd");
+        _auditEntries.ShouldHaveSingleItem().EventType.ShouldBe(AuthAuditEvents.LoginSucceeded);
+        _metrics.Received(1).RecordLogin(LoginOutcome.Succeeded);
+    }
+
+    [Fact]
+    public async Task Lost_save_race_of_a_challenge_returns_invalid_credentials()
+    {
+        var user = GivenUser();
+        GivenMfa(user);
+        _passwordHasher.Verify(StoredHash, Password).Returns(PasswordVerification.SuccessRehashNeeded);
+        _passwordHasher.Hash(Password).Returns("stronger-hash");
+        _unitOfWork.TrySaveChangesAsync(Arg.Any<CancellationToken>()).Returns(false);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        // The rehash makes the challenge's save write the user row, so it can lose a race; the answer is the generic 401, as on Plan 2's path.
+        result.Error.ShouldBe(UserErrors.InvalidCredentials);
+        user.PasswordHash.ShouldBe("stronger-hash");
+        _metrics.Received(1).RecordLogin(LoginOutcome.InvalidCredentials);
+        _metrics.DidNotReceive().RecordLogin(LoginOutcome.MfaRequired);
+    }
+
+    [Fact]
+    public void Login_result_text_shows_only_whether_mfa_is_required()
+    {
+        LoginResult.Challenge("challenge-token-value", Now).ToString().ShouldBe("LoginResult { MfaRequired = True }");
+        LoginResult.Signed(new LoginResponse(AccessTokenValue, Now, RefreshTokenValue, Now, Guid.Empty)).ToString()
+            .ShouldBe("LoginResult { MfaRequired = False }");
+    }
+
     [Theory]
     [InlineData(129)]
     [InlineData(1024 * 1024)]
     public async Task Oversized_password_is_rejected_before_hashing(int length)
     {
         // The pipeline the host builds: the validation decorator runs the validator before the handler.
-        var pipeline = new ValidationDecorator.CommandHandler<LoginCommand, LoginResponse>(
+        var pipeline = new ValidationDecorator.CommandHandler<LoginCommand, LoginResult>(
             _sut,
             [new LoginCommandValidator(Options.Create(new PasswordOptions()))]);
 
@@ -333,6 +484,8 @@ public sealed class LoginCommandHandlerTests
     }
 
     private static LoginCommand Command() => new("alice@example.com", Password, null);
+
+    private void GivenMfa(User user) => _mfaMethods.HasConfirmedAsync(user.Id, Arg.Any<CancellationToken>()).Returns(true);
 
     private static void FailBeforehand(User user, int times)
     {

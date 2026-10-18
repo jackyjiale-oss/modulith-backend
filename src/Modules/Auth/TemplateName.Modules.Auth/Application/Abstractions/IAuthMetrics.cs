@@ -1,3 +1,5 @@
+using TemplateName.Modules.Auth.Application.Mfa;
+
 namespace TemplateName.Modules.Auth.Application.Abstractions;
 
 /// <summary>
@@ -23,4 +25,12 @@ internal interface IAuthMetrics
     /// failure is any 400 of the handler (a wrong proof, a factor the account may not use, a locked account), never a 401.
     /// </summary>
     void RecordStepUp(bool succeeded);
+
+    /// <summary>
+    /// Counts one verify of a sign-in challenge that reached a decision (<c>auth.mfa_verifications</c>, tags <c>result</c> =
+    /// <c>succeeded</c>, <c>invalid_code</c> or <c>invalid_challenge</c>, and <c>factor</c> = <c>totp</c>, <c>recovery_code</c> or
+    /// <c>none</c>). <paramref name="factor"/> is the factor accepted or tried, null when the challenge was refused before a factor
+    /// counted. A 400 of the validator and a 429 are not counted.
+    /// </summary>
+    void RecordMfaVerification(MfaVerificationOutcome outcome, MfaFactor? factor);
 }

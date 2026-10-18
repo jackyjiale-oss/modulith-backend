@@ -27,6 +27,9 @@ internal static class AuthAuditEvents
     public const string ProfileUpdated = "auth.profile_updated";
     public const string StepUpSucceeded = "auth.step_up_succeeded";
     public const string StepUpFailed = "auth.step_up_failed";
+    public const string MfaChallengeIssued = "auth.mfa_challenge_issued";
+    public const string MfaVerified = "auth.mfa_verified";
+    public const string MfaFailed = "auth.mfa_failed";
     public const string MfaSetupStarted = "auth.mfa_setup_started";
     public const string MfaEnabled = "auth.mfa_enabled";
     public const string AdminUserCreated = "auth.admin_user_created";

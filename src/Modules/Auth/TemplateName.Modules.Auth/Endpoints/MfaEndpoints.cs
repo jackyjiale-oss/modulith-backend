@@ -6,6 +6,7 @@ using TemplateName.Modules.Auth.Application.Mfa;
 using TemplateName.Modules.Auth.Application.Mfa.ConfirmTotp;
 using TemplateName.Modules.Auth.Application.Mfa.GetMethods;
 using TemplateName.Modules.Auth.Application.Mfa.SetUpTotp;
+using TemplateName.Modules.Auth.Application.Mfa.Verify;
 using TemplateName.SharedKernel;
 using TemplateName.Web.Common.Results;
 using TemplateName.Web.Common.Security;
@@ -18,6 +19,17 @@ internal static class MfaEndpoints
     internal static RouteGroupBuilder MapMfaEndpoints(this RouteGroupBuilder auth)
     {
         var group = auth.MapGroup("mfa");
+
+        // The second step of a sign-in: anonymous (the caller has no token yet), said explicitly (Ruling R13), and it checks a code that
+        // counts toward the lockout, so it is limited per client address like login; the answer carries tokens, so it is never stored.
+        group.MapPost("verify", VerifyAsync)
+            .WithName("VerifyMfa")
+            .AllowAnonymous()
+            .RequireRateLimiting(RateLimitPolicies.AuthStrict)
+            .WithNoStore()
+            .Produces<MfaVerifyResponse>()
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
         // Authenticated, said explicitly (Ruling R13). Setup and confirm need a fresh step-up (403) and answer with a secret or recovery
         // codes shown once, so they are never stored.
@@ -48,6 +60,20 @@ internal static class MfaEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized);
 
         return auth;
+    }
+
+    // 200 with the tokens of a new session; 400 validation.failed (blank or over-long challenge token, not exactly one of a 6-digit code
+    // and a recovery code), auth.invalid_mfa_code (counted on the challenge and toward the lockout) or auth.invalid_mfa_challenge (unknown,
+    // expired, used, exhausted, or the account changed, locked or gone: all alike, nothing counted).
+    private static async Task<IResult> VerifyAsync(
+        VerifyMfaRequest request,
+        ICommandHandler<VerifyMfaCommand, MfaVerifyResponse> handler,
+        CancellationToken cancellationToken)
+    {
+        var command = new VerifyMfaCommand(request.ChallengeToken, request.Code, request.RecoveryCode, request.RememberDevice ?? false);
+        var result = await handler.HandleAsync(command, cancellationToken);
+
+        return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
     }
 
     // 200 with the secret (base32 and the otpauth URI), shown once; 400 validation.failed (blank or over-long label); 403
