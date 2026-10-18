@@ -30,7 +30,9 @@ namespace TemplateName.Modules.Auth.Application.Mfa.ConfirmTotp;
 /// (<see cref="SessionRevokedReason.MfaChanged"/>) and keeps this one; audit <c>auth.mfa_enabled</c> with the revoked count.</item>
 /// </list>
 /// One save commits all of it. It writes the user row, whose <c>RowVersion</c> makes a simultaneous second confirm fail with 409
-/// <c>concurrency.conflict</c> instead of issuing a second set of codes. The recovery codes leave only in the answer.
+/// <c>concurrency.conflict</c> instead of issuing a second set of codes, and the method row, whose concurrency tokens (the secret and
+/// the confirmation as loaded) make it fail the same way when a setup restart replaced the secret meanwhile, so a secret nobody
+/// verified is never confirmed. The recovery codes leave only in the answer.
 /// </summary>
 internal sealed partial class ConfirmTotpCommandHandler(
     IUserRepository users,

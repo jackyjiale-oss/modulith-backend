@@ -51,7 +51,8 @@ internal static class MfaEndpoints
     }
 
     // 200 with the secret (base32 and the otpauth URI), shown once; 400 validation.failed (blank or over-long label); 403
-    // auth.step_up_required; 409 auth.mfa_already_enabled. A token whose user is gone or suspended, or whose session is not the caller's
+    // auth.step_up_required; 409 auth.mfa_already_enabled, or concurrency.conflict when a simultaneous
+    // confirm or setup of the method saved first. A token whose user is gone or suspended, or whose session is not the caller's
     // active session, gets the body-less 401 of a request without a valid token, as PUT me does. The body is optional.
     private static async Task<IResult> SetUpTotpAsync(
         SetUpTotpRequest? request,
@@ -69,8 +70,8 @@ internal static class MfaEndpoints
     }
 
     // 200 with the ten recovery codes, shown once; 400 validation.failed (not 6 digits) or auth.invalid_mfa_code (not counted toward
-    // the lockout); 403 auth.step_up_required; 409 auth.mfa_setup_not_pending, or concurrency.conflict when a simultaneous confirm
-    // won. The 401 is the same as for setup.
+    // the lockout); 403 auth.step_up_required; 409 auth.mfa_setup_not_pending, or concurrency.conflict when a simultaneous confirm or
+    // setup restart saved first. The 401 is the same as for setup.
     private static async Task<IResult> ConfirmTotpAsync(
         ConfirmTotpRequest request,
         ICommandHandler<ConfirmTotpCommand, RecoveryCodesResponse> handler,

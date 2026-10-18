@@ -27,7 +27,9 @@ namespace TemplateName.Modules.Auth.Application.Mfa.SetUpTotp;
 /// </list>
 /// The plain secret leaves only in the answer, as base32 and inside the <c>otpauth://</c> URI; the stamp and the sessions do not change
 /// until the confirm. When a simultaneous setup inserted the user's row first, the unique index refuses this insert and nothing of it is
-/// saved; this request then takes that pending row over as a second setup would, so what it answers is what is stored.
+/// saved; this request then takes that pending row over as a second setup would, so what it answers is what is stored. A restart whose
+/// method a simultaneous confirm or restart changed after it was loaded fails on the method's concurrency tokens (409
+/// <c>concurrency.conflict</c>), so the secret of an enabled method is never replaced here.
 /// </summary>
 internal sealed class SetUpTotpCommandHandler(
     IUserRepository users,

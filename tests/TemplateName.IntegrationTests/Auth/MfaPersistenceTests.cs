@@ -156,6 +156,49 @@ public sealed class MfaPersistenceTests(IntegrationTestWebAppFactory factory) : 
     }
 
     [Fact]
+    public async Task Confirm_of_a_secret_a_restart_replaced_meanwhile_is_a_concurrency_conflict()
+    {
+        var user = NewUser("alice@example.com");
+        await SaveAsync(user, UserMfaMethod.StartTotp(user.Id, "Phone", "protected-a", Now));
+        var (restartScope, restarting) = await LoadTotpAsync(user);
+        var (confirmScope, confirming) = await LoadTotpAsync(user);
+
+        // The confirm verified its code against secret A; a setup restart commits secret B first.
+        restarting.RestartSetup("Tablet", "protected-b", Now);
+        await restartScope.GetRequiredService<IUnitOfWork>().SaveChangesAsync(Ct);
+        confirming.Confirm(Totp.TimeStepAt(Now), Now).IsSuccess.ShouldBeTrue();
+
+        // The UPDATE also requires the secret it loaded, so a secret nobody verified is never confirmed.
+        await Should.ThrowAsync<DbUpdateConcurrencyException>(() => confirmScope.GetRequiredService<IUnitOfWork>().SaveChangesAsync(Ct));
+
+        var stored = (await NewScope().GetRequiredService<IMfaMethodRepository>().GetTotpAsync(user.Id, Ct)).ShouldNotBeNull();
+        stored.SecretEncrypted.ShouldBe("protected-b");
+        stored.IsConfirmed.ShouldBeFalse();
+        stored.LastUsedTimeStep.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Restart_of_a_method_a_confirm_turned_on_meanwhile_is_a_concurrency_conflict()
+    {
+        var user = NewUser("alice@example.com");
+        await SaveAsync(user, UserMfaMethod.StartTotp(user.Id, "Phone", "protected-a", Now));
+        var (confirmScope, confirming) = await LoadTotpAsync(user);
+        var (restartScope, restarting) = await LoadTotpAsync(user);
+
+        // The setup loaded the method while it was pending, so the domain guard of RestartSetup cannot see the confirm that commits first.
+        confirming.Confirm(Totp.TimeStepAt(Now), Now).IsSuccess.ShouldBeTrue();
+        await confirmScope.GetRequiredService<IUnitOfWork>().SaveChangesAsync(Ct);
+        restarting.RestartSetup("Tablet", "protected-b", Now);
+
+        await Should.ThrowAsync<DbUpdateConcurrencyException>(() => restartScope.GetRequiredService<IUnitOfWork>().SaveChangesAsync(Ct));
+
+        var stored = (await NewScope().GetRequiredService<IMfaMethodRepository>().GetTotpAsync(user.Id, Ct)).ShouldNotBeNull();
+        stored.SecretEncrypted.ShouldBe("protected-a");
+        stored.Label.ShouldBe("Phone");
+        stored.IsConfirmed.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task Try_claim_time_step_succeeds_for_exactly_one_of_two_concurrent_callers()
     {
         var user = NewUser("alice@example.com");
@@ -534,6 +577,14 @@ public sealed class MfaPersistenceTests(IntegrationTestWebAppFactory factory) : 
         step = Totp.TimeStepAt(Now);
         method.Confirm(step, Now).IsSuccess.ShouldBeTrue();
         return method;
+    }
+
+    /// <summary>The user's TOTP method, tracked by a scope of its own (a request that loaded it and has not saved yet).</summary>
+    private async Task<(IServiceProvider Scope, UserMfaMethod Method)> LoadTotpAsync(User user)
+    {
+        var scope = NewScope();
+        var method = (await scope.GetRequiredService<IMfaMethodRepository>().GetTotpAsync(user.Id, Ct)).ShouldNotBeNull();
+        return (scope, method);
     }
 
     private MfaChallenge NewChallenge(User user, byte[] tokenHash)

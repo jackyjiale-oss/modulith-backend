@@ -7,6 +7,8 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -358,30 +360,81 @@ public sealed partial class MfaEnrollmentTests(IntegrationTestWebAppFactory fact
     [Fact]
     public async Task Simultaneous_confirms_enable_once_and_never_fail_with_a_500()
     {
+        // The first confirm is held just before its save; the second runs through and commits; then the first saves.
+        var gate = new MethodSaveGate(entry => entry.Property(method => method.ConfirmedAt).IsModified);
+        await using var host = GatedHost(gate);
         await SignInAsync();
-        var secret = await SetUpAsync(Client);
-        var code = CurrentCode(secret);
+        using var client = await CreateClientAsync(host);
+        var code = CurrentCode(await SetUpAsync(client));
 
-        var responses = await Task.WhenAll(
-            Client.PostAsJsonAsync(ConfirmRoute, new { code }, Ct),
-            Client.PostAsJsonAsync(ConfirmRoute, new { code }, Ct));
-
-        var outcomes = new List<string>();
-        foreach (var response in responses)
+        var first = client.PostAsJsonAsync(ConfirmRoute, new { code }, Ct);
+        await gate.Entered;
+        using (var second = await client.PostAsJsonAsync(ConfirmRoute, new { code }, Ct))
         {
-            using (response)
-            {
-                outcomes.Add(response.StatusCode == HttpStatusCode.OK
-                    ? "ok"
-                    : (await response.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("code").GetString()!);
-            }
+            second.StatusCode.ShouldBe(HttpStatusCode.OK);
         }
 
-        // The user's RowVersion lets one save win; the other is a 409 (a conflict, or no setup left when it ran after the first).
-        outcomes.Count(outcome => outcome == "ok").ShouldBe(1);
-        outcomes.Single(outcome => outcome != "ok").ShouldBeOneOf("concurrency.conflict", "auth.mfa_setup_not_pending");
+        gate.Release();
+
+        // The user's RowVersion (and the method's tokens) refuse the held save: one set of codes, never a 500.
+        using var held = await first;
+        await AssertProblemAsync(held, HttpStatusCode.Conflict, "concurrency.conflict");
         (await QueryAsync(context => context.Set<RecoveryCode>().CountAsync(Ct))).ShouldBe(RecoveryCodeFormat.Count);
         (await QueryAsync(context => context.Set<AuthAuditLog>().CountAsync(entry => entry.EventType == AuthAuditEvents.MfaEnabled, Ct))).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Confirm_racing_a_setup_restart_that_commits_first_is_a_conflict()
+    {
+        // The confirm verified its code against secret A and is held before its save; a setup restart commits secret B meanwhile.
+        var gate = new MethodSaveGate(entry => entry.Property(method => method.ConfirmedAt).IsModified);
+        await using var host = GatedHost(gate);
+        await SignInAsync();
+        using var client = await CreateClientAsync(host);
+        var code = CurrentCode(await SetUpAsync(client));
+
+        var confirm = client.PostAsJsonAsync(ConfirmRoute, new { code }, Ct);
+        await gate.Entered;
+        var restartedSecret = Base32.Encode(await SetUpAsync(client));
+        gate.Release();
+
+        // No secret nobody verified is ever confirmed: the confirm loses, and the restarted setup stands, still pending.
+        using var held = await confirm;
+        await AssertProblemAsync(held, HttpStatusCode.Conflict, "concurrency.conflict");
+        var method = await QueryAsync(context => context.Set<UserMfaMethod>().AsNoTracking().SingleAsync(Ct));
+        method.IsConfirmed.ShouldBeFalse();
+        Base32.Encode(Factory.Services.GetRequiredService<IMfaSecretProtector>().Unprotect(method.SecretEncrypted)).ShouldBe(restartedSecret);
+        (await QueryAsync(context => context.Set<RecoveryCode>().CountAsync(Ct))).ShouldBe(0);
+        (await QueryAsync(context => context.Set<AuthAuditLog>().CountAsync(entry => entry.EventType == AuthAuditEvents.MfaEnabled, Ct))).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Setup_restart_racing_a_confirm_that_commits_first_is_a_conflict()
+    {
+        // A second setup loaded the method while it was pending and is held before its save; the confirm commits meanwhile.
+        var gate = new MethodSaveGate(entry => entry.Property(method => method.SecretEncrypted).IsModified);
+        await using var host = GatedHost(gate);
+        await SignInAsync();
+        using var client = await CreateClientAsync(host);
+        var secret = await SetUpAsync(client);
+
+        var restart = client.PostAsJsonAsync(SetupRoute, new { label = "Other phone" }, Ct);
+        await gate.Entered;
+        using (var confirm = await client.PostAsJsonAsync(ConfirmRoute, new { code = CurrentCode(secret) }, Ct))
+        {
+            confirm.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+
+        gate.Release();
+
+        // The setup cannot replace the secret of the method that is now on (which would bypass the MFA step-up rule): it loses.
+        using var held = await restart;
+        await AssertProblemAsync(held, HttpStatusCode.Conflict, "concurrency.conflict");
+        var method = await QueryAsync(context => context.Set<UserMfaMethod>().AsNoTracking().SingleAsync(Ct));
+        method.IsConfirmed.ShouldBeTrue();
+        method.Label.ShouldBe("Authenticator app");
+        Factory.Services.GetRequiredService<IMfaSecretProtector>().Unprotect(method.SecretEncrypted).ShouldBe(secret);
+        (await QueryAsync(context => context.Set<AuthAuditLog>().CountAsync(entry => entry.EventType == AuthAuditEvents.MfaSetupStarted, Ct))).ShouldBe(1);
     }
 
     [GeneratedRegex("^[2-9A-HJ-NP-Z]{4}(-[2-9A-HJ-NP-Z]{4}){3}$")]
@@ -401,6 +454,11 @@ public sealed partial class MfaEnrollmentTests(IntegrationTestWebAppFactory fact
             services.RemoveAll<ILoggerFactory>();
             services.AddSingleton<ILoggerFactory>(_ => new LoggerFactory([logs]));
         }));
+
+    /// <summary>A host whose Auth context runs <paramref name="gate"/> on every save, so a test can interleave two requests exactly.</summary>
+    private WebApplicationFactory<Program> GatedHost(MethodSaveGate gate)
+        => Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.ConfigureDbContext<AuthDbContext>(options => options.AddInterceptors(gate))));
 
     private string CurrentCode(byte[] secret) => Totp.ComputeCode(secret, Totp.TimeStepAt(Factory.Time.GetUtcNow()));
 
@@ -494,4 +552,41 @@ public sealed partial class MfaEnrollmentTests(IntegrationTestWebAppFactory fact
     }
 
     private sealed record Tokens(string AccessToken, string RefreshToken, Guid SessionId);
+
+    /// <summary>
+    /// Holds the first save that updates a loaded <see cref="UserMfaMethod"/> matching <paramref name="holds"/>, after the request has
+    /// read and changed everything and before any SQL runs, until <see cref="Release"/>; every other save passes. No sleeps: the test
+    /// awaits <see cref="Entered"/>, runs the competing request to completion, then releases.
+    /// </summary>
+    private sealed class MethodSaveGate(Func<EntityEntry<UserMfaMethod>, bool> holds) : SaveChangesInterceptor
+    {
+        private static readonly TimeSpan Limit = TimeSpan.FromSeconds(30);
+
+        private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _held;
+
+        public Task Entered => _entered.Task.WaitAsync(Limit);
+
+        public void Release() => _released.TrySetResult();
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context is { } context)
+            {
+                context.ChangeTracker.DetectChanges();
+                var matches = context.ChangeTracker.Entries<UserMfaMethod>().Any(entry => entry.State == EntityState.Modified && holds(entry));
+                if (matches && Interlocked.Exchange(ref _held, 1) == 0)
+                {
+                    _entered.TrySetResult();
+                    await _released.Task.WaitAsync(Limit, cancellationToken);
+                }
+            }
+
+            return result;
+        }
+    }
 }
