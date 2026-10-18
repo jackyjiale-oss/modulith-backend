@@ -139,7 +139,7 @@ These ship with every generated project (index: [`docs/README.md`](docs/README.m
 - [`docs/services/api.md`](docs/services/api.md): the host's pipeline, every configuration section, health, environments, migrations
 - [`docs/building-blocks/`](docs/building-blocks/): SharedKernel, Application.Common, Infrastructure.Common, Web.Common
 - [`docs/modules/`](docs/modules/): one page per module, from [`_template.md`](docs/modules/_template.md)
-- [`docs/adr/`](docs/adr/): architecture decision records 0001 to 0024
+- [`docs/adr/`](docs/adr/): architecture decision records 0001 to 0025
 - [`docs/coding-conventions.md`](docs/coding-conventions.md): naming, files and code style
 - [`CONTRIBUTING.md`](CONTRIBUTING.md): branches, Conventional Commits, pull requests, releases and licences
 

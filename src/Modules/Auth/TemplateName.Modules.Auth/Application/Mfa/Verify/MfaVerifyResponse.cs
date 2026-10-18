@@ -8,8 +8,12 @@ namespace TemplateName.Modules.Auth.Application.Mfa.Verify;
 /// <param name="RefreshToken">The secret that gets the next token pair; 43 base64url characters, single use.</param>
 /// <param name="RefreshTokenExpiresAt">When the refresh token stops working unless it is used first.</param>
 /// <param name="SessionId">The session, also the access token's <c>sid</c> claim.</param>
-/// <param name="TrustedDeviceToken">The token of a remembered device, shown once; always null until trusted devices arrive (a later Plan 4 task).</param>
-/// <param name="TrustedDeviceExpiresAt">When the remembered device must verify again; null with <paramref name="TrustedDeviceToken"/>.</param>
+/// <param name="TrustedDeviceToken">
+/// The token of the device remembered by this verify (43 base64url characters), shown only here; the server keeps its hash. Sent as
+/// <c>trustedDeviceToken</c> at login, it skips the challenge until <paramref name="TrustedDeviceExpiresAt"/>. Null (and left out of the
+/// JSON) unless <c>rememberDevice</c> was asked for and trusted devices are on.
+/// </param>
+/// <param name="TrustedDeviceExpiresAt">When the remembered device must verify again (absolute); null with <paramref name="TrustedDeviceToken"/>.</param>
 internal sealed record MfaVerifyResponse(
     string AccessToken,
     DateTimeOffset AccessTokenExpiresAt,

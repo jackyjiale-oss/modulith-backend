@@ -19,7 +19,7 @@ public sealed class LoginCommandValidatorTests
     [InlineData(null, false)]
     public void Email_is_validated(string? email, bool isAccepted)
     {
-        var result = _sut.TestValidate(new LoginCommand(email!, Password, null));
+        var result = _sut.TestValidate(new LoginCommand(email!, Password, null, null));
 
         if (isAccepted)
         {
@@ -36,7 +36,7 @@ public sealed class LoginCommandValidatorTests
     {
         var email = new string('a', 245) + "@example.com";
 
-        _sut.TestValidate(new LoginCommand(email, Password, null)).ShouldHaveValidationErrorFor(command => command.Email);
+        _sut.TestValidate(new LoginCommand(email, Password, null, null)).ShouldHaveValidationErrorFor(command => command.Email);
     }
 
     [Theory]
@@ -46,7 +46,7 @@ public sealed class LoginCommandValidatorTests
     public void Any_password_up_to_the_maximum_is_accepted_without_the_minimum_length(int length)
     {
         // A password shorter than today's minimum may still be the one an older policy accepted; only the hash can tell.
-        _sut.TestValidate(new LoginCommand("alice@example.com", new string('p', length), null)).ShouldNotHaveAnyValidationErrors();
+        _sut.TestValidate(new LoginCommand("alice@example.com", new string('p', length), null, null)).ShouldNotHaveAnyValidationErrors();
     }
 
     [Theory]
@@ -54,7 +54,7 @@ public sealed class LoginCommandValidatorTests
     [InlineData(1024 * 1024)]
     public void Password_longer_than_the_maximum_fails(int length)
     {
-        _sut.TestValidate(new LoginCommand("alice@example.com", new string('p', length), null)).ShouldHaveValidationErrorFor(command => command.Password);
+        _sut.TestValidate(new LoginCommand("alice@example.com", new string('p', length), null, null)).ShouldHaveValidationErrorFor(command => command.Password);
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public sealed class LoginCommandValidatorTests
     {
         var validator = new LoginCommandValidator(Options.Create(new PasswordOptions { MaxLength = 64 }));
 
-        validator.TestValidate(new LoginCommand("alice@example.com", new string('p', 65), null)).ShouldHaveValidationErrorFor(command => command.Password);
+        validator.TestValidate(new LoginCommand("alice@example.com", new string('p', 65), null, null)).ShouldHaveValidationErrorFor(command => command.Password);
     }
 
     [Theory]
@@ -70,14 +70,23 @@ public sealed class LoginCommandValidatorTests
     [InlineData(null)]
     public void Empty_password_fails(string? password)
     {
-        _sut.TestValidate(new LoginCommand("alice@example.com", password!, null)).ShouldHaveValidationErrorFor(command => command.Password);
+        _sut.TestValidate(new LoginCommand("alice@example.com", password!, null, null)).ShouldHaveValidationErrorFor(command => command.Password);
     }
 
     [Fact]
     public void Device_name_is_optional_and_at_most_200_characters()
     {
-        _sut.TestValidate(new LoginCommand("alice@example.com", Password, null)).ShouldNotHaveAnyValidationErrors();
-        _sut.TestValidate(new LoginCommand("alice@example.com", Password, new string('d', 200))).ShouldNotHaveAnyValidationErrors();
-        _sut.TestValidate(new LoginCommand("alice@example.com", Password, new string('d', 201))).ShouldHaveValidationErrorFor(command => command.DeviceName);
+        _sut.TestValidate(new LoginCommand("alice@example.com", Password, null, null)).ShouldNotHaveAnyValidationErrors();
+        _sut.TestValidate(new LoginCommand("alice@example.com", Password, new string('d', 200), null)).ShouldNotHaveAnyValidationErrors();
+        _sut.TestValidate(new LoginCommand("alice@example.com", Password, new string('d', 201), null)).ShouldHaveValidationErrorFor(command => command.DeviceName);
+    }
+
+    [Fact]
+    public void Trusted_device_token_is_optional_and_at_most_256_characters()
+    {
+        // A real one has 43 characters; its value is the handler's business (an unknown one simply gets the challenge).
+        _sut.TestValidate(new LoginCommand("alice@example.com", Password, null, new string('t', 256))).ShouldNotHaveAnyValidationErrors();
+        _sut.TestValidate(new LoginCommand("alice@example.com", Password, null, new string('t', 257)))
+            .ShouldHaveValidationErrorFor(command => command.TrustedDeviceToken);
     }
 }

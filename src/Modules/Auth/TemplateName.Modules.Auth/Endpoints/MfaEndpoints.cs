@@ -87,7 +87,8 @@ internal static class MfaEndpoints
         return auth;
     }
 
-    // 200 with the tokens of a new session; 400 validation.failed (blank or over-long challenge token, not exactly one of a 6-digit code
+    // 200 with the tokens of a new session (and, with rememberDevice while trusted devices are on, a trusted device token shown once);
+    // 400 validation.failed (blank or over-long challenge token, not exactly one of a 6-digit code
     // and a recovery code), auth.invalid_mfa_code (counted on the challenge and toward the lockout) or auth.invalid_mfa_challenge (unknown,
     // expired, used, exhausted, or the account changed, locked or gone: all alike, nothing counted).
     private static async Task<IResult> VerifyAsync(

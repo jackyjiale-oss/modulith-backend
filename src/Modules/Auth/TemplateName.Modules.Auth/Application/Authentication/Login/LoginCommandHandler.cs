@@ -7,6 +7,7 @@ using TemplateName.Modules.Auth.Application.Mfa;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Mfa;
 using TemplateName.Modules.Auth.Domain.Sessions;
+using TemplateName.Modules.Auth.Domain.TrustedDevices;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.SharedKernel;
 
@@ -23,11 +24,20 @@ namespace TemplateName.Modules.Auth.Application.Authentication.Login;
 /// confirmed method gets its session as before; one with it gets a challenge instead, and the failure count is <b>not</b> reset (decision
 /// D7: only a verified second factor resets it), so starting a new challenge after every few wrong codes never earns more guesses.
 /// </para>
+/// <para>
+/// A trusted device (plan decision D14, ADR 0025) is looked at only there, for an account with a confirmed method and while
+/// <c>Auth:Mfa:TrustedDevicesEnabled</c> is on: a device token whose device belongs to this user and is usable (not revoked, before its
+/// absolute expiry, bound to the user's current security stamp) stands in for the second factor, and the session starts with <c>amr</c>
+/// <c>pwd</c> (D9: a code proved earlier is not proved now, so it never satisfies an MFA step-up). Every other token (unknown, expired,
+/// revoked, another user's, an older stamp) gets the challenge exactly as if none was sent, and nothing in the answer, the audit or the
+/// metrics tells it apart.
+/// </para>
 /// </summary>
 internal sealed class LoginCommandHandler(
     IUserRepository users,
     IMfaMethodRepository mfaMethods,
     IMfaChallengeRepository challenges,
+    ITrustedDeviceRepository trustedDevices,
     IPasswordHasher passwordHasher,
     ISecureTokenService tokenService,
     SessionStarter sessionStarter,
@@ -79,10 +89,12 @@ internal sealed class LoginCommandHandler(
         var deviceName = command.DeviceName ?? DefaultDeviceName;
         if (await mfaMethods.HasConfirmedAsync(user.Id, cancellationToken))
         {
-            return await ChallengeAsync(user, deviceName, attemptedIdentifier, now, cancellationToken);
+            return await FindUsableTrustedDeviceAsync(user, command.TrustedDeviceToken, now, cancellationToken) is { } trustedDevice
+                ? await SignInAsync(user, deviceName, attemptedIdentifier, now, trustedDevice, cancellationToken)
+                : await ChallengeAsync(user, deviceName, attemptedIdentifier, now, cancellationToken);
         }
 
-        return await SignInAsync(user, deviceName, attemptedIdentifier, now, cancellationToken);
+        return await SignInAsync(user, deviceName, attemptedIdentifier, now, trustedDevice: null, cancellationToken);
     }
 
     /// <summary>
@@ -98,6 +110,21 @@ internal sealed class LoginCommandHandler(
 
         passwordHasher.SpendVerificationCost(password);
         return PasswordVerification.Failed;
+    }
+
+    /// <summary>
+    /// The device <paramref name="token"/> names, when trusted devices are on and it is a usable device of <paramref name="user"/>;
+    /// otherwise null, whatever the reason, so the caller answers exactly as without a token. Only the token's hash is looked up.
+    /// </summary>
+    private async Task<TrustedDevice?> FindUsableTrustedDeviceAsync(User user, string? token, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (!mfaOptions.Value.TrustedDevicesEnabled || string.IsNullOrWhiteSpace(token))
+        {
+            return null;
+        }
+
+        var device = await trustedDevices.GetByTokenHashAsync(tokenService.Hash(token), cancellationToken);
+        return device is not null && device.UserId == user.Id && device.IsUsable(user.SecurityStamp, now) ? device : null;
     }
 
     private async Task<Result<LoginResult>> RejectWrongCredentialsAsync(
@@ -170,14 +197,27 @@ internal sealed class LoginCommandHandler(
         return Result.Failure<LoginResult>(error);
     }
 
+    /// <summary>
+    /// Starts the session of a correct password: an account without two-step verification, or one whose usable
+    /// <paramref name="trustedDevice"/> stands in for the second factor (marked used; its expiry stays absolute). Either way the session's
+    /// <c>amr</c> is <c>pwd</c>; a trusted device is named in the audit row's <c>Details</c> by its id, never by its token.
+    /// </summary>
     private async Task<Result<LoginResult>> SignInAsync(
         User user,
         string deviceName,
         string? attemptedIdentifier,
         DateTimeOffset now,
+        TrustedDevice? trustedDevice,
         CancellationToken cancellationToken)
     {
-        var started = await sessionStarter.StartAsync(user, AuthenticationMethods.Password, deviceName, viaTrustedDevice: false, now, cancellationToken);
+        trustedDevice?.MarkUsed(now);
+        var started = await sessionStarter.StartAsync(
+            user,
+            AuthenticationMethods.Password,
+            deviceName,
+            viaTrustedDevice: trustedDevice is not null,
+            now,
+            cancellationToken);
 
         auditWriter.Record(AuthAuditLog.Create(
             AuthAuditEvents.LoginSucceeded,
@@ -185,7 +225,8 @@ internal sealed class LoginCommandHandler(
             now,
             userId: user.Id,
             attemptedIdentifier: attemptedIdentifier,
-            sessionId: started.Session.Id));
+            sessionId: started.Session.Id,
+            details: trustedDevice is null ? null : JsonSerializer.Serialize(new { trustedDeviceId = trustedDevice.Id })));
 
         // Another request changed this user between our read and this save (a parallel login, say). Nothing was saved; answer like a
         // wrong password, because the 409 the conflict would otherwise become can only happen to an existing account.

@@ -34,6 +34,8 @@ internal static class AuthAuditEvents
     public const string MfaEnabled = "auth.mfa_enabled";
     public const string MfaDisabled = "auth.mfa_disabled";
     public const string RecoveryCodesRegenerated = "auth.recovery_codes_regenerated";
+    public const string TrustedDeviceAdded = "auth.trusted_device_added";
+    public const string TrustedDeviceRevoked = "auth.trusted_device_revoked";
     public const string AdminUserCreated = "auth.admin_user_created";
     public const string AdminUserLocked = "auth.admin_user_locked";
     public const string AdminUserUnlocked = "auth.admin_user_unlocked";

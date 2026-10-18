@@ -160,8 +160,9 @@ internal static class AuthEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
-        // Two-step verification: auth/mfa/..., in the same group and tag.
+        // Two-step verification: auth/mfa/... and auth/trusted-devices/..., in the same group and tag.
         group.MapMfaEndpoints();
+        group.MapTrustedDeviceEndpoints();
 
         return app;
     }
@@ -253,14 +254,15 @@ internal static class AuthEndpoints
     }
 
     // 200 with the tokens (mfaRequired false) or, for an account with two-step verification, a challenge for POST mfa/verify (mfaRequired
-    // true); 401 auth.invalid_credentials for every wrong combination (unknown email, wrong password, no password set, locked account);
-    // 403 only after a correct password.
+    // true), unless a usable trusted device token came with the password (then the tokens, amr pwd); 401 auth.invalid_credentials for
+    // every wrong combination (unknown email, wrong password, no password set, locked account); 403 only after a correct password.
     private static async Task<IResult> LoginAsync(
         LoginRequest request,
         ICommandHandler<LoginCommand, LoginResult> handler,
         CancellationToken cancellationToken)
     {
-        var result = await handler.HandleAsync(new LoginCommand(request.Email, request.Password, request.DeviceName), cancellationToken);
+        var command = new LoginCommand(request.Email, request.Password, request.DeviceName, request.TrustedDeviceToken);
+        var result = await handler.HandleAsync(command, cancellationToken);
 
         return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
     }

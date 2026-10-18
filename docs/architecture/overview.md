@@ -143,3 +143,4 @@ The rules for when a boundary is crossed:
 | [0022](../adr/0022-totp-secrets-and-replay-protection.md) | Own RFC 6238 TOTP with a monotonic replay guard, an Auth-only secret purpose and 80-bit recovery codes |
 | [0023](../adr/0023-step-up-through-auth-time-and-amr.md) | Step-up through a fresh `auth_time` and `amr` in the access token, checked by `StepUpPolicy` |
 | [0024](../adr/0024-mfa-challenge-as-a-hashed-server-side-token.md) | The sign-in challenge is an opaque token over a hashed server-side row, with wrong codes counted on it and in the lockout |
+| [0025](../adr/0025-trusted-devices-bound-to-the-security-stamp.md) | Trusted devices are hashed bearer tokens bound to the security stamp, skipping the challenge only (`amr` `pwd`) |

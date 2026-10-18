@@ -9,6 +9,7 @@ using TemplateName.Modules.Auth.Application.Mfa.Verify;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Mfa;
 using TemplateName.Modules.Auth.Domain.Sessions;
+using TemplateName.Modules.Auth.Domain.TrustedDevices;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Domain.Users.Events;
 using TemplateName.SharedKernel;
@@ -23,12 +24,14 @@ public sealed class VerifyMfaCommandHandlerTests
     private const string AccessTokenValue = "header.payload.signature";
     private const string ProtectedSecret = "protected-secret";
     private const string DeviceName = "Alice's phone";
+    private const string DeviceTokenValue = "trusted-device-token-of-forty-three-chars-x";
 
     private static readonly DateTimeOffset Now = new(2026, 10, 17, 9, 0, 10, 500, TimeSpan.Zero);
     private static readonly DateTimeOffset IssuedAt = Now.AddMinutes(-1);
     private static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
     private static readonly byte[] ChallengeHash = [.. Enumerable.Range(1, 32).Select(value => (byte)value)];
     private static readonly byte[] RefreshTokenHash = [.. Enumerable.Range(101, 32).Select(value => (byte)value)];
+    private static readonly byte[] DeviceTokenHash = [.. Enumerable.Range(201, 32).Select(value => (byte)value)];
 
     private readonly IUserRepository _users = Substitute.For<IUserRepository>();
     private readonly IMfaChallengeRepository _challenges = Substitute.For<IMfaChallengeRepository>();
@@ -42,8 +45,10 @@ public sealed class VerifyMfaCommandHandlerTests
     private readonly IAuthAuditWriter _auditWriter = Substitute.For<IAuthAuditWriter>();
     private readonly IUnitOfWork _unitOfWork = Substitute.For<IUnitOfWork>();
     private readonly IAuthMetrics _metrics = Substitute.For<IAuthMetrics>();
+    private readonly ITrustedDeviceRepository _trustedDevices = Substitute.For<ITrustedDeviceRepository>();
     private readonly List<AuthAuditLog> _auditEntries = [];
     private readonly List<UserSession> _addedSessions = [];
+    private readonly List<TrustedDevice> _addedDevices = [];
     private readonly List<AccessTokenRequest> _tokenRequests = [];
     private readonly byte[] _secret = Totp.NewSecret();
     private readonly User _user;
@@ -91,21 +96,8 @@ public sealed class VerifyMfaCommandHandlerTests
         _sessions.Add(Arg.Do<UserSession>(_addedSessions.Add));
         _unitOfWork.TrySaveChangesAsync(Arg.Any<CancellationToken>()).Returns(true);
 
-        var verifier = new MfaFactorVerifier(_methods, _recoveryCodes, _secretProtector, new RecordingLogger<MfaFactorVerifier>());
-        var sessionStarter = new SessionStarter(_sessions, _tokenService, _accessTokenIssuer, _clientContext, Options.Create(new RefreshTokenOptions()));
-        _sut = new VerifyMfaCommandHandler(
-            _users,
-            _challenges,
-            _methods,
-            verifier,
-            sessionStarter,
-            _tokenService,
-            _auditWriter,
-            _unitOfWork,
-            _metrics,
-            Options.Create(new LockoutOptions()),
-            Options.Create(new MfaOptions()),
-            new FakeTimeProvider(Now));
+        _trustedDevices.Add(Arg.Do<TrustedDevice>(_addedDevices.Add));
+        _sut = CreateHandler(new MfaOptions());
     }
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -349,6 +341,123 @@ public sealed class VerifyMfaCommandHandlerTests
         Command(code: "123456").ToString().ShouldBe(nameof(VerifyMfaCommand));
         new MfaVerifyResponse(AccessTokenValue, Now, RefreshTokenValue, Now, Guid.Empty, "trusted-device-token", Now).ToString()
             .ShouldBe(nameof(MfaVerifyResponse));
+    }
+
+    [Fact]
+    public async Task Remember_device_returns_a_token_once_and_stores_its_hash()
+    {
+        // The first token is the session's refresh token (SessionStarter), the second the device's, generated after it.
+        _tokenService.Generate().Returns(new GeneratedToken(RefreshTokenValue, RefreshTokenHash), new GeneratedToken(DeviceTokenValue, DeviceTokenHash));
+
+        var result = await _sut.HandleAsync(Command(code: CurrentCode) with { RememberDevice = true }, Ct);
+
+        // Shown once, in this answer; the device keeps only the hash, bound to the user and the stamp the session started under.
+        var session = _addedSessions.ShouldHaveSingleItem();
+        result.Value.ShouldBe(new MfaVerifyResponse(
+            AccessTokenValue, Now.AddMinutes(10), RefreshTokenValue, Now.AddDays(14), session.Id, DeviceTokenValue, Now.AddDays(30)));
+        var device = _addedDevices.ShouldHaveSingleItem();
+        device.UserId.ShouldBe(_user.Id);
+        device.TokenHash.ShouldBe(DeviceTokenHash);
+        device.DeviceName.ShouldBe(DeviceName);
+        device.UserAgent.ShouldBe("UnitTests/1.0");
+        device.SecurityStamp.ShouldBe(_user.SecurityStamp);
+        device.SecurityStamp.ShouldBe(session.SecurityStamp);
+        device.CreatedAt.ShouldBe(Now);
+        device.ExpiresAt.ShouldBe(Now.AddDays(30));
+        device.LastUsedAt.ShouldBeNull();
+        device.RevokedAt.ShouldBeNull();
+
+        // The session itself is the TOTP sign-in's; the device is audited with its id only, and everything is one save.
+        session.AuthMethods.ShouldBe("pwd otp mfa");
+        _auditEntries.Select(entry => entry.EventType)
+            .ShouldBe([AuthAuditEvents.MfaVerified, AuthAuditEvents.LoginSucceeded, AuthAuditEvents.TrustedDeviceAdded]);
+        var added = _auditEntries[2];
+        added.Succeeded.ShouldBeTrue();
+        added.UserId.ShouldBe(_user.Id);
+        added.SessionId.ShouldBe(session.Id);
+        added.Details.ShouldBe($$"""{"trustedDeviceId":"{{device.Id}}"}""");
+        _auditEntries.ShouldAllBe(entry => entry.Details == null || !entry.Details.Contains(DeviceTokenValue));
+        await _unitOfWork.Received(1).TrySaveChangesAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Without_remember_device_no_device_is_trusted()
+    {
+        var result = await _sut.HandleAsync(Command(code: CurrentCode), Ct);
+
+        result.Value.TrustedDeviceToken.ShouldBeNull();
+        result.Value.TrustedDeviceExpiresAt.ShouldBeNull();
+        _trustedDevices.DidNotReceiveWithAnyArgs().Add(default!);
+        _tokenService.Received(1).Generate();
+    }
+
+    [Fact]
+    public async Task Switch_off_ignores_tokens_and_remember_device()
+    {
+        var sut = CreateHandler(new MfaOptions { TrustedDevicesEnabled = false });
+
+        var result = await sut.HandleAsync(Command(code: CurrentCode) with { RememberDevice = true }, Ct);
+
+        // Auth:Mfa:TrustedDevicesEnabled off: the sign-in completes as without rememberDevice, and nothing is remembered.
+        result.IsSuccess.ShouldBeTrue();
+        result.Value.TrustedDeviceToken.ShouldBeNull();
+        result.Value.TrustedDeviceExpiresAt.ShouldBeNull();
+        _trustedDevices.DidNotReceiveWithAnyArgs().Add(default!);
+        _auditEntries.ShouldAllBe(entry => entry.EventType != AuthAuditEvents.TrustedDeviceAdded);
+    }
+
+    [Fact]
+    public async Task Failed_verify_remembers_no_device()
+    {
+        var wrongCode = Totp.ComputeCode(_secret, Totp.TimeStepAt(Now) + 2);
+
+        var result = await _sut.HandleAsync(Command(code: wrongCode) with { RememberDevice = true }, Ct);
+
+        result.Error.ShouldBe(MfaErrors.InvalidCode);
+        _trustedDevices.DidNotReceiveWithAnyArgs().Add(default!);
+        _tokenService.DidNotReceiveWithAnyArgs().Generate();
+    }
+
+    [Fact]
+    public async Task Save_conflict_retry_remembers_the_device_once_under_the_reread_user()
+    {
+        var reread = NewUser(id: _user.Id, stamp: _user.SecurityStamp);
+        _users.GetByIdAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_user, reread);
+        _unitOfWork.TrySaveChangesAsync(Arg.Any<CancellationToken>()).Returns(false, true);
+        _tokenService.Generate().Returns(
+            new GeneratedToken(RefreshTokenValue, RefreshTokenHash),
+            new GeneratedToken("first-device-token", [.. Enumerable.Repeat((byte)9, 32)]),
+            new GeneratedToken(RefreshTokenValue, RefreshTokenHash),
+            new GeneratedToken(DeviceTokenValue, DeviceTokenHash));
+
+        var result = await _sut.HandleAsync(Command(code: CurrentCode) with { RememberDevice = true }, Ct);
+
+        // The first attempt's changes were discarded with the conflict; the answer carries the token of the device the second one saved.
+        result.Value.TrustedDeviceToken.ShouldBe(DeviceTokenValue);
+        _addedDevices.Count.ShouldBe(2);
+        _addedDevices[1].TokenHash.ShouldBe(DeviceTokenHash);
+        _addedDevices[1].SecurityStamp.ShouldBe(reread.SecurityStamp);
+    }
+
+    private VerifyMfaCommandHandler CreateHandler(MfaOptions mfaOptions)
+    {
+        var verifier = new MfaFactorVerifier(_methods, _recoveryCodes, _secretProtector, new RecordingLogger<MfaFactorVerifier>());
+        var sessionStarter = new SessionStarter(_sessions, _tokenService, _accessTokenIssuer, _clientContext, Options.Create(new RefreshTokenOptions()));
+        return new VerifyMfaCommandHandler(
+            _users,
+            _challenges,
+            _methods,
+            _trustedDevices,
+            verifier,
+            sessionStarter,
+            _tokenService,
+            _clientContext,
+            _auditWriter,
+            _unitOfWork,
+            _metrics,
+            Options.Create(new LockoutOptions()),
+            Options.Create(mfaOptions),
+            new FakeTimeProvider(Now));
     }
 
     private static VerifyMfaCommand Command(string? code = null, string? recoveryCode = null) =>

@@ -13,6 +13,9 @@ namespace TemplateName.Modules.Auth.Application.Authentication.Login;
 /// </summary>
 internal sealed class LoginCommandValidator : AbstractValidator<LoginCommand>
 {
+    /// <summary>The longest trusted device token accepted (as for a refresh token); a real one has 43 characters.</summary>
+    internal const int MaxTrustedDeviceTokenLength = 256;
+
     public LoginCommandValidator(IOptions<PasswordOptions> passwordOptions)
     {
         var passwords = passwordOptions.Value;
@@ -31,5 +34,9 @@ internal sealed class LoginCommandValidator : AbstractValidator<LoginCommand>
 
         RuleFor(command => command.DeviceName)
             .MaximumLength(UserSession.MaxDeviceNameLength);
+
+        // A real token has 43 characters; any other value is simply not found (the challenge, as without one), so only the size is checked.
+        RuleFor(command => command.TrustedDeviceToken)
+            .MaximumLength(MaxTrustedDeviceTokenLength);
     }
 }

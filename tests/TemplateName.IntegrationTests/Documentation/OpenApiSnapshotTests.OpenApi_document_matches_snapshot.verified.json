@@ -756,6 +756,135 @@
         ]
       }
     },
+    "/api/v1/auth/trusted-devices": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "ListTrustedDevices",
+        "parameters": [
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "includeTotalCount",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CursorPageOfTrustedDeviceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/trusted-devices/{id}": {
+      "delete": {
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "RevokeTrustedDevice",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/mfa/verify": {
       "post": {
         "tags": [
@@ -3909,6 +4038,53 @@
           }
         }
       },
+      "CursorPageOfTrustedDeviceResponse": {
+        "required": [
+          "items",
+          "pageSize",
+          "nextCursor",
+          "previousCursor",
+          "totalCount"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrustedDeviceResponse"
+            }
+          },
+          "pageSize": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "nextCursor": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "previousCursor": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
       "CursorPageOfUserListItemResponse": {
         "required": [
           "items",
@@ -4271,6 +4447,12 @@
             "type": "string"
           },
           "deviceName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "trustedDeviceToken": {
             "type": [
               "null",
               "string"
@@ -5025,6 +5207,47 @@
           },
           "otpAuthUri": {
             "type": "string"
+          }
+        }
+      },
+      "TrustedDeviceResponse": {
+        "required": [
+          "id",
+          "deviceName",
+          "userAgent",
+          "createdAt",
+          "expiresAt",
+          "lastUsedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deviceName": {
+            "type": "string"
+          },
+          "userAgent": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
           }
         }
       },

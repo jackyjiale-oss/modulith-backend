@@ -7,6 +7,7 @@ using TemplateName.Modules.Auth.Application.Authentication;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Mfa;
 using TemplateName.Modules.Auth.Domain.Sessions;
+using TemplateName.Modules.Auth.Domain.TrustedDevices;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.SharedKernel;
 
@@ -26,6 +27,10 @@ namespace TemplateName.Modules.Auth.Application.Mfa.Verify;
 /// meanwhile) is <see cref="MfaErrors.InvalidChallenge"/>, and the code stays spent: the user signs in again with the next code.</item>
 /// <item>The session, through <see cref="SessionStarter"/>: <c>amr</c> <c>pwd otp mfa</c> or <c>pwd rcvr mfa</c>, <c>auth_time</c> now, the
 /// failure count reset; a recovery code also raises <see cref="MfaChange.RecoveryCodeUsed"/>.</item>
+/// <item>With <see cref="VerifyMfaCommand.RememberDevice"/> and <c>Auth:Mfa:TrustedDevicesEnabled</c> on, a trusted device (plan
+/// decision D14, ADR 0025): a fresh secure token, only its hash stored, bound to the user and to the security stamp the session started
+/// under (taken after <see cref="SessionStarter"/>, which does not rotate it), valid <c>Auth:Mfa:TrustedDeviceLifetime</c>; the token and
+/// its expiry are in this answer only, and the device is audited as <c>auth.trusted_device_added</c> with its id. Same save as the session.</item>
 /// </list>
 /// Every outcome is audited (<c>auth.mfa_verified</c> with <c>auth.login_succeeded</c>, or <c>auth.mfa_failed</c> with the error code as
 /// the reason) and counted in <c>auth.mfa_verifications</c>. From the factor on, nothing honours the request's cancellation: a code may
@@ -35,9 +40,11 @@ internal sealed class VerifyMfaCommandHandler(
     IUserRepository users,
     IMfaChallengeRepository challenges,
     IMfaMethodRepository mfaMethods,
+    ITrustedDeviceRepository trustedDevices,
     MfaFactorVerifier factorVerifier,
     SessionStarter sessionStarter,
     ISecureTokenService tokenService,
+    IClientContext client,
     IAuthAuditWriter auditWriter,
     IUnitOfWork unitOfWork,
     IAuthMetrics metrics,
@@ -109,6 +116,10 @@ internal sealed class VerifyMfaCommandHandler(
                 userId: user.Id,
                 sessionId: started.Session.Id));
 
+            var remembered = command.RememberDevice && mfaOptions.Value.TrustedDevicesEnabled
+                ? RememberDevice(user, challenge.DeviceName, started.Session.Id, now)
+                : null;
+
             if (await unitOfWork.TrySaveChangesAsync(CancellationToken.None))
             {
                 metrics.RecordMfaVerification(MfaVerificationOutcome.Succeeded, factor);
@@ -119,8 +130,8 @@ internal sealed class VerifyMfaCommandHandler(
                     tokens.RefreshToken,
                     tokens.RefreshTokenExpiresAt,
                     tokens.SessionId,
-                    TrustedDeviceToken: null,
-                    TrustedDeviceExpiresAt: null);
+                    remembered?.Token,
+                    remembered?.ExpiresAt);
             }
 
             // Nothing was saved and the pending changes are gone. Read the user again and go on only while it could still sign in with
@@ -136,6 +147,34 @@ internal sealed class VerifyMfaCommandHandler(
     }
 
     private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    /// <summary>
+    /// Stages a trusted device of <paramref name="user"/> for the save that starts the session: a fresh token (only its hash is kept), the
+    /// user's current security stamp, the challenge's device name and the client's user agent. Returns the token to show once.
+    /// </summary>
+    private RememberedDevice RememberDevice(User user, string deviceName, Guid sessionId, DateTimeOffset now)
+    {
+        var token = tokenService.Generate();
+        var device = TrustedDevice.Trust(
+            user.Id,
+            token.Hash,
+            deviceName,
+            client.UserAgent,
+            user.SecurityStamp,
+            mfaOptions.Value.TrustedDeviceLifetime,
+            now);
+        trustedDevices.Add(device);
+
+        auditWriter.Record(AuthAuditLog.Create(
+            AuthAuditEvents.TrustedDeviceAdded,
+            succeeded: true,
+            now,
+            userId: user.Id,
+            sessionId: sessionId,
+            details: JsonSerializer.Serialize(new { trustedDeviceId = device.Id })));
+
+        return new RememberedDevice(token.Value, device.ExpiresAt);
+    }
 
     /// <summary>The user still holds the stamp the challenge was issued under, may sign in and is not locked.</summary>
     private static bool CanSignIn(User user, MfaChallenge challenge, DateTimeOffset now) =>
@@ -195,4 +234,11 @@ internal sealed class VerifyMfaCommandHandler(
             userId: userId,
             failureReason: error.Code,
             details: FactorDetails(tried)));
+
+    /// <summary>The token of a device remembered by this verify, shown once, and its absolute expiry.</summary>
+    private sealed record RememberedDevice(string Token, DateTimeOffset ExpiresAt)
+    {
+        /// <summary>Only the type name, so the token can never be formatted into a log line.</summary>
+        public override string ToString() => nameof(RememberedDevice);
+    }
 }
