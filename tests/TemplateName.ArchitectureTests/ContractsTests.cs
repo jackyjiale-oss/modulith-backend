@@ -33,7 +33,8 @@ public sealed class ContractsTests
             // The project file: one project reference (the shared kernel) and no package.
             var project = XDocument.Load(ProjectFilePath(contracts));
             var projectReferences = project.Descendants("ProjectReference")
-                .Select(reference => Path.GetFileNameWithoutExtension((string?)reference.Attribute("Include") ?? string.Empty))
+                // MSBuild paths use backslashes on every OS, but Path only splits on them on Windows.
+                .Select(reference => Path.GetFileNameWithoutExtension(((string?)reference.Attribute("Include") ?? string.Empty).Replace('\\', '/')))
                 .ToList();
             if (!projectReferences.SequenceEqual([SharedKernelName]))
             {
