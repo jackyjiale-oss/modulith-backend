@@ -12,8 +12,9 @@ namespace TemplateName.Modules.Auth.Application.TrustedDevices.Revoke;
 /// Revokes one of the caller's trusted devices, so its token gets the challenge again at the next sign-in. A device that does not exist
 /// and a device of another user answer with the same <see cref="TrustedDeviceErrors.NotFound"/>, so ids cannot be probed. A device of the
 /// caller that is already revoked succeeds without changing anything (the first revocation time stays, and no second audit row is
-/// written). An expired device, or one an older security stamp already made unusable, is revoked like any other. No step-up: reducing
-/// trust is always safe (plan decision D11).
+/// written). That check is a read, not a conditional update, so two revocations racing each other can both pass it and both write an
+/// audit row; the stored revocation time is then the later save's. An expired device, or one an older security stamp already made
+/// unusable, is revoked like any other. No step-up: reducing trust is always safe (plan decision D11).
 /// </summary>
 internal sealed class RevokeTrustedDeviceCommandHandler(
     ITrustedDeviceRepository trustedDevices,

@@ -22,7 +22,8 @@ internal sealed class ListTrustedDevicesQueryHandler(IDbConnectionFactory connec
     : IQueryHandler<ListTrustedDevicesQuery, CursorPage<TrustedDeviceResponse>>
 {
     // Same boundaries as the domain: the device is over from its expiry instant on (now >= ExpiresAt), and the stamps compare ordinally
-    // (a binary collation, like StringComparison.Ordinal in TrustedDevice.IsUsable).
+    // (a binary collation, like StringComparison.Ordinal in TrustedDevice.IsUsable). Both queries alias the table as "device", which the
+    // subquery names for the outer row (a three-part column name is deprecated).
     private const string Filter = """
         UserId = @UserId
         AND RevokedAt IS NULL
@@ -30,8 +31,8 @@ internal sealed class ListTrustedDevicesQueryHandler(IDbConnectionFactory connec
         AND EXISTS (
             SELECT 1
             FROM [auth].[Users] AS owner
-            WHERE owner.Id = [auth].[TrustedDevices].UserId
-              AND owner.SecurityStamp = [auth].[TrustedDevices].SecurityStamp COLLATE Latin1_General_BIN2)
+            WHERE owner.Id = device.UserId
+              AND owner.SecurityStamp = device.SecurityStamp COLLATE Latin1_General_BIN2)
         """;
 
     public async Task<Result<CursorPage<TrustedDeviceResponse>>> HandleAsync(ListTrustedDevicesQuery query, CancellationToken cancellationToken)
@@ -72,7 +73,7 @@ internal sealed class ListTrustedDevicesQueryHandler(IDbConnectionFactory connec
         // The columns follow the TrustedDeviceResponse constructor, which Dapper binds by position.
         var pageSql = $"""
             SELECT TOP (@Take) Id, DeviceName, UserAgent, CreatedAt, ExpiresAt, LastUsedAt
-            FROM [auth].[TrustedDevices]
+            FROM [auth].[TrustedDevices] AS device
             WHERE {Filter} AND {keyset.WhereClause}
             ORDER BY {keyset.OrderByClause}
             """;
@@ -83,7 +84,7 @@ internal sealed class ListTrustedDevicesQueryHandler(IDbConnectionFactory connec
         long? totalCount = null;
         if (query.Page.IncludeTotalCount)
         {
-            var countSql = $"SELECT COUNT_BIG(*) FROM [auth].[TrustedDevices] WHERE {Filter}";
+            var countSql = $"SELECT COUNT_BIG(*) FROM [auth].[TrustedDevices] AS device WHERE {Filter}";
             totalCount = await connection.ExecuteScalarAsync<long>(new CommandDefinition(countSql, parameters, cancellationToken: cancellationToken));
         }
 
