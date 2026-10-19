@@ -7,7 +7,9 @@ using TemplateName.Application.Common.Security;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.IntegrationTests.Infrastructure;
 using TemplateName.Modules.Auth.Application;
+using TemplateName.Modules.Auth.Application.Mfa;
 using TemplateName.Modules.Auth.Contracts.IntegrationEvents;
+using TemplateName.Modules.Auth.Domain.Mfa;
 using TemplateName.Modules.Auth.Domain.Sessions.Events;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Domain.Users.Events;
@@ -28,10 +30,18 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
     private const string LoginRoute = "/api/v1/auth/login";
     private const string RefreshRoute = "/api/v1/auth/token/refresh";
     private const string ChangeRoute = "/api/v1/auth/password/change";
+    private const string SetupRoute = "/api/v1/auth/mfa/totp/setup";
+    private const string ConfirmRoute = "/api/v1/auth/mfa/totp/confirm";
+    private const string RegenerateRoute = "/api/v1/auth/mfa/recovery-codes/regenerate";
+    private const string MethodsRoute = "/api/v1/auth/mfa/methods";
+    private const string StepUpRoute = "/api/v1/auth/step-up";
+    private const string VerifyRoute = "/api/v1/auth/mfa/verify";
     private const string UsersRoute = "/api/v1/admin/auth/users";
     private const string Email = "alice@example.com";
     private const string ConfirmEmailUrl = "http://localhost:3000/confirm-email?token=";
     private const string ResetPasswordUrl = "http://localhost:3000/reset-password?token=";
+
+    private int _addressCount;
 
     [Fact]
     public async Task Register_then_dispatch_publishes_one_email_verification_event()
@@ -195,6 +205,229 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
             .ShouldBe(new UserLockedOutIntegrationEvent(lockout.Id, OccurredAt(lockout), user.Id, stored.LockoutEnd.ShouldNotBeNull()));
     }
 
+    [Fact]
+    public async Task Enabling_disabling_and_regenerating_publish_mfa_changed()
+    {
+        var user = await CreateUserAsync(Email);
+        var login = await SignInOnDeviceAsync("Laptop");
+        AuthTestHarness.Authorize(Client, login.AccessToken);
+        var (methodId, secret) = await SetUpAuthenticatorAsync();
+
+        Factory.Time.Advance(TimeSpan.FromSeconds(20));
+        using (var confirm = await Client.PostAsJsonAsync(ConfirmRoute, new { code = CodeAt(secret) }, Ct))
+        {
+            confirm.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+
+        // A later time step proves the step-up the next two actions need.
+        Factory.Time.Advance(TimeSpan.FromSeconds(60));
+        await StepUpAsync(new { code = CodeAt(secret) });
+        using (var regenerate = await Client.PostAsync(RegenerateRoute, content: null, Ct))
+        {
+            regenerate.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+
+        Factory.Time.Advance(TimeSpan.FromSeconds(1));
+        using (var disable = await Client.DeleteAsync($"{MethodsRoute}/{methodId}", Ct))
+        {
+            disable.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        }
+
+        await DispatchNotificationsAsync();
+
+        var messages = (await QueryAsync(context => context.Set<OutboxMessage>().AsNoTracking()
+            .Where(message => message.Type == typeof(MfaChangedDomainEvent).FullName)
+            .ToListAsync(Ct))).OrderBy(message => message.OccurredAt).ToList();
+        var published = Factory.IntegrationEvents.Events.OfType<MfaChangedIntegrationEvent>().OrderBy(integrationEvent => integrationEvent.OccurredAt).ToList();
+        published.Select(integrationEvent => integrationEvent.Change)
+            .ShouldBe([MfaChangeKind.Enabled, MfaChangeKind.RecoveryCodesRegenerated, MfaChangeKind.Disabled]);
+        published.ShouldAllBe(integrationEvent => integrationEvent.UserId == user.Id);
+
+        // Each carries the id and time of its outbox message.
+        messages.Count.ShouldBe(3);
+        published.Select(integrationEvent => integrationEvent.Id).ShouldBe(messages.Select(message => message.Id));
+        published.Select(integrationEvent => integrationEvent.OccurredAt).ShouldBe(messages.Select(OccurredAt));
+
+        // The first session of the account is not a new device, and no other sign-in happened.
+        Factory.IntegrationEvents.Events.OfType<NewDeviceSignedInIntegrationEvent>().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Recovery_code_sign_in_publishes_RecoveryCodeUsed()
+    {
+        var user = await CreateUserAsync(Email);
+        var enrollment = await EnrollTotpAsync(user.Id);
+
+        var challengeToken = await ChallengeAsync("Laptop");
+        using (var verify = await PostAnonymousAsync(VerifyRoute, new { challengeToken, recoveryCode = enrollment.RecoveryCodes[0] }))
+        {
+            verify.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+
+        await DispatchNotificationsAsync();
+
+        var message = await OutboxMessageAsync<MfaChangedDomainEvent>();
+        Factory.IntegrationEvents.Events.OfType<MfaChangedIntegrationEvent>().ShouldHaveSingleItem()
+            .ShouldBe(new MfaChangedIntegrationEvent(message.Id, OccurredAt(message), user.Id, MfaChangeKind.RecoveryCodeUsed));
+    }
+
+    [Fact]
+    public async Task Totp_sign_in_publishes_no_mfa_changed()
+    {
+        var user = await CreateUserAsync(Email);
+        var enrollment = await EnrollTotpAsync(user.Id);
+
+        var challengeToken = await ChallengeAsync("Laptop");
+        using (var verify = await PostAnonymousAsync(VerifyRoute, new { challengeToken, code = enrollment.CodeAt(Factory.Time.GetUtcNow()) }))
+        {
+            verify.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+
+        await DispatchNotificationsAsync();
+
+        Factory.IntegrationEvents.Events.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Admin_reset_publishes_ResetByAdmin()
+    {
+        var target = await CreateUserAsync(Email);
+        await EnrollTotpAsync(target.Id);
+        await SignInAsync(AuthPermissions.UserResetMfa);
+
+        using (var reset = await Client.PostAsync($"{UsersRoute}/{target.Id}/reset-mfa", content: null, Ct))
+        {
+            reset.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        }
+
+        await DispatchNotificationsAsync();
+
+        var message = await OutboxMessageAsync<MfaChangedDomainEvent>();
+        Factory.IntegrationEvents.Events.OfType<MfaChangedIntegrationEvent>().ShouldHaveSingleItem()
+            .ShouldBe(new MfaChangedIntegrationEvent(message.Id, OccurredAt(message), target.Id, MfaChangeKind.ResetByAdmin));
+    }
+
+    [Fact]
+    public async Task First_sign_in_is_not_a_new_device()
+    {
+        await CreateUserAsync(Email);
+
+        await SignInOnDeviceAsync("Laptop");
+        await DispatchNotificationsAsync();
+
+        Factory.IntegrationEvents.Events.OfType<NewDeviceSignedInIntegrationEvent>().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Second_device_publishes_new_device_and_the_same_device_again_does_not()
+    {
+        var user = await CreateUserAsync(Email);
+        await SignInOnDeviceAsync("Laptop");
+
+        var phone = await SignInOnDeviceAsync("Phone", address: "198.51.100.77");
+        await SignInOnDeviceAsync("Phone");
+        await SignInOnDeviceAsync("Laptop");
+        await DispatchNotificationsAsync();
+
+        var message = await OutboxMessageAsync<NewDeviceSignedInDomainEvent>();
+        Factory.IntegrationEvents.Events.OfType<NewDeviceSignedInIntegrationEvent>().ShouldHaveSingleItem()
+            .ShouldBe(new NewDeviceSignedInIntegrationEvent(message.Id, OccurredAt(message), user.Id, phone.SessionId, "198.51.100.77"));
+    }
+
+    [Fact]
+    public async Task A_device_is_told_apart_by_name_and_user_agent_exactly()
+    {
+        await CreateUserAsync(Email);
+        await SignInOnDeviceAsync("Phone", userAgent: "Agent/1");
+
+        // Another agent, another case, and no agent at all are each a device the user has not signed in from.
+        await SignInOnDeviceAsync("Phone", userAgent: "Agent/2");
+        await SignInOnDeviceAsync("phone", userAgent: "Agent/1");
+        await SignInOnDeviceAsync("Phone");
+
+        // The same pair again, and the same pair without an agent again, are known.
+        await SignInOnDeviceAsync("Phone", userAgent: "Agent/1");
+        await SignInOnDeviceAsync("Phone");
+        await DispatchNotificationsAsync();
+
+        Factory.IntegrationEvents.Events.OfType<NewDeviceSignedInIntegrationEvent>().Count().ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task A_new_device_after_the_challenge_publishes_new_device_too()
+    {
+        var user = await CreateUserAsync(Email);
+        var enrollment = await EnrollTotpAsync(user.Id);
+        var first = await ChallengeAsync("Laptop");
+        using (var verify = await PostAnonymousAsync(VerifyRoute, new { challengeToken = first, code = enrollment.CodeAt(Factory.Time.GetUtcNow()) }))
+        {
+            verify.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+
+        Factory.Time.Advance(TimeSpan.FromSeconds(60));
+        var second = await ChallengeAsync("Phone");
+        using var secondVerify = await PostAnonymousAsync(VerifyRoute, new { challengeToken = second, code = enrollment.CodeAt(Factory.Time.GetUtcNow()) });
+        secondVerify.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var sessionId = (await secondVerify.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("sessionId").GetGuid();
+
+        await DispatchNotificationsAsync();
+
+        Factory.IntegrationEvents.Events.OfType<NewDeviceSignedInIntegrationEvent>().ShouldHaveSingleItem().SessionId.ShouldBe(sessionId);
+    }
+
+    [Fact]
+    public async Task Events_carry_no_secret()
+    {
+        const string FirstDevice = "Home PC of the Wilsons";
+        const string SecondDevice = "Secret Phone of Alice";
+        await CreateUserAsync(Email);
+        var home = await SignInOnDeviceAsync(FirstDevice);
+        AuthTestHarness.Authorize(Client, home.AccessToken);
+        var (_, secret) = await SetUpAuthenticatorAsync();
+        Factory.Time.Advance(TimeSpan.FromSeconds(20));
+        using var confirm = await Client.PostAsJsonAsync(ConfirmRoute, new { code = CodeAt(secret) }, Ct);
+        confirm.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var recoveryCodes = (await confirm.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("recoveryCodes")
+            .EnumerateArray().Select(item => item.GetString()!).ToList();
+        SignOut();
+
+        // A second device signs in with a recovery code: a new device and a recovery-code event, each with secrets around it.
+        var challengeToken = await ChallengeAsync(SecondDevice);
+        using var verify = await PostAnonymousAsync(VerifyRoute, new { challengeToken, recoveryCode = recoveryCodes[0] });
+        verify.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var tokens = await verify.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        await DispatchNotificationsAsync();
+
+        var published = Factory.IntegrationEvents.Events;
+        published.OfType<MfaChangedIntegrationEvent>().Select(integrationEvent => integrationEvent.Change)
+            .ShouldBe([MfaChangeKind.Enabled, MfaChangeKind.RecoveryCodeUsed], ignoreOrder: true);
+        published.OfType<NewDeviceSignedInIntegrationEvent>().ShouldHaveSingleItem();
+
+        var secrets = new List<string>
+        {
+            Convert.ToBase64String(secret),
+            Convert.ToHexString(secret),
+            Base32.Encode(secret),
+            challengeToken,
+            FirstDevice,
+            SecondDevice,
+            home.AccessToken,
+            home.RefreshToken,
+            tokens.GetProperty("accessToken").GetString()!,
+            tokens.GetProperty("refreshToken").GetString()!,
+        };
+        secrets.AddRange(recoveryCodes);
+        secrets.AddRange(recoveryCodes.Select(code => code.Replace("-", string.Empty, StringComparison.Ordinal)));
+        foreach (var integrationEvent in published)
+        {
+            var json = JsonSerializer.Serialize(integrationEvent, integrationEvent.GetType());
+            foreach (var value in secrets)
+            {
+                json.ShouldNotContain(value, Case.Insensitive);
+            }
+        }
+    }
+
     private static DateTimeOffset OccurredAt(OutboxMessage message)
         => new(DateTime.SpecifyKind(message.OccurredAt, DateTimeKind.Utc));
 
@@ -222,6 +455,57 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
         return new Tokens(body.GetProperty("accessToken").GetString()!, body.GetProperty("refreshToken").GetString()!, body.GetProperty("sessionId").GetGuid());
+    }
+
+    private string CodeAt(byte[] secret) => Totp.ComputeCode(secret, Totp.TimeStepAt(Factory.Time.GetUtcNow()));
+
+    /// <summary>Starts a TOTP setup for the user <see cref="IntegrationTestBase.Client"/> is signed in as; returns the method and its secret.</summary>
+    private async Task<(Guid MethodId, byte[] Secret)> SetUpAuthenticatorAsync()
+    {
+        using var setup = await Client.PostAsJsonAsync(SetupRoute, new { }, Ct);
+        setup.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await setup.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        return (body.GetProperty("methodId").GetGuid(), Base32.Decode(body.GetProperty("secret").GetString()!));
+    }
+
+    /// <summary>Steps up the session whose token the client sends, and makes the client send the new token.</summary>
+    private async Task StepUpAsync(object proof)
+    {
+        using var response = await Client.PostAsJsonAsync(StepUpRoute, proof, Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var token = (await response.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("accessToken").GetString()!;
+        AuthTestHarness.Authorize(Client, token);
+    }
+
+    /// <summary>Signs <see cref="Email"/> in on a device the way a client does, from its own address unless one is given.</summary>
+    private async Task<Tokens> SignInOnDeviceAsync(string deviceName, string? userAgent = null, string? address = null)
+    {
+        using var response = await PostAnonymousAsync(LoginRoute, new { email = Email, password = AuthTestHarness.Password, deviceName }, address, userAgent);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        return new Tokens(body.GetProperty("accessToken").GetString()!, body.GetProperty("refreshToken").GetString()!, body.GetProperty("sessionId").GetGuid());
+    }
+
+    /// <summary>The password step of an account with two-step verification; returns the challenge token.</summary>
+    private async Task<string> ChallengeAsync(string deviceName)
+    {
+        using var response = await PostAnonymousAsync(LoginRoute, new { email = Email, password = AuthTestHarness.Password, deviceName });
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        body.GetProperty("mfaRequired").GetBoolean().ShouldBeTrue();
+        return body.GetProperty("challengeToken").GetString()!;
+    }
+
+    private async Task<HttpResponseMessage> PostAnonymousAsync(string route, object body, string? address = null, string? userAgent = null)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, route) { Content = JsonContent.Create(body) };
+        request.Headers.Add(TestClientAddressStartupFilter.HeaderName, address ?? $"198.51.100.{Interlocked.Increment(ref _addressCount)}");
+        if (userAgent is not null)
+        {
+            request.Headers.TryAddWithoutValidation("User-Agent", userAgent);
+        }
+
+        return await Client.SendAsync(request, Ct);
     }
 
     private Task<HttpResponseMessage> RefreshAsync(string refreshToken) => Client.PostAsJsonAsync(RefreshRoute, new { refreshToken }, Ct);

@@ -11,7 +11,8 @@ namespace TemplateName.Modules.Auth.Application.Authentication;
 /// it records the successful sign-in on the user (failures and lockout cleared, <c>LastLoginAt</c> set), starts a session from the
 /// client's user agent and address with a first refresh token (only its hash is stored) and issues the access token, whose
 /// <c>auth_time</c> is <c>now</c> and whose <c>amr</c> is <c>authMethods</c>. It saves nothing and audits nothing: the caller adds its
-/// audit rows and saves everything at once, so a lost save keeps none of it.
+/// audit rows and saves everything at once, so a lost save keeps none of it. A sign-in that is not through a trusted device from a
+/// device none of the user's stored sessions used raises <c>NewDeviceSignedInDomainEvent</c> on the new session (D15).
 /// </summary>
 internal sealed class SessionStarter(
     ISessionRepository sessions,
@@ -24,10 +25,13 @@ internal sealed class SessionStarter(
     /// <param name="user">The tracked user who just proved every factor the sign-in needs.</param>
     /// <param name="authMethods">The <c>amr</c> values in the <see cref="UserSession.AuthMethods"/> format (<see cref="AuthenticationMethods.Join"/>).</param>
     /// <param name="deviceName">The device name the client gave (<c>Unknown</c> when it gave none); a longer one is cut to its column.</param>
-    /// <param name="viaTrustedDevice">Whether a remembered device stood in for the second factor; read by the new-device rule of a later task.</param>
+    /// <param name="viaTrustedDevice">
+    /// Whether a remembered device stood in for the second factor. Such a sign-in is never a new device (the user already proved this
+    /// device once), so nothing is asked or raised.
+    /// </param>
     /// <param name="now">The instant of the sign-in: the session's start and the token's <c>auth_time</c>.</param>
-    /// <param name="cancellationToken">Unused for now: nothing here reads the database yet.</param>
-    public Task<StartedSession> StartAsync(
+    /// <param name="cancellationToken">Cancels the device lookup.</param>
+    public async Task<StartedSession> StartAsync(
         User user,
         string authMethods,
         string deviceName,
@@ -52,13 +56,20 @@ internal sealed class SessionStarter(
             refreshTokens.SlidingLifetime,
             refreshTokens.AbsoluteLifetime,
             now);
+
+        // Before the session is added, so it can never match itself. The stored (cut) values are the ones compared (D15).
+        if (!viaTrustedDevice
+            && await sessions.GetDeviceFamiliarityAsync(user.Id, session.DeviceName, session.UserAgent, cancellationToken) == DeviceFamiliarity.New)
+        {
+            session.NoteNewDevice();
+        }
+
         sessions.Add(session);
 
         var accessToken = accessTokens.Issue(new AccessTokenRequest(user.Id, session.Id, user.SecurityStamp, authMethods, now, user.Locale));
 
-        var started = new StartedSession(
+        return new StartedSession(
             session,
             new LoginResponse(accessToken.Value, accessToken.ExpiresAt, refreshToken.Value, firstToken.ExpiresAt, session.Id));
-        return Task.FromResult(started);
     }
 }

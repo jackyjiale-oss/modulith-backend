@@ -179,6 +179,8 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             AddRecordingIntegrationEventHandler<PasswordChangedIntegrationEvent>(services);
             AddRecordingIntegrationEventHandler<UserLockedOutIntegrationEvent>(services);
             AddRecordingIntegrationEventHandler<RefreshTokenReuseDetectedIntegrationEvent>(services);
+            AddRecordingIntegrationEventHandler<MfaChangedIntegrationEvent>(services);
+            AddRecordingIntegrationEventHandler<NewDeviceSignedInIntegrationEvent>(services);
             services.AddSingleton(IntegrationEvents);
             services.AddApplicationHandlers(typeof(IntegrationTestWebAppFactory).Assembly);
             services.AddOutbox<TestDbContext>(typeof(IntegrationTestWebAppFactory).Assembly);
