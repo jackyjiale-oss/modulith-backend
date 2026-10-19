@@ -1759,6 +1759,85 @@
         ]
       }
     },
+    "/api/v1/admin/auth/users/{id}/reset-mfa": {
+      "post": {
+        "tags": [
+          "Auth administration"
+        ],
+        "operationId": "ResetUserMfa",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/auth/users/{id}/roles": {
       "put": {
         "tags": [
@@ -5404,6 +5483,7 @@
           "lastLoginAt",
           "passwordChangedAt",
           "createdAt",
+          "mfaEnabled",
           "roles"
         ],
         "type": "object",
@@ -5460,6 +5540,9 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "mfaEnabled": {
+            "type": "boolean"
           },
           "roles": {
             "type": "array",

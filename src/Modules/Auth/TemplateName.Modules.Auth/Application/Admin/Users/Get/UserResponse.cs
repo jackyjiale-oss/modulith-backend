@@ -16,6 +16,7 @@ namespace TemplateName.Modules.Auth.Application.Admin.Users.Get;
 /// <param name="LastLoginAt">The last successful sign-in, if any.</param>
 /// <param name="PasswordChangedAt">When the password was last set, if ever.</param>
 /// <param name="CreatedAt">When the account was created (UTC).</param>
+/// <param name="MfaEnabled">Whether two-step verification is on (a confirmed method); a setup nobody confirmed does not count.</param>
 /// <param name="Roles">The user's roles that are not deleted, sorted by name.</param>
 internal sealed record UserResponse(
     Guid Id,
@@ -31,4 +32,5 @@ internal sealed record UserResponse(
     DateTimeOffset? LastLoginAt,
     DateTimeOffset? PasswordChangedAt,
     DateTime CreatedAt,
+    bool MfaEnabled,
     IReadOnlyList<UserRoleResponse> Roles);

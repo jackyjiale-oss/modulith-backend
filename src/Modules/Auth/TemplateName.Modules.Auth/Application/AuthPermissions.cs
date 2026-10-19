@@ -13,6 +13,8 @@ internal static class AuthPermissions
 
     public const string UserRevokeSessions = "auth.user.revoke_sessions";
 
+    public const string UserResetMfa = "auth.user.reset_mfa";
+
     public const string UserAssignRoles = "auth.user.assign_roles";
 
     public const string RoleView = "auth.role.view";

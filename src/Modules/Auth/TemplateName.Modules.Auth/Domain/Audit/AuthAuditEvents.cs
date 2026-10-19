@@ -41,6 +41,7 @@ internal static class AuthAuditEvents
     public const string AdminUserUnlocked = "auth.admin_user_unlocked";
     public const string AdminPasswordResetForced = "auth.admin_password_reset_forced";
     public const string AdminSessionsRevoked = "auth.admin_sessions_revoked";
+    public const string AdminMfaReset = "auth.admin_mfa_reset";
     public const string AdminRolesAssigned = "auth.admin_roles_assigned";
     public const string RoleCreated = "auth.role_created";
     public const string RoleUpdated = "auth.role_updated";

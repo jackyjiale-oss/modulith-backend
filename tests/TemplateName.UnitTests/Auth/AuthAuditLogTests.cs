@@ -134,10 +134,11 @@ public sealed class AuthAuditLogTests
             .Select(f => (string)f.GetRawConstantValue()!)
             .ToList();
 
-        values.Count.ShouldBe(41);
+        values.Count.ShouldBe(42);
         values.ShouldContain("auth.step_up_succeeded");
         values.ShouldContain("auth.step_up_failed");
         values.ShouldContain("auth.mfa_setup_started");
+        values.ShouldContain("auth.admin_mfa_reset");
         values.ShouldContain("auth.mfa_enabled");
         values.ShouldContain("auth.mfa_disabled");
         values.ShouldContain("auth.recovery_codes_regenerated");
