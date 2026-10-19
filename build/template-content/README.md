@@ -49,7 +49,7 @@ With these settings the API applies the module migrations on startup and seeds t
 
 | Module | Document |
 |---|---|
-| Auth (sign-in, tokens, sessions, roles, permissions, audit log) | [`docs/modules/auth.md`](docs/modules/auth.md) |
+| Auth (sign-in, tokens, sessions, two-step verification with recovery codes, step-up and trusted devices, roles, permissions, audit log) | [`docs/modules/auth.md`](docs/modules/auth.md) |
 | Notifications (every email and in-app message, the inbox, the SignalR hub, preferences, quiet hours) | [`docs/modules/notifications.md`](docs/modules/notifications.md) |
 | Sample (leave requests) | [`docs/modules/sample.md`](docs/modules/sample.md) |
 
