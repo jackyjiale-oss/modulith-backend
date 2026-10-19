@@ -40,6 +40,13 @@ public sealed class MfaNotificationTemplateTests
             message.TextBody.ShouldContain("2026-10-09 14:30 (Asia/Kuala_Lumpur)", customMessage: $"{culture} {kind} text");
             message.HtmlBody.ShouldContain("2026-10-09 14:30 (Asia/Kuala_Lumpur)", customMessage: $"{culture} {kind} html");
             message.TextBody.ShouldNotContain(kind, Case.Insensitive);
+
+            // A mistyped condition renders its sentence as nothing; the greeting and the time paragraphs would hide that, so the
+            // sentence paragraph itself must not be empty (text: no blank-line run; html: no empty <p>), and the four paragraphs stay.
+            var text = message.TextBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+            text.ShouldNotContain("\n\n\n", customMessage: $"{culture} {kind} text has an empty paragraph");
+            Paragraphs(text).ShouldBe(4, $"{culture} {kind} text");
+            Regex.IsMatch(message.HtmlBody, @"<p>\s*</p>").ShouldBeFalse($"{culture} {kind} html has an empty paragraph");
             texts.Add(message.TextBody);
             htmls.Add(message.HtmlBody);
         }
