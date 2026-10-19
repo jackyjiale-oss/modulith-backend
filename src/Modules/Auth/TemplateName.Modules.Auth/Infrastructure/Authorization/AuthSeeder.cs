@@ -27,17 +27,13 @@ internal sealed partial class AuthSeeder(
     TimeProvider timeProvider,
     ILogger<AuthSeeder> logger)
 {
-    /// <summary>The permissions <c>Admin</c> gets when the role is created. Later runs leave its set to the administrators.</summary>
+    /// <summary>
+    /// The Auth permissions <c>Admin</c> gets by default: the Auth definitions flagged <c>AdminDefault</c> (see
+    /// <see cref="AuthPermissionSource"/>). Other modules flag their own; the seeder grants every flagged code the same way.
+    /// </summary>
     internal static readonly IReadOnlyList<string> AdminDefaultPermissions =
     [
-        AuthPermissions.UserView,
-        AuthPermissions.UserCreate,
-        AuthPermissions.UserLock,
-        AuthPermissions.UserResetPassword,
-        AuthPermissions.UserRevokeSessions,
-        AuthPermissions.RoleView,
-        AuthPermissions.PermissionView,
-        AuthPermissions.AuditView,
+        .. new AuthPermissionSource().Permissions.Where(definition => definition.AdminDefault).Select(definition => definition.Code),
     ];
 
     private const string AdministratorDisplayName = "Administrator";
@@ -74,18 +70,15 @@ internal sealed partial class AuthSeeder(
         await context.Database.ExecuteSqlRawAsync(AcquireSeedLockSql, cancellationToken);
 
         var now = timeProvider.GetUtcNow();
-        var activePermissions = await synchronizer.SyncAsync(now, cancellationToken);
+        var sync = await synchronizer.SyncAsync(now, cancellationToken);
 
         var superAdmin = await EnsureSystemRoleAsync(SystemRoleDefinitions[0], now, cancellationToken);
         var admin = await EnsureSystemRoleAsync(SystemRoleDefinitions[1], now, cancellationToken);
         _ = await EnsureSystemRoleAsync(SystemRoleDefinitions[2], now, cancellationToken);
 
         // SyncPermissions, not SetPermissions: the seeder is the one writer of SuperAdmin's set, which SetPermissions refuses.
-        superAdmin.Role.SyncPermissions([.. activePermissions.Select(permission => permission.Id)]);
-        if (admin.IsCreated)
-        {
-            admin.Role.SyncPermissions(AdminDefaultPermissionIds(activePermissions));
-        }
+        superAdmin.Role.SyncPermissions([.. sync.Active.Select(permission => permission.Id)]);
+        GrantAdminDefaults(admin, sync);
 
         var seededAdministratorId = administrator is { } settings
             ? await EnsureAdministratorAsync(settings.Email, settings.Password, superAdmin.Role.Id, now, cancellationToken)
@@ -94,7 +87,7 @@ internal sealed partial class AuthSeeder(
         await context.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        LogSeeded(logger, activePermissions.Count);
+        LogSeeded(logger, sync.Active.Count);
         if (seededAdministratorId is { } userId)
         {
             LogAdministratorSeeded(logger, userId);
@@ -174,16 +167,23 @@ internal sealed partial class AuthSeeder(
         return user.Id;
     }
 
-    private static Guid[] AdminDefaultPermissionIds(IReadOnlyList<Permission> activePermissions)
+    /// <summary>
+    /// Gives <c>Admin</c> the flagged permissions a run introduces, and only those: a newly created role gets every flagged permission
+    /// (its starting set), an existing one only the flagged codes this run inserted. Nothing is ever taken away or added back, so a
+    /// default an administrator removed stays removed on the next run, and a deprecated code that is declared again keeps whatever
+    /// grants it had. Like every seeder grant it does not clear the permission cache: a user who held a cached set sees the new
+    /// permission within 30 seconds (ADR 0016); the host seeds before it serves requests, so in practice nobody does.
+    /// </summary>
+    private static void GrantAdminDefaults((Role Role, bool IsCreated) admin, PermissionSyncResult sync)
     {
-        var idsByCode = activePermissions.ToDictionary(permission => permission.Code, permission => permission.Id, StringComparer.Ordinal);
+        var granted = admin.IsCreated ? sync.AdminDefaults : sync.InsertedAdminDefaults;
+        if (granted.Count == 0)
+        {
+            return;
+        }
 
-        return
-        [
-            .. AdminDefaultPermissions.Select(code => idsByCode.TryGetValue(code, out var id)
-                ? id
-                : throw new InvalidOperationException($"The Admin default permission '{code}' is not declared by any permission source.")),
-        ];
+        // SyncPermissions replaces the set, so the grants the role holds are passed along with the new ones.
+        admin.Role.SyncPermissions([.. admin.Role.Permissions.Select(grant => grant.PermissionId), .. granted.Select(permission => permission.Id)]);
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Seeded the Auth module: system roles and {PermissionCount} permissions")]

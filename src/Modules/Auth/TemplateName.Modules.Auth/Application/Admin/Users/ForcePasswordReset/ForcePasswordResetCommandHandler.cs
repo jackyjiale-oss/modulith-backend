@@ -4,6 +4,7 @@ using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Users;
+using TemplateName.Modules.Auth.Domain.Verification;
 using TemplateName.SharedKernel;
 
 namespace TemplateName.Modules.Auth.Application.Admin.Users.ForcePasswordReset;
@@ -45,7 +46,7 @@ internal sealed class ForcePasswordResetCommandHandler(
         }
 
         var now = timeProvider.GetUtcNow();
-        await linkIssuer.IssueAsync(user, now, cancellationToken);
+        await linkIssuer.IssueAsync(user, VerificationTrigger.ForcedByAdmin, now, cancellationToken);
         foreach (var session in await sessions.GetActiveByUserAsync(user.Id, now, cancellationToken))
         {
             session.Revoke(SessionRevokedReason.AdminRevoked, now);

@@ -1,0 +1,5 @@
+<p>{{ display_name }}，您好：</p>
+<p>请确认您的电子邮件地址。</p>
+<p><a href="{{ action_url }}" style="display:inline-block;padding:12px 24px;background-color:#1d4ed8;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold;">确认电子邮件地址</a></p>
+<p>如果按钮无法使用，请将此地址复制到浏览器中打开：<br>{{ action_url }}</p>
+<p>此链接只能使用一次，并将在 {{ expires_in_minutes }} 分钟后失效。如果您没有注册，可以忽略此邮件。</p>

@@ -1,0 +1,5 @@
+<p>Helo {{ display_name }},</p>
+<p>Sila sahkan alamat e-mel anda.</p>
+<p><a href="{{ action_url }}" style="display:inline-block;padding:12px 24px;background-color:#1d4ed8;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold;">Sahkan alamat e-mel</a></p>
+<p>Jika butang tidak berfungsi, salin alamat ini ke pelayar anda:<br>{{ action_url }}</p>
+<p>Pautan ini hanya boleh digunakan sekali dan tamat tempoh dalam {{ expires_in_minutes }} minit. Jika anda tidak mendaftar, anda boleh mengabaikan e-mel ini.</p>

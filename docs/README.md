@@ -27,6 +27,7 @@ Everything about how this service is built and run. Documents are part of the de
 | Document | Module |
 |---|---|
 | [`modules/auth.md`](modules/auth.md) | Auth: registration, sign-in, tokens, sessions, passwords, roles, permissions and the audit log |
+| [`modules/notifications.md`](modules/notifications.md) | Notifications: every email and in-app message, from Auth's integration events to SMTP, the inbox and the SignalR hub; templates, preferences, quiet hours, delivery worker, administration |
 | [`modules/sample.md`](modules/sample.md) | Sample: leave requests, the worked example of every pattern |
 | [`modules/_template.md`](modules/_template.md) | The required outline; copy it to `modules/{module}.md` when you add a module |
 
@@ -51,5 +52,9 @@ Everything about how this service is built and run. Documents are part of the de
 | [0015](adr/0015-es256-jwt-with-configured-signing-keys.md) | ES256 access tokens signed with keys from configuration |
 | [0016](adr/0016-server-side-permissions-with-per-user-cache.md) | Server-side permissions with a per-user cache |
 | [0017](adr/0017-outbox-secrets-protected-with-data-protection.md) | Single-use tokens in outbox events protected with Data Protection |
+| [0018](adr/0018-in-process-integration-events-with-inbox.md) | In-process integration events with a per-consumer inbox |
+| [0019](adr/0019-embedded-scriban-notification-templates.md) | Notification templates as Scriban files embedded in the declaring assembly |
+| [0020](adr/0020-secrets-in-cross-module-events.md) | Single-use links cross module boundaries encrypted |
+| [0021](adr/0021-signalr-hub-tickets.md) | SignalR hub authenticated by single-use tickets, never a JWT in the query string |
 
 A new decision gets the next number: `adr/NNNN-kebab-title.md`, in the same format, listed here and in the architecture overview.

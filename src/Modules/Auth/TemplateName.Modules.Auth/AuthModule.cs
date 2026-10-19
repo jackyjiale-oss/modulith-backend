@@ -22,9 +22,10 @@ using TemplateName.Modules.Auth.Application.Admin.Users;
 using TemplateName.Modules.Auth.Application.Authentication;
 using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Application.Verification;
+using TemplateName.Modules.Auth.Contracts.Users;
 using TemplateName.Modules.Auth.Endpoints;
 using TemplateName.Modules.Auth.Infrastructure.Authorization;
-using TemplateName.Modules.Auth.Infrastructure.Email;
+using TemplateName.Modules.Auth.Infrastructure.Contracts;
 using TemplateName.Modules.Auth.Infrastructure.Observability;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
 using TemplateName.Modules.Auth.Infrastructure.Security;
@@ -41,8 +42,8 @@ public static class AuthModule
 
     /// <summary>
     /// Registers the module's context (schema <c>auth</c>), outbox, handlers and validators, repositories, audit writer, the user
-    /// administration's SuperAdmin rules and reset-link issuer, the role administration's cache invalidator, error messages
-    /// (<c>AuthErrorMessages</c>), the SMTP email sender with <c>Auth:Links</c> and <c>Auth:Verification</c>, the sign-in settings
+    /// administration's SuperAdmin rules and reset-link issuer, the role administration's cache invalidator, the contact directory other modules call (<c>IUserContactDirectory</c> from the Contracts project), error messages
+    /// (<c>AuthErrorMessages</c>), the link and verification settings <c>Auth:Links</c> and <c>Auth:Verification</c>, the sign-in settings
     /// <c>Auth:RefreshToken</c> and <c>Auth:Lockout</c>, the counters of the <c>TemplateName.Auth</c> meter (added to OpenTelemetry), the
     /// access tokens with the JWT bearer handler as the default authentication scheme, the permission checker with its cache, the
     /// permission source and the seeder, and the Data Protection key ring stored in <c>auth.DataProtectionKeys</c>. Call it after
@@ -68,6 +69,7 @@ public static class AuthModule
         services.AddScoped<PermissionGrantRules>();
         services.AddScoped<RolePermissionCacheInvalidator>();
         services.AddScoped<PasswordResetLinkIssuer>();
+        services.AddScoped<IUserContactDirectory, UserContactDirectory>();
 
         services.AddHttpContextAccessor();
         services.AddScoped<IClientContext, HttpClientContext>();
@@ -78,19 +80,13 @@ public static class AuthModule
             .ValidateOnStart();
         services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
         services.AddSingleton<ISecureTokenService, SecureTokenService>();
-        services.AddSingleton<ISecretProtector, DataProtectionSecretProtector>();
         services.AddHttpClient(HibpBreachedPasswordChecker.HttpClientName, client => client.Timeout = HibpBreachedPasswordChecker.RequestBudget);
         services.AddSingleton<IBreachedPasswordChecker, HibpBreachedPasswordChecker>();
 
-        services.AddOptions<EmailOptions>()
-            .Bind(configuration.GetSection(EmailOptions.SectionName))
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
         services.AddOptions<LinksOptions>()
             .Bind(configuration.GetSection(LinksOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
-        services.AddSingleton<IEmailSender, SmtpEmailSender>();
         services.AddOptions<VerificationOptions>()
             .Bind(configuration.GetSection(VerificationOptions.SectionName))
             .ValidateDataAnnotations()
@@ -125,10 +121,11 @@ public static class AuthModule
     /// <summary>
     /// Seeds the module in one transaction: the system roles (<c>SuperAdmin</c>, <c>Admin</c>, <c>User</c>); the permissions every
     /// registered <c>IPermissionSource</c> declares (new ones inserted, names and descriptions updated, undeclared ones deprecated, never
-    /// deleted; an invalid definition fails the run); every non-deprecated permission for <c>SuperAdmin</c> on each run; the default
-    /// permissions for <c>Admin</c> only when the role is created; and, when <c>Auth:Seed:AdminEmail</c> and <c>Auth:Seed:AdminPassword</c>
-    /// are both set and no user has that email, a confirmed <c>SuperAdmin</c> user. Idempotent. The host calls it after the migration
-    /// step when <c>Auth:Seed:RunOnStartup</c> is on; the test harness calls it after each database reset.
+    /// deleted; an invalid definition fails the run); every non-deprecated permission for <c>SuperAdmin</c> on each run; the permissions
+    /// flagged <c>AdminDefault</c> for <c>Admin</c> when the role is created and, later, each such code in the run that first inserts it
+    /// (never again, so an administrator's removal sticks); and, when <c>Auth:Seed:AdminEmail</c> and <c>Auth:Seed:AdminPassword</c> are
+    /// both set and no user has that email, a confirmed <c>SuperAdmin</c> user. Idempotent. The host calls it after the migration step
+    /// when <c>Auth:Seed:RunOnStartup</c> is on; the test harness calls it after each database reset.
     /// </summary>
     /// <exception cref="InvalidOperationException">A permission definition or an <c>Auth:Seed</c> setting is invalid.</exception>
     public static async Task SeedAuthModuleAsync(this IServiceProvider services, CancellationToken cancellationToken)

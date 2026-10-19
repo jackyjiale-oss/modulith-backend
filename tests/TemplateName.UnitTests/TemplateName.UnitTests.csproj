@@ -6,6 +6,7 @@
     <ProjectReference Include="..\..\src\BuildingBlocks\TemplateName.Infrastructure.Common\TemplateName.Infrastructure.Common.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\TemplateName.Web.Common\TemplateName.Web.Common.csproj" />
     <ProjectReference Include="..\..\src\Modules\Auth\TemplateName.Modules.Auth\TemplateName.Modules.Auth.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Notifications\TemplateName.Modules.Notifications\TemplateName.Modules.Notifications.csproj" />
     <ProjectReference Include="..\..\src\Modules\Sample\TemplateName.Modules.Sample\TemplateName.Modules.Sample.csproj" />
   </ItemGroup>
 
@@ -16,6 +17,15 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.Logging" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Test-only notification templates for TestNotificationTypeSource. The template store expects the names a module gets from a
+      root-level Templates folder ({AssemblyName}.Templates.{Channel}.{file}), so the Notifications folder is left out of the name.
+    -->
+    <EmbeddedResource Include="Notifications\Templates\Email\*.scriban" LogicalName="$(AssemblyName).Templates.Email.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Notifications\Templates\InApp\*.scriban" LogicalName="$(AssemblyName).Templates.InApp.%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

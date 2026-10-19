@@ -1,0 +1,7 @@
+Helo {{ display_name }},
+
+Pentadbir telah mencipta akaun untuk anda. Buka pautan ini untuk menetapkan kata laluan anda dan bermula:
+
+{{ action_url }}
+
+Pautan ini hanya boleh digunakan sekali dan tamat tempoh dalam {{ expires_in_minutes }} minit. Jika anda tidak menjangkakan e-mel ini, jangan gunakan pautan tersebut dan hubungi pentadbir anda.

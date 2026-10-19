@@ -1,17 +1,32 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <!-- The host's shared framework, referenced directly so restore prunes the packages it already provides (the SignalR client's
+         SignalR.Common and Http.Connections.Common among them): the test process runs them from the framework, never from a package. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Host\TemplateName.Api\TemplateName.Api.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\TemplateName.Infrastructure.Common\TemplateName.Infrastructure.Common.csproj" />
     <ProjectReference Include="..\..\src\Modules\Auth\TemplateName.Modules.Auth\TemplateName.Modules.Auth.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Auth\TemplateName.Modules.Auth.Contracts\TemplateName.Modules.Auth.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Notifications\TemplateName.Modules.Notifications\TemplateName.Modules.Notifications.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="Respawn" />
     <PackageReference Include="Testcontainers" />
     <PackageReference Include="Testcontainers.MsSql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The templates of DeliveryTestTypeSource, under the names a module's own Templates folder gets. -->
+    <EmbeddedResource Include="Notifications\Templates\Email\*.scriban" LogicalName="$(AssemblyName).Templates.Email.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Notifications\Templates\InApp\*.scriban" LogicalName="$(AssemblyName).Templates.InApp.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

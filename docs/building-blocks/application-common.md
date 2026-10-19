@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The application-layer contracts modules code against: command, query and domain event handlers with their registration and decorators (ADR 0005), the current user, the read-side connection factory, error-message resources (ADR 0009) and cursor pagination (ADR 0010). It depends on SharedKernel, FluentValidation, Scrutor, Dapper (for `KeysetQuery.Parameters`) and the `Microsoft.Extensions` abstractions, never on Infrastructure.Common or Web.Common (architecture test).
+The application-layer contracts modules code against: command, query, domain event and integration event handlers with their registration and decorators (ADR 0005), the integration event publisher (ADR 0018), the current user, the secret protector contract, the read-side connection factory, error-message resources (ADR 0009) and cursor pagination (ADR 0010). It depends on SharedKernel, FluentValidation, Scrutor, Dapper (for `KeysetQuery.Parameters`) and the `Microsoft.Extensions` abstractions, never on Infrastructure.Common or Web.Common (architecture test).
 
 Code: `src/BuildingBlocks/TemplateName.Application.Common/`.
 
@@ -18,11 +18,15 @@ Code: `src/BuildingBlocks/TemplateName.Application.Common/`.
 | `ICommandHandler<TCommand, TResponse>` | `Task<Result<TResponse>> HandleAsync(TCommand, CancellationToken)`. |
 | `IQueryHandler<TQuery, TResponse>` | `Task<Result<TResponse>> HandleAsync(TQuery, CancellationToken)`. |
 | `IDomainEventHandler<TEvent>` | `Task HandleAsync(TEvent, CancellationToken)`; run by the module outbox after the save, at least once (ADR 0007). Must be idempotent. |
+| `IOutboxMessageContext` | `Guid MessageId`, `DateTimeOffset OccurredAt`: the outbox message a domain event handler runs for, the same on every retry. Use `MessageId` as the `Id` of the integration event the handler publishes. Set by the outbox dispatcher in each message's scope; reading it anywhere else (a request, an integration event handler) throws `InvalidOperationException`. |
+| `IIntegrationEventPublisher` | `Task PublishAsync<TEvent>(TEvent, CancellationToken)`: runs every `IIntegrationEventHandler<TEvent>` sequentially, each created and run in its own scope; every handler runs even if an earlier one throws or cannot be created, then one failure is rethrown as it is and several as an `AggregateException`, so the outbox retries the publishing handler (the consumers that succeeded skip the repeat through their inbox). Cancellation is rethrown at once. Call it from a domain event handler only (ADR 0018). Infrastructure.Common implements it in process. |
+| `IntegrationEventHandlerRegistration` | `sealed record (EventType, HandlerType)`: one integration event handler, recorded by `AddApplicationHandlers`; the publisher resolves `HandlerType` on its own in each handler's scope. |
+| `IIntegrationEventHandler<TEvent>` | `Task HandleAsync(TEvent, CancellationToken)`; consumes another module's integration event, at least once. It checks and records the event in its module's inbox in the same save as its rows, and only writes rows (slow work is queued). |
 
 | Extension | Does |
 |---|---|
-| `services.AddApplicationHandlers(assembly)` | Registers every handler (including `internal` ones) of the four interfaces above, and every FluentValidation validator in the assembly, as scoped. |
-| `services.AddApplicationDecorators()` | Wraps every registered command and query handler with the validation decorator, then the logging decorator (outermost). Call it once, last, after every module. Domain event handlers are not decorated. |
+| `services.AddApplicationHandlers(assembly)` | Registers every handler (including `internal` ones) of the five handler interfaces above, and every FluentValidation validator in the assembly, as scoped. Command, query and domain event handlers are registered as their interfaces; integration event handlers as their own type plus one `IntegrationEventHandlerRegistration` each (recorded once even if the assembly is scanned twice). |
+| `services.AddApplicationDecorators()` | Wraps every registered command and query handler with the validation decorator, then the logging decorator (outermost). Call it once, last, after every module. Domain and integration event handlers are not decorated. |
 
 - **Validation decorator:** runs every `IValidator<T>` of the message; on failure it returns a `ValidationError` (`validation.failed`) without calling the handler. Field keys are camel-cased paths (`Items[0].Name` → `items[0].name`).
 - **Logging decorator:** logs `Processing {RequestName}` and `Completed {RequestName} in {ElapsedMs} ms` (Information) or `Failed {RequestName} with {ErrorCode} in {ElapsedMs} ms` (Warning). Exceptions are not caught; the exception handler logs them once.
@@ -32,10 +36,16 @@ Code: `src/BuildingBlocks/TemplateName.Application.Common/`.
 | Type | What it is |
 |---|---|
 | `ICurrentUser` | `Guid? UserId`, `Guid? SessionId`, `bool IsAuthenticated`. Web.Common implements it from the request's access token: `UserId` from the `sub` (or name identifier) claim, `SessionId` from the `sid` claim (the caller's `UserSession`); each is null when anonymous, absent or not a `Guid`. |
-| `PermissionDefinition` | `sealed record (Code, Module, Name, Description)`: one permission a module declares. `Code` is `module.resource.action` in snake case (`auth.user.view`); `Module` is its first segment; `Name` and `Description` are English text for administration screens. |
+| `PermissionDefinition` | `sealed record (Code, Module, Name, Description, bool AdminDefault = false)`: one permission a module declares. `Code` is `module.resource.action` in snake case (`auth.user.view`); `Module` is its first segment; `Name` and `Description` are English text for administration screens. `AdminDefault` says that the `Admin` system role gets the permission: the Auth seeder grants a flagged code to `Admin` in the run that first inserts it (and to a newly created `Admin` role), never again, so an administrator's removal sticks; `SuperAdmin` holds every permission regardless ([Auth module](../modules/auth.md#permissions)). Review a flag like a role change (every `Admin` account gains the power), and note that flagging a code that an install already has changes nothing there, because only the run that inserts a code grants it. A release that flags a new code also stops actors who lack it from assigning `Admin` (the no-escalation rule). |
 | `IPermissionSource` | `IReadOnlyCollection<PermissionDefinition> Permissions`. Any module registers one as a singleton; the Auth module collects every registered source and syncs the definitions into its permission table at startup. A definition that breaks the rules above (or a code declared twice, by any sources) stops the sync with a message naming the code and the source ([Auth module](../modules/auth.md#background-processing)). |
 | `IPermissionChecker` | `Task<bool> HasPermissionAsync(Guid userId, string permission, CancellationToken)`: whether the user holds the permission through any role. The Auth module implements it (cached per user, ADR 0016); other modules depend on the interface only. |
 | `IDbConnectionFactory` | `Task<DbConnection> OpenConnectionAsync(CancellationToken)`: an open connection for Dapper reads. Infrastructure.Common implements it. |
+
+### Security
+
+| Type | What it is |
+|---|---|
+| `ISecretProtector` | `string Protect(string plaintext)`, `string Unprotect(string protectedValue)`: encrypts a secret that has to leave the process or be stored by another module (a token in an outbox event, a link in an integration event; ADR 0017). The same value protected twice differs; `Unprotect` throws `CryptographicException` for a changed value or one protected by another key ring. Infrastructure.Common implements it with Data Protection; a module injects the interface and never references Data Protection. |
 
 ### Localization
 

@@ -1,6 +1,6 @@
 # API host (`TemplateName.Api`)
 
-The one deployable process: `src/Host/TemplateName.Api`. `Program.cs` registers the building blocks and modules, builds the middleware pipeline, maps health checks, OpenAPI and the module endpoints under `/api/v1`, (in Development) migrates the databases on start, and seeds the Auth module's roles and permissions. This page lists what the host does and every setting it reads. Architecture: [`docs/architecture/overview.md`](../architecture/overview.md).
+The one deployable process: `src/Host/TemplateName.Api`. `Program.cs` registers the building blocks and modules, builds the middleware pipeline, maps health checks, OpenAPI and the module endpoints under `/api/v1`, migrates the databases on start when told to (local development), and seeds the Auth module's roles and permissions. This page lists what the host does and every setting it reads. Architecture: [`docs/architecture/overview.md`](../architecture/overview.md).
 
 ## Service registration
 
@@ -17,7 +17,7 @@ Order matters; `Program.cs` marks it with comments.
 | 7 | `AddHealthChecks()` | Health checks; each module context adds its own `ready` check |
 | 8 | `AddHttpSecurity(configuration)` | CORS, the global rate limiter, the `auth-strict` rate-limit policy, forwarded headers |
 | 9 | `AddPermissionAuthorization()` | The permission authorization handler behind `RequirePermission(code)` and the **fallback policy**: every endpoint requires an authenticated user unless it says `.AllowAnonymous()` ([web-common](../building-blocks/web-common.md)). It needs the explicit `UseAuthentication` and `UseAuthorization` of the pipeline (slots 1a and 10): without them `WebApplication` adds `UseAuthorization` ahead of `UseRouting` by itself, where no endpoint is known and the fallback policy answers 401 to every request. |
-| 10 | `AddAuthModule(configuration)`, `AddSampleModule()` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme (the default authentication scheme), the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)) |
+| 10 | `AddAuthModule(configuration)`, `AddNotificationsModule(configuration)`, `AddSampleModule()` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme (the default authentication scheme), the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)); the Notifications module also its delivery worker, SignalR, the `HubTicket` authentication scheme (not a default scheme: only the hub's policy uses it) and the rate-limit policy of its ticket route ([Notifications module](../modules/notifications.md)) |
 | 11 | `AddOptions<KestrelServerOptions>()…Bind("Kestrel")` | Binds the whole `Kestrel` section lazily, so `Kestrel:Limits:*` apply and test overrides work |
 | 12 | `AddApplicationDecorators()` | Validation and logging decorators around every handler registered above; always last |
 
@@ -25,7 +25,7 @@ Order matters; `Program.cs` marks it with comments.
 
 Before the pipeline serves requests, the host runs two steps, in this order:
 
-1. **Migrations**, when `Database:ApplyMigrationsOnStartup` is on (Development; see [Migrations](#migrations)).
+1. **Migrations**, when `Database:ApplyMigrationsOnStartup` is on (off by default; set it locally for development: user secrets, an environment variable, or a git-ignored `appsettings.Development.json`; see [Migrations](#migrations)).
 2. **Auth seeding**, when `Auth:Seed:RunOnStartup` is on (the default in every environment): `SeedAuthModuleAsync` creates the system roles, syncs the permissions every module declares, keeps `SuperAdmin` on every permission and, when `Auth:Seed:AdminEmail` and `Auth:Seed:AdminPassword` are both set, creates the first administrator. It is idempotent and runs under a database lock, so several instances may start together. An invalid permission declaration or an invalid `Auth:Seed` value stops the host with a message naming it. The database must already be migrated: outside Development, run the `migrate` mode first (Plan 6) or turn the key off and seed from there. Details: [Auth module](../modules/auth.md#background-processing).
 
 ## Pipeline
@@ -40,13 +40,13 @@ Before the pipeline serves requests, the host runs two steps, in this order:
 | 4 | `UseTraceIdHeader` | `X-Trace-Id` = the W3C trace id, also the `traceId` of every problem response. |
 | 5 | `UseSecurityHeaders` | `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`. |
 | 6 | `UseHsts` + `UseHttpsRedirection` | Every environment except Development. |
-| 7 | `UseRequestLogging` | One Serilog event per request with `UserId`; health checks at `Verbose`, failures (exception or 5xx) at `Error`. |
+| 7 | `UseRequestLogging` | One Serilog event per request with `UserId`; health checks at `Verbose`, failures (exception or 5xx) at `Error`. `RequestPath` is the path without the query string, so a hub ticket sent as `access_token` never reaches it; `access_token` values are also masked in every other log event and in traces ([web-common](../building-blocks/web-common.md#observability)). |
 | 8 | `UseRouting` | |
 | 9 | `UseCors` | Default policy from `Cors:AllowedOrigins`. Before authorization, so a preflight (which carries no token) is answered without a 401. |
 | 9a | `UseRateLimiter` | Global fixed-window limiter, plus the `auth-strict` policy on the endpoints that ask for it; 429 `rate_limit.exceeded` with `Retry-After`. After routing (the endpoint's rate-limit metadata is known) and authentication (the `user:{sub}` partition sees the signed-in user), and before authorization, so the 401 and 403 responses that slot 10 produces are counted too. |
 | 10 | `UseAuthorization` | After routing, so it reads the endpoint's metadata. An endpoint with `.AllowAnonymous()` passes; one with `RequirePermission(code)` needs that permission (403 for a signed-in caller without it); every other endpoint, and a request that matched no endpoint, falls under the fallback policy and needs an authenticated user. An anonymous caller gets 401 `http.401` (localized, with `traceId` and `WWW-Authenticate: Bearer`). |
 | 11 | `UseIdempotency` | `Idempotency-Key` on endpoints marked `WithIdempotency()`; after routing because it reads endpoint metadata. |
-| 12 | Endpoints | `/health/live`, `/health/ready` (both anonymous and exempt from rate limiting), OpenAPI and Scalar outside Production (anonymous), then the `/api/v1` group with every module's endpoints, and the Auth module's anonymous `GET /.well-known/jwks.json` at the root (`MapAuthWellKnownEndpoints`). Everything else is protected by the fallback policy. |
+| 12 | Endpoints | `/health/live`, `/health/ready` (both anonymous and exempt from rate limiting), OpenAPI and Scalar outside Production (anonymous), then the `/api/v1` group with every module's endpoints, the Auth module's anonymous `GET /.well-known/jwks.json` at the root (`MapAuthWellKnownEndpoints`), and the Notifications SignalR hub at `/hubs/notifications` (`MapNotificationsHub`: WebSockets only, authorized by the JWT bearer scheme or a single-use hub ticket, [Notifications module](../modules/notifications.md#realtime-hub)). Slots 1a to 10 apply to the hub's negotiate and WebSocket requests like to any endpoint. Everything else is protected by the fallback policy. |
 
 Slots 4 and 5 register their headers with `Response.OnStarting` before the rest of the pipeline runs, so they are written when the response starts and survive the exception handler clearing the response headers. `Content-Language` is the exception: responses written by the exception handler (500, malformed body, concurrency conflict) do not carry it, although their `detail` is still localized (ADR 0009).
 
@@ -66,7 +66,7 @@ A module context can name another entry (`AddModuleDbContext<T>(schema, connecti
 
 | Key | Default | Validation | Meaning |
 |---|---|---|---|
-| `ApplyMigrationsOnStartup` | `false` (`true` in `appsettings.Development.json`) | none | Migrate every module database before the pipeline starts. Development only. |
+| `ApplyMigrationsOnStartup` | `false`; set `true` locally (user secrets, an environment variable, or a git-ignored `appsettings.Development.json`) | none | Migrate every module database before the pipeline starts. Local development only. |
 
 ### `Outbox`
 
@@ -96,6 +96,8 @@ The first request with a key holds it as a lease for `InProgressTimeout`; duplic
 | `AllowedOrigins` | `[]` (no cross-origin caller) | `*` is rejected | Origins allowed to call with credentials, e.g. `https://app.example.com`. Any header and method are allowed for them. |
 
 The policy exposes `X-Trace-Id`, `Location`, `Retry-After` and `Idempotency-Replayed` (`Access-Control-Expose-Headers`), so browser code on an allowed origin can read them.
+
+**The notification hub.** A browser on an allowed origin calls `POST /api/v1/notifications/hub-tickets` and the hub's negotiate request through this policy like any route. Browsers do not apply CORS to the WebSocket request itself, and the hub does not check its `Origin`: the hub accepts no cookie, so there is no ambient credential for a hostile page to use (cross-site WebSocket hijacking), and a page cannot get a ticket without the user's access token ([ADR 0021](../adr/0021-signalr-hub-tickets.md)).
 
 ### `RateLimiting`
 
@@ -132,7 +134,7 @@ Read with `ReadFrom.Configuration`, so every Serilog setting works here.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `MinimumLevel:Default` | `Information` (`Debug` in Development) | Minimum level. |
+| `MinimumLevel:Default` | `Information`; `Debug` if set locally (user secrets, an environment variable, or a git-ignored `appsettings.Development.json`) | Minimum level. |
 | `MinimumLevel:Override` | `Microsoft.AspNetCore`, `Microsoft.EntityFrameworkCore`, `System`: `Warning` | Per-source levels. |
 
 Console output is a readable template in Development and compact JSON (`RenderedCompactJsonFormatter`) elsewhere. Every event carries `Application` and `Environment`; destructured objects have values of properties named like `password`, `token`, `secret`, `otp` or `apikey` replaced by `***`.
@@ -141,7 +143,7 @@ Console output is a readable template in Development and compact JSON (`Rendered
 
 | Key | Default | Meaning |
 |---|---|---|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset (`http://localhost:4317` in `appsettings.Development.json`, the Aspire dashboard from `docker-compose.yml`) | When set, logs, traces and metrics are exported over OTLP. Environment variable or configuration key. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset; set locally (user secrets, an environment variable, or a git-ignored `appsettings.Development.json`) to `http://localhost:4317`, the Aspire dashboard from `docker-compose.yml` | When set, logs, traces and metrics are exported over OTLP. Environment variable or configuration key. |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | gRPC | `http/protobuf` switches to HTTP; Serilog then posts logs to `{endpoint}/v1/logs`. |
 
 The endpoint decides which OpenTelemetry services are registered, so it is **read once, when the host is configured**; `WebApplicationFactory` overrides cannot change it. The protocol is read lazily when Serilog is configured. Traces cover ASP.NET Core (without `/health`), `HttpClient`, SqlClient and EF Core; metrics cover ASP.NET Core, `HttpClient` and the runtime.
@@ -159,15 +161,14 @@ The endpoint decides which OpenTelemetry services are registered, so it is **rea
 | Key | Default | Validation | Meaning |
 |---|---|---|---|
 | `RunOnStartup` | `true` | none | Seed the Auth module after the migration step ([Start-up](#start-up)). The integration tests set `false` and seed from the harness. |
-| `AdminEmail` | empty (`admin@localhost.test` in `appsettings.Development.json`) | when seeding: a plain email address, up to 256 characters | The first administrator's email. |
+| `AdminEmail` | empty; `admin@localhost.test` set locally (user secrets, an environment variable, or a git-ignored `appsettings.Development.json`) | when seeding: a plain email address, up to 256 characters | The first administrator's email. |
 | `AdminPassword` | empty | when seeding: within `Auth:Password:MinLength`/`MaxLength` | The first administrator's password. **Never in a file**: `dotnet user-secrets set "Auth:Seed:AdminPassword" "…" --project src/Host/TemplateName.Api` or `Auth__Seed__AdminPassword`. Without it no administrator is seeded. **Remove it after the first start**: the account then exists, and an account with that email, even a soft-deleted one, is never re-created (each start logs a warning while the key is still set). |
 
-The Auth module reads the sections below, each with its keys, defaults and ranges in the [Auth module](../modules/auth.md#configuration) document. Seven of them are validated on start (`Auth:Password`, `Auth:Email`, `Auth:Links`, `Auth:Verification`, `Auth:RefreshToken`, `Auth:Lockout` and `Auth:Jwt`), so an out-of-range value or a bad signing key stops the host. `Auth:DataProtection` is read as it is (a missing name falls back to `TemplateName`), and `Auth:Seed` is checked when the seeder runs.
+The Auth module reads the sections below, each with its keys, defaults and ranges in the [Auth module](../modules/auth.md#configuration) document. Six of them are validated on start (`Auth:Password`, `Auth:Links`, `Auth:Verification`, `Auth:RefreshToken`, `Auth:Lockout` and `Auth:Jwt`), so an out-of-range value or a bad signing key stops the host. `Auth:DataProtection` is read as it is (a missing name falls back to `TemplateName`), and `Auth:Seed` is checked when the seeder runs.
 
 | Section | Holds |
 |---|---|
 | `Auth:Password` | Length limits, history count, the breached-password check. |
-| `Auth:Email` | The SMTP sender (Mailpit locally); `Username` and `Password` only from user secrets or the environment. |
 | `Auth:Links` | The front-end URLs the confirmation and reset links open. |
 | `Auth:Verification` | Lifetimes of the confirmation and reset links, the resend cooldown. |
 | `Auth:RefreshToken` | Sliding and absolute session lifetimes. |
@@ -175,6 +176,49 @@ The Auth module reads the sections below, each with its keys, defaults and range
 | `Auth:Jwt` | Issuer, audience, lifetime, skew and the signing keys (required outside Development and Testing). |
 | `Auth:DataProtection` | The Data Protection application name. |
 | `Auth:Seed` | Above. |
+
+### `Notifications:Email`
+
+The SMTP server the Notifications email channel sends through ([Notifications module](../modules/notifications.md#email-channel)); Mailpit locally. Validated on start. Until Plan 3 these keys were `Auth:Email`: the host **refuses to start** while any `Auth:Email` key is still set, in any source (a settings file, user secrets, `Auth__Email__*` in the environment), with `Auth:Email has moved to Notifications:Email (see docs/modules/notifications.md#configuration).` (D15). Rename the keys; their values and meaning are unchanged.
+
+| Key | Default | Validation (on start) | Meaning |
+|---|---|---|---|
+| `Host` | `localhost` | required | The SMTP host. The default (`localhost:1025`, no TLS) is Mailpit from `docker-compose.yml`. |
+| `Port` | `1025` | 1 to 65535 | The SMTP port. |
+| `UseTls` | `false` | must be `true` when `Username` is set, unless `Host` is a loopback address (`localhost`, `127.0.0.1`, `::1`) | STARTTLS. Turn it on for every real server; the start-up check keeps the credentials from travelling in clear. |
+| `Username` | empty | — | The SMTP account; empty means no authentication. **Never in a file**: user secrets or `Notifications__Email__Username`. |
+| `Password` | empty | — | The SMTP password. **Never in a file**: user secrets or `Notifications__Email__Password`. |
+| `From` | `no-reply@localhost.test` | an email address | The sender address. |
+| `FromName` | `TemplateName` | required, at most 100 characters | The display name next to the sender address. |
+| `Timeout` | `00:00:30` | `00:00:01` to `00:05:00` | How long connecting and sending may each take. |
+
+### `Notifications:Delivery`
+
+The Notifications delivery worker ([Notifications module](../modules/notifications.md#background-processing)). Validated on start.
+
+| Key | Default | Validation (on start) | Meaning |
+|---|---|---|---|
+| `Enabled` | `true` | — | Runs the delivery worker. Integration tests set `false` and dispatch by hand. |
+| `PollingInterval` | `00:00:05` | `00:00:01` to `01:00:00` | Pause between polls once the due deliveries are drained. |
+| `BatchSize` | `10` | 1 to 100 | Most deliveries one worker claims per batch; a full batch is followed at once by the next. |
+| `MaxAttempts` | `5` | 1 to 10 | Attempts before a delivery is dead-lettered. Retries are due 1 min, 5 min, 15 min and 1 h after failed attempts 1 to 4; with the default the 5th failure dead-letters, and the 6 h step is used only when `MaxAttempts` is raised. |
+| `LeaseDuration` | `00:05:00` | `00:00:30` to `01:00:00` | How long a claimed batch stays hidden from other workers; keep it longer than the slowest batch of sends. No delivery starts with less than a fifth of it left (at least 30 seconds, at most half); the unstarted rest of the batch is released. |
+
+### `Notifications:Hub`
+
+The notification hub and its single-use tickets ([Notifications module](../modules/notifications.md#realtime-hub), [ADR 0021](../adr/0021-signalr-hub-tickets.md)). Validated on start.
+
+| Key | Default | Validation (on start) | Meaning |
+|---|---|---|---|
+| `TicketLifetime` | `00:00:30` | `00:00:05` to `00:05:00` | How long a ticket from `POST /api/v1/notifications/hub-tickets` can be used, once. |
+| `ConnectionLifetime` | `00:10:00` | `00:01:00` to `01:00:00` | How long a connection opened with a ticket stays open; then the hub closes it and the client reconnects with new tickets. |
+| `TicketsPerMinute` | `30` | 1 to 1000 | Tickets one user may get per minute (fixed window per `user:{sub}`, on top of the global limiter); a connection takes two. Beyond it, 429 `rate_limit.exceeded`. |
+
+### `Notifications:Templates`
+
+| Key | Default | Validation (on start) | Meaning |
+|---|---|---|---|
+| `ProductName` | `TemplateName` | required, at most 100 characters | The product's name as recipients know it: `{{ product_name }}` in every notification template and the email footer ([Notifications module](../modules/notifications.md#templates-and-rendering)). |
 
 ### Other keys
 
@@ -187,7 +231,7 @@ The Auth module reads the sections below, each with its keys, defaults and range
 | Endpoint | Checks | Use |
 |---|---|---|
 | `GET /health/live` | none: 200 while the process serves requests | Liveness probe |
-| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `auth`, `sample`, plus one per added module) | Readiness probe, load balancer |
+| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `auth`, `notify`, `sample`, plus one per added module) | Readiness probe, load balancer |
 
 Both are anonymous, exempt from rate limiting, logged at `Verbose` when healthy, and left out of traces.
 
@@ -200,13 +244,13 @@ Outside Production (Development, Testing, and any other non-Production environme
 | | Development | Testing | Production |
 |---|---|---|---|
 | Used by | `dotnet run` (`launchSettings.json`) | the integration tests (`WebApplicationFactory`) | deployments |
-| Migrations on start | yes | no (the test harness migrates once) | no (`migrate` mode, Plan 6) |
-| Log output | readable console, `Debug` | compact JSON, `Warning` (set by the tests) | compact JSON, `Information` |
-| OTLP export | to `http://localhost:4317` | off | when `OTEL_EXPORTER_OTLP_ENDPOINT` is set |
+| Migrations on start | when `Database:ApplyMigrationsOnStartup` is set locally | no (the test harness migrates once) | no (`migrate` mode, Plan 6) |
+| Log output | readable console, `Information` (`Debug` when set locally) | compact JSON, `Warning` (set by the tests) | compact JSON, `Information` |
+| OTLP export | when `OTEL_EXPORTER_OTLP_ENDPOINT` is set locally (`http://localhost:4317`) | off | when `OTEL_EXPORTER_OTLP_ENDPOINT` is set |
 | HSTS + HTTPS redirection | no | yes | yes |
 | `exceptionDetails` in 500 responses | yes | no | no |
 | OpenAPI + Scalar | yes | yes | no |
-| Auth seeding on start | yes; the administrator `admin@localhost.test` once its password is in user secrets | no (the test harness seeds after each reset) | yes (roles and permissions; an administrator only when both settings are supplied) |
+| Auth seeding on start | yes; the administrator once `Auth:Seed:AdminEmail` and `Auth:Seed:AdminPassword` are set locally (the README uses `admin@localhost.test`) | no (the test harness seeds after each reset) | yes (roles and permissions; an administrator only when both settings are supplied) |
 | JWT signing key (`Auth:Jwt:SigningKeys`) | an ephemeral key when none is configured | an ephemeral key when none is configured | required: the host does not start without one ([Auth module](../modules/auth.md#access-tokens)) |
 
 Local URLs: `https://localhost:5001` and `http://localhost:5000`.
@@ -215,7 +259,7 @@ Local URLs: `https://localhost:5001` and `http://localhost:5000`.
 
 `MigrateModuleDatabasesAsync` applies the pending migrations of every context registered with `AddModuleDbContext` (`includeInMigrations: true`, the default), in registration order: `platform` first, then each module. It validates `ConnectionStrings:Database` first, so a missing connection string fails with the options error.
 
-- **Development:** `Database:ApplyMigrationsOnStartup` is `true`, so the host migrates before it starts serving.
+- **Local development:** `Database:ApplyMigrationsOnStartup` is `false` in `appsettings.json`; set it to `true` locally (user secrets, an environment variable, or a git-ignored `appsettings.Development.json`) and the host migrates before it starts serving. Without it, a fresh database stops the host at Auth seeding (`Invalid object name`).
 - **Production:** never on start. The API's `migrate` command-line mode (`dotnet TemplateName.Api.dll migrate`, Plan 6) runs the same method, optionally with a DDL-privileged connection string. There are no EF migration bundles (ADR 0006).
 - **Adding a migration:** `dotnet ef migrations add {Verb}{What} --project src/Modules/{Module}/TemplateName.Modules.{Module} --startup-project src/Host/TemplateName.Api --context {Module}DbContext --output-dir Infrastructure/Persistence/Migrations`. Never edit a migration that has been applied; add a new one.
 
@@ -229,6 +273,10 @@ HTTP security:
 - IPv6 and IPv4-mapped addresses are partition keys as plain strings, so one client can appear as two addresses.
 - The limiter keeps its counters in memory per instance: with N instances a client gets up to N × `GlobalPermitLimit` (a Redis-backed limiter is Plan 5).
 - A bare `Accept-Language: zh` gets English, because `zh` is not a supported culture and `zh-Hans` is its child, not its parent.
+
+Notifications:
+- The SignalR hub pushes only to the connections on the instance that delivered the notification, and the per-user hub ticket limit is counted per instance (no Redis backplane until Plan 5); the inbox endpoints are always complete. More: [Notifications: Operations and known limits](../modules/notifications.md#operations-and-known-limits).
+- A rejected sender address (a wrong `Notifications:Email:From`) fails every email; it is retried for about 81 minutes before the emails are dead-lettered: watch the retry Warnings and the dead-letter metric.
 
 Observability:
 - `OpenTelemetry.Instrumentation.EntityFrameworkCore` is `1.19.1-beta.1`, the only prerelease dependency: no stable release exists ([ADR 0013](../adr/0013-prerelease-ef-core-opentelemetry-instrumentation.md)). The SqlClient instrumentation is stable.

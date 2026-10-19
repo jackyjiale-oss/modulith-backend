@@ -1,0 +1,1 @@
+Hello {{ display_name }}, this is a test message from {{ product_name }}.

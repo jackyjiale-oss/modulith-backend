@@ -50,10 +50,10 @@ Every type plays one of these roles. Its name follows the role's pattern, and it
 |---|---|---|---|
 | Aggregate / entity | singular noun | `LeaveRequest` | review |
 | Value object | singular noun, `record` | `DateRange`, `EmailAddress` | review |
-| Domain event | `{Noun}{PastTenseVerb}DomainEvent` | `LeaveRequestApprovedDomainEvent` | architecture test |
-| Integration event | `{Noun}{PastTenseVerb}IntegrationEvent` (in `*.Contracts`) | `UserRegisteredIntegrationEvent` | architecture test |
-| Command | `{Verb}{Noun}Command` | `ApproveLeaveRequestCommand` | architecture test |
-| Query | `Get{Noun}Query`, `List{Nouns}Query`, `Search{Nouns}Query` | `GetLeaveRequestByIdQuery` | architecture test |
+| Domain event | `{Noun}{PastTenseVerb}DomainEvent` | `LeaveRequestApprovedDomainEvent` | architecture test (suffix); review (the rest) |
+| Integration event | `{Noun}{PastTenseVerb}IntegrationEvent` (in `*.Contracts`) | `PasswordChangedIntegrationEvent` | architecture test (`ContractsTests`: the `IntegrationEvent` suffix, `IIntegrationEvent`, `Guid Id, DateTimeOffset OccurredAt` first); review (the noun and past-tense form) |
+| Command | `{Verb}{Noun}Command` | `ApproveLeaveRequestCommand` | architecture test (suffix); review (the rest) |
+| Query | `Get{Noun}Query`, `List{Nouns}Query`, `Search{Nouns}Query` | `GetLeaveRequestByIdQuery` | architecture test (suffix); review (the rest) |
 | Handler (command/query/event) | `{MessageName}Handler` | `ApproveLeaveRequestCommandHandler`, `LeaveRequestSubmittedDomainEventHandler` | architecture test |
 | Validator | `{MessageName}Validator` | `SubmitLeaveRequestCommandValidator` | architecture test |
 | Read model / response | `{Noun}Response` | `LeaveRequestResponse` | review |
@@ -138,7 +138,7 @@ Every type plays one of these roles. Its name follows the role's pattern, and it
 | F2 | Generic type: `{Name}.cs`; when a non-generic type with the same name exists, the generic one is `{Name}OfT.cs`. | `Result.cs` + `ResultOfT.cs` | review |
 | F3 | Nested types stay in the parent's file. Partial classes are `{Type}.{Aspect}.cs`. | `ValidationDecorator.cs`, `SampleDbContext.Outbox.cs` | review |
 | F4 | Folder = namespace segment, PascalCase. Category folders are plural (`Events`, `Migrations`, `Resources`); use-case folders are named after the use case (`Submit`, `Approve`, `GetById`). | `Application/LeaveRequests/Submit/` | `.editorconfig` (IDE0130) |
-| F5 | **Module layout is fixed:** `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/`, `Resources/`, `{Module}Module.cs`. | — | architecture test (layering) |
+| F5 | **Module layout is fixed:** `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/`, `Resources/`, `{Module}Module.cs`. A module that declares notification types adds one more folder at the project root, `Templates/` (embedded Scriban files: `Templates/Email/{type}.{culture}.{part}.scriban`, `Templates/InApp/...`; see [Notifications: Templates](modules/notifications.md#templates-and-rendering)); nothing else is added. | — | architecture test (layering: the dependencies between the folders); review (the set of folders) |
 | F6 | **Project folder = project name = assembly name = root namespace.** `TemplateName.{Area}` for building blocks, `TemplateName.Modules.{Module}` and `TemplateName.Modules.{Module}.Contracts` for modules. | `src/Modules/Sample/TemplateName.Modules.Sample/` | review |
 | F7 | Tests live in `tests/{TestProject}/{Module or Area}/…/{Subject}Tests.cs`. | `tests/TemplateName.UnitTests/Sample/LeaveRequestTests.cs` | review |
 
@@ -155,7 +155,7 @@ Every type plays one of these roles. Its name follows the role's pattern, and it
 | Runbooks | kebab-case | `docs/runbooks/rotate-jwt-signing-keys.md` |
 | Scripts | kebab-case | `build/scripts/check-commit-msg.sh`, `deploy-iis.ps1` |
 | GitHub workflows | kebab-case `.yml`; reusable workflows prefixed `_` | `ci.yml`, `_reusable-dotnet-build.yml` |
-| App settings | `appsettings.json`, `appsettings.{Environment}.json` | `appsettings.Development.json` |
+| App settings | `appsettings.json`, `appsettings.{Environment}.json`; Development settings are local and git-ignored (`appsettings.Development.json` is never committed) | `appsettings.Production.json` |
 | Resources | `{Marker}.resx`, `{Marker}.{culture}.resx` | `SampleErrorMessages.zh-Hans.resx` |
 | EF migrations | PascalCase `{Verb}{What}`; the first one in a module is `Initial{Module}` | `InitialSample`, `AddApproverIdToLeaveRequests` |
 | Load tests | kebab-case `.js` | `tests/load/submit-leave-request.js` |
@@ -198,6 +198,6 @@ These are part of public contracts or operations. Changing one is a breaking cha
 |---|---|---|
 | `.editorconfig` naming rules (IDE1006) + code style (IDE0130, IDE0161, `var`) | Casing, `I`/`T` prefixes, `_camelCase` fields, `Async` suffix on `async` methods, namespace = folder, file-scoped namespaces | `.editorconfig` (root) and `tests/.editorconfig` (test-method overrides) |
 | Build (`EnforceCodeStyleInBuild` + `TreatWarningsAsErrors` in Release) | Turns the above into build errors in CI | `Directory.Build.props` |
-| Architecture tests | Role suffixes (Command, Query, Handler, Validator, DomainEvent, Repository, DbContext, Configuration), forbidden suffixes (G5), `Async` on Task-returning methods, `CancellationToken cancellationToken` as the last parameter, sealed/internal rules, module layering, translation completeness | `tests/TemplateName.ArchitectureTests/` |
+| Architecture tests | Role suffixes (Command, Query, Handler, Validator, DomainEvent, Repository, DbContext, Configuration), forbidden suffixes (G5), `Async` on Task-returning methods, `CancellationToken cancellationToken` as the last parameter (these three over every `src` assembly, the `*.Contracts` ones included), sealed/internal rules, module layering, translation completeness | `tests/TemplateName.ArchitectureTests/` |
 | Commit-message hook + CI PR-title check | Conventional Commits format, allowed types and scopes, length | `.githooks/commit-msg`, `build/scripts/check-commit-msg.sh`, `.github/workflows/pr-title.yml` |
 | Code review | Everything marked *review*: meaning, domain language, abbreviations | `.github/pull_request_template.md` |

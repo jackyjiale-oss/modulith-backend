@@ -10,8 +10,9 @@ flowchart TD
 
     subgraph Modules["Business modules (internal by default)"]
         Auth["TemplateName.Modules.Auth<br/>Domain · Application · Infrastructure · Endpoints"]
+        Notifications["TemplateName.Modules.Notifications<br/>Domain · Application · Infrastructure · Endpoints"]
         Sample["TemplateName.Modules.Sample<br/>Domain · Application · Infrastructure · Endpoints"]
-        Contracts["TemplateName.Modules.{Module}.Contracts<br/>integration events, public interfaces<br/>(none yet)"]
+        Contracts["TemplateName.Modules.{Module}.Contracts<br/>integration events, public interfaces<br/>(Auth today)"]
     end
 
     subgraph BuildingBlocks["Building blocks (src/BuildingBlocks)"]
@@ -22,16 +23,22 @@ flowchart TD
     end
 
     Api --> Auth
+    Api --> Notifications
     Api --> Sample
     Api --> Web
     Api --> Infra
     Api --> App
     Auth -. "other modules only via" .-> Contracts
     Sample -. "other modules only via" .-> Contracts
+    Notifications -. "reads Auth only via" .-> Contracts
     Auth --> Web
     Auth --> Infra
     Auth --> App
     Auth --> Kernel
+    Notifications --> Web
+    Notifications --> Infra
+    Notifications --> App
+    Notifications --> Kernel
     Sample --> Web
     Sample --> Infra
     Sample --> App
@@ -44,8 +51,9 @@ flowchart TD
 ```
 
 - **Host** (`src/Host/TemplateName.Api`, [`docs/services/api.md`](../services/api.md)) wires the building blocks and modules in `Program.cs`: services, the middleware pipeline, health checks, OpenAPI and the `/api/v1` route group.
-- **Modules** (`src/Modules/{Module}`, one document per module under [`docs/modules/`](../modules/)) are two projects: `TemplateName.Modules.{Module}` with `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/` and `Resources/` folders, and `TemplateName.Modules.{Module}.Contracts`, the only project another module may reference (ADR 0001). The entry point `{Module}Module` (`Add{Module}Module`, `Map{Module}Endpoints`) is the only public type.
-- **Auth** ([`docs/modules/auth.md`](../modules/auth.md)) is the identity module: users, sessions, roles, permissions and the audit log in the `auth` schema, with the sign-in, token, password and administration endpoints. It implements `IPermissionChecker` for the whole host; no other module references it (it has no `.Contracts` project yet, because nothing outside it needs its data).
+- **Modules** (`src/Modules/{Module}`, one document per module under [`docs/modules/`](../modules/)) are two projects: `TemplateName.Modules.{Module}` with `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/` and `Resources/` folders (a module that declares notification types also has `Templates/`, its embedded notification templates), and `TemplateName.Modules.{Module}.Contracts`, the only project another module may reference (ADR 0001). The entry point `{Module}Module` (`Add{Module}Module`, `Map{Module}Endpoints`) is the only public type.
+- **Auth** ([`docs/modules/auth.md`](../modules/auth.md)) is the identity module: users, sessions, roles, permissions and the audit log in the `auth` schema, with the sign-in, token, password and administration endpoints. It implements `IPermissionChecker` for the whole host; no other module references it (its `TemplateName.Modules.Auth.Contracts` project holds its integration events and `IUserContactDirectory`; Auth publishes the events from its outbox, and the Notifications module consumes them).
+- **Notifications** ([`docs/modules/notifications.md`](../modules/notifications.md)) is the module through which every message the template sends goes (Auth sends no email itself): it consumes the integration events other modules publish and renders and delivers them by email and in-app in the recipient's language. It holds the code-defined notification type catalog with its embedded templates, the recipient culture and time zone rules, its `notify` schema, the consumers of Auth's integration events (which create notification and delivery rows through its inbox), the delivery worker with the email (SMTP, `Notifications:Email`) and in-app channels, the inbox, preference and hub-ticket APIs, the SignalR hub (`/hubs/notifications`) that pushes new in-app notifications, and the administrator's delivery list and retry. It references `TemplateName.Modules.Auth.Contracts` only, never the Auth module, and no module references it.
 - **Building blocks** ([`shared-kernel`](../building-blocks/shared-kernel.md), [`application-common`](../building-blocks/application-common.md), [`infrastructure-common`](../building-blocks/infrastructure-common.md), [`web-common`](../building-blocks/web-common.md)) hold everything every module needs.
 
 The arrows are project references, and architecture tests (`tests/TemplateName.ArchitectureTests`) enforce them: SharedKernel has no dependencies; Application.Common does not depend on Infrastructure.Common or Web.Common; a module's `Domain` depends on nothing but SharedKernel; its `Application` does not depend on its `Infrastructure` or `Endpoints`; and no module references another module except its `.Contracts`.
@@ -81,16 +89,31 @@ One SQL Server database, one schema per owner, each with its own `__EFMigrations
 |---|---|---|---|---|
 | `platform` | Infrastructure.Common (building block) | `PlatformDbContext` | `IdempotencyKeys` | `src/BuildingBlocks/TemplateName.Infrastructure.Common/Idempotency/Migrations/` |
 | `auth` | Auth module | `AuthDbContext` | `Users`, `PasswordHistory`, `UserRoles`, `Roles`, `Permissions`, `RolePermissions`, `UserSessions`, `RefreshTokens`, `VerificationCodes`, `AuthAuditLogs`, `DataProtectionKeys`, `OutboxMessages`, `OutboxMessageConsumers` | `src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Persistence/Migrations/` |
+| `notify` | Notifications module | `NotificationsDbContext` | `Notifications`, `Deliveries`, `InAppNotifications`, `UserPreferences`, `UserSettings`, `HubTickets`, `InboxMessages` (no outbox) | `src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Persistence/Migrations/` |
 | `sample` | Sample module | `SampleDbContext` | `LeaveRequests`, `OutboxMessages`, `OutboxMessageConsumers` | `src/Modules/Sample/TemplateName.Modules.Sample/Infrastructure/Persistence/Migrations/` |
 
 `MigrateModuleDatabasesAsync` applies every registered context's migrations in registration order (`platform` first, because `AddInfrastructureCommon` registers it before any module). The tables of each module are described in its document; `platform.IdempotencyKeys` in [`infrastructure-common`](../building-blocks/infrastructure-common.md#idempotency).
 
 ## Cross-module communication
 
-There are two modules today (Sample and Auth), and neither uses the other, so nothing crosses a module boundary yet. The rules for when it does:
+There are three modules today (Sample, Auth and Notifications). Auth's outbox handlers turn six domain events into the integration events of `TemplateName.Modules.Auth.Contracts`, which also holds `IUserContactDirectory` (see [`docs/modules/auth.md`](../modules/auth.md#events)); Notifications references that project only and consumes the events through its inbox (see [`docs/modules/notifications.md`](../modules/notifications.md#events)). Sample uses neither. A contracts project references only `TemplateName.SharedKernel` and holds only public sealed records, enums and interfaces (`ContractsTests`). One message, from the endpoint to the recipient:
+
+```mermaid
+flowchart LR
+    Ep["Auth endpoint<br/>(register, change password, ...)"] -->|"one save"| Ob[("auth.OutboxMessages")]
+    Ob -->|"Auth outbox dispatcher"| Pub["Auth publishing handler<br/>IIntegrationEventPublisher"]
+    Pub -->|"Auth.Contracts event"| Con["Notifications consumer<br/>+ notify.InboxMessages"]
+    Con -->|"one save"| Rows[("notify.Notifications<br/>notify.Deliveries")]
+    Rows -->|"delivery worker"| Em["Email channel<br/>SMTP / Mailpit"]
+    Rows -->|"delivery worker"| In["In-app channel<br/>notify.InAppNotifications"]
+    In -->|"push, best effort"| Hub["SignalR hub<br/>/hubs/notifications"]
+```
+
+The rules for when a boundary is crossed:
 
 - A module exposes integration events (`{Noun}{PastTenseVerb}IntegrationEvent`) and public interfaces only in its `.Contracts` project.
-- Domain events stay inside the module. A domain event handler that must tell another module publishes an integration event; the consumer records what it has processed (inbox, Plan 3). Cross-module effects are eventually consistent, never one transaction (ADR 0007).
+- Domain events stay inside the module. A domain event handler that must tell another module builds an integration event whose `Id` is the outbox message id (`IOutboxMessageContext.MessageId`) and calls `IIntegrationEventPublisher`, which runs every `IIntegrationEventHandler<T>` in the process, each in its own scope. A failing consumer makes the outbox retry the publish; each consumer records the event in its own module's inbox (`InboxMessages`) in the same save as its rows, so a repeat has no effect. Consumers only write rows. Cross-module effects are eventually consistent, never one transaction (ADR 0007, ADR 0018).
+- A secret that must cross a boundary, such as a single-use link, travels only as `ISecretProtector` ciphertext: the owning module builds it and encrypts it, the consumer stores the ciphertext and decrypts it only in memory when it needs it (ADR 0020).
 
 ## Decisions
 
@@ -113,3 +136,7 @@ There are two modules today (Sample and Auth), and neither uses the other, so no
 | [0015](../adr/0015-es256-jwt-with-configured-signing-keys.md) | ES256 access tokens signed with keys from configuration |
 | [0016](../adr/0016-server-side-permissions-with-per-user-cache.md) | Server-side permissions with a per-user cache |
 | [0017](../adr/0017-outbox-secrets-protected-with-data-protection.md) | Single-use tokens in outbox events protected with Data Protection |
+| [0018](../adr/0018-in-process-integration-events-with-inbox.md) | In-process integration events with a per-consumer inbox |
+| [0019](../adr/0019-embedded-scriban-notification-templates.md) | Notification templates as Scriban files embedded in the declaring assembly |
+| [0020](../adr/0020-secrets-in-cross-module-events.md) | Single-use links cross module boundaries encrypted |
+| [0021](../adr/0021-signalr-hub-tickets.md) | SignalR hub authenticated by single-use tickets, never a JWT in the query string |

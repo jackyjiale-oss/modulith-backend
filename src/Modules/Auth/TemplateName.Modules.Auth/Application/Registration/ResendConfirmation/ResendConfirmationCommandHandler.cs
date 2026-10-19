@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using TemplateName.Application.Common.Messaging;
+using TemplateName.Application.Common.Security;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Application.Verification;
 using TemplateName.Modules.Auth.Domain.Audit;
@@ -51,6 +52,7 @@ internal sealed class ResendConfirmationCommandHandler(
         verificationCodes.Add(VerificationCode.Issue(
             user.Id,
             VerificationPurpose.EmailVerify,
+            VerificationTrigger.SelfService,
             user.NormalizedEmail,
             token.Hash,
             secretProtector.Protect(token.Value),

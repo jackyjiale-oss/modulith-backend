@@ -1,0 +1,3 @@
+Hello {{ display_name }},
+
+Your account was created at {{ occurred_at }}. Open this link to start: {{ action_url }}

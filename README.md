@@ -67,13 +67,17 @@ docker compose up -d                 # SQL Server, the Aspire dashboard and Mail
 dotnet user-secrets set "ConnectionStrings:Database" \
   "Server=127.0.0.1,1433;Database=TemplateName;User Id=sa;Password=<from .env>;TrustServerCertificate=True" \
   --project src/Host/TemplateName.Api
+dotnet user-secrets set "Database:ApplyMigrationsOnStartup" "true" --project src/Host/TemplateName.Api
+dotnet user-secrets set "Auth:Seed:AdminEmail" "admin@localhost.test" --project src/Host/TemplateName.Api
 dotnet user-secrets set "Auth:Seed:AdminPassword" "<value>" --project src/Host/TemplateName.Api
 dotnet run --project src/Host/TemplateName.Api
 ```
 
 SQL Server needs several seconds on its first start: if the API stops at the migration step, wait until the container is ready (`docker compose logs sqlserver` shows `SQL Server is now ready for client connections`) and run it again. The connection string uses `127.0.0.1`, not `localhost`, because `localhost` can hang on some Windows setups.
 
-In Development the API applies the migrations and seeds the roles, the permissions and the first administrator, `admin@localhost.test`, with the password you put in user secrets (12 to 128 characters; choose your own, never commit it). Sign in as that administrator with `POST /api/v1/auth/login` in Scalar (<https://localhost:5001/scalar/v1>) and send the `accessToken` as a bearer token. Register a user the same way: the confirmation email is not sent anywhere; **Mailpit** catches it, and its inbox is at <http://localhost:8025>. Remove `Auth:Seed:AdminPassword` from user secrets after the first start. Health is at <https://localhost:5001/health/ready>.
+Local development settings are not committed: `appsettings.Development.json` is git-ignored. The two settings above that are not secrets (`Database:ApplyMigrationsOnStartup` and `Auth:Seed:AdminEmail`) can live in such a local file instead of user secrets, along with `"OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4317"` (the Aspire dashboard) and a Serilog `MinimumLevel:Default` of `Debug`.
+
+With these settings the API applies the migrations and seeds the roles, the permissions and the first administrator, `admin@localhost.test`, with the password you put in user secrets (12 to 128 characters; choose your own, never commit it). Sign in as that administrator with `POST /api/v1/auth/login` in Scalar (<https://localhost:5001/scalar/v1>) and send the `accessToken` as a bearer token. Register a user the same way (`POST /api/v1/auth/register`, with `locale` `en`, `ms` or `zh-Hans`): the confirmation email is not sent anywhere; **Mailpit** catches it, rendered in the user's language, and its inbox is at <http://localhost:8025>. The email is sent by the Notifications module in the background, so it arrives a few seconds after the request (the Auth outbox and the delivery worker each poll every 5 seconds: two polling intervals, about 10 s, plus processing). Once signed in, `GET /api/v1/notifications/inbox` lists the user's in-app notifications (changing the password creates one, and an email), `GET /api/v1/notifications/inbox/unread-count` counts the unread ones, and a browser opens the SignalR hub at `/hubs/notifications` with a single-use ticket from `POST /api/v1/notifications/hub-tickets` to get new ones live ([`docs/modules/notifications.md`](docs/modules/notifications.md#realtime-hub) has a client example). The SMTP settings are `Notifications:Email:*` (they were `Auth:Email:*` in earlier versions: the API refuses to start while the old section is set). Remove `Auth:Seed:AdminPassword` from user secrets after the first start. Health is at <https://localhost:5001/health/ready>.
 
 ## Repository layout
 
@@ -135,7 +139,7 @@ These ship with every generated project (index: [`docs/README.md`](docs/README.m
 - [`docs/services/api.md`](docs/services/api.md): the host's pipeline, every configuration section, health, environments, migrations
 - [`docs/building-blocks/`](docs/building-blocks/): SharedKernel, Application.Common, Infrastructure.Common, Web.Common
 - [`docs/modules/`](docs/modules/): one page per module, from [`_template.md`](docs/modules/_template.md)
-- [`docs/adr/`](docs/adr/): architecture decision records 0001 to 0017
+- [`docs/adr/`](docs/adr/): architecture decision records 0001 to 0021
 - [`docs/coding-conventions.md`](docs/coding-conventions.md): naming, files and code style
 - [`CONTRIBUTING.md`](CONTRIBUTING.md): branches, Conventional Commits, pull requests, releases and licences
 

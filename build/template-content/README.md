@@ -26,13 +26,17 @@ chmod +x .githooks/commit-msg        # the hook must be executable (harmless on 
 dotnet user-secrets set "ConnectionStrings:Database" \
   "Server=127.0.0.1,1433;Database=TemplateName;User Id=sa;Password=<from .env>;TrustServerCertificate=True" \
   --project src/Host/TemplateName.Api
+dotnet user-secrets set "Database:ApplyMigrationsOnStartup" "true" --project src/Host/TemplateName.Api
+dotnet user-secrets set "Auth:Seed:AdminEmail" "admin@localhost.test" --project src/Host/TemplateName.Api
 dotnet user-secrets set "Auth:Seed:AdminPassword" "<value>" --project src/Host/TemplateName.Api
 dotnet run --project src/Host/TemplateName.Api
 ```
 
 SQL Server needs several seconds on its first start: if the API stops at the migration step, wait until the container is ready (`docker compose logs sqlserver` shows `SQL Server is now ready for client connections`) and run it again. The connection string uses `127.0.0.1`, not `localhost`, because `localhost` can hang on some Windows setups.
 
-In Development the API applies the module migrations on startup and seeds the roles, the permissions and the first administrator, `admin@localhost.test`, with the password you set above (12 to 128 characters; choose your own and never commit it). Sign in as that administrator with `POST /api/v1/auth/login` in Scalar and send the returned `accessToken` as a bearer token. Remove `Auth:Seed:AdminPassword` from user secrets after the first start. Emails (account confirmation, password reset) are not delivered anywhere locally: Mailpit catches them, and its inbox is at <http://localhost:8025>.
+Local development settings are not committed: `appsettings.Development.json` is git-ignored. The two settings above that are not secrets (`Database:ApplyMigrationsOnStartup` and `Auth:Seed:AdminEmail`) can live in such a local file instead of user secrets, along with `"OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4317"` (the Aspire dashboard) and a Serilog `MinimumLevel:Default` of `Debug`.
+
+With these settings the API applies the module migrations on startup and seeds the roles, the permissions and the first administrator, `admin@localhost.test`, with the password you set above (12 to 128 characters; choose your own and never commit it). Sign in as that administrator with `POST /api/v1/auth/login` in Scalar and send the returned `accessToken` as a bearer token. Remove `Auth:Seed:AdminPassword` from user secrets after the first start. Emails (account confirmation, password reset, security notices) are not delivered anywhere locally: Mailpit catches them, rendered in the recipient's language (`en`, `ms` or `zh-Hans`, the `locale` sent on registration), and its inbox is at <http://localhost:8025>. The Notifications module sends them in the background, so an email arrives a few seconds after the request (the Auth outbox and the delivery worker each poll every 5 seconds: two polling intervals, about 10 s, plus processing). Signed in, `GET /api/v1/notifications/inbox` lists the user's in-app notifications (a password change creates one, and an email), `GET /api/v1/notifications/inbox/unread-count` counts the unread ones, and a browser opens the SignalR hub at `/hubs/notifications` with a single-use ticket from `POST /api/v1/notifications/hub-tickets` to receive new ones live (client example: [`docs/modules/notifications.md`](docs/modules/notifications.md#realtime-hub)). The SMTP settings are `Notifications:Email:*` (they were `Auth:Email:*` in earlier versions: the API refuses to start while the old section is set).
 
 | What | URL |
 |---|---|
@@ -46,6 +50,7 @@ In Development the API applies the module migrations on startup and seeds the ro
 | Module | Document |
 |---|---|
 | Auth (sign-in, tokens, sessions, roles, permissions, audit log) | [`docs/modules/auth.md`](docs/modules/auth.md) |
+| Notifications (every email and in-app message, the inbox, the SignalR hub, preferences, quiet hours) | [`docs/modules/notifications.md`](docs/modules/notifications.md) |
 | Sample (leave requests) | [`docs/modules/sample.md`](docs/modules/sample.md) |
 
 A new module gets its own page, copied from [`docs/modules/_template.md`](docs/modules/_template.md).
