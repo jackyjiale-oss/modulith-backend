@@ -1,8 +1,8 @@
 namespace TemplateName.Modules.Auth.Domain.Mfa;
 
 /// <summary>
-/// What happened to a user's two-step verification. Carried by <c>MfaChangedDomainEvent</c> and, later, by the integration event, so it
-/// is serialized by its numeric value: a new change is appended and existing values are never renumbered.
+/// What happened to a user's two-step verification. Carried by <c>MfaChangedDomainEvent</c> and by the integration event (<c>MfaChangeKind</c>), so
+/// it is serialized by its numeric value: a new change is appended and existing values are never renumbered.
 /// </summary>
 internal enum MfaChange
 {
@@ -18,6 +18,6 @@ internal enum MfaChange
     /// <summary>An administrator removed the user's two-step verification.</summary>
     ResetByAdmin = 3,
 
-    /// <summary>A recovery code was used to sign in. Nothing else changes (<c>User.NoteRecoveryCodeUsed</c>).</summary>
+    /// <summary>A recovery code was used to sign in or to step up. Nothing else changes (<c>User.NoteRecoveryCodeUsed</c>).</summary>
     RecoveryCodeUsed = 4,
 }

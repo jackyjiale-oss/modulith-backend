@@ -125,7 +125,7 @@ public sealed class MfaFlowTests(IntegrationTestWebAppFactory factory) : Integra
         emails.Count.ShouldBe(5);
         emails.Count(message => message.TextBody.Contains("您的账户已开启两步验证。", StringComparison.Ordinal)).ShouldBe(1);
         emails.Count(message => message.TextBody.Contains("已生成新的恢复码", StringComparison.Ordinal)).ShouldBe(1);
-        emails.Count(message => message.TextBody.Contains("已使用恢复码登录您的账户。", StringComparison.Ordinal)).ShouldBe(2);
+        emails.Count(message => message.TextBody.Contains("已在您的账户上使用恢复码。", StringComparison.Ordinal)).ShouldBe(2);
         emails.Count(message => message.TextBody.Contains("您的账户已关闭两步验证。", StringComparison.Ordinal)).ShouldBe(1);
         Factory.EmailSender.Sent.ShouldNotContain(message => message.Subject == NewDeviceSubject);
         Factory.IntegrationEvents.Events.OfType<NewDeviceSignedInIntegrationEvent>().ShouldBeEmpty();
