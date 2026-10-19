@@ -6,7 +6,9 @@ using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Application.Passwords.Change;
+using TemplateName.Modules.Auth.Application.StepUp;
 using TemplateName.Modules.Auth.Domain.Audit;
+using TemplateName.Modules.Auth.Domain.Mfa;
 using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Domain.Verification;
@@ -25,6 +27,7 @@ public sealed class ChangePasswordCommandHandlerTests
 
     private readonly IUserRepository _users = Substitute.For<IUserRepository>();
     private readonly ISessionRepository _sessions = Substitute.For<ISessionRepository>();
+    private readonly IMfaMethodRepository _mfaMethods = Substitute.For<IMfaMethodRepository>();
     private readonly IVerificationCodeRepository _verificationCodes = Substitute.For<IVerificationCodeRepository>();
     private readonly IPasswordHasher _passwordHasher = Substitute.For<IPasswordHasher>();
     private readonly IBreachedPasswordChecker _breachedPasswordChecker = Substitute.For<IBreachedPasswordChecker>();
@@ -55,20 +58,85 @@ public sealed class ChangePasswordCommandHandlerTests
         _auditWriter.Record(Arg.Do<AuthAuditLog>(_auditEntries.Add));
         _sessions.GetActiveByUserAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([]);
         _verificationCodes.GetPendingAsync(_user.Id, VerificationPurpose.PasswordReset, Now, Arg.Any<CancellationToken>()).Returns([]);
+        var time = new FakeTimeProvider(Now);
         _sut = new ChangePasswordCommandHandler(
             _users,
             _sessions,
+            _mfaMethods,
             _verificationCodes,
             _passwordHasher,
             _breachedPasswordChecker,
+            new StepUpPolicy(_currentUser, Options.Create(new StepUpOptions()), time),
             _currentUser,
             _auditWriter,
             _unitOfWork,
             Options.Create(new PasswordOptions()),
-            new FakeTimeProvider(Now));
+            time);
     }
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    [Theory]
+    [InlineData("pwd-only")]
+    [InlineData("stale")]
+    [InlineData("no-auth-time")]
+    public async Task Mfa_account_change_password_needs_an_mfa_step_up(string scenario)
+    {
+        // The account has a confirmed method: its current password in the body is no longer enough. The step-up is checked after the
+        // caller is loaded and before the password is verified, so a refused request spends no hashing and counts nothing.
+        _mfaMethods.HasConfirmedAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(true);
+        _currentUser.AuthTime.Returns(scenario == "no-auth-time" ? (DateTimeOffset?)null : scenario == "stale" ? Now.AddMinutes(-10) : Now.AddMinutes(-1));
+        _currentUser.AuthMethods.Returns(["pwd"]);
+        var other = StartSession();
+        _sessions.GetActiveByUserAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([other]);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        result.Error.ShouldBe(MfaErrors.StepUpRequired);
+        _user.PasswordHash.ShouldBe(CurrentHash);
+        _user.AccessFailedCount.ShouldBe(0);
+        other.RevokedAt.ShouldBeNull();
+        _passwordHasher.DidNotReceiveWithAnyArgs().Verify(default!, default!);
+        _passwordHasher.DidNotReceiveWithAnyArgs().SpendVerificationCost(default!);
+        _passwordHasher.DidNotReceiveWithAnyArgs().Hash(default!);
+        await _breachedPasswordChecker.DidNotReceiveWithAnyArgs().IsBreachedAsync(default!, Ct);
+        await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
+        var audit = _auditEntries.ShouldHaveSingleItem();
+        audit.EventType.ShouldBe(AuthAuditEvents.PasswordChangeFailed);
+        audit.Succeeded.ShouldBeFalse();
+        audit.UserId.ShouldBe(_user.Id);
+        audit.FailureReason.ShouldBe(MfaErrors.StepUpRequired.Code);
+        await _unitOfWork.Received(1).SaveChangesAsync(Ct);
+    }
+
+    [Fact]
+    public async Task Mfa_account_with_a_fresh_otp_step_up_changes_the_password()
+    {
+        _mfaMethods.HasConfirmedAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(true);
+        _currentUser.AuthTime.Returns(Now.AddMinutes(-1));
+        _currentUser.AuthMethods.Returns(["otp"]);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        _user.PasswordHash.ShouldBe(NewHash);
+        _auditEntries.ShouldHaveSingleItem().EventType.ShouldBe(AuthAuditEvents.PasswordChanged);
+    }
+
+    [Fact]
+    public async Task Password_only_account_change_password_is_unchanged()
+    {
+        // No confirmed method (a pending setup does not count): the token needs no auth_time or amr, only the current password.
+        _mfaMethods.HasConfirmedAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(false);
+        _currentUser.AuthTime.Returns((DateTimeOffset?)null);
+        _currentUser.AuthMethods.Returns(Array.Empty<string>());
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        _user.PasswordHash.ShouldBe(NewHash);
+        _auditEntries.ShouldHaveSingleItem().EventType.ShouldBe(AuthAuditEvents.PasswordChanged);
+    }
 
     [Fact]
     public async Task Change_keeps_the_current_session()

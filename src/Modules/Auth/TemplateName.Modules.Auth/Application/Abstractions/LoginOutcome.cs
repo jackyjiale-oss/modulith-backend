@@ -17,4 +17,10 @@ internal enum LoginOutcome
 
     /// <summary>The password was correct but the account is suspended (403).</summary>
     Inactive = 4,
+
+    /// <summary>
+    /// The password was correct and the account has two-step verification: a challenge was issued instead of tokens. Whether the sign-in
+    /// then completes is counted by <see cref="IAuthMetrics.RecordMfaVerification"/>.
+    /// </summary>
+    MfaRequired = 5,
 }

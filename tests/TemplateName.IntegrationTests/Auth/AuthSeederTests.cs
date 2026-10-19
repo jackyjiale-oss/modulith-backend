@@ -33,6 +33,7 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
         "auth.user.lock",
         "auth.user.reset_password",
         "auth.user.revoke_sessions",
+        "auth.user.reset_mfa",
         "auth.role.view",
         "auth.permission.view",
         "auth.audit.view",
@@ -115,7 +116,7 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
     [Fact]
     public async Task Auth_admin_defaults_are_unchanged()
     {
-        // The Admin role holds exactly the eight Auth permissions it always did: nothing was added to or taken from them.
+        // The Admin role holds exactly the nine Auth permissions: the eight it always held and auth.user.reset_mfa (plan 4, D17); nothing else.
         var admin = await GrantedCodesAsync(SystemRoles.Admin);
 
         admin.Where(code => code.StartsWith("auth.", StringComparison.Ordinal)).ShouldBe(AuthAdminDefaults, ignoreOrder: true);

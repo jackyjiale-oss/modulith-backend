@@ -6,6 +6,9 @@ namespace TemplateName.Modules.Auth.Application.Abstractions;
 /// </summary>
 internal static class UniqueIndexNames
 {
+    /// <summary>The unique index on <c>auth.UserMfaMethods (UserId, Type)</c>: one method of each type per user (plan decision D18).</summary>
+    public const string MfaMethodPerUserAndType = "IX_UserMfaMethods_UserId_Type";
+
     /// <summary>The unique index on <c>auth.Roles.NormalizedName</c> (filtered to roles that are not deleted).</summary>
     public const string RoleName = "IX_Roles_NormalizedName";
 

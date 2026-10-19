@@ -15,7 +15,7 @@ public sealed partial class AuthPermissionSourceTests
         IPermissionSource source = new AuthPermissionSource();
         var permissions = source.Permissions;
 
-        permissions.Count.ShouldBe(10);
+        permissions.Count.ShouldBe(11);
         permissions.Select(p => p.Code).Distinct(StringComparer.Ordinal).Count().ShouldBe(permissions.Count);
         permissions.ShouldAllBe(p => CodePattern().IsMatch(p.Code));
         permissions.ShouldAllBe(p => p.Code.StartsWith("auth.", StringComparison.Ordinal));
@@ -35,7 +35,7 @@ public sealed partial class AuthPermissionSourceTests
     }
 
     [Fact]
-    public void AuthPermissionSource_flags_exactly_the_eight_admin_defaults()
+    public void AuthPermissionSource_flags_exactly_the_nine_admin_defaults()
     {
         // The Admin role's Auth defaults, spelled out: a change here is a change of what every new installation's Admin can do.
         new AuthPermissionSource().Permissions.Where(permission => permission.AdminDefault).Select(permission => permission.Code).ShouldBe(
@@ -45,6 +45,7 @@ public sealed partial class AuthPermissionSourceTests
                 "auth.user.lock",
                 "auth.user.reset_password",
                 "auth.user.revoke_sessions",
+                "auth.user.reset_mfa",
                 "auth.role.view",
                 "auth.permission.view",
                 "auth.audit.view",

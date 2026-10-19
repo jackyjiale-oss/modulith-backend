@@ -6,6 +6,8 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence;
 
 internal sealed class SessionRepository(AuthDbContext context) : ISessionRepository
 {
+    private const string DeviceCollation = "Latin1_General_100_BIN2";
+
     public Task<UserSession?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
         => Sessions().SingleOrDefaultAsync(session => session.Id == id, cancellationToken);
 
@@ -20,6 +22,32 @@ internal sealed class SessionRepository(AuthDbContext context) : ISessionReposit
             .Where(session => session.UserId == userId && session.RevokedAt == null && session.ExpiresAt > now)
             .OrderBy(session => session.CreatedAt)
             .ToListAsync(cancellationToken);
+
+    // One aggregate over the user's sessions. The pair is compared with a binary collation, because the column collation is case and
+    // accent insensitive and a device is told apart exactly; a null agent compares equal to a null agent (EF's null semantics).
+    public async Task<DeviceFamiliarity> GetDeviceFamiliarityAsync(Guid userId, string deviceName, string? userAgent, CancellationToken cancellationToken)
+    {
+        var counts = await context.Set<UserSession>()
+            .AsNoTracking()
+            .Where(session => session.UserId == userId)
+            .GroupBy(session => session.UserId)
+            .Select(group => new
+            {
+                Matching = group.Count(session =>
+                    EF.Functions.Collate(session.DeviceName, DeviceCollation) == deviceName
+                    && (userAgent == null
+                        ? session.UserAgent == null
+                        : EF.Functions.Collate(session.UserAgent!, DeviceCollation) == userAgent)),
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return counts switch
+        {
+            null => DeviceFamiliarity.FirstSignIn,
+            { Matching: > 0 } => DeviceFamiliarity.Known,
+            _ => DeviceFamiliarity.New,
+        };
+    }
 
     public void Add(UserSession session) => context.Set<UserSession>().Add(session);
 

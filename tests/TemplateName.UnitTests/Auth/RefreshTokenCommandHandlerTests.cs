@@ -117,6 +117,20 @@ public sealed class RefreshTokenCommandHandlerTests
     }
 
     [Fact]
+    public async Task Refresh_after_a_step_up_carries_its_auth_time_and_amr()
+    {
+        // auth_time is the session's AuthenticatedAt: the sign-in, or the latest step-up, never the session's creation.
+        var steppedUpAt = SignedInAt.AddMinutes(30);
+        _session.StepUp("otp", steppedUpAt);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        _tokenRequests.ShouldHaveSingleItem().ShouldBe(
+            new AccessTokenRequest(_user.Id, _session.Id, _session.SecurityStamp, "otp", steppedUpAt, "ms"));
+    }
+
+    [Fact]
     public async Task Claim_failure_is_handled_as_reuse()
     {
         // A simultaneous refresh with the same token claimed it first: the row says used.

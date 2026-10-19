@@ -28,5 +28,11 @@ public sealed class TestCurrentUser(IHttpContextAccessor httpContextAccessor) : 
     /// <summary>The request's session; a forced user has none.</summary>
     public Guid? SessionId => _forcedUserId.HasValue ? null : _requestUser.SessionId;
 
+    /// <summary>The request's sign-in time; a forced user has none.</summary>
+    public DateTimeOffset? AuthTime => _forcedUserId.HasValue ? null : _requestUser.AuthTime;
+
+    /// <summary>The request's sign-in methods; a forced user has none.</summary>
+    public IReadOnlyCollection<string> AuthMethods => _forcedUserId.HasValue ? [] : _requestUser.AuthMethods;
+
     public bool IsAuthenticated => _forcedUserId.HasValue || _requestUser.IsAuthenticated;
 }

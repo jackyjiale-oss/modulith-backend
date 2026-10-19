@@ -3,7 +3,9 @@ using Microsoft.Extensions.Options;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Application.StepUp;
 using TemplateName.Modules.Auth.Domain.Audit;
+using TemplateName.Modules.Auth.Domain.Mfa;
 using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Domain.Verification;
@@ -17,13 +19,19 @@ namespace TemplateName.Modules.Auth.Application.Passwords.Change;
 /// current password is audited but not counted towards the login lockout. A successful change invalidates every pending reset link of
 /// the user. A caller whose account is gone or suspended gets
 /// <see cref="UserErrors.NotFound"/>, which the endpoint answers like a request without a valid token.
+/// An account with a confirmed MFA method must also prove a fresh step-up with a code first (plan decision D11, ADR 0023): after the
+/// caller is loaded and before the current password is verified, <see cref="StepUpPolicy.Check"/> must pass, otherwise
+/// <see cref="MfaErrors.StepUpRequired"/>, audited like the other failures and, like a wrong current password, not counted toward the
+/// lockout. A password-only account is unchanged: its current password in the body is the re-verification.
 /// </summary>
 internal sealed class ChangePasswordCommandHandler(
     IUserRepository users,
     ISessionRepository sessions,
+    IMfaMethodRepository mfaMethods,
     IVerificationCodeRepository verificationCodes,
     IPasswordHasher passwordHasher,
     IBreachedPasswordChecker breachedPasswordChecker,
+    StepUpPolicy stepUpPolicy,
     ICurrentUser currentUser,
     IAuthAuditWriter auditWriter,
     IUnitOfWork unitOfWork,
@@ -44,6 +52,15 @@ internal sealed class ChangePasswordCommandHandler(
         }
 
         var now = timeProvider.GetUtcNow();
+        if (await mfaMethods.HasConfirmedAsync(userId, cancellationToken))
+        {
+            var stepUp = stepUpPolicy.Check(hasConfirmedMfa: true);
+            if (stepUp.IsFailure)
+            {
+                return await FailAsync(user, stepUp.Error, now, cancellationToken);
+            }
+        }
+
         if (!VerifyCurrentPassword(user, command.CurrentPassword))
         {
             return await FailAsync(user, UserErrors.CurrentPasswordIncorrect, now, cancellationToken);

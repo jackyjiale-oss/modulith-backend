@@ -18,6 +18,8 @@ internal sealed class AuthNotificationTypeSource : INotificationTypeSource
     private const string LockedUntil = "locked_until";
     private const string TimeZone = "time_zone";
     private const string ActionUrl = "action_url";
+    private const string Change = "change";
+    private const string IpAddress = "ip_address";
 
     private static readonly NotificationChannel[] EmailOnly = [NotificationChannel.Email];
     private static readonly NotificationChannel[] EmailAndInApp = [NotificationChannel.Email, NotificationChannel.InApp];
@@ -32,6 +34,8 @@ internal sealed class AuthNotificationTypeSource : INotificationTypeSource
         Notice(AuthNotificationTypes.PasswordChanged, EmailAndInApp, DisplayName, OccurredAt, TimeZone),
         Notice(AuthNotificationTypes.AccountLocked, EmailOnly, DisplayName, LockedUntil, TimeZone),
         Notice(AuthNotificationTypes.TokenReuseDetected, EmailAndInApp, DisplayName, OccurredAt, TimeZone),
+        Notice(AuthNotificationTypes.MfaChanged, EmailOnly, DisplayName, Change, OccurredAt, TimeZone),
+        Notice(AuthNotificationTypes.NewDeviceLogin, EmailOnly, DisplayName, OccurredAt, TimeZone, IpAddress),
     ];
 
     private static NotificationTypeDefinition Link(string code) =>

@@ -53,6 +53,11 @@ internal static class UserErrors
         "auth.role_assignment_not_allowed",
         "You may not assign roles, so a new account can only get the default role.");
 
+    /// <summary>An administrator tried to reset their own two-step verification; the self-service route (with a step-up) is for that.</summary>
+    public static readonly Error CannotResetOwnMfa = Error.Validation(
+        "auth.cannot_reset_own_mfa",
+        "You cannot reset your own two-step verification here.");
+
     public static Error NotFound(Guid id) =>
         Error.NotFound("auth.user_not_found", $"User '{id}' was not found.")
         with

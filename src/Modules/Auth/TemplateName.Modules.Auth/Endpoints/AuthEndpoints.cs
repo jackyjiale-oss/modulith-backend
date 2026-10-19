@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Application.Common.Pagination;
+using TemplateName.Modules.Auth.Application.Authentication;
 using TemplateName.Modules.Auth.Application.Authentication.Login;
 using TemplateName.Modules.Auth.Application.Authentication.Logout;
 using TemplateName.Modules.Auth.Application.Authentication.LogoutAll;
@@ -18,6 +19,7 @@ using TemplateName.Modules.Auth.Application.Registration.Register;
 using TemplateName.Modules.Auth.Application.Registration.ResendConfirmation;
 using TemplateName.Modules.Auth.Application.Sessions.List;
 using TemplateName.Modules.Auth.Application.Sessions.Revoke;
+using TemplateName.Modules.Auth.Application.StepUp;
 using TemplateName.SharedKernel;
 using TemplateName.Web.Common.Results;
 using TemplateName.Web.Common.Security;
@@ -61,7 +63,7 @@ internal static class AuthEndpoints
             .AllowAnonymous()
             .RequireRateLimiting(RateLimitPolicies.AuthStrict)
             .WithNoStore()
-            .Produces<LoginResponse>()
+            .Produces<LoginResult>()
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -143,7 +145,24 @@ internal static class AuthEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        // Authenticated, and it checks a password or a code that counts towards the lockout, so it is limited per client address too;
+        // the answer carries an access token, so it is never stored.
+        group.MapPost("step-up", StepUpAsync)
+            .WithName("StepUp")
+            .RequireAuthorization()
+            .RequireRateLimiting(RateLimitPolicies.AuthStrict)
+            .WithNoStore()
+            .Produces<StepUpResponse>()
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        // Two-step verification: auth/mfa/... and auth/trusted-devices/..., in the same group and tag.
+        group.MapMfaEndpoints();
+        group.MapTrustedDeviceEndpoints();
 
         return app;
     }
@@ -171,8 +190,9 @@ internal static class AuthEndpoints
         return result.IsSuccess ? TypedResults.NoContent() : result.ToProblem();
     }
 
-    // 204, or 400 auth.current_password_incorrect, auth.password_breached or auth.password_reused. A token whose user is gone or
-    // suspended gets the body-less 401 of a request without a valid token, as GET me does.
+    // 204, or 400 auth.current_password_incorrect, auth.password_breached or auth.password_reused, or 403 auth.step_up_required (an
+    // account with two-step verification on needs a fresh step-up with a code first). A token whose user is gone or suspended gets the
+    // body-less 401 of a request without a valid token, as GET me does.
     private static async Task<IResult> ChangePasswordAsync(
         ChangePasswordRequest request,
         ICommandHandler<ChangePasswordCommand> handler,
@@ -183,6 +203,24 @@ internal static class AuthEndpoints
         if (result.IsSuccess)
         {
             return TypedResults.NoContent();
+        }
+
+        return result.Error.Type == ErrorType.NotFound ? TypedResults.Unauthorized() : result.ToProblem();
+    }
+
+    // 200 with a new access token of the same session (fresh auth_time, amr what was proved); 400 auth.current_password_incorrect,
+    // auth.invalid_mfa_code or auth.step_up_method_not_allowed. A token whose user is gone or suspended, or whose session is not the
+    // caller's active session, gets the body-less 401 of a request without a valid token, as PUT me does.
+    private static async Task<IResult> StepUpAsync(
+        StepUpRequest request,
+        ICommandHandler<StepUpCommand, StepUpResponse> handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new StepUpCommand(request.Password, request.Code, request.RecoveryCode), cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            return TypedResults.Ok(result.Value);
         }
 
         return result.Error.Type == ErrorType.NotFound ? TypedResults.Unauthorized() : result.ToProblem();
@@ -215,14 +253,16 @@ internal static class AuthEndpoints
         return result.IsSuccess ? TypedResults.NoContent() : result.ToProblem();
     }
 
-    // 401 auth.invalid_credentials for every wrong combination (unknown email, wrong password, no password set, locked account);
-    // 403 only after a correct password.
+    // 200 with the tokens (mfaRequired false) or, for an account with two-step verification, a challenge for POST mfa/verify (mfaRequired
+    // true), unless a usable trusted device token came with the password (then the tokens, amr pwd); 401 auth.invalid_credentials for
+    // every wrong combination (unknown email, wrong password, no password set, locked account); 403 only after a correct password.
     private static async Task<IResult> LoginAsync(
         LoginRequest request,
-        ICommandHandler<LoginCommand, LoginResponse> handler,
+        ICommandHandler<LoginCommand, LoginResult> handler,
         CancellationToken cancellationToken)
     {
-        var result = await handler.HandleAsync(new LoginCommand(request.Email, request.Password, request.DeviceName), cancellationToken);
+        var command = new LoginCommand(request.Email, request.Password, request.DeviceName, request.TrustedDeviceToken);
+        var result = await handler.HandleAsync(command, cancellationToken);
 
         return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
     }

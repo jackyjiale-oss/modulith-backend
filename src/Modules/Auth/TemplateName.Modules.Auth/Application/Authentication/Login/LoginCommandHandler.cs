@@ -3,8 +3,11 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Application.Mfa;
 using TemplateName.Modules.Auth.Domain.Audit;
+using TemplateName.Modules.Auth.Domain.Mfa;
 using TemplateName.Modules.Auth.Domain.Sessions;
+using TemplateName.Modules.Auth.Domain.TrustedDevices;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.SharedKernel;
 
@@ -16,30 +19,41 @@ namespace TemplateName.Modules.Auth.Application.Authentication.Login;
 /// password (decision D10), and the 403s come only after a correct password, so they reveal nothing to someone who does not know it.
 /// Every outcome writes an audit entry and is saved, so failure counts survive the failure result; a failure is counted by one atomic
 /// statement in the database, so parallel guesses are each counted and never lost to a concurrency conflict.
+/// <para>
+/// Only once the password is right and the account may sign in does it look at two-step verification (Plan 4): an account without a
+/// confirmed method gets its session as before; one with it gets a challenge instead, and the failure count is <b>not</b> reset (decision
+/// D7: only a verified second factor resets it), so starting a new challenge after every few wrong codes never earns more guesses.
+/// </para>
+/// <para>
+/// A trusted device (plan decision D14, ADR 0025) is looked at only there, for an account with a confirmed method and while
+/// <c>Auth:Mfa:TrustedDevicesEnabled</c> is on: a device token whose device belongs to this user and is usable (not revoked, before its
+/// absolute expiry, bound to the user's current security stamp) stands in for the second factor, and the session starts with <c>amr</c>
+/// <c>pwd</c> (D9: a code proved earlier is not proved now, so it never satisfies an MFA step-up). Every other token (unknown, expired,
+/// revoked, another user's, an older stamp) gets the challenge exactly as if none was sent, and nothing in the answer, the audit or the
+/// metrics tells it apart.
+/// </para>
 /// </summary>
 internal sealed class LoginCommandHandler(
     IUserRepository users,
-    ISessionRepository sessions,
+    IMfaMethodRepository mfaMethods,
+    IMfaChallengeRepository challenges,
+    ITrustedDeviceRepository trustedDevices,
     IPasswordHasher passwordHasher,
     ISecureTokenService tokenService,
-    IAccessTokenIssuer accessTokenIssuer,
+    SessionStarter sessionStarter,
     IAuthAuditWriter auditWriter,
-    IClientContext clientContext,
     IUnitOfWork unitOfWork,
     IAuthMetrics metrics,
     IOptions<LockoutOptions> lockoutOptions,
-    IOptions<RefreshTokenOptions> refreshTokenOptions,
-    TimeProvider timeProvider) : ICommandHandler<LoginCommand, LoginResponse>
+    IOptions<MfaOptions> mfaOptions,
+    TimeProvider timeProvider) : ICommandHandler<LoginCommand, LoginResult>
 {
     /// <summary>The audit failure reason of a correct password on a locked account.</summary>
     internal const string LockedFailureReason = "locked";
 
-    /// <summary>The <c>amr</c> value of a password sign-in.</summary>
-    private const string PasswordAuthMethod = "pwd";
-
     private const string DefaultDeviceName = "Unknown";
 
-    public async Task<Result<LoginResponse>> HandleAsync(LoginCommand command, CancellationToken cancellationToken)
+    public async Task<Result<LoginResult>> HandleAsync(LoginCommand command, CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
         var attemptedIdentifier = AuthAuditLog.MaskIdentifier(command.Email);
@@ -66,7 +80,21 @@ internal sealed class LoginCommandHandler(
             return await RejectAsync(user, canSignIn.Error.Code, outcome, canSignIn.Error, attemptedIdentifier, now, cancellationToken);
         }
 
-        return await SignInAsync(user, command, verification, attemptedIdentifier, now, cancellationToken);
+        if (verification == PasswordVerification.SuccessRehashNeeded)
+        {
+            user.UpgradePasswordHash(passwordHasher.Hash(command.Password));
+        }
+
+        // The first read of anything two-step: only a correct password of an account that may sign in gets this far (enumeration).
+        var deviceName = command.DeviceName ?? DefaultDeviceName;
+        if (await mfaMethods.HasConfirmedAsync(user.Id, cancellationToken))
+        {
+            return await FindUsableTrustedDeviceAsync(user, command.TrustedDeviceToken, now, cancellationToken) is { } trustedDevice
+                ? await SignInAsync(user, deviceName, attemptedIdentifier, now, trustedDevice, cancellationToken)
+                : await ChallengeAsync(user, deviceName, attemptedIdentifier, now, cancellationToken);
+        }
+
+        return await SignInAsync(user, deviceName, attemptedIdentifier, now, trustedDevice: null, cancellationToken);
     }
 
     /// <summary>
@@ -84,7 +112,22 @@ internal sealed class LoginCommandHandler(
         return PasswordVerification.Failed;
     }
 
-    private async Task<Result<LoginResponse>> RejectWrongCredentialsAsync(
+    /// <summary>
+    /// The device <paramref name="token"/> names, when trusted devices are on and it is a usable device of <paramref name="user"/>;
+    /// otherwise null, whatever the reason, so the caller answers exactly as without a token. Only the token's hash is looked up.
+    /// </summary>
+    private async Task<TrustedDevice?> FindUsableTrustedDeviceAsync(User user, string? token, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (!mfaOptions.Value.TrustedDevicesEnabled || string.IsNullOrWhiteSpace(token))
+        {
+            return null;
+        }
+
+        var device = await trustedDevices.GetByTokenHashAsync(tokenService.Hash(token), cancellationToken);
+        return device is not null && device.UserId == user.Id && device.IsUsable(user.SecurityStamp, now) ? device : null;
+    }
+
+    private async Task<Result<LoginResult>> RejectWrongCredentialsAsync(
         User? user,
         string? attemptedIdentifier,
         DateTimeOffset now,
@@ -127,10 +170,10 @@ internal sealed class LoginCommandHandler(
         await unitOfWork.SaveChangesAsync(cancellationToken);
         metrics.RecordLogin(LoginOutcome.InvalidCredentials);
 
-        return Result.Failure<LoginResponse>(UserErrors.InvalidCredentials);
+        return Result.Failure<LoginResult>(UserErrors.InvalidCredentials);
     }
 
-    private async Task<Result<LoginResponse>> RejectAsync(
+    private async Task<Result<LoginResult>> RejectAsync(
         User user,
         string failureReason,
         LoginOutcome outcome,
@@ -151,39 +194,30 @@ internal sealed class LoginCommandHandler(
         await unitOfWork.SaveChangesAsync(cancellationToken);
         metrics.RecordLogin(outcome);
 
-        return Result.Failure<LoginResponse>(error);
+        return Result.Failure<LoginResult>(error);
     }
 
-    private async Task<Result<LoginResponse>> SignInAsync(
+    /// <summary>
+    /// Starts the session of a correct password: an account without two-step verification, or one whose usable
+    /// <paramref name="trustedDevice"/> stands in for the second factor (marked used; its expiry stays absolute). Either way the session's
+    /// <c>amr</c> is <c>pwd</c>; a trusted device is named in the audit row's <c>Details</c> by its id, never by its token.
+    /// </summary>
+    private async Task<Result<LoginResult>> SignInAsync(
         User user,
-        LoginCommand command,
-        PasswordVerification verification,
+        string deviceName,
         string? attemptedIdentifier,
         DateTimeOffset now,
+        TrustedDevice? trustedDevice,
         CancellationToken cancellationToken)
     {
-        user.RecordSuccessfulSignIn(now);
-        if (verification == PasswordVerification.SuccessRehashNeeded)
-        {
-            user.UpgradePasswordHash(passwordHasher.Hash(command.Password));
-        }
-
-        var refreshToken = tokenService.Generate();
-        var refreshTokens = refreshTokenOptions.Value;
-        var (session, firstToken) = UserSession.Start(
-            user.Id,
-            PasswordAuthMethod,
-            command.DeviceName ?? DefaultDeviceName,
-            clientContext.UserAgent,
-            clientContext.IpAddress,
-            user.SecurityStamp,
-            refreshToken.Hash,
-            refreshTokens.SlidingLifetime,
-            refreshTokens.AbsoluteLifetime,
-            now);
-        sessions.Add(session);
-
-        var accessToken = accessTokenIssuer.Issue(new AccessTokenRequest(user.Id, session.Id, user.SecurityStamp, PasswordAuthMethod, now, user.Locale));
+        trustedDevice?.MarkUsed(now);
+        var started = await sessionStarter.StartAsync(
+            user,
+            AuthenticationMethods.Password,
+            deviceName,
+            viaTrustedDevice: trustedDevice is not null,
+            now,
+            cancellationToken);
 
         auditWriter.Record(AuthAuditLog.Create(
             AuthAuditEvents.LoginSucceeded,
@@ -191,18 +225,54 @@ internal sealed class LoginCommandHandler(
             now,
             userId: user.Id,
             attemptedIdentifier: attemptedIdentifier,
-            sessionId: session.Id));
+            sessionId: started.Session.Id,
+            details: trustedDevice is null ? null : JsonSerializer.Serialize(new { trustedDeviceId = trustedDevice.Id })));
 
         // Another request changed this user between our read and this save (a parallel login, say). Nothing was saved; answer like a
         // wrong password, because the 409 the conflict would otherwise become can only happen to an existing account.
         if (!await unitOfWork.TrySaveChangesAsync(cancellationToken))
         {
             metrics.RecordLogin(LoginOutcome.InvalidCredentials);
-            return Result.Failure<LoginResponse>(UserErrors.InvalidCredentials);
+            return Result.Failure<LoginResult>(UserErrors.InvalidCredentials);
         }
 
         metrics.RecordLogin(LoginOutcome.Succeeded);
 
-        return new LoginResponse(accessToken.Value, accessToken.ExpiresAt, refreshToken.Value, firstToken.ExpiresAt, session.Id);
+        return LoginResult.Signed(started.Tokens);
+    }
+
+    /// <summary>
+    /// The password step of an account with two-step verification: a challenge (a fresh secure token, only its hash stored) bound to the
+    /// user's security stamp, valid <c>Auth:Mfa:ChallengeLifetime</c>. No session, and no <see cref="User.RecordSuccessfulSignIn"/>: the
+    /// failure count stays as it is until a second factor is verified (D7).
+    /// </summary>
+    private async Task<Result<LoginResult>> ChallengeAsync(
+        User user,
+        string deviceName,
+        string? attemptedIdentifier,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var token = tokenService.Generate();
+        var challenge = MfaChallenge.Issue(user.Id, token.Hash, user.SecurityStamp, deviceName, mfaOptions.Value.ChallengeLifetime, now);
+        challenges.Add(challenge);
+
+        auditWriter.Record(AuthAuditLog.Create(
+            AuthAuditEvents.MfaChallengeIssued,
+            succeeded: true,
+            now,
+            userId: user.Id,
+            attemptedIdentifier: attemptedIdentifier));
+
+        // The user row changes here only for a rehash; a conflict with another request is answered like the success path's.
+        if (!await unitOfWork.TrySaveChangesAsync(cancellationToken))
+        {
+            metrics.RecordLogin(LoginOutcome.InvalidCredentials);
+            return Result.Failure<LoginResult>(UserErrors.InvalidCredentials);
+        }
+
+        metrics.RecordLogin(LoginOutcome.MfaRequired);
+
+        return LoginResult.Challenge(token.Value, challenge.ExpiresAt);
     }
 }

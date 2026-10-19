@@ -155,6 +155,61 @@ public sealed class AuthEventHandlerTests
     }
 
     [Theory]
+    [InlineData(MfaChangeKind.Enabled, "enabled")]
+    [InlineData(MfaChangeKind.Disabled, "disabled")]
+    [InlineData(MfaChangeKind.RecoveryCodesRegenerated, "recovery_codes_regenerated")]
+    [InlineData(MfaChangeKind.ResetByAdmin, "reset_by_admin")]
+    [InlineData(MfaChangeKind.RecoveryCodeUsed, "recovery_code_used")]
+    public async Task Maps_mfa_changed_to_its_type_and_variables(MfaChangeKind kind, string expectedChange)
+    {
+        var handler = new MfaChangedIntegrationEventHandler(_harness.CreateScheduler());
+
+        await handler.HandleAsync(new MfaChangedIntegrationEvent(_eventId, OccurredAt, _userId, kind), Ct);
+
+        var notification = AssertNotice(AuthNotificationTypes.MfaChanged, handler.GetType());
+        Variables(notification.Data).ShouldBe(new Dictionary<string, string>
+        {
+            ["change"] = expectedChange,
+            ["display_name"] = "Alice",
+            ["occurred_at"] = "2026-03-01 16:05",
+            ["time_zone"] = KualaLumpur,
+        });
+        notification.Culture.ShouldBe("ms");
+        notification.Deliveries.ShouldHaveSingleItem().Channel.ShouldBe(NotificationChannel.Email);
+    }
+
+    [Fact]
+    public async Task Unknown_change_kind_throws()
+    {
+        var handler = new MfaChangedIntegrationEventHandler(_harness.CreateScheduler());
+
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => handler.HandleAsync(new MfaChangedIntegrationEvent(_eventId, OccurredAt, _userId, (MfaChangeKind)99), Ct));
+
+        _harness.Added.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("203.0.113.7", "203.0.113.7")]
+    [InlineData(null, "")]
+    public async Task Maps_new_device_sign_in_to_its_type_and_variables(string? ipAddress, string expectedAddress)
+    {
+        var handler = new NewDeviceSignedInIntegrationEventHandler(_harness.CreateScheduler());
+
+        await handler.HandleAsync(new NewDeviceSignedInIntegrationEvent(_eventId, OccurredAt, _userId, Guid.NewGuid(), ipAddress), Ct);
+
+        var notification = AssertNotice(AuthNotificationTypes.NewDeviceLogin, handler.GetType());
+        Variables(notification.Data).ShouldBe(new Dictionary<string, string>
+        {
+            ["display_name"] = "Alice",
+            ["ip_address"] = expectedAddress,
+            ["occurred_at"] = "2026-03-01 16:05",
+            ["time_zone"] = KualaLumpur,
+        });
+        notification.Deliveries.ShouldHaveSingleItem().Channel.ShouldBe(NotificationChannel.Email);
+    }
+
+    [Theory]
     [InlineData("Mars/Olympus_Mons")]
     [InlineData("")]
     public async Task Local_times_of_an_unusable_time_zone_are_in_utc(string timeZone)

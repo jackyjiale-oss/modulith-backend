@@ -1,0 +1,4 @@
+<p>Hello {{ display_name }},</p>
+<p>Your account was signed in to from a new device on {{ occurred_at }} ({{ time_zone }}).</p>
+{{ if ip_address != "" }}<p>The sign-in came from the address {{ ip_address }}.</p>
+{{ end }}<p>If this was not you, reset your password now and contact your administrator.</p>

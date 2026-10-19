@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Sessions.Events;
 using TemplateName.SharedKernel;
@@ -349,6 +350,93 @@ public sealed class UserSessionTests
         session.DeviceName.ShouldBe(new string('d', UserSession.MaxDeviceNameLength));
         session.UserAgent.ShouldBe(new string('u', UserSession.MaxUserAgentLength));
         session.IpAddress.ShouldBe(new string('i', UserSession.MaxIpAddressLength));
+    }
+
+    [Fact]
+    public void Start_sets_AuthenticatedAt_to_now()
+    {
+        var (session, _) = StartSession();
+
+        session.AuthenticatedAt.ShouldBe(Now);
+    }
+
+    [Fact]
+    public void StepUp_replaces_auth_methods_and_time_and_refuses_an_inactive_session()
+    {
+        var (session, _) = StartSession();
+        var later = Now.AddMinutes(20);
+
+        session.StepUp("pwd otp", later);
+
+        session.AuthMethods.ShouldBe("pwd otp");
+        session.AuthenticatedAt.ShouldBe(later);
+        session.CreatedAt.ShouldBe(Now);
+        session.DomainEvents.ShouldBeEmpty();
+
+        // The session is inactive at its absolute expiry and once revoked; either way a step-up changes nothing.
+        Should.Throw<InvalidOperationException>(() => session.StepUp("pwd rcvr", session.ExpiresAt));
+        session.AuthMethods.ShouldBe("pwd otp");
+
+        session.Revoke(SessionRevokedReason.Logout, later);
+
+        Should.Throw<InvalidOperationException>(() => session.StepUp("pwd rcvr", later.AddMinutes(1)));
+        session.AuthMethods.ShouldBe("pwd otp");
+        session.AuthenticatedAt.ShouldBe(later);
+    }
+
+    [Fact]
+    public void StepUp_refuses_blank_auth_methods()
+    {
+        var (session, _) = StartSession();
+
+        Should.Throw<ArgumentException>(() => session.StepUp(" ", Now));
+        session.AuthMethods.ShouldBe("pwd");
+    }
+
+    [Fact]
+    public void NoteNewDevice_raises_with_session_and_address()
+    {
+        var userId = Guid.NewGuid();
+        var (session, _) = StartSession(userId);
+
+        session.NoteNewDevice();
+
+        session.DomainEvents.ShouldHaveSingleItem().ShouldBe(new NewDeviceSignedInDomainEvent(userId, session.Id, "203.0.113.7"));
+        session.RevokedAt.ShouldBeNull();
+    }
+
+    [Fact]
+    public void NoteNewDevice_carries_a_missing_address_as_null()
+    {
+        var userId = Guid.NewGuid();
+        var (session, _) = UserSession.Start(userId, "pwd", "Pixel 9", null, null, Stamp, Hash(1), Sliding, Absolute, Now);
+
+        session.NoteNewDevice();
+
+        session.DomainEvents.ShouldHaveSingleItem().ShouldBe(new NewDeviceSignedInDomainEvent(userId, session.Id, null));
+    }
+
+    [Fact]
+    public void New_device_event_survives_the_outbox_round_trip()
+    {
+        var domainEvent = new NewDeviceSignedInDomainEvent(Guid.NewGuid(), Guid.NewGuid(), "2001:db8::1");
+
+        var content = JsonSerializer.Serialize(domainEvent, typeof(NewDeviceSignedInDomainEvent));
+
+        JsonSerializer.Deserialize(content, typeof(NewDeviceSignedInDomainEvent)).ShouldBe(domainEvent);
+    }
+
+    [Fact]
+    public void MfaChanged_is_the_sixth_revoke_reason_and_the_values_are_stable()
+    {
+        ((int)SessionRevokedReason.Expired).ShouldBe(5);
+        ((int)SessionRevokedReason.MfaChanged).ShouldBe(6);
+        Enum.GetValues<SessionRevokedReason>().Length.ShouldBe(7);
+
+        var (session, _) = StartSession();
+        session.Revoke(SessionRevokedReason.MfaChanged, Now);
+
+        session.RevokedReason.ShouldBe(SessionRevokedReason.MfaChanged);
     }
 
     [Fact]

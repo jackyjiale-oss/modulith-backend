@@ -64,6 +64,49 @@ public sealed class HttpContextCurrentUserTests
         new HttpContextCurrentUser(accessor).SessionId.ShouldBeNull();
     }
 
+    [Fact]
+    public void AuthTime_is_read_from_unix_seconds_and_null_when_missing_or_malformed()
+    {
+        CreateSut(new Claim("sub", UserId.ToString()), new Claim("auth_time", "1792000000")).AuthTime
+            .ShouldBe(DateTimeOffset.FromUnixTimeSeconds(1792000000));
+        CreateSut(new Claim("sub", UserId.ToString()), new Claim("auth_time", "abc")).AuthTime.ShouldBeNull();
+        CreateSut(new Claim("sub", UserId.ToString()), new Claim("auth_time", "1.5")).AuthTime.ShouldBeNull();
+        CreateSut(new Claim("sub", UserId.ToString())).AuthTime.ShouldBeNull();
+        CreateAnonymousSut().AuthTime.ShouldBeNull();
+    }
+
+    [Fact]
+    public void AuthMethods_lists_every_amr_claim_and_is_empty_when_anonymous()
+    {
+        var sut = CreateSut(
+            new Claim("sub", UserId.ToString()),
+            new Claim("amr", "pwd"),
+            new Claim("amr", "otp"),
+            new Claim("amr", "mfa"));
+
+        sut.AuthMethods.ShouldBe(["pwd", "otp", "mfa"]);
+        CreateSut(new Claim("sub", UserId.ToString())).AuthMethods.ShouldBeEmpty();
+        CreateAnonymousSut().AuthMethods.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void No_request_means_no_auth_time_and_no_methods()
+    {
+        var accessor = Substitute.For<IHttpContextAccessor>();
+        accessor.HttpContext.Returns((HttpContext?)null);
+        var sut = new HttpContextCurrentUser(accessor);
+
+        sut.AuthTime.ShouldBeNull();
+        sut.AuthMethods.ShouldBeEmpty();
+    }
+
+    private static HttpContextCurrentUser CreateAnonymousSut()
+    {
+        var accessor = Substitute.For<IHttpContextAccessor>();
+        accessor.HttpContext.Returns(new DefaultHttpContext());
+        return new HttpContextCurrentUser(accessor);
+    }
+
     private static HttpContextCurrentUser CreateSut(params Claim[] claims)
     {
         var accessor = Substitute.For<IHttpContextAccessor>();

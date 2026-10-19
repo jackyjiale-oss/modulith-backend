@@ -16,6 +16,7 @@ internal sealed class AuthPermissionSource : IPermissionSource
         Define(AuthPermissions.UserLock, "Lock users", "Suspend and reinstate user accounts.", adminDefault: true),
         Define(AuthPermissions.UserResetPassword, "Reset passwords", "Send a password reset to a user.", adminDefault: true),
         Define(AuthPermissions.UserRevokeSessions, "Revoke sessions", "End the sessions of a user.", adminDefault: true),
+        Define(AuthPermissions.UserResetMfa, "Reset two-step verification", "Turn off a user's two-step verification so they can set it up again.", adminDefault: true),
         Define(AuthPermissions.UserAssignRoles, "Assign roles", "Add and remove the roles of a user."),
         Define(AuthPermissions.RoleView, "View roles", "List roles and read their permissions.", adminDefault: true),
         Define(AuthPermissions.RoleManage, "Manage roles", "Create, change and delete roles and set their permissions."),

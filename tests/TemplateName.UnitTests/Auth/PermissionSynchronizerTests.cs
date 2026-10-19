@@ -13,7 +13,7 @@ public sealed class PermissionSynchronizerTests
 
         var definitions = PermissionSynchronizer.Validate([new AuthPermissionSource(), new StubPermissionSource(other)]);
 
-        definitions.Count.ShouldBe(11);
+        definitions.Count.ShouldBe(12);
         definitions[^1].ShouldBe(other);
     }
 

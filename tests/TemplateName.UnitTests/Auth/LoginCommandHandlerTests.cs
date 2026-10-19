@@ -5,9 +5,12 @@ using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Application.Authentication;
 using TemplateName.Modules.Auth.Application.Authentication.Login;
+using TemplateName.Modules.Auth.Application.Mfa;
 using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Domain.Audit;
+using TemplateName.Modules.Auth.Domain.Mfa;
 using TemplateName.Modules.Auth.Domain.Sessions;
+using TemplateName.Modules.Auth.Domain.TrustedDevices;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Domain.Users.Events;
 using TemplateName.SharedKernel;
@@ -20,12 +23,18 @@ public sealed class LoginCommandHandlerTests
     private const string StoredHash = "stored-hash";
     private const string RefreshTokenValue = "refresh-token-value-of-forty-three-chars-xx";
     private const string AccessTokenValue = "header.payload.signature";
+    private const string DeviceTokenValue = "trusted-device-token-of-forty-three-chars-x";
 
     private static readonly DateTimeOffset Now = new(2026, 10, 8, 9, 0, 0, TimeSpan.Zero);
     private static readonly byte[] RefreshTokenHash = [.. Enumerable.Range(1, 32).Select(value => (byte)value)];
     private static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan TrustedDeviceLifetime = TimeSpan.FromDays(30);
+    private static readonly byte[] DeviceTokenHash = [.. Enumerable.Range(201, 32).Select(value => (byte)value)];
 
     private readonly IUserRepository _users = Substitute.For<IUserRepository>();
+    private readonly IMfaMethodRepository _mfaMethods = Substitute.For<IMfaMethodRepository>();
+    private readonly IMfaChallengeRepository _challenges = Substitute.For<IMfaChallengeRepository>();
+    private readonly ITrustedDeviceRepository _trustedDevices = Substitute.For<ITrustedDeviceRepository>();
     private readonly ISessionRepository _sessions = Substitute.For<ISessionRepository>();
     private readonly IPasswordHasher _passwordHasher = Substitute.For<IPasswordHasher>();
     private readonly ISecureTokenService _tokenService = Substitute.For<ISecureTokenService>();
@@ -36,6 +45,7 @@ public sealed class LoginCommandHandlerTests
     private readonly IAuthMetrics _metrics = Substitute.For<IAuthMetrics>();
     private readonly List<AuthAuditLog> _auditEntries = [];
     private readonly List<UserSession> _addedSessions = [];
+    private readonly List<MfaChallenge> _addedChallenges = [];
     private readonly List<AccessTokenRequest> _tokenRequests = [];
     private readonly LoginCommandHandler _sut;
 
@@ -47,21 +57,11 @@ public sealed class LoginCommandHandlerTests
         _clientContext.UserAgent.Returns("UnitTests/1.0");
         _auditWriter.Record(Arg.Do<AuthAuditLog>(_auditEntries.Add));
         _sessions.Add(Arg.Do<UserSession>(_addedSessions.Add));
+        _challenges.Add(Arg.Do<MfaChallenge>(_addedChallenges.Add));
         _unitOfWork.TrySaveChangesAsync(Arg.Any<CancellationToken>()).Returns(true);
 
-        _sut = new LoginCommandHandler(
-            _users,
-            _sessions,
-            _passwordHasher,
-            _tokenService,
-            _accessTokenIssuer,
-            _auditWriter,
-            _clientContext,
-            _unitOfWork,
-            _metrics,
-            Options.Create(new LockoutOptions()),
-            Options.Create(new RefreshTokenOptions()),
-            new FakeTimeProvider(Now));
+        _tokenService.Hash(DeviceTokenValue).Returns(DeviceTokenHash);
+        _sut = CreateHandler(new MfaOptions());
     }
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -238,7 +238,7 @@ public sealed class LoginCommandHandlerTests
 
         var response = result.Value;
         var session = _addedSessions.ShouldHaveSingleItem();
-        response.ShouldBe(new LoginResponse(AccessTokenValue, Now.AddMinutes(10), RefreshTokenValue, Now.AddDays(14), session.Id));
+        response.ShouldBe(LoginResult.Signed(new LoginResponse(AccessTokenValue, Now.AddMinutes(10), RefreshTokenValue, Now.AddDays(14), session.Id)));
         session.UserId.ShouldBe(user.Id);
         session.AuthMethods.ShouldBe("pwd");
         session.DeviceName.ShouldBe("Alice's phone");
@@ -306,13 +306,318 @@ public sealed class LoginCommandHandlerTests
         _metrics.DidNotReceive().RecordLogin(LoginOutcome.Succeeded);
     }
 
+    [Fact]
+    public async Task Mfa_account_gets_a_challenge_and_no_session()
+    {
+        var user = GivenUser();
+        GivenMfa(user);
+        _passwordHasher.Verify(StoredHash, Password).Returns(PasswordVerification.Success);
+
+        var result = await _sut.HandleAsync(Command() with { DeviceName = "Alice's phone" }, Ct);
+
+        // The challenge token is a fresh secure token, shown once; only its hash is stored, bound to the user's stamp for five minutes.
+        var response = result.Value;
+        response.MfaRequired.ShouldBeTrue();
+        response.ChallengeToken.ShouldBe(RefreshTokenValue);
+        response.ChallengeExpiresAt.ShouldBe(Now.AddMinutes(5));
+        response.Methods.ShouldBe(["totp", "recovery_code"]);
+        response.AccessToken.ShouldBeNull();
+        response.AccessTokenExpiresAt.ShouldBeNull();
+        response.RefreshToken.ShouldBeNull();
+        response.RefreshTokenExpiresAt.ShouldBeNull();
+        response.SessionId.ShouldBeNull();
+        var challenge = _addedChallenges.ShouldHaveSingleItem();
+        challenge.UserId.ShouldBe(user.Id);
+        challenge.TokenHash.ShouldBe(RefreshTokenHash);
+        challenge.SecurityStamp.ShouldBe(user.SecurityStamp);
+        challenge.DeviceName.ShouldBe("Alice's phone");
+        challenge.CreatedAt.ShouldBe(Now);
+        challenge.ExpiresAt.ShouldBe(Now.AddMinutes(5));
+        challenge.FailedAttempts.ShouldBe(0);
+
+        _sessions.DidNotReceiveWithAnyArgs().Add(default!);
+        _accessTokenIssuer.DidNotReceiveWithAnyArgs().Issue(default!);
+        user.LastLoginAt.ShouldBeNull();
+        var audit = _auditEntries.ShouldHaveSingleItem();
+        audit.EventType.ShouldBe(AuthAuditEvents.MfaChallengeIssued);
+        audit.Succeeded.ShouldBeTrue();
+        audit.UserId.ShouldBe(user.Id);
+        audit.AttemptedIdentifier.ShouldBe("a****@example.com");
+        audit.SessionId.ShouldBeNull();
+        await _unitOfWork.Received(1).TrySaveChangesAsync(Ct);
+        _metrics.Received(1).RecordLogin(LoginOutcome.MfaRequired);
+        _metrics.DidNotReceive().RecordLogin(LoginOutcome.Succeeded);
+    }
+
+    [Fact]
+    public async Task Password_step_does_not_reset_the_failure_count_of_an_mfa_account()
+    {
+        var user = GivenUser();
+        GivenMfa(user);
+        FailBeforehand(user, times: 2);
+        _passwordHasher.Verify(StoredHash, Password).Returns(PasswordVerification.Success);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        // Only a verified second factor resets the count (decision D7), or "password, four wrong codes, password again" would never end.
+        result.Value.MfaRequired.ShouldBeTrue();
+        user.AccessFailedCount.ShouldBe(2);
+        user.LockoutEnd.ShouldBeNull();
+        user.LastLoginAt.ShouldBeNull();
+        await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
+    }
+
+    [Theory]
+    [InlineData("unknown email")]
+    [InlineData("wrong password")]
+    [InlineData("no password")]
+    [InlineData("locked")]
+    [InlineData("unverified")]
+    [InlineData("suspended")]
+    public async Task Mfa_lookup_happens_only_after_a_correct_password(string state)
+    {
+        var user = GivenUser(passwordHash: state == "no password" ? null : StoredHash, confirmed: state != "unverified");
+        GivenMfa(user);
+        _passwordHasher.Verify(StoredHash, Password).Returns(state == "wrong password" ? PasswordVerification.Failed : PasswordVerification.Success);
+        var command = Command();
+        switch (state)
+        {
+            case "unknown email":
+                command = command with { Email = "nobody@example.com" };
+                break;
+            case "locked":
+                FailBeforehand(user, times: 5);
+                break;
+            case "suspended":
+                user.Suspend(Now);
+                break;
+        }
+
+        var result = await _sut.HandleAsync(command, Ct);
+
+        // Nothing two-step is read or decided before the password is right and the account may sign in, so these answers stay Plan 2's.
+        result.IsFailure.ShouldBeTrue();
+        await _mfaMethods.DidNotReceiveWithAnyArgs().HasConfirmedAsync(default, Ct);
+        _challenges.DidNotReceiveWithAnyArgs().Add(default!);
+        _tokenService.DidNotReceiveWithAnyArgs().Generate();
+        _auditEntries.ShouldAllBe(entry => entry.EventType != AuthAuditEvents.MfaChallengeIssued);
+    }
+
+    [Fact]
+    public async Task Non_mfa_account_signs_in_as_before()
+    {
+        var user = GivenUser();
+        _passwordHasher.Verify(StoredHash, Password).Returns(PasswordVerification.Success);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        var session = _addedSessions.ShouldHaveSingleItem();
+        result.Value.ShouldBe(LoginResult.Signed(new LoginResponse(AccessTokenValue, Now.AddMinutes(10), RefreshTokenValue, Now.AddDays(14), session.Id)));
+        result.Value.MfaRequired.ShouldBeFalse();
+        result.Value.ChallengeToken.ShouldBeNull();
+        result.Value.ChallengeExpiresAt.ShouldBeNull();
+        result.Value.Methods.ShouldBeNull();
+        await _mfaMethods.Received(1).HasConfirmedAsync(user.Id, Ct);
+        _challenges.DidNotReceiveWithAnyArgs().Add(default!);
+        session.AuthMethods.ShouldBe("pwd");
+        _auditEntries.ShouldHaveSingleItem().EventType.ShouldBe(AuthAuditEvents.LoginSucceeded);
+        _metrics.Received(1).RecordLogin(LoginOutcome.Succeeded);
+    }
+
+    [Fact]
+    public async Task Lost_save_race_of_a_challenge_returns_invalid_credentials()
+    {
+        var user = GivenUser();
+        GivenMfa(user);
+        _passwordHasher.Verify(StoredHash, Password).Returns(PasswordVerification.SuccessRehashNeeded);
+        _passwordHasher.Hash(Password).Returns("stronger-hash");
+        _unitOfWork.TrySaveChangesAsync(Arg.Any<CancellationToken>()).Returns(false);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        // The rehash makes the challenge's save write the user row, so it can lose a race; the answer is the generic 401, as on Plan 2's path.
+        result.Error.ShouldBe(UserErrors.InvalidCredentials);
+        user.PasswordHash.ShouldBe("stronger-hash");
+        _metrics.Received(1).RecordLogin(LoginOutcome.InvalidCredentials);
+        _metrics.DidNotReceive().RecordLogin(LoginOutcome.MfaRequired);
+    }
+
+    [Fact]
+    public void Login_result_text_shows_only_whether_mfa_is_required()
+    {
+        LoginResult.Challenge("challenge-token-value", Now).ToString().ShouldBe("LoginResult { MfaRequired = True }");
+        LoginResult.Signed(new LoginResponse(AccessTokenValue, Now, RefreshTokenValue, Now, Guid.Empty)).ToString()
+            .ShouldBe("LoginResult { MfaRequired = False }");
+    }
+
+    [Fact]
+    public async Task Usable_trusted_device_skips_the_challenge_with_amr_pwd()
+    {
+        var user = GivenUser();
+        GivenMfa(user);
+        FailBeforehand(user, times: 2);
+        _passwordHasher.Verify(StoredHash, Password).Returns(PasswordVerification.Success);
+        var device = GivenTrustedDevice(user.Id, user.SecurityStamp);
+
+        var result = await _sut.HandleAsync(Command() with { DeviceName = "Alice's phone", TrustedDeviceToken = DeviceTokenValue }, Ct);
+
+        // The remembered device stands in for the second factor only: a session whose amr is pwd (D9), so it never satisfies an MFA step-up.
+        var session = _addedSessions.ShouldHaveSingleItem();
+        result.Value.ShouldBe(LoginResult.Signed(new LoginResponse(AccessTokenValue, Now.AddMinutes(10), RefreshTokenValue, Now.AddDays(14), session.Id)));
+        session.AuthMethods.ShouldBe("pwd");
+        session.DeviceName.ShouldBe("Alice's phone");
+        _tokenRequests.ShouldHaveSingleItem().ShouldBe(new AccessTokenRequest(user.Id, session.Id, user.SecurityStamp, "pwd", Now, "ms"));
+        _challenges.DidNotReceiveWithAnyArgs().Add(default!);
+        await _trustedDevices.Received(1).GetByTokenHashAsync(Arg.Is<byte[]>(hash => hash.SequenceEqual(DeviceTokenHash)), Ct);
+
+        // The device is used (its expiry stays absolute) and the sign-in is complete: failures reset, LastLoginAt set.
+        device.LastUsedAt.ShouldBe(Now);
+        device.ExpiresAt.ShouldBe(Now.AddDays(-1) + TrustedDeviceLifetime);
+        user.AccessFailedCount.ShouldBe(0);
+        user.LastLoginAt.ShouldBe(Now);
+        var audit = _auditEntries.ShouldHaveSingleItem();
+        audit.EventType.ShouldBe(AuthAuditEvents.LoginSucceeded);
+        audit.UserId.ShouldBe(user.Id);
+        audit.SessionId.ShouldBe(session.Id);
+        audit.Details.ShouldBe($$"""{"trustedDeviceId":"{{device.Id}}"}""");
+        await _unitOfWork.Received(1).TrySaveChangesAsync(Ct);
+        _metrics.Received(1).RecordLogin(LoginOutcome.Succeeded);
+        _metrics.DidNotReceive().RecordLogin(LoginOutcome.MfaRequired);
+    }
+
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("expired")]
+    [InlineData("revoked")]
+    [InlineData("another user's")]
+    [InlineData("another stamp")]
+    public async Task Unusable_or_foreign_device_token_gets_the_normal_challenge(string state)
+    {
+        var user = GivenUser();
+        GivenMfa(user);
+        _passwordHasher.Verify(StoredHash, Password).Returns(PasswordVerification.Success);
+        var device = state switch
+        {
+            "unknown" => null,
+            "expired" => GivenTrustedDevice(user.Id, user.SecurityStamp, trustedAt: Now - TrustedDeviceLifetime),
+            "another user's" => GivenTrustedDevice(Guid.NewGuid(), user.SecurityStamp),
+            "another stamp" => GivenTrustedDevice(user.Id, "an-older-security-stamp"),
+            _ => GivenTrustedDevice(user.Id, user.SecurityStamp),
+        };
+        if (state == "revoked")
+        {
+            device.ShouldNotBeNull().Revoke(Now.AddHours(-1));
+        }
+
+        var result = await _sut.HandleAsync(Command() with { TrustedDeviceToken = DeviceTokenValue }, Ct);
+
+        // Exactly the answer of a request without a token: a challenge, the same audit row and metric, nothing about the token.
+        result.Value.ShouldBe(LoginResult.Challenge(RefreshTokenValue, Now.AddMinutes(5)));
+        _addedChallenges.ShouldHaveSingleItem().UserId.ShouldBe(user.Id);
+        _sessions.DidNotReceiveWithAnyArgs().Add(default!);
+        _accessTokenIssuer.DidNotReceiveWithAnyArgs().Issue(default!);
+        device?.LastUsedAt.ShouldBeNull();
+        user.LastLoginAt.ShouldBeNull();
+        var audit = _auditEntries.ShouldHaveSingleItem();
+        audit.EventType.ShouldBe(AuthAuditEvents.MfaChallengeIssued);
+        audit.Details.ShouldBeNull();
+        _metrics.Received(1).RecordLogin(LoginOutcome.MfaRequired);
+    }
+
+    [Theory]
+    [InlineData("unknown email")]
+    [InlineData("wrong password")]
+    [InlineData("no password")]
+    [InlineData("locked")]
+    [InlineData("unverified")]
+    [InlineData("suspended")]
+    public async Task Trusted_device_check_happens_only_after_a_correct_password(string state)
+    {
+        var user = GivenUser(passwordHash: state == "no password" ? null : StoredHash, confirmed: state != "unverified");
+        GivenMfa(user);
+        var device = GivenTrustedDevice(user.Id, user.SecurityStamp);
+        _passwordHasher.Verify(StoredHash, Password).Returns(state == "wrong password" ? PasswordVerification.Failed : PasswordVerification.Success);
+        var command = Command() with { TrustedDeviceToken = DeviceTokenValue };
+        switch (state)
+        {
+            case "unknown email":
+                command = command with { Email = "nobody@example.com" };
+                break;
+            case "locked":
+                FailBeforehand(user, times: 5);
+                break;
+            case "suspended":
+                user.Suspend(Now);
+                break;
+        }
+
+        var result = await _sut.HandleAsync(command, Ct);
+
+        // A device token is no way around the password: it is not even hashed until the password is right and the account may sign in.
+        result.IsFailure.ShouldBeTrue();
+        _tokenService.DidNotReceiveWithAnyArgs().Hash(default!);
+        await _trustedDevices.DidNotReceiveWithAnyArgs().GetByTokenHashAsync(default!, Ct);
+        device.LastUsedAt.ShouldBeNull();
+        _sessions.DidNotReceiveWithAnyArgs().Add(default!);
+    }
+
+    [Fact]
+    public async Task Password_only_account_ignores_a_device_token()
+    {
+        var user = GivenUser();
+        GivenTrustedDevice(user.Id, user.SecurityStamp);
+        _passwordHasher.Verify(StoredHash, Password).Returns(PasswordVerification.Success);
+
+        var result = await _sut.HandleAsync(Command() with { TrustedDeviceToken = DeviceTokenValue }, Ct);
+
+        // Without two-step verification there is no challenge to skip: Plan 2's sign-in, the token never looked up.
+        result.Value.MfaRequired.ShouldBeFalse();
+        _auditEntries.ShouldHaveSingleItem().Details.ShouldBeNull();
+        await _trustedDevices.DidNotReceiveWithAnyArgs().GetByTokenHashAsync(default!, Ct);
+    }
+
+    [Fact]
+    public async Task Switch_off_ignores_tokens_and_remember_device()
+    {
+        var user = GivenUser();
+        GivenMfa(user);
+        _passwordHasher.Verify(StoredHash, Password).Returns(PasswordVerification.Success);
+        var device = GivenTrustedDevice(user.Id, user.SecurityStamp);
+        var sut = CreateHandler(new MfaOptions { TrustedDevicesEnabled = false });
+
+        var result = await sut.HandleAsync(Command() with { TrustedDeviceToken = DeviceTokenValue }, Ct);
+
+        // Auth:Mfa:TrustedDevicesEnabled off: even a usable device gets the challenge, and the token is not looked up.
+        result.Value.ShouldBe(LoginResult.Challenge(RefreshTokenValue, Now.AddMinutes(5)));
+        _tokenService.DidNotReceiveWithAnyArgs().Hash(default!);
+        await _trustedDevices.DidNotReceiveWithAnyArgs().GetByTokenHashAsync(default!, Ct);
+        device.LastUsedAt.ShouldBeNull();
+        _sessions.DidNotReceiveWithAnyArgs().Add(default!);
+    }
+
+    [Fact]
+    public async Task Lost_save_race_of_a_trusted_device_sign_in_returns_invalid_credentials()
+    {
+        var user = GivenUser();
+        GivenMfa(user);
+        _passwordHasher.Verify(StoredHash, Password).Returns(PasswordVerification.Success);
+        GivenTrustedDevice(user.Id, user.SecurityStamp);
+        _unitOfWork.TrySaveChangesAsync(Arg.Any<CancellationToken>()).Returns(false);
+
+        var result = await _sut.HandleAsync(Command() with { TrustedDeviceToken = DeviceTokenValue }, Ct);
+
+        result.Error.ShouldBe(UserErrors.InvalidCredentials);
+        _metrics.Received(1).RecordLogin(LoginOutcome.InvalidCredentials);
+        _metrics.DidNotReceive().RecordLogin(LoginOutcome.Succeeded);
+    }
+
     [Theory]
     [InlineData(129)]
     [InlineData(1024 * 1024)]
     public async Task Oversized_password_is_rejected_before_hashing(int length)
     {
         // The pipeline the host builds: the validation decorator runs the validator before the handler.
-        var pipeline = new ValidationDecorator.CommandHandler<LoginCommand, LoginResponse>(
+        var pipeline = new ValidationDecorator.CommandHandler<LoginCommand, LoginResult>(
             _sut,
             [new LoginCommandValidator(Options.Create(new PasswordOptions()))]);
 
@@ -329,10 +634,42 @@ public sealed class LoginCommandHandlerTests
     [Fact]
     public void Command_text_never_shows_the_password()
     {
-        Command().ToString().ShouldNotContain(Password);
+        var command = Command() with { TrustedDeviceToken = DeviceTokenValue };
+
+        command.ToString().ShouldNotContain(Password);
+        command.ToString().ShouldNotContain(DeviceTokenValue);
     }
 
-    private static LoginCommand Command() => new("alice@example.com", Password, null);
+    private static LoginCommand Command() => new("alice@example.com", Password, null, null);
+
+    private LoginCommandHandler CreateHandler(MfaOptions mfaOptions)
+    {
+        var sessionStarter = new SessionStarter(_sessions, _tokenService, _accessTokenIssuer, _clientContext, Options.Create(new RefreshTokenOptions()));
+        return new LoginCommandHandler(
+            _users,
+            _mfaMethods,
+            _challenges,
+            _trustedDevices,
+            _passwordHasher,
+            _tokenService,
+            sessionStarter,
+            _auditWriter,
+            _unitOfWork,
+            _metrics,
+            Options.Create(new LockoutOptions()),
+            Options.Create(mfaOptions),
+            new FakeTimeProvider(Now));
+    }
+
+    /// <summary>A device of <paramref name="userId"/> trusted a day ago under <paramref name="stamp"/>, found by <see cref="DeviceTokenHash"/>.</summary>
+    private TrustedDevice GivenTrustedDevice(Guid userId, string stamp, DateTimeOffset? trustedAt = null)
+    {
+        var device = TrustedDevice.Trust(userId, DeviceTokenHash, "Alice's laptop", "Browser/1.0", stamp, TrustedDeviceLifetime, trustedAt ?? Now.AddDays(-1));
+        _trustedDevices.GetByTokenHashAsync(Arg.Is<byte[]>(hash => hash.SequenceEqual(DeviceTokenHash)), Arg.Any<CancellationToken>()).Returns(device);
+        return device;
+    }
+
+    private void GivenMfa(User user) => _mfaMethods.HasConfirmedAsync(user.Id, Arg.Any<CancellationToken>()).Returns(true);
 
     private static void FailBeforehand(User user, int times)
     {

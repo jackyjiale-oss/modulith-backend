@@ -24,7 +24,19 @@ internal static class AuthEventRequests
 
     /// <summary>A notice without a link: only the variables the scheduler and the <c>contactVariables</c> callback add.</summary>
     public static NotificationRequest Notice(string typeCode, IIntegrationEvent integrationEvent, Guid userId, Type consumer) =>
-        new(typeCode, userId, integrationEvent.Id, ConsumerName(consumer), None, None, EmailOverride: null, ExpiresAt: null);
+        Notice(typeCode, integrationEvent, userId, consumer, None);
+
+    /// <summary>
+    /// A notice without a link that also carries <paramref name="variables"/>: values the event decides (for example which kind of
+    /// change happened), next to what the scheduler and the <c>contactVariables</c> callback add. Every name must be one the type declares.
+    /// </summary>
+    public static NotificationRequest Notice(
+        string typeCode,
+        IIntegrationEvent integrationEvent,
+        Guid userId,
+        Type consumer,
+        IReadOnlyDictionary<string, string> variables) =>
+        new(typeCode, userId, integrationEvent.Id, ConsumerName(consumer), variables, None, EmailOverride: null, ExpiresAt: null);
 
     /// <summary>
     /// A single-use link: <c>action_url</c> is the event's ciphertext as is, the email goes to <paramref name="email"/> (the address the

@@ -37,6 +37,7 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
         AuthPermissions.UserLock,
         AuthPermissions.UserResetPassword,
         AuthPermissions.UserRevokeSessions,
+        AuthPermissions.UserResetMfa,
         AuthPermissions.UserAssignRoles,
     ];
 
@@ -50,6 +51,7 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
         { "POST", UsersRoute + "/{id}/unlock", AuthPermissions.UserLock, null },
         { "POST", UsersRoute + "/{id}/force-password-reset", AuthPermissions.UserResetPassword, null },
         { "POST", UsersRoute + "/{id}/revoke-sessions", AuthPermissions.UserRevokeSessions, null },
+        { "POST", UsersRoute + "/{id}/reset-mfa", AuthPermissions.UserResetMfa, null },
         { "PUT", UsersRoute + "/{id}/roles", AuthPermissions.UserAssignRoles, """{"roleIds":[]}""" },
     };
 
@@ -159,7 +161,7 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
         body.EnumerateObject().Select(property => property.Name).ShouldBe(
             ["id", "email", "emailConfirmed", "displayName", "locale", "timeZone", "status", "hasPassword", "isLockedOut", "lockoutEnd",
-             "lastLoginAt", "passwordChangedAt", "createdAt", "roles"],
+             "lastLoginAt", "passwordChangedAt", "createdAt", "mfaEnabled", "roles"],
             ignoreOrder: true);
         body.GetProperty("id").GetGuid().ShouldBe(target.Id);
         body.GetProperty("hasPassword").GetBoolean().ShouldBeTrue();

@@ -105,12 +105,12 @@ The policy exposes `X-Trace-Id`, `Location`, `Retry-After` and `Idempotency-Repl
 |---|---|---|---|
 | `GlobalPermitLimit` | `300` | 1 or more | Requests per partition per window. |
 | `GlobalWindow` | `00:01:00` | `00:00:01` to `1.00:00:00` | Fixed window length. |
-| `AuthStrictPermitLimit` | `10` | 1 or more | Requests per client address per window, shared by every endpoint with the `auth-strict` policy (`RequireRateLimiting(RateLimitPolicies.AuthStrict)`): `POST /api/v1/auth/register`, `/email/confirm`, `/email/resend-confirmation`, `/login`, `/token/refresh`, `/password/forgot`, `/password/reset` and `/password/change`. |
+| `AuthStrictPermitLimit` | `10` | 1 or more | Requests per client address per window, shared by every endpoint with the `auth-strict` policy (`RequireRateLimiting(RateLimitPolicies.AuthStrict)`): `POST /api/v1/auth/register`, `/email/confirm`, `/email/resend-confirmation`, `/login`, `/token/refresh`, `/password/forgot`, `/password/reset`, `/password/change`, `/step-up` and `/mfa/verify`. |
 | `AuthStrictWindow` | `00:01:00` | `00:00:01` to `1.00:00:00` | The `auth-strict` fixed window length. |
 
 The global partition is `user:{sub}` for an authenticated caller, else `ip:{remote address}`; the `auth-strict` partition is always `ip:{remote address}`. The address is the one left by the forwarded-headers middleware, so a spoofed `X-Forwarded-For` cannot choose a partition. An `auth-strict` endpoint is also under the global limiter. Requests over a limit are rejected at once (no queue).
 
-**Sizing `auth-strict` behind NAT.** The `auth-strict` budget is **one bucket per client address shared by all eight routes** above (refresh included), 10 per minute by default. Many users behind one NAT or carrier-grade NAT address (an office, a campus, a mobile network) share that bucket, so their logins and token refreshes together can exhaust it and get 429s. For such deployments raise `RateLimiting:AuthStrictPermitLimit` (and make sure the forwarded-headers settings give the real client address). A separate, larger policy for refresh is a planned follow-up.
+**Sizing `auth-strict` behind NAT.** The `auth-strict` budget is **one bucket per client address shared by all ten routes** above (refresh included), 10 per minute by default. Many users behind one NAT or carrier-grade NAT address (an office, a campus, a mobile network) share that bucket, so their logins and token refreshes together can exhaust it and get 429s. For such deployments raise `RateLimiting:AuthStrictPermitLimit` (and make sure the forwarded-headers settings give the real client address). A separate, larger policy for refresh is a planned follow-up.
 
 ### `ForwardedHeaders`
 
@@ -164,7 +164,7 @@ The endpoint decides which OpenTelemetry services are registered, so it is **rea
 | `AdminEmail` | empty; `admin@localhost.test` set locally (user secrets, an environment variable, or a git-ignored `appsettings.Development.json`) | when seeding: a plain email address, up to 256 characters | The first administrator's email. |
 | `AdminPassword` | empty | when seeding: within `Auth:Password:MinLength`/`MaxLength` | The first administrator's password. **Never in a file**: `dotnet user-secrets set "Auth:Seed:AdminPassword" "…" --project src/Host/TemplateName.Api` or `Auth__Seed__AdminPassword`. Without it no administrator is seeded. **Remove it after the first start**: the account then exists, and an account with that email, even a soft-deleted one, is never re-created (each start logs a warning while the key is still set). |
 
-The Auth module reads the sections below, each with its keys, defaults and ranges in the [Auth module](../modules/auth.md#configuration) document. Six of them are validated on start (`Auth:Password`, `Auth:Links`, `Auth:Verification`, `Auth:RefreshToken`, `Auth:Lockout` and `Auth:Jwt`), so an out-of-range value or a bad signing key stops the host. `Auth:DataProtection` is read as it is (a missing name falls back to `TemplateName`), and `Auth:Seed` is checked when the seeder runs.
+The Auth module reads the sections below, each with its keys, defaults and ranges in the [Auth module](../modules/auth.md#configuration) document. Eight of them are validated on start (`Auth:Password`, `Auth:Links`, `Auth:Verification`, `Auth:RefreshToken`, `Auth:Lockout`, `Auth:Mfa`, `Auth:StepUp` and `Auth:Jwt`), so an out-of-range value or a bad signing key stops the host. `Auth:DataProtection` is read as it is (a missing name falls back to `TemplateName`), and `Auth:Seed` is checked when the seeder runs.
 
 | Section | Holds |
 |---|---|
@@ -173,6 +173,8 @@ The Auth module reads the sections below, each with its keys, defaults and range
 | `Auth:Verification` | Lifetimes of the confirmation and reset links, the resend cooldown. |
 | `Auth:RefreshToken` | Sliding and absolute session lifetimes. |
 | `Auth:Lockout` | Failed attempts and lockout duration. |
+| `Auth:Mfa` | Two-step verification: the authenticator issuer name (no `:`), the sign-in challenge's lifetime and wrong-code limit, and whether and for how long a device can be remembered. |
+| `Auth:StepUp` | How long a step-up (a fresh `auth_time`) satisfies a protected action (`MaxAge`). |
 | `Auth:Jwt` | Issuer, audience, lifetime, skew and the signing keys (required outside Development and Testing). |
 | `Auth:DataProtection` | The Data Protection application name. |
 | `Auth:Seed` | Above. |

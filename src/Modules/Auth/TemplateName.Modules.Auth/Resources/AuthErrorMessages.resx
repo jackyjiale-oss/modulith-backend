@@ -105,4 +105,34 @@
   <data name="auth.role_assignment_not_allowed" xml:space="preserve">
     <value>You may not assign roles, so a new account can only get the default role.</value>
   </data>
+  <data name="auth.invalid_mfa_challenge" xml:space="preserve">
+    <value>The sign-in attempt is invalid or has expired. Sign in again.</value>
+  </data>
+  <data name="auth.invalid_mfa_code" xml:space="preserve">
+    <value>The verification code is incorrect.</value>
+  </data>
+  <data name="auth.mfa_already_enabled" xml:space="preserve">
+    <value>Two-step verification is already turned on.</value>
+  </data>
+  <data name="auth.mfa_not_enabled" xml:space="preserve">
+    <value>Two-step verification is not turned on.</value>
+  </data>
+  <data name="auth.mfa_setup_not_pending" xml:space="preserve">
+    <value>There is no authenticator setup to confirm. Start the setup again.</value>
+  </data>
+  <data name="auth.mfa_method_not_found" xml:space="preserve">
+    <value>Verification method '{id}' was not found.</value>
+  </data>
+  <data name="auth.step_up_required" xml:space="preserve">
+    <value>Confirm your identity again to continue.</value>
+  </data>
+  <data name="auth.step_up_method_not_allowed" xml:space="preserve">
+    <value>This way of confirming your identity is not available for your account.</value>
+  </data>
+  <data name="auth.cannot_reset_own_mfa" xml:space="preserve">
+    <value>You cannot reset your own two-step verification here.</value>
+  </data>
+  <data name="auth.trusted_device_not_found" xml:space="preserve">
+    <value>Trusted device '{id}' was not found.</value>
+  </data>
 </root>

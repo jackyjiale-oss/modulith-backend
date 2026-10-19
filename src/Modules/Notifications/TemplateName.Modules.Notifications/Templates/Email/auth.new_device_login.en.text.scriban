@@ -1,0 +1,7 @@
+Hello {{ display_name }},
+
+Your account was signed in to from a new device on {{ occurred_at }} ({{ time_zone }}).
+
+{{ if ip_address != "" }}The sign-in came from the address {{ ip_address }}.
+
+{{ end }}If this was not you, reset your password now and contact your administrator.

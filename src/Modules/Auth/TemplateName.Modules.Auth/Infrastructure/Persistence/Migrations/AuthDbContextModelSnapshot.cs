@@ -168,6 +168,128 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                     b.ToTable("AuthAuditLogs", "auth");
                 });
 
+            modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Mfa.MfaChallenge", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ConsumedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("DeviceName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("FailedAttempts")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SecurityStamp")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<byte[]>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("varbinary(32)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("MfaChallenges", "auth");
+                });
+
+            modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Mfa.RecoveryCode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("varbinary(32)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "CodeHash")
+                        .IsUnique();
+
+                    b.ToTable("RecoveryCodes", "auth");
+                });
+
+            modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Mfa.UserMfaMethod", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ConfirmedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("LastUsedTimeStep")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("SecretEncrypted")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Type")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserMfaMethods_UserId_Type");
+
+                    b.ToTable("UserMfaMethods", "auth");
+                });
+
             modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Roles.Permission", b =>
                 {
                     b.Property<Guid>("Id")
@@ -337,6 +459,10 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<DateTime>("AuthenticatedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)");
@@ -384,6 +510,59 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                     b.HasIndex("UserId", "LastSeenAt", "Id");
 
                     b.ToTable("UserSessions", "auth");
+                });
+
+            modelBuilder.Entity("TemplateName.Modules.Auth.Domain.TrustedDevices.TrustedDevice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("DeviceName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("SecurityStamp")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<byte[]>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("varbinary(32)");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "CreatedAt", "Id");
+
+                    b.ToTable("TrustedDevices", "auth");
                 });
 
             modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Users.PasswordHistoryEntry", b =>
@@ -586,6 +765,33 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                     b.ToTable("VerificationCodes", "auth");
                 });
 
+            modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Mfa.MfaChallenge", b =>
+                {
+                    b.HasOne("TemplateName.Modules.Auth.Domain.Users.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Mfa.RecoveryCode", b =>
+                {
+                    b.HasOne("TemplateName.Modules.Auth.Domain.Users.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Mfa.UserMfaMethod", b =>
+                {
+                    b.HasOne("TemplateName.Modules.Auth.Domain.Users.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Roles.RolePermission", b =>
                 {
                     b.HasOne("TemplateName.Modules.Auth.Domain.Roles.Permission", null)
@@ -611,6 +817,15 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                 });
 
             modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Sessions.UserSession", b =>
+                {
+                    b.HasOne("TemplateName.Modules.Auth.Domain.Users.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("TemplateName.Modules.Auth.Domain.TrustedDevices.TrustedDevice", b =>
                 {
                     b.HasOne("TemplateName.Modules.Auth.Domain.Users.User", null)
                         .WithMany()

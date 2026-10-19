@@ -56,5 +56,9 @@ Everything about how this service is built and run. Documents are part of the de
 | [0019](adr/0019-embedded-scriban-notification-templates.md) | Notification templates as Scriban files embedded in the declaring assembly |
 | [0020](adr/0020-secrets-in-cross-module-events.md) | Single-use links cross module boundaries encrypted |
 | [0021](adr/0021-signalr-hub-tickets.md) | SignalR hub authenticated by single-use tickets, never a JWT in the query string |
+| [0022](adr/0022-totp-secrets-and-replay-protection.md) | Own RFC 6238 TOTP with a monotonic replay guard, an Auth-only secret purpose and 80-bit recovery codes |
+| [0023](adr/0023-step-up-through-auth-time-and-amr.md) | Step-up through a fresh `auth_time` and `amr` in the access token, checked by `StepUpPolicy` |
+| [0024](adr/0024-mfa-challenge-as-a-hashed-server-side-token.md) | The sign-in challenge is an opaque token over a hashed server-side row, with wrong codes counted on it and in the lockout |
+| [0025](adr/0025-trusted-devices-bound-to-the-security-stamp.md) | Trusted devices are hashed bearer tokens bound to the security stamp, skipping the challenge only (`amr` `pwd`) |
 
 A new decision gets the next number: `adr/NNNN-kebab-title.md`, in the same format, listed here and in the architecture overview.

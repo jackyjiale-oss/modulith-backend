@@ -9,7 +9,11 @@ namespace TemplateName.Modules.Auth.Application.Admin.Users.Get;
 /// Reads one user through the repositories, whose soft-delete filter hides deleted users (an unknown and a deleted id both answer
 /// <see cref="UserErrors.NotFound"/>) and deleted roles. Only the fields an administrator needs leave the handler.
 /// </summary>
-internal sealed class GetUserQueryHandler(IUserRepository users, IRoleRepository roles, TimeProvider timeProvider)
+internal sealed class GetUserQueryHandler(
+    IUserRepository users,
+    IRoleRepository roles,
+    IMfaMethodRepository mfaMethods,
+    TimeProvider timeProvider)
     : IQueryHandler<GetUserQuery, UserResponse>
 {
     public async Task<Result<UserResponse>> HandleAsync(GetUserQuery query, CancellationToken cancellationToken)
@@ -36,6 +40,7 @@ internal sealed class GetUserQueryHandler(IUserRepository users, IRoleRepository
             user.LastLoginAt,
             user.PasswordChangedAt,
             user.CreatedAt,
+            await mfaMethods.HasConfirmedAsync(user.Id, cancellationToken),
             [.. userRoles.OrderBy(role => role.Name, StringComparer.Ordinal).Select(role => new UserRoleResponse(role.Id, role.Name))]);
     }
 }

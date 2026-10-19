@@ -51,7 +51,7 @@ public sealed partial class NotificationsPermissionSourceTests
         var definitions = PermissionSynchronizer.Validate(
             [new AuthPermissionSource(), new SamplePermissionSource(), new NotificationsPermissionSource()]);
 
-        definitions.Count.ShouldBe(15);
+        definitions.Count.ShouldBe(16);
         definitions.Count(definition => definition.Module == "notifications").ShouldBe(2);
     }
 

@@ -34,7 +34,6 @@ public sealed class LoginTests(IntegrationTestWebAppFactory factory) : Integrati
     private const string UserAgent = "LoginTests/1.0";
 
     private static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
-    private static readonly string[] VolatileHeaders = ["X-Trace-Id", "Date"];
 
     [Fact]
     public async Task Token_responses_and_me_are_marked_no_store()
@@ -73,7 +72,9 @@ public sealed class LoginTests(IntegrationTestWebAppFactory factory) : Integrati
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
-        PropertyNames(body).ShouldBe(["accessToken", "accessTokenExpiresAt", "refreshToken", "refreshTokenExpiresAt", "sessionId"], ignoreOrder: true);
+        // A LoginResult of an account without two-step verification: the tokens, and no challenge member (decision D8 of Plan 4).
+        PropertyNames(body).ShouldBe(["mfaRequired", "accessToken", "accessTokenExpiresAt", "refreshToken", "refreshTokenExpiresAt", "sessionId"], ignoreOrder: true);
+        body.GetProperty("mfaRequired").GetBoolean().ShouldBeFalse();
         var refreshToken = body.GetProperty("refreshToken").GetString().ShouldNotBeNull();
         refreshToken.Length.ShouldBe(43);
         body.GetProperty("accessTokenExpiresAt").GetDateTimeOffset().ShouldBe(now.AddMinutes(10));
@@ -432,10 +433,7 @@ public sealed class LoginTests(IntegrationTestWebAppFactory factory) : Integrati
 
     private static List<string> PropertyNames(JsonElement body) => [.. body.EnumerateObject().Select(property => property.Name)];
 
-    private static Dictionary<string, string> Headers(HttpResponseMessage response)
-        => response.Headers.Concat(response.Content.Headers)
-            .Where(header => !VolatileHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase))
-            .ToDictionary(header => header.Key, header => string.Join(", ", header.Value), StringComparer.OrdinalIgnoreCase);
+    private static Dictionary<string, string> Headers(HttpResponseMessage response) => ProblemResponseComparison.Headers(response);
 
     private static async Task AssertInvalidCredentialsAsync(HttpResponseMessage response)
         => await AssertProblemAsync(response, HttpStatusCode.Unauthorized, "auth.invalid_credentials");
@@ -450,23 +448,8 @@ public sealed class LoginTests(IntegrationTestWebAppFactory factory) : Integrati
     }
 
     /// <summary>The same status, headers (but the trace id and date), body fields, <c>code</c>, <c>title</c>, <c>type</c> and <c>detail</c>.</summary>
-    private static async Task AssertIdenticalAsync(HttpResponseMessage first, HttpResponseMessage second)
-    {
-        first.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
-        second.StatusCode.ShouldBe(first.StatusCode);
-        Headers(second).ShouldBe(Headers(first));
-
-        var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>(Ct);
-        var secondBody = await second.Content.ReadFromJsonAsync<JsonElement>(Ct);
-        firstBody.GetProperty("code").GetString().ShouldBe("auth.invalid_credentials");
-        firstBody.GetProperty("traceId").GetString().ShouldBe(TraceId(first));
-        secondBody.GetProperty("traceId").GetString().ShouldBe(TraceId(second));
-        PropertyNames(secondBody).ShouldBe(PropertyNames(firstBody));
-        foreach (var name in PropertyNames(firstBody).Where(name => name != "traceId"))
-        {
-            secondBody.GetProperty(name).GetRawText().ShouldBe(firstBody.GetProperty(name).GetRawText(), name);
-        }
-    }
+    private static Task AssertIdenticalAsync(HttpResponseMessage first, HttpResponseMessage second)
+        => ProblemResponseComparison.AssertIdenticalAsync(HttpStatusCode.Unauthorized, "auth.invalid_credentials", first, second);
 
     private async Task FailAsync(string email, int times)
     {

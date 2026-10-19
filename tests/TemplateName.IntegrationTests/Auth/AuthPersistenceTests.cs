@@ -730,6 +730,9 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
         public Task<IReadOnlyList<UserSession>> GetActiveByUserAsync(Guid userId, DateTimeOffset now, CancellationToken cancellationToken)
             => inner.GetActiveByUserAsync(userId, now, cancellationToken);
 
+        public Task<DeviceFamiliarity> GetDeviceFamiliarityAsync(Guid userId, string deviceName, string? userAgent, CancellationToken cancellationToken)
+            => inner.GetDeviceFamiliarityAsync(userId, deviceName, userAgent, cancellationToken);
+
         public void Add(UserSession session) => inner.Add(session);
 
         public async Task<bool> TryClaimRefreshTokenAsync(Guid refreshTokenId, DateTimeOffset now, CancellationToken cancellationToken)

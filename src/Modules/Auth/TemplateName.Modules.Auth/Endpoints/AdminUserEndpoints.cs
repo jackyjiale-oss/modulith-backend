@@ -12,6 +12,7 @@ using TemplateName.Modules.Auth.Application.Admin.Users.ForcePasswordReset;
 using TemplateName.Modules.Auth.Application.Admin.Users.Get;
 using TemplateName.Modules.Auth.Application.Admin.Users.List;
 using TemplateName.Modules.Auth.Application.Admin.Users.Lock;
+using TemplateName.Modules.Auth.Application.Admin.Users.ResetMfa;
 using TemplateName.Modules.Auth.Application.Admin.Users.RevokeSessions;
 using TemplateName.Modules.Auth.Application.Admin.Users.Unlock;
 using TemplateName.Web.Common.Results;
@@ -77,6 +78,14 @@ internal static class AdminUserEndpoints
             .RequirePermission(AuthPermissions.UserRevokeSessions)
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status404NotFound);
+
+        group.MapPost("/{id:guid}/reset-mfa", ResetMfaAsync)
+            .WithName("ResetUserMfa")
+            .RequirePermission(AuthPermissions.UserResetMfa)
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
 
         group.MapPut("/{id:guid}/roles", AssignRolesAsync)
             .WithName("AssignUserRoles")
@@ -171,6 +180,10 @@ internal static class AdminUserEndpoints
         ICommandHandler<RevokeUserSessionsCommand> handler,
         CancellationToken cancellationToken)
         => AdminActor.RunAsync(currentUser, actorId => handler.HandleAsync(new RevokeUserSessionsCommand(actorId, id), cancellationToken), TypedResults.NoContent());
+
+    // 204, also for a user without two-step verification (nothing changes). 400 auth.cannot_reset_own_mfa; 403 auth.cannot_manage_super_admin.
+    private static Task<IResult> ResetMfaAsync(Guid id, ICurrentUser currentUser, ICommandHandler<ResetUserMfaCommand> handler, CancellationToken cancellationToken)
+        => AdminActor.RunAsync(currentUser, actorId => handler.HandleAsync(new ResetUserMfaCommand(id, actorId), cancellationToken), TypedResults.NoContent());
 
     // 204; 404 auth.user_not_found or auth.role_not_found; 409 auth.last_super_admin.
     private static Task<IResult> AssignRolesAsync(

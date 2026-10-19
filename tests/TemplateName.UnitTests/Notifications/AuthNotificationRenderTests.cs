@@ -20,6 +20,7 @@ public sealed class AuthNotificationRenderTests
     private const string OccurredAt = "2026-10-09 14:30";
     private const string LockedUntil = "2026-10-09 15:45";
     private const string TimeZone = "Asia/Kuala_Lumpur";
+    private const string IpAddress = "203.0.113.7";
     private const string ExpiresInMinutes = "60";
 
     private static readonly NotificationCatalog Catalog = BuildCatalog();
@@ -45,9 +46,9 @@ public sealed class AuthNotificationRenderTests
     }
 
     [Fact]
-    public void Catalog_holds_all_eight_auth_types()
+    public void Catalog_holds_all_ten_auth_types()
     {
-        Catalog.All.Count.ShouldBe(8);
+        Catalog.All.Count.ShouldBe(10);
     }
 
     [Theory]
@@ -85,7 +86,8 @@ public sealed class AuthNotificationRenderTests
             message.TextBody.ShouldContain("Aisha");
             message.TextBody.ShouldNotContain("<");
 
-            foreach (var name in type.Variables.Where(name => name != "display_name"))
+            // "change" selects a sentence (MfaNotificationTemplateTests), so its value is not printed.
+            foreach (var name in type.Variables.Where(name => name is not ("display_name" or "change")))
             {
                 message.TextBody.ShouldContain(variables[name], customMessage: $"{typeCode} {culture} text shows {name}");
                 message.HtmlBody.ShouldContain(variables[name], customMessage: $"{typeCode} {culture} html shows {name}");
@@ -152,6 +154,8 @@ public sealed class AuthNotificationRenderTests
             ["locked_until"] = LockedUntil,
             ["time_zone"] = TimeZone,
             ["action_url"] = ActionUrl,
+            ["change"] = "enabled",
+            ["ip_address"] = IpAddress,
         };
 
         return type.Variables.Concat(type.SecretVariables).ToDictionary(name => name, name => values[name], StringComparer.Ordinal);
