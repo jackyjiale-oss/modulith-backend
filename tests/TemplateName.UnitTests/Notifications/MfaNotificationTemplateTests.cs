@@ -79,6 +79,21 @@ public sealed class MfaNotificationTemplateTests
     }
 
     [Theory]
+    [InlineData("en", "A recovery code was used on your account.", "sign in")]
+    [InlineData("ms", "Satu kod pemulihan telah digunakan pada akaun anda.", "log masuk")]
+    [InlineData("zh-Hans", "已在您的账户上使用恢复码。", "登录")]
+    public void Recovery_code_sentence_covers_a_step_up_as_well_as_a_sign_in(string culture, string sentence, string signInWording)
+    {
+        // The same event is raised for a sign-in and for a step-up inside an existing session, so the sentence must not say "sign in".
+        var message = Renderer.Render(AuthNotificationTypes.MfaChanged, NotificationChannel.Email, culture, MfaVariables("recovery_code_used"));
+
+        message.TextBody.ShouldContain(sentence);
+        message.HtmlBody.ShouldNotBeNull().ShouldContain(sentence);
+        message.TextBody.ShouldNotContain(signInWording, Case.Insensitive);
+        message.HtmlBody.ShouldNotContain(signInWording, Case.Insensitive);
+    }
+
+    [Theory]
     [MemberData(nameof(Cultures))]
     public void New_device_template_omits_the_address_line_when_unknown(string culture)
     {

@@ -1,4 +1,4 @@
 <p>{{ display_name }}，您好：</p>
-<p>{{ if change == "enabled" }}您的账户已开启两步验证。{{ else if change == "disabled" }}您的账户已关闭两步验证。{{ else if change == "recovery_codes_regenerated" }}已生成新的恢复码，旧的恢复码不再有效。{{ else if change == "reset_by_admin" }}管理员已关闭您账户的两步验证。{{ else if change == "recovery_code_used" }}已使用恢复码登录您的账户。{{ end }}</p>
+<p>{{ if change == "enabled" }}您的账户已开启两步验证。{{ else if change == "disabled" }}您的账户已关闭两步验证。{{ else if change == "recovery_codes_regenerated" }}已生成新的恢复码，旧的恢复码不再有效。{{ else if change == "reset_by_admin" }}管理员已关闭您账户的两步验证。{{ else if change == "recovery_code_used" }}已在您的账户上使用恢复码。{{ end }}</p>
 <p>此更改发生于 {{ occurred_at }} ({{ time_zone }})。</p>
 <p>如果这不是您本人的操作，请立即重置密码并联系管理员。</p>

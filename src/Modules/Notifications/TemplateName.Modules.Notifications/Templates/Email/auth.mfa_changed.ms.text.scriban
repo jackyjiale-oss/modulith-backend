@@ -1,6 +1,6 @@
 Helo {{ display_name }},
 
-{{ if change == "enabled" }}Pengesahan dua langkah telah diaktifkan untuk akaun anda.{{ else if change == "disabled" }}Pengesahan dua langkah telah dimatikan untuk akaun anda.{{ else if change == "recovery_codes_regenerated" }}Kod pemulihan baharu telah dijana; kod yang lama tidak lagi berfungsi.{{ else if change == "reset_by_admin" }}Pentadbir telah mematikan pengesahan dua langkah untuk akaun anda.{{ else if change == "recovery_code_used" }}Satu kod pemulihan telah digunakan untuk log masuk ke akaun anda.{{ end }}
+{{ if change == "enabled" }}Pengesahan dua langkah telah diaktifkan untuk akaun anda.{{ else if change == "disabled" }}Pengesahan dua langkah telah dimatikan untuk akaun anda.{{ else if change == "recovery_codes_regenerated" }}Kod pemulihan baharu telah dijana; kod yang lama tidak lagi berfungsi.{{ else if change == "reset_by_admin" }}Pentadbir telah mematikan pengesahan dua langkah untuk akaun anda.{{ else if change == "recovery_code_used" }}Satu kod pemulihan telah digunakan pada akaun anda.{{ end }}
 
 Perubahan ini dibuat pada {{ occurred_at }} ({{ time_zone }}).
 

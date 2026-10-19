@@ -39,7 +39,7 @@ public sealed class AdminMfaTests(IntegrationTestWebAppFactory factory) : AdminT
             await AssertProblemAsync(anonymous, HttpStatusCode.Unauthorized, "http.401");
         }
 
-        // Every other user administration permission, but not this one.
+        // Four of the other user administration permissions (view, lock, reset password, revoke sessions), but not this one.
         await SignInAsync(AuthPermissions.UserView, AuthPermissions.UserLock, AuthPermissions.UserResetPassword, AuthPermissions.UserRevokeSessions);
         using (var forbidden = await Client.PostAsync(ResetRoute(target.Id), null, Ct))
         {

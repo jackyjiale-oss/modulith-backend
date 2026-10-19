@@ -421,7 +421,9 @@ public sealed class VerifyMfaCommandHandlerTests
     [Fact]
     public async Task Save_conflict_retry_remembers_the_device_once_under_the_reread_user()
     {
-        var reread = NewUser(id: _user.Id, stamp: _user.SecurityStamp);
+        // The re-read user must keep the stamp the challenge was issued under (or the retry ends), so its id is what tells the two
+        // instances apart: a device staged under the wrong one carries the wrong user id.
+        var reread = NewUser(id: Guid.NewGuid(), stamp: _user.SecurityStamp);
         _users.GetByIdAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_user, reread);
         _unitOfWork.TrySaveChangesAsync(Arg.Any<CancellationToken>()).Returns(false, true);
         _tokenService.Generate().Returns(
@@ -436,7 +438,9 @@ public sealed class VerifyMfaCommandHandlerTests
         result.Value.TrustedDeviceToken.ShouldBe(DeviceTokenValue);
         _addedDevices.Count.ShouldBe(2);
         _addedDevices[1].TokenHash.ShouldBe(DeviceTokenHash);
-        _addedDevices[1].SecurityStamp.ShouldBe(reread.SecurityStamp);
+        _addedDevices[0].UserId.ShouldBe(_user.Id);
+        _addedDevices[1].UserId.ShouldBe(reread.Id);
+        _addedDevices[1].SecurityStamp.ShouldBe(_challenge.SecurityStamp);
     }
 
     private VerifyMfaCommandHandler CreateHandler(MfaOptions mfaOptions)

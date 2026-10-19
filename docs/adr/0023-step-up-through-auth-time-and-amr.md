@@ -32,4 +32,4 @@ We chose option 3 (decisions D9 to D12 of Plan 4).
 - **A trusted device does not satisfy an MFA step-up.** Its sign-ins carry `pwd` only, so an MFA account always steps up with a code.
 - **Lockout coupling.** A session thief can lock the owner out with five wrong codes (they could already sign them out); the lockout email tells the owner. A successful step-up does not reset the failure count; only a successful sign-in does.
 - **`rcvr` is not in RFC 8176.** Clients that read `amr` must accept it.
-- Follow-up actions: the callers above (Plan 4 Tasks 6 and 8), and the later endpoints listed in Plan 4 Part D.
+- Follow-up actions: none open. The callers above and the endpoints of Plan 4 Part D are implemented ([Step-up](../modules/auth.md#step-up)); a step-up on administrator actions stays deferred ([Known limits](../modules/auth.md#known-limits)).

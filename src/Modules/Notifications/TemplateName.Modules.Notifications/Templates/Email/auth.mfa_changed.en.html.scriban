@@ -1,4 +1,4 @@
 <p>Hello {{ display_name }},</p>
-<p>{{ if change == "enabled" }}Two-step verification was turned on for your account.{{ else if change == "disabled" }}Two-step verification was turned off for your account.{{ else if change == "recovery_codes_regenerated" }}New recovery codes were created; the old ones no longer work.{{ else if change == "reset_by_admin" }}An administrator turned off two-step verification for your account.{{ else if change == "recovery_code_used" }}A recovery code was used to sign in to your account.{{ end }}</p>
+<p>{{ if change == "enabled" }}Two-step verification was turned on for your account.{{ else if change == "disabled" }}Two-step verification was turned off for your account.{{ else if change == "recovery_codes_regenerated" }}New recovery codes were created; the old ones no longer work.{{ else if change == "reset_by_admin" }}An administrator turned off two-step verification for your account.{{ else if change == "recovery_code_used" }}A recovery code was used on your account.{{ end }}</p>
 <p>The change was made on {{ occurred_at }} ({{ time_zone }}).</p>
 <p>If this was not you, reset your password now and contact your administrator.</p>

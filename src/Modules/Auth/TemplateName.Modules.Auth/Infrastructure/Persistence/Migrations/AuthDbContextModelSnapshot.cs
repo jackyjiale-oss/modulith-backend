@@ -251,6 +251,7 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("ConfirmedAt")
+                        .IsConcurrencyToken()
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)");
 
@@ -271,6 +272,7 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                         .HasColumnType("bigint");
 
                     b.Property<string>("SecretEncrypted")
+                        .IsConcurrencyToken()
                         .IsRequired()
                         .HasMaxLength(512)
                         .HasColumnType("nvarchar(512)");

@@ -173,8 +173,8 @@ The Auth module reads the sections below, each with its keys, defaults and range
 | `Auth:Verification` | Lifetimes of the confirmation and reset links, the resend cooldown. |
 | `Auth:RefreshToken` | Sliding and absolute session lifetimes. |
 | `Auth:Lockout` | Failed attempts and lockout duration. |
-| `Auth:Mfa` | Two-step verification: the authenticator issuer name (no `:`), the sign-in challenge's lifetime and wrong-code limit, and whether and for how long a device can be remembered. |
-| `Auth:StepUp` | How long a step-up (a fresh `auth_time`) satisfies a protected action (`MaxAge`). |
+| `Auth:Mfa` | Two-step verification: `Issuer` (the authenticator issuer name, no `:`), `ChallengeLifetime` and `MaxChallengeAttempts` (the sign-in challenge's lifetime and wrong-code limit), and `TrustedDevicesEnabled` and `TrustedDeviceLifetime` (whether and for how long a device can be remembered). |
+| `Auth:StepUp` | `MaxAge`: how long a step-up (a fresh `auth_time`) satisfies a protected action. |
 | `Auth:Jwt` | Issuer, audience, lifetime, skew and the signing keys (required outside Development and Testing). |
 | `Auth:DataProtection` | The Data Protection application name. |
 | `Auth:Seed` | Above. |

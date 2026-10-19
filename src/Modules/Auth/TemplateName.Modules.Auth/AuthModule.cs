@@ -143,11 +143,15 @@ public static class AuthModule
     /// <summary>
     /// Maps the module's endpoints; <paramref name="app"/> is the host's <c>/api/v1</c> group. The self-service routes live in its
     /// <c>auth</c> group: <c>POST auth/register</c>, <c>POST auth/email/confirm</c>, <c>POST auth/email/resend-confirmation</c>,
-    /// <c>POST auth/login</c>, <c>POST auth/token/refresh</c>, <c>POST auth/step-up</c>, <c>POST auth/mfa/verify</c>, <c>POST auth/mfa/totp/setup</c>, <c>POST auth/mfa/totp/confirm</c>, <c>GET auth/mfa/methods</c>, <c>GET auth/me</c>, <c>PUT auth/me</c>, <c>GET auth/sessions</c>, <c>DELETE auth/sessions/{id}</c>, <c>POST auth/logout</c>, <c>POST auth/logout-all</c>,
-    /// <c>POST auth/password/forgot</c>, <c>POST auth/password/reset</c> and <c>POST auth/password/change</c>. The user administration
+    /// <c>POST auth/login</c>, <c>POST auth/token/refresh</c>, <c>POST auth/step-up</c>, <c>GET auth/me</c>, <c>PUT auth/me</c>,
+    /// <c>GET auth/sessions</c>, <c>DELETE auth/sessions/{id}</c>, <c>POST auth/logout</c>, <c>POST auth/logout-all</c>,
+    /// <c>POST auth/password/forgot</c>, <c>POST auth/password/reset</c> and <c>POST auth/password/change</c>; its <c>auth/mfa</c> group:
+    /// <c>POST auth/mfa/verify</c>, <c>POST auth/mfa/totp/setup</c>, <c>POST auth/mfa/totp/confirm</c>, <c>GET auth/mfa/methods</c>,
+    /// <c>DELETE auth/mfa/methods/{id}</c> and <c>POST auth/mfa/recovery-codes/regenerate</c>; and the trusted devices,
+    /// <c>GET auth/trusted-devices</c> and <c>DELETE auth/trusted-devices/{id}</c>. The user administration
     /// routes live in its <c>admin/auth/users</c> group, each behind its permission: <c>GET</c> (list) and <c>POST</c> (create) on the
     /// group, <c>GET admin/auth/users/{id}</c>, <c>POST .../{id}/lock</c>, <c>/unlock</c>, <c>/force-password-reset</c>,
-    /// <c>/revoke-sessions</c> and <c>PUT .../{id}/roles</c>. The role administration lives in <c>admin/auth/roles</c> (<c>GET</c> list and
+    /// <c>/revoke-sessions</c>, <c>/reset-mfa</c> and <c>PUT .../{id}/roles</c>. The role administration lives in <c>admin/auth/roles</c> (<c>GET</c> list and
     /// <c>POST</c> on the group, <c>GET</c>, <c>PUT</c> and <c>DELETE .../{id}</c>, <c>PUT .../{id}/permissions</c>), the permission list in
     /// <c>GET admin/auth/permissions</c> and the audit log in <c>GET admin/auth/audit-logs</c>, each behind its permission.
     /// </summary>
