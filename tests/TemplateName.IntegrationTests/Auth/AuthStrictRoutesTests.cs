@@ -10,9 +10,10 @@ namespace TemplateName.IntegrationTests.Auth;
 /// <summary>
 /// Pins which routes of the real host carry the <c>auth-strict</c> rate-limit policy. A route that checks a password, a code or a
 /// token must keep it (the Redis limiter of Plan 5 inherits this list), and a new route that gets it must be added here and to
-/// <c>docs/modules/auth.md</c> and <c>docs/services/api.md</c>.
+/// <c>docs/modules/auth.md</c> and <c>docs/services/api.md</c>. It only reads the route table of the shared host, so it does not derive from
+/// <see cref="IntegrationTestBase"/> and the databases are not reset for it.
 /// </summary>
-public sealed class AuthStrictRoutesTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)
+public sealed class AuthStrictRoutesTests(IntegrationTestWebAppFactory factory)
 {
     private static readonly string[] ExpectedRoutes =
     [
@@ -31,16 +32,20 @@ public sealed class AuthStrictRoutesTests(IntegrationTestWebAppFactory factory) 
     [Fact]
     public void Exactly_ten_routes_carry_auth_strict_among_them_mfa_verify_and_step_up()
     {
-        var endpoints = Factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>();
+        var endpoints = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>();
 
         var strict = endpoints
             .Where(endpoint => endpoint.Metadata.GetOrderedMetadata<EnableRateLimitingAttribute>()
                 .Any(attribute => attribute.PolicyName == RateLimitPolicies.AuthStrict))
-            .SelectMany(endpoint => endpoint.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods
+            .SelectMany(endpoint => HttpMethodsOf(endpoint)
                 .Select(method => $"{method} /{endpoint.RoutePattern.RawText!.TrimStart('/')}"))
             .Order(StringComparer.Ordinal)
             .ToList();
 
         strict.ShouldBe(ExpectedRoutes);
     }
+
+    private static IReadOnlyList<string> HttpMethodsOf(RouteEndpoint endpoint) =>
+        endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods
+        ?? throw new InvalidOperationException($"The rate-limited endpoint '{endpoint.DisplayName}' has no HTTP method metadata, so it cannot be listed.");
 }
