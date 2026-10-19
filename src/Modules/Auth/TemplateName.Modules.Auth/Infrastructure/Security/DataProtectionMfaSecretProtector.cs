@@ -34,6 +34,12 @@ internal sealed class DataProtectionMfaSecretProtector(IDataProtectionProvider p
     {
         ArgumentNullException.ThrowIfNull(protectedSecret);
 
+        // The text form has no padding, and the decoder's tolerance of it is not the same on every platform: refuse it here.
+        if (protectedSecret.Contains('='))
+        {
+            throw new CryptographicException("The protected secret is not valid base64url.");
+        }
+
         byte[] payload;
         try
         {
