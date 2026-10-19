@@ -19,6 +19,8 @@ public sealed class AuthNotificationTypesTests
         AuthNotificationTypes.PasswordChanged,
         AuthNotificationTypes.AccountLocked,
         AuthNotificationTypes.TokenReuseDetected,
+        AuthNotificationTypes.MfaChanged,
+        AuthNotificationTypes.NewDeviceLogin,
     ];
 
     private static readonly AuthNotificationTypeSource Source = new();
@@ -26,7 +28,7 @@ public sealed class AuthNotificationTypesTests
     public static TheoryData<string> Codes => new(AllCodes);
 
     [Fact]
-    public void Source_declares_exactly_the_eight_auth_types()
+    public void Source_declares_exactly_the_ten_auth_types()
     {
         Source.Types.Select(type => type.Code).ShouldBe(
             [
@@ -38,6 +40,8 @@ public sealed class AuthNotificationTypesTests
                 "auth.password_changed",
                 "auth.account_locked",
                 "auth.token_reuse_detected",
+                "auth.mfa_changed",
+                "auth.new_device_login",
             ],
             ignoreOrder: true);
     }
@@ -54,6 +58,22 @@ public sealed class AuthNotificationTypesTests
             type.IsMandatory(NotificationChannel.Email).ShouldBeTrue(type.Code);
             type.Variables.ShouldContain("display_name", type.Code);
         }
+    }
+
+    [Theory]
+    [InlineData(AuthNotificationTypes.MfaChanged, "auth.mfa_changed")]
+    [InlineData(AuthNotificationTypes.NewDeviceLogin, "auth.new_device_login")]
+    public void Mfa_and_new_device_types_are_security_critical_email_only(string code, string expectedCode)
+    {
+        code.ShouldBe(expectedCode);
+        var type = Source.Types.Single(candidate => candidate.Code == code);
+
+        type.Category.ShouldBe(NotificationCategory.Security);
+        type.Priority.ShouldBe(NotificationPriority.Critical);
+        type.DefaultChannels.ShouldBe([NotificationChannel.Email]);
+        type.MandatoryChannels.ShouldBe([NotificationChannel.Email]);
+        type.IsConfigurable.ShouldBeFalse();
+        type.SecretVariables.ShouldBeEmpty();
     }
 
     [Fact]
@@ -87,6 +107,8 @@ public sealed class AuthNotificationTypesTests
     [InlineData(AuthNotificationTypes.PasswordChanged, "display_name,occurred_at,time_zone", "")]
     [InlineData(AuthNotificationTypes.AccountLocked, "display_name,locked_until,time_zone", "")]
     [InlineData(AuthNotificationTypes.TokenReuseDetected, "display_name,occurred_at,time_zone", "")]
+    [InlineData(AuthNotificationTypes.MfaChanged, "display_name,change,occurred_at,time_zone", "")]
+    [InlineData(AuthNotificationTypes.NewDeviceLogin, "display_name,occurred_at,time_zone,ip_address", "")]
     public void Types_declare_their_variables_and_secrets(string code, string variables, string secrets)
     {
         var type = Source.Types.Single(candidate => candidate.Code == code);

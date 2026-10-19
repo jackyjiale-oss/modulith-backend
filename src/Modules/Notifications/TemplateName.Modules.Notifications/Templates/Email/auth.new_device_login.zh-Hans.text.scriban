@@ -1,0 +1,7 @@
+{{ display_name }}，您好：
+
+您的账户于 {{ occurred_at }} ({{ time_zone }}) 在新设备上登录。
+
+{{ if ip_address != "" }}此次登录来自地址 {{ ip_address }}。
+
+{{ end }}如果这不是您本人的操作，请立即重置密码并联系管理员。

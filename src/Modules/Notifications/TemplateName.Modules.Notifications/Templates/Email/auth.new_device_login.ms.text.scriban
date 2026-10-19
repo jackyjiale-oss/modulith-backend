@@ -1,0 +1,7 @@
+Helo {{ display_name }},
+
+Akaun anda telah dilog masuk daripada peranti baharu pada {{ occurred_at }} ({{ time_zone }}).
+
+{{ if ip_address != "" }}Log masuk itu datang daripada alamat {{ ip_address }}.
+
+{{ end }}Jika ini bukan anda, tetapkan semula kata laluan anda sekarang dan hubungi pentadbir anda.

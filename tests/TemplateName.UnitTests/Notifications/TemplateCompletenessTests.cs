@@ -32,7 +32,13 @@ public sealed class TemplateCompletenessTests
 
     // Security notices whose sentences (what happened, what to do if it was not you) must survive in every language.
     private static readonly string[] SecurityNotices =
-        [AuthNotificationTypes.PasswordChanged, AuthNotificationTypes.TokenReuseDetected, AuthNotificationTypes.AccountLocked];
+        [
+            AuthNotificationTypes.PasswordChanged,
+            AuthNotificationTypes.TokenReuseDetected,
+            AuthNotificationTypes.AccountLocked,
+            AuthNotificationTypes.MfaChanged,
+            AuthNotificationTypes.NewDeviceLogin,
+        ];
 
     public static TheoryData<string> SecurityNoticeTypeCodes => new(SecurityNotices);
 

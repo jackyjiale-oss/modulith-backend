@@ -29,4 +29,10 @@ internal static class AuthNotificationTypes
 
     /// <summary>A refresh token was presented twice, so a session was signed out (<c>RefreshTokenReuseDetected</c>); email and an optional in-app message.</summary>
     public const string TokenReuseDetected = "auth.token_reuse_detected";
+
+    /// <summary>Two-step verification was turned on or off, its recovery codes changed or one was used, or an administrator reset it (<c>MfaChanged</c>); email only.</summary>
+    public const string MfaChanged = "auth.mfa_changed";
+
+    /// <summary>The account was signed in to from a device none of its earlier sessions used (<c>NewDeviceSignedIn</c>); email only, no client-supplied text.</summary>
+    public const string NewDeviceLogin = "auth.new_device_login";
 }

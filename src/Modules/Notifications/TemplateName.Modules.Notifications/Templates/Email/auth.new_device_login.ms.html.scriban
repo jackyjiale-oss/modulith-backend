@@ -1,0 +1,4 @@
+<p>Helo {{ display_name }},</p>
+<p>Akaun anda telah dilog masuk daripada peranti baharu pada {{ occurred_at }} ({{ time_zone }}).</p>
+{{ if ip_address != "" }}<p>Log masuk itu datang daripada alamat {{ ip_address }}.</p>
+{{ end }}<p>Jika ini bukan anda, tetapkan semula kata laluan anda sekarang dan hubungi pentadbir anda.</p>

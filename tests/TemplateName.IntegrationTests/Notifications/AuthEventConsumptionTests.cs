@@ -79,6 +79,66 @@ public sealed class AuthEventConsumptionTests(IntegrationTestWebAppFactory facto
     }
 
     [Fact]
+    public async Task Mfa_change_and_new_device_create_one_email_each_in_the_user_culture()
+    {
+        var user = await CreateUserAsync(Email, locale: "ms");
+        var changed = new MfaChangedIntegrationEvent(Guid.NewGuid(), Now.AddMinutes(-1), user.Id, MfaChangeKind.ResetByAdmin);
+        var signedIn = new NewDeviceSignedInIntegrationEvent(Guid.NewGuid(), Now.AddMinutes(-2), user.Id, Guid.NewGuid(), "203.0.113.7");
+
+        await PublishAsync(changed);
+        await PublishAsync(signedIn);
+
+        var notifications = (await NotificationsAsync()).OrderBy(notification => notification.TypeCode, StringComparer.Ordinal).ToList();
+        notifications.Select(notification => notification.TypeCode).ShouldBe([AuthNotificationTypes.MfaChanged, AuthNotificationTypes.NewDeviceLogin]);
+        notifications.ShouldAllBe(notification => notification.Culture == "ms"
+            && notification.RecipientUserId == user.Id
+            && notification.Priority == NotificationPriority.Critical
+            && notification.ProtectedData == null);
+        foreach (var notification in notifications)
+        {
+            var delivery = notification.Deliveries.ShouldHaveSingleItem();
+            delivery.Channel.ShouldBe(NotificationChannel.Email);
+            delivery.Destination.ShouldBe(Email);
+            delivery.Status.ShouldBe(DeliveryStatus.Pending);
+        }
+
+        JsonSerializer.Deserialize<Dictionary<string, string>>(notifications[0].Data).ShouldBe(new Dictionary<string, string>
+        {
+            ["change"] = "reset_by_admin",
+            ["display_name"] = "Test user",
+            ["occurred_at"] = "2025-12-31 23:59",
+            ["time_zone"] = "UTC",
+        });
+        JsonSerializer.Deserialize<Dictionary<string, string>>(notifications[1].Data).ShouldBe(new Dictionary<string, string>
+        {
+            ["display_name"] = "Test user",
+            ["ip_address"] = "203.0.113.7",
+            ["occurred_at"] = "2025-12-31 23:58",
+            ["time_zone"] = "UTC",
+        });
+        (await InboxAsync(changed.Id)).ShouldBe([typeof(MfaChangedIntegrationEventHandler).FullName!]);
+        (await InboxAsync(signedIn.Id)).ShouldBe([typeof(NewDeviceSignedInIntegrationEventHandler).FullName!]);
+    }
+
+    [Fact]
+    public async Task Same_mfa_changed_and_new_device_events_twice_create_one_notification_each()
+    {
+        var user = await CreateUserAsync(Email);
+        var changed = new MfaChangedIntegrationEvent(Guid.NewGuid(), Now, user.Id, MfaChangeKind.Enabled);
+        var signedIn = new NewDeviceSignedInIntegrationEvent(Guid.NewGuid(), Now, user.Id, Guid.NewGuid(), IpAddress: null);
+
+        await PublishAsync(changed);
+        await PublishAsync(changed);
+        await PublishAsync(signedIn);
+        await PublishAsync(signedIn);
+
+        var notifications = await NotificationsAsync();
+        notifications.Count.ShouldBe(2);
+        notifications.Select(notification => notification.SourceMessageId).ShouldBe([changed.Id, signedIn.Id], ignoreOrder: true);
+        JsonSerializer.Deserialize<Dictionary<string, string>>(notifications.Single(notification => notification.SourceMessageId == signedIn.Id).Data)!["ip_address"].ShouldBe(string.Empty);
+    }
+
+    [Fact]
     public async Task Concurrent_duplicate_consumption_creates_one_notification()
     {
         var user = await CreateUserAsync(Email);
