@@ -38,6 +38,23 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
     private static readonly TimeSpan OneYear = TimeSpan.FromDays(365);
     private static readonly TimeSpan OneSecond = TimeSpan.FromSeconds(1);
 
+    // One age between each two of the retentions the key theory uses (12 h, 1 d, 3 d, 7 d, 10 d, 30 d, 60 d, 90 d, 120 d, 365 d), below the
+    // first and above the last.
+    private static readonly TimeSpan[] RetentionAgeGrid =
+    [
+        TimeSpan.FromHours(6),
+        TimeSpan.FromHours(18),
+        TimeSpan.FromDays(2),
+        TimeSpan.FromDays(5),
+        TimeSpan.FromDays(8),
+        TimeSpan.FromDays(20),
+        TimeSpan.FromDays(45),
+        TimeSpan.FromDays(75),
+        TimeSpan.FromDays(100),
+        TimeSpan.FromDays(200),
+        TimeSpan.FromDays(400),
+    ];
+
     private static readonly string[] JobNames =
     [
         VerificationCodesCleanupJob.JobName,
@@ -383,6 +400,103 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
     }
 
     [Fact]
+    public async Task A_used_refresh_token_answers_reuse_until_its_cleanup_and_invalid_refresh_token_after()
+    {
+        await CreateUserAsync(Email);
+        var reused = await LoginAsync();
+        var forgotten = await LoginAsync();
+        foreach (var login in new[] { reused, forgotten })
+        {
+            using var rotated = await RefreshAsync(login.RefreshToken);
+            rotated.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+
+        // The rotated tokens expire in 14 days; 30 days after that (the default retention) they are exactly at the cutoff and are kept.
+        Factory.Time.Advance(TimeSpan.FromDays(14) + ThirtyDays);
+        (await RunAsync(RefreshTokensCleanupJob.JobName)).Processed.ShouldBe(0);
+
+        // The used token is past its own expiry but still there, so presenting it is still reuse and revokes the session.
+        using var reuse = await RefreshAsync(reused.RefreshToken);
+        reuse.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        (await reuse.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("code").GetString().ShouldBe("auth.refresh_token_reused");
+        (await SessionOfAsync(reused.SessionId)).RevokedReason.ShouldBe(SessionRevokedReason.TokenReuse);
+
+        // A second later the cleanup has deleted the tokens of both sessions (two each): the same request is refused as unknown and no longer
+        // revokes the session.
+        Factory.Time.Advance(OneSecond);
+        (await RunAsync(RefreshTokensCleanupJob.JobName)).Processed.ShouldBe(4);
+        using var unknown = await RefreshAsync(forgotten.RefreshToken);
+        unknown.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        (await unknown.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("code").GetString().ShouldBe("auth.invalid_refresh_token");
+        (await SessionOfAsync(forgotten.SessionId)).RevokedAt.ShouldBeNull();
+    }
+
+    [Theory]
+    [MemberData(nameof(AllJobNames))]
+    public async Task Each_auth_job_reads_its_own_retention_key(string jobName)
+    {
+        // Every table holds one row at each age of a grid whose steps lie between any two retentions used below, so a job that read the wrong
+        // key leaves a different set of rows than the one its own key leaves. Defaults are 7 d / 30 d / 90 d / 1 d / 30 d / off.
+        var codes = new Dictionary<TimeSpan, Guid>();
+        var tokens = new Dictionary<TimeSpan, Guid>();
+        var sessions = new Dictionary<TimeSpan, Guid>();
+        var challenges = new Dictionary<TimeSpan, Guid>();
+        var devices = new Dictionary<TimeSpan, Guid>();
+        var auditLogs = new Dictionary<TimeSpan, long>();
+
+        // The tokens hang off one live session, so only the token job can delete them.
+        var tokenSession = await SeedSessionAsync(Now + NinetyDays + OneYear, tokenExpiries: [.. RetentionAgeGrid.Select(age => Now - age)]);
+        for (var index = 0; index < RetentionAgeGrid.Length; index++)
+        {
+            tokens[RetentionAgeGrid[index]] = tokenSession.TokenIds[index];
+        }
+
+        foreach (var age in RetentionAgeGrid)
+        {
+            codes[age] = await SeedVerificationCodeAsync(Now - age);
+            sessions[age] = (await SeedSessionAsync(Now - age, tokenExpiries: [Now + OneYear])).SessionId;
+            challenges[age] = await SeedMfaChallengeAsync(Now - age);
+            devices[age] = await SeedTrustedDeviceAsync(Now - age);
+            auditLogs[age] = await SeedAuditLogAsync(Now - age);
+        }
+
+        var retention = new AuthRetentionOptions();
+        switch (jobName)
+        {
+            case VerificationCodesCleanupJob.JobName:
+                retention.VerificationCodes = TimeSpan.FromDays(3);
+                break;
+            case RefreshTokensCleanupJob.JobName:
+                retention.RefreshTokens = TimeSpan.FromDays(10);
+                break;
+            case UserSessionsCleanupJob.JobName:
+                retention.Sessions = TimeSpan.FromDays(120);
+                break;
+            case MfaChallengesCleanupJob.JobName:
+                retention.MfaChallenges = TimeSpan.FromHours(12);
+                break;
+            case TrustedDevicesCleanupJob.JobName:
+                retention.TrustedDevices = TimeSpan.FromDays(60);
+                break;
+            default:
+                retention.AuditLogs = OneYear;
+                break;
+        }
+
+        foreach (var name in JobNames)
+        {
+            await RunAsync(name, retention);
+        }
+
+        (await VerificationCodeIdsAsync()).ShouldBe(Survivors(codes, retention.VerificationCodes), ignoreOrder: true);
+        (await TokenIdsAsync()).Where(tokens.ContainsValue).ShouldBe(Survivors(tokens, retention.RefreshTokens), ignoreOrder: true);
+        (await SessionIdsAsync()).Where(id => id != tokenSession.SessionId).ShouldBe(Survivors(sessions, retention.Sessions), ignoreOrder: true);
+        (await MfaChallengeIdsAsync()).ShouldBe(Survivors(challenges, retention.MfaChallenges), ignoreOrder: true);
+        (await TrustedDeviceIdsAsync()).ShouldBe(Survivors(devices, retention.TrustedDevices), ignoreOrder: true);
+        (await AuditLogIdsAsync()).ShouldBe(Survivors(auditLogs, retention.AuditLogs), ignoreOrder: true);
+    }
+
+    [Fact]
     public async Task Cleanup_predicates_use_their_indexes()
     {
         // A table of mostly live rows with an old tail of about a tenth of a per cent, as a real one is: the cutoff selects few rows, so a seek on
@@ -422,18 +536,21 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
     }
 
     /// <summary>
-    /// The plan of the job's own statement, compiled but not run. The plan helper declares <c>@Batch</c> and <c>@Cutoff</c> as local variables,
-    /// which SQL Server estimates with a flat guess (a third of the rows per comparison); the job binds them as parameters, whose values it
-    /// sniffs. The hint gives the compile the values the job would bind, so the plan is the one the job gets.
+    /// The plan of the job's own statement, compiled but not run, for the cutoff of the default retention of a session (ninety days): the
+    /// plan helper gives the compile the values the job would bind as parameters, so the plan is the one the job gets.
     /// </summary>
     private async Task<string> PlanOfAsync(string jobName, AsyncServiceScope scope, System.Data.Common.DbConnection connection)
     {
         var statement = CreateJob(jobName, scope, new AuthRetentionOptions(), batchSize: 1000, maxBatchesPerRun: 100).DeleteStatement;
-        var cutoff = (Now - NinetyDays).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
-        var hinted = statement.TrimEnd().TrimEnd(';') + $" OPTION (OPTIMIZE FOR (@Batch = 1000, @Cutoff = '{cutoff}'));";
 
-        return await SqlExecutionPlan.OfDeleteAsync(connection, hinted, Ct);
+        return await SqlExecutionPlan.OfDeleteAsync(connection, statement, (Now - NinetyDays).UtcDateTime, Ct);
     }
+
+    private static List<T> Survivors<T>(Dictionary<TimeSpan, T> seeded, TimeSpan? retention)
+        => [.. seeded.Where(row => retention is not { } period || period == TimeSpan.Zero || row.Key <= period).Select(row => row.Value)];
+
+    private async Task<UserSession> SessionOfAsync(Guid sessionId)
+        => await QueryAsync(context => context.Set<UserSession>().SingleAsync(candidate => candidate.Id == sessionId, Ct));
 
     private static byte[] NewHash() => RandomNumberGenerator.GetBytes(RefreshTokenConfiguration.TokenHashLength);
 

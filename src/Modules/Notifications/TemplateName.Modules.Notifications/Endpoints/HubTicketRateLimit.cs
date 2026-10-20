@@ -9,7 +9,8 @@ namespace TemplateName.Modules.Notifications.Endpoints;
 /// The rate-limit policy of <c>POST /api/v1/notifications/hub-tickets</c>: a fixed window of one minute per signed-in user
 /// (<c>user:{sub}</c>; per client address for a request without one, which the endpoint refuses anyway) allowing
 /// <see cref="HubOptions.TicketsPerMinute"/> tickets. It applies on top of the global limiter and answers with the host's usual 429
-/// <c>rate_limit.exceeded</c> problem. Every ticket is a row until Plan 5's cleanup job, so this bounds what one account can add.
+/// <c>rate_limit.exceeded</c> problem. Every ticket is a row until the hub ticket cleanup job deletes it (an hour after it expires, by
+/// default), so this bounds what one account can add.
 /// </summary>
 internal static class HubTicketRateLimit
 {

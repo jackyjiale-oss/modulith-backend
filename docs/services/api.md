@@ -91,7 +91,7 @@ The first request with a key holds it as a lease for `InProgressTimeout`; duplic
 
 ### `Retention`
 
-How long the building blocks keep what they own before a cleanup job deletes it (ADR 0028; the jobs are in [infrastructure-common](../building-blocks/infrastructure-common.md#cleanup-jobs)). A row goes only when strictly older than the retention. Set a retention to `00:00:00` (or empty) to turn that cleanup off; modules keep their own retentions in their own sections (`Auth:Retention`, below).
+How long the building blocks keep what they own before a cleanup job deletes it (ADR 0028; the jobs are in [infrastructure-common](../building-blocks/infrastructure-common.md#cleanup-jobs)). A row goes only when strictly older than the retention. Set a retention to `00:00:00` (or empty) to turn that cleanup off; modules keep their own retentions in their own sections (`Auth:Retention` and `Notifications:Retention`, below).
 
 | Key | Default | Validation (on start) | Meaning |
 |---|---|---|---|
@@ -247,6 +247,16 @@ The notification hub and its single-use tickets ([Notifications module](../modul
 | Key | Default | Validation (on start) | Meaning |
 |---|---|---|---|
 | `ProductName` | `TemplateName` | required, at most 100 characters | The product's name as recipients know it: `{{ product_name }}` in every notification template and the email footer ([Notifications module](../modules/notifications.md#templates-and-rendering)). |
+
+### `Notifications:Retention`
+
+How long the Notifications module keeps its time-bound rows before a cleanup job deletes them (ADR 0028; the jobs and their rules are in [Notifications module: Cleanup](../modules/notifications.md#cleanup)). Each key is a `TimeSpan` that is not negative: a row goes only when strictly older than it, and `00:00:00` or an empty value turns that cleanup off. Validated on start. The batch size and the most batches per run are the building-block settings under [`Retention`](#retention) and [`Jobs`](#jobs).
+
+| Key | Default | Validation (on start) | Meaning |
+|---|---|---|---|
+| `HubTickets` | `01:00:00` (1 hour) | not negative | How long a hub ticket is kept after its `ExpiresAt`, consumed or not. The job `NotificationsHubTicketsCleanup` runs hourly. |
+| `Notifications` | `180.00:00:00` (180 days) | not negative | How long a notification is kept after its `CreatedAt`; its deliveries, dead-lettered ones included, go with it, and one with a delivery still pending stays. The job `NotificationsRowsCleanup` runs daily. |
+| `InAppNotifications` | `180.00:00:00` (180 days) | not negative | How long an inbox row is kept after its `CreatedAt`, read or unread. The job `NotificationsInAppCleanup` runs daily. |
 
 ### Other keys
 

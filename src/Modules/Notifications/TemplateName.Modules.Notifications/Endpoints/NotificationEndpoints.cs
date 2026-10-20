@@ -60,7 +60,7 @@ internal static class NotificationEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
-        // The ticket is a bearer secret: never stored by a cache, and limited per user because each one is a row until Plan 5's cleanup.
+        // The ticket is a bearer secret: never stored by a cache, and limited per user because each one is a row until the hub ticket cleanup job deletes it.
         group.MapPost("hub-tickets", IssueHubTicketAsync)
             .WithName("IssueNotificationHubTicket")
             .RequireAuthorization()
