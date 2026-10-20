@@ -65,6 +65,9 @@ namespace TemplateName.Modules.Sample.Infrastructure.Persistence.Migrations
                     b.HasIndex("OccurredAt")
                         .HasFilter("[ProcessedAt] IS NULL");
 
+                    b.HasIndex("ProcessedAt")
+                        .HasFilter("[ProcessedAt] IS NOT NULL");
+
                     b.ToTable("OutboxMessages", "sample");
                 });
 

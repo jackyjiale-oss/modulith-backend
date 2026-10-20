@@ -24,6 +24,9 @@ internal sealed class VerificationCodeConfiguration : IEntityTypeConfiguration<V
         // The pending-code and resend-cooldown lookups: one user, one purpose, newest first.
         builder.HasIndex(code => new { code.UserId, code.Purpose, code.CreatedAt });
 
+        // The cleanup job deletes the codes that expired before the retention cutoff.
+        builder.HasIndex(code => code.ExpiresAt);
+
         builder.Ignore(code => code.DomainEvents);
     }
 }

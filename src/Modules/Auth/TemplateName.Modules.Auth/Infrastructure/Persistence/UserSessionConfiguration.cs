@@ -33,6 +33,10 @@ internal sealed class UserSessionConfiguration : IEntityTypeConfiguration<UserSe
         builder.HasIndex(session => new { session.UserId, session.LastSeenAt, session.Id });
         builder.HasIndex(session => new { session.UserId, session.CreatedAt, session.Id });
 
+        // The cleanup job deletes the sessions past their expiry, and the revoked ones once the retention has passed.
+        builder.HasIndex(session => session.ExpiresAt);
+        builder.HasIndex(session => session.RevokedAt).HasFilter("[RevokedAt] IS NOT NULL");
+
         // When the user last proved their identity in the session (sign-in or step-up), the auth_time of its access tokens. Not null:
         // migration AddMultiFactorAuthentication filled it from CreatedAt for the sessions that existed before it.
         builder.Property(session => session.AuthenticatedAt);

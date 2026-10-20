@@ -40,6 +40,8 @@ namespace TemplateName.Modules.Notifications.Infrastructure.Persistence.Migratio
                     b.HasKey("MessageId", "Consumer")
                         .HasName("PK_InboxMessages");
 
+                    b.HasIndex("ProcessedAt");
+
                     b.ToTable("InboxMessages", "notify");
                 });
 
@@ -139,6 +141,8 @@ namespace TemplateName.Modules.Notifications.Infrastructure.Persistence.Migratio
 
                     b.HasKey("TokenHash");
 
+                    b.HasIndex("ExpiresAt");
+
                     b.ToTable("HubTickets", "notify");
                 });
 
@@ -180,6 +184,8 @@ namespace TemplateName.Modules.Notifications.Infrastructure.Persistence.Migratio
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
 
                     b.HasIndex("UserId")
                         .HasFilter("[ReadAt] IS NULL");
@@ -234,6 +240,8 @@ namespace TemplateName.Modules.Notifications.Infrastructure.Persistence.Migratio
                         .HasColumnType("nvarchar(100)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
 
                     b.HasIndex("RecipientUserId");
 

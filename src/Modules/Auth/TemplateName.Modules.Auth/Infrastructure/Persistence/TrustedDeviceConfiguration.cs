@@ -26,6 +26,10 @@ internal sealed class TrustedDeviceConfiguration : IEntityTypeConfiguration<Trus
         // The device list's sort, which always filters on the owner; the leading UserId also serves the foreign key.
         builder.HasIndex(device => new { device.UserId, device.CreatedAt, device.Id });
 
+        // The cleanup job deletes the devices past their expiry, and the revoked ones once the retention has passed.
+        builder.HasIndex(device => device.ExpiresAt);
+        builder.HasIndex(device => device.RevokedAt).HasFilter("[RevokedAt] IS NOT NULL");
+
         builder.Ignore(device => device.DomainEvents);
     }
 }

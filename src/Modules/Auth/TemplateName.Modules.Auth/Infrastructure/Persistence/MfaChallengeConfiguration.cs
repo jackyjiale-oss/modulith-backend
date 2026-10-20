@@ -23,6 +23,9 @@ internal sealed class MfaChallengeConfiguration : IEntityTypeConfiguration<MfaCh
         builder.HasIndex(challenge => challenge.TokenHash).IsUnique();
         builder.HasIndex(challenge => challenge.UserId);
 
+        // The cleanup job deletes the challenges past their expiry.
+        builder.HasIndex(challenge => challenge.ExpiresAt);
+
         builder.Ignore(challenge => challenge.DomainEvents);
     }
 }

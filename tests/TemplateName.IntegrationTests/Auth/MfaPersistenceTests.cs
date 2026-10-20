@@ -506,6 +506,9 @@ public sealed class MfaPersistenceTests(IntegrationTestWebAppFactory factory) : 
                 ["IX_MfaChallenges_UserId"] = "(UserId)",
                 ["IX_TrustedDevices_TokenHash"] = "UNIQUE (TokenHash)",
                 ["IX_TrustedDevices_UserId_CreatedAt_Id"] = "(UserId, CreatedAt, Id)",
+                ["IX_MfaChallenges_ExpiresAt"] = "(ExpiresAt)",
+                ["IX_TrustedDevices_ExpiresAt"] = "(ExpiresAt)",
+                ["IX_TrustedDevices_RevokedAt"] = "(RevokedAt) WHERE ([RevokedAt] IS NOT NULL)",
             },
             ignoreOrder: true);
 

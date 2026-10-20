@@ -30,6 +30,9 @@ internal sealed class NotificationConfiguration : IEntityTypeConfiguration<Notif
         // The administrator's delivery list filtered by recipient: a user's notifications are found here and their few deliveries sorted.
         builder.HasIndex(notification => notification.RecipientUserId);
 
+        // The cleanup job deletes the notifications older than the retention (their deliveries go with them).
+        builder.HasIndex(notification => notification.CreatedAt);
+
         // The deliveries belong to the notification and go with it; the recipient is another module's user, referred to by id only.
         builder.HasMany(notification => notification.Deliveries).WithOne().HasForeignKey(delivery => delivery.NotificationId).OnDelete(DeleteBehavior.Cascade);
         builder.Navigation(notification => notification.Deliveries).HasField("_deliveries").UsePropertyAccessMode(PropertyAccessMode.Field);

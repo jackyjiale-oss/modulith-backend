@@ -66,7 +66,53 @@ namespace TemplateName.Infrastructure.Common.Idempotency.Migrations
 
                     b.HasKey("Scope", "Key");
 
+                    b.HasIndex("ExpiresAt");
+
                     b.ToTable("IdempotencyKeys", "platform");
+                });
+
+            modelBuilder.Entity("TemplateName.Infrastructure.Common.Jobs.JobStateRecord", b =>
+                {
+                    b.Property<string>("Name")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime?>("LastFinishedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("LastProcessed")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("LastStartedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("LastStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime?>("LockedUntil")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime>("NextRunAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.HasKey("Name");
+
+                    b.ToTable("JobStates", "platform");
                 });
 #pragma warning restore 612, 618
         }
