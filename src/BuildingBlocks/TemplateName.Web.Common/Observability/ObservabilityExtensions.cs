@@ -25,6 +25,10 @@ public static class ObservabilityExtensions
     private const string HttpProtobufProtocol = "http/protobuf";
     private const string LogsPath = "/v1/logs";
     private const string UrlQueryTag = "url.query";
+    // The building blocks' own meter (the recurring-job scheduler in Infrastructure.Common, which this project does not reference) and
+    // Polly's, through which the HTTP resilience pipelines report.
+    private const string PlatformMeterName = "TemplateName.Platform";
+    private const string PollyMeterName = "Polly";
     private const string DevelopmentOutputTemplate = "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}";
 
     /// <summary>
@@ -163,6 +167,7 @@ public static class ObservabilityExtensions
             .WithMetrics(metrics => metrics
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
-                .AddRuntimeInstrumentation())
+                .AddRuntimeInstrumentation()
+                .AddMeter(PlatformMeterName, PollyMeterName))
             .UseOtlpExporter();
 }

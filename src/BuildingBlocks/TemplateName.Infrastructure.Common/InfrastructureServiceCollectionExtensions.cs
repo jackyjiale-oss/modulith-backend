@@ -7,6 +7,7 @@ using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Application.Common.Security;
 using TemplateName.Infrastructure.Common.Idempotency;
+using TemplateName.Infrastructure.Common.Jobs;
 using TemplateName.Infrastructure.Common.Messaging;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
@@ -23,7 +24,9 @@ public static class InfrastructureServiceCollectionExtensions
     /// interceptors, the concurrency-conflict exception handler, the <c>platform</c> context (idempotency keys), the messages of
     /// their error codes (<c>InfrastructureErrorMessages</c>), the in-process <see cref="IIntegrationEventPublisher"/> (singleton) and
     /// the <see cref="IOutboxMessageContext"/> the outbox dispatcher sets (scoped), and the <see cref="ISecretProtector"/> (singleton,
-    /// Data Protection purpose <c>TemplateName.Secrets.v1</c>) with a Data Protection registration that has no key store of its own. Call it before
+    /// Data Protection purpose <c>TemplateName.Secrets.v1</c>) with a Data Protection registration that has no key store of its own, and the
+    /// recurring-job scheduler (the <c>Jobs</c> options validated on start, the <see cref="RecurringJobRunner"/> and the background service
+    /// that ticks it; jobs come from <c>AddRecurringJob</c>). Call it before
     /// <c>AddWebCommon</c>, so the concurrency handler runs before the global one, and before any <c>AddModuleDbContext</c> or
     /// <c>AddOutbox</c>, so the <c>platform</c> migrations apply first.
     /// </summary>
@@ -51,6 +54,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddExceptionHandler<ConcurrencyExceptionHandler>();
         services.AddErrorMessages<InfrastructureErrorMessages>();
         services.AddModuleDbContext<PlatformDbContext>(PlatformDbContext.Schema);
+        services.AddRecurringJobScheduler(configuration);
 
         // Dapper's type handlers are process-wide; adding the same handler again replaces it.
         SqlMapper.AddTypeHandler(new DateOnlyTypeHandler());

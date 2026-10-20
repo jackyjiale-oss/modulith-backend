@@ -9,7 +9,7 @@ Order matters; `Program.cs` marks it with comments.
 | # | Call | Registers |
 |---|---|---|
 | 1 | `builder.AddObservability()` | Serilog, the request-activity listener, OpenTelemetry when `OTEL_EXPORTER_OTLP_ENDPOINT` is set ([web-common](../building-blocks/web-common.md#observability)) |
-| 2 | `AddInfrastructureCommon(configuration)` | `TimeProvider`, `ConnectionStrings`/`Database`/`Outbox`/`Idempotency` options, the Dapper connection factory, EF interceptors, the concurrency exception handler, the `platform` context ([infrastructure-common](../building-blocks/infrastructure-common.md)). Before `AddWebCommon`, so the concurrency handler runs before the global one. |
+| 2 | `AddInfrastructureCommon(configuration)` | `TimeProvider`, `ConnectionStrings`/`Database`/`Outbox`/`Idempotency`/`Jobs` options, the Dapper connection factory, EF interceptors, the concurrency exception handler, the `platform` context, the recurring-job scheduler ([infrastructure-common](../building-blocks/infrastructure-common.md)). Before `AddWebCommon`, so the concurrency handler runs before the global one. |
 | 3 | `AddWebCommon()` | ProblemDetails customization, the global exception handler, `ICurrentUser`, `ThrowOnBadRequest` ([web-common](../building-blocks/web-common.md)) |
 | 4 | `AddApiLocalization(configuration)` | The `Localization` options, request localization, FluentValidation translations |
 | 5 | `ConfigureHttpJsonOptions` | `JsonStringEnumConverter`: enums are strings in JSON (`"Pending"`) |
@@ -88,6 +88,21 @@ Shared by every module's dispatcher (ADR 0007).
 | `InProgressTimeout` | `00:05:00` (five minutes) | `00:00:05` to `01:00:00`, and not longer than `TimeToLive` | How long a key stays leased to the request running with it. |
 
 The first request with a key holds it as a lease for `InProgressTimeout`; duplicates get 409 meanwhile. Storing the response replaces the lease with `TimeToLive`. If the request dies or its response cannot be stored, the next request with the key after the lease ends runs the endpoint again instead of getting 409 for the whole time to live, so keep `InProgressTimeout` longer than the slowest idempotent request: one that outlives its lease can run twice. Details: [infrastructure-common](../building-blocks/infrastructure-common.md#idempotency).
+
+### `Jobs`
+
+The recurring-job scheduler ([infrastructure-common](../building-blocks/infrastructure-common.md#recurring-jobs)).
+
+| Key | Default | Validation | Meaning |
+|---|---|---|---|
+| `Enabled` | `true` | — | Runs the scheduler's background service. Integration tests set `false` and run jobs through `RecurringJobRunner.RunDueAsync`. |
+| `TickInterval` | `00:00:30` | `00:00:05` to `01:00:00`, on start | How often the scheduler looks for due jobs. |
+| `LeaseDuration` | `00:15:00` | `00:01:00` to `1.00:00:00`, on start | How long a claimed run keeps other instances off its job; a run still going at the end is cancelled and recorded `Failed`. |
+| `MaxBatchesPerRun` | `100` | 1 to 10000, on start | Most batches a batched job (a cleanup) runs in one run. |
+| `{JobName}:Enabled` | `true` | — | `false` stops that job on this instance. |
+| `{JobName}:Interval` | the job's own default | `00:00:01` to `365.00:00:00`, when the job is first considered | Time from the end of one run to the next. |
+
+`{JobName}` is the job's name (PascalCase, no dots), for example `Jobs__AuthRefreshTokensCleanup__Interval=12:00:00`. A section that names no registered job is ignored.
 
 ### `Cors`
 
