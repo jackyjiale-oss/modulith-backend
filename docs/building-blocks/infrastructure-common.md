@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The infrastructure every module shares: module `DbContext` registration and conventions on SQL Server with audit and soft-delete interceptors (ADR 0006), migrations, the Dapper connection factory, the Data Protection based secret protector (ADR 0017), the per-module transactional outbox (ADR 0007), the in-process integration event publisher and the per-module inbox (ADR 0018), optimistic-concurrency handling, `Idempotency-Key` support with its own `platform` schema, and the recurring-job scheduler (state in `platform.JobStates`). It depends on SharedKernel, Application.Common, EF Core SQL Server, Dapper and ASP.NET Core.
+The infrastructure every module shares: module `DbContext` registration and conventions on SQL Server with audit and soft-delete interceptors (ADR 0006), migrations, the Dapper connection factory, the Data Protection based secret protector (ADR 0017), the per-module transactional outbox (ADR 0007), the in-process integration event publisher and the per-module inbox (ADR 0018), optimistic-concurrency handling, `Idempotency-Key` support with its own `platform` schema, the recurring-job scheduler (state in `platform.JobStates`) and the retention cleanup of the outbox that runs on it (ADR 0026, 0028). It depends on SharedKernel, Application.Common, EF Core SQL Server, Dapper and ASP.NET Core.
 
 Code: `src/BuildingBlocks/TemplateName.Infrastructure.Common/`.
 
@@ -10,7 +10,7 @@ Code: `src/BuildingBlocks/TemplateName.Infrastructure.Common/`.
 
 | Extension / type | Does |
 |---|---|
-| `services.AddInfrastructureCommon(configuration)` | Registers `TimeProvider.System` (if none), binds `ConnectionStrings`, `Outbox` and `Idempotency` (validated on start) and `Database`, the `IDbConnectionFactory`, the EF interceptors, `ConcurrencyExceptionHandler`, the `platform` context and `InfrastructureErrorMessages`, Dapper's `DateOnly` type handler, the singleton `IIntegrationEventPublisher` (`InProcessIntegrationEventPublisher`), the scoped `IOutboxMessageContext`, the singleton `ISecretProtector` (`DataProtectionSecretProtector`) with `AddDataProtection()` and no key store, and the recurring-job scheduler (`Jobs` options validated on start, each job's `Jobs:{Name}` options checked on start, the singleton `RecurringJobRunner`, `RecurringJobBackgroundService` and the `TemplateName.Platform` meter's instruments). Call it before `AddWebCommon` (so the concurrency handler runs before the global one) and before any module. |
+| `services.AddInfrastructureCommon(configuration)` | Registers `TimeProvider.System` (if none), binds `ConnectionStrings`, `Outbox`, `Idempotency` and `Retention` (validated on start) and `Database`, the `IDbConnectionFactory`, the EF interceptors, `ConcurrencyExceptionHandler`, the `platform` context and `InfrastructureErrorMessages`, Dapper's `DateOnly` type handler, the singleton `IIntegrationEventPublisher` (`InProcessIntegrationEventPublisher`), the scoped `IOutboxMessageContext`, the singleton `ISecretProtector` (`DataProtectionSecretProtector`) with `AddDataProtection()` and no key store, and the recurring-job scheduler (`Jobs` options validated on start, each job's `Jobs:{Name}` options checked on start, the singleton `RecurringJobRunner`, `RecurringJobBackgroundService` and the `TemplateName.Platform` meter's instruments). Call it before `AddWebCommon` (so the concurrency handler runs before the global one) and before any module. |
 | `services.AddModuleDbContext<TContext>(schema, connectionStringName = "Database", includeInMigrations = true)` | Registers a module context on SQL Server: migrations history `__EFMigrationsHistory` in `schema`, retry on transient failures, the audit, soft-delete and domain-events-to-outbox interceptors, a `ready` health check named after the schema, and (by default) a place in `MigrateModuleDatabasesAsync`. The connection string is read when a context is created. |
 | `configurationBuilder.ApplyDefaultConventions()` | In `ConfigureConventions`: every `DateTime`/`DateTime?` is `datetime2(3)`, stored as UTC (local values converted, unspecified taken as UTC) and read back as `DateTimeKind.Utc`. Every `DateTimeOffset`/`DateTimeOffset?` gets the same `datetime2(3)` column holding its UTC instant and is read back with offset zero (the original offset is not kept), so Dapper reads both kinds as UTC `DateTime`. |
 | `modelBuilder.ApplySoftDeleteQueryFilters()` | At the end of `OnModelCreating`: the named query filter `ModelConventions.SoftDeleteFilterName` (`"SoftDelete"`, `!IsDeleted`) on every root `ISoftDeletable` entity. See deleted rows with `IgnoreQueryFilters(["SoftDelete"])`. |
@@ -26,7 +26,8 @@ Code: `src/BuildingBlocks/TemplateName.Infrastructure.Common/`.
 | `IRecurringJob`, `JobResult` | A recurring job: `Name` (unique, PascalCase letters and digits, its row and its `Jobs:{Name}` section), `DefaultInterval`, `RunAsync(cancellationToken)` returning `JobResult(Processed)`. |
 | `services.AddRecurringJob<TJob>()` | Registers `TJob` (scoped, resolved in its own scope for every run) with the scheduler. The same type twice is registered once; two types with one name, or an invalid name, make the runner throw `InvalidOperationException` on first use, and so stop the host at start. |
 | `RecurringJobRunner.RunDueAsync(include, cancellationToken)` | Claims and runs every enabled due job that `include` accepts (all when null), one at a time; returns the number run. The background service calls it with `null`; tests pass a job-name filter with `Jobs:Enabled = false`. |
-| `OutboxOptions`, `IdempotencyOptions`, `DatabaseOptions`, `JobsOptions` | The bound option classes. |
+| `BatchedCleanupJob` | Base class of the retention cleanup jobs: a subclass supplies `Name`, `DefaultInterval`, `RetentionPeriod` (`null` or zero turns the job off) and `DeleteSql` (a `DELETE TOP (@Batch)` statement over `@Cutoff` that reports the rows it deleted); the base class computes `cutoff = now - retention`, repeats the statement and returns `JobResult(deleted)`. See [Cleanup jobs](#cleanup-jobs). |
+| `OutboxOptions`, `IdempotencyOptions`, `RetentionOptions`, `DatabaseOptions`, `JobsOptions` | The bound option classes. |
 | `endpoint.WithIdempotency()` | Opts an endpoint in to `Idempotency-Key` handling. |
 | `app.UseIdempotency()` | The idempotency middleware: after `UseRouting` and authentication, before the endpoints. |
 
@@ -41,7 +42,7 @@ Error codes (messages in `Resources/InfrastructureErrorMessages.resx`, `.ms.resx
 
 ## Configuration
 
-`ConnectionStrings:Database`, `Database:ApplyMigrationsOnStartup`, `Outbox:*`, `Idempotency:TimeToLive`, `Idempotency:InProgressTimeout` and `Jobs:*` (with `Jobs:{Name}:Enabled` and `Interval`), with defaults and validation, are listed in [`docs/services/api.md`](../services/api.md#configuration).
+`ConnectionStrings:Database`, `Database:ApplyMigrationsOnStartup`, `Outbox:*`, `Idempotency:TimeToLive`, `Idempotency:InProgressTimeout`, `Retention:*` and `Jobs:*` (with `Jobs:{Name}:Enabled` and `Interval`), with defaults and validation, are listed in [`docs/services/api.md`](../services/api.md#configuration).
 
 ## Persistence
 
@@ -62,7 +63,7 @@ Each module context that raises domain events maps its own `OutboxMessages` / `O
 - **Delivery is at least once per handler:** a consumer row records each handler that succeeded, so a retry runs only the failed ones, but a crash or an expired lease can run a handler twice. Handlers must be idempotent.
 - **No ordering guarantee:** failed messages are retried later while newer ones go ahead.
 - Handlers resolve the same scoped `DbContext` as the dispatcher; changes they leave tracked are saved with their consumer row, atomically.
-- After `MaxAttempts` failures a message is abandoned: it stays with `ProcessedAt` null and its last `Error`. Processed rows are not purged yet (cleanup job, Plan 5).
+- After `MaxAttempts` failures a message is abandoned: it stays with `ProcessedAt` null and its last `Error`. Processed rows are deleted by the outbox cleanup job after `Retention:Outbox` (7 days); abandoned messages are never deleted, and are counted in a gauge ([Cleanup jobs](#cleanup-jobs)).
 - Each message's scope carries an `IOutboxMessageContext` with the message's `Id` and `OccurredAt`, set before the handlers run, so a handler sees the same id on every retry.
 
 ## Recurring jobs
@@ -77,6 +78,19 @@ A job implements `IRecurringJob` and is registered with `AddRecurringJob<TJob>()
 - **Finish.** One update writes the outcome and `NextRunAt = finish + interval` (`Jobs:{Name}:Interval`, else the job's `DefaultInterval`), so a missed interval runs once rather than in a burst. The update matches the lease the runner claimed, so a runner whose lease ran out never overwrites the outcome of the runner that re-claimed the job (it logs a warning). If the host stops mid-run nothing is written and the job runs again once the lease expires.
 - **Failures of the scheduler itself** (the database is unreachable) are logged once per tick; the next tick tries again.
 - **Metrics** on the meter `TemplateName.Platform` (exported with the host's OpenTelemetry metrics): `platform.jobs.runs{job,outcome}` (`succeeded`, `failed`), `platform.jobs.duration{job}` in seconds, `platform.jobs.processed{job}` (the `JobResult.Processed` of successful runs).
+- **Cheap constructors.** On host start every registered job is resolved once, in a scope, to read its `Name` and `DefaultInterval`; a job's constructor must not open a connection or do work.
+
+### Cleanup jobs
+
+A cleanup deletes what has outlived its retention (ADR 0028). The building block supplies the shape, `BatchedCleanupJob`, and the jobs for what it owns; each module derives its own jobs for its own tables.
+
+- **Bounded.** The job repeats its `DELETE TOP (@Batch)` statement with `@Batch = Retention:BatchSize` (1000) and `@Cutoff = now - retention` until a batch deletes fewer rows than `@Batch` or `Jobs:MaxBatchesPerRun` (100) batches have run. A backlog drains over several runs; each batch is its own transaction.
+- **Strictly older.** A row goes only when its age column is before the cutoff, so a row exactly at the retention stays until the next run. `now` is `TimeProvider`.
+- **Off.** A retention of `null` (an empty value in configuration) or zero turns the job off: a run returns `JobResult(0)`. The scheduler's own `Jobs:{Name}:Enabled = false` stops it altogether.
+- **Names.** PascalCase, without dots: `{Context}OutboxCleanup` where `{Context}` is the context's name without `DbContext` (`AuthOutboxCleanup`, `SampleOutboxCleanup`).
+- **Outbox cleanup.** `AddOutbox<TContext>()` also registers `OutboxCleanupJob<TContext>` (daily). Each batch deletes `OutboxMessages` with `ProcessedAt < cutoff` and the `OutboxMessageConsumers` of those messages in the same transaction (no foreign key joins the tables, so nothing cascades). The predicate is served by the filtered index on `ProcessedAt` (`WHERE ProcessedAt IS NOT NULL`); a test reads the statement's execution plan.
+- **Dead letters stay.** Pending messages and abandoned ones (`ProcessedAt IS NULL`, `AttemptCount >= Outbox:MaxAttempts`) are never deleted. After every run, whether or not the retention is on, the job sets the gauge `platform.outbox.abandoned{context}` (meter `TemplateName.Platform`; `context` is the context's name without `DbContext`) to the number of abandoned messages. The gauge reports the last value until the next run; alert on it being above zero.
+- **Inbox window.** `Retention:Inbox` may not be above zero and below one day: the outbox retries for about an hour, and an inbox row deleted before a redelivery would let a consumer run twice (ADR 0028).
 
 ## Integration events and the inbox
 

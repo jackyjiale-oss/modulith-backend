@@ -60,5 +60,7 @@ Everything about how this service is built and run. Documents are part of the de
 | [0023](adr/0023-step-up-through-auth-time-and-amr.md) | Step-up through a fresh `auth_time` and `amr` in the access token, checked by `StepUpPolicy` |
 | [0024](adr/0024-mfa-challenge-as-a-hashed-server-side-token.md) | The sign-in challenge is an opaque token over a hashed server-side row, with wrong codes counted on it and in the lockout |
 | [0025](adr/0025-trusted-devices-bound-to-the-security-stamp.md) | Trusted devices are hashed bearer tokens bound to the security stamp, skipping the challenge only (`amr` `pwd`) |
+| [0026](adr/0026-recurring-jobs-on-our-own-scheduler.md) | Recurring jobs run on our own scheduler with a SQL lease, not Hangfire |
+| [0028](adr/0028-retention-policy-and-the-inbox-window.md) | Retention per kind of data in bounded delete batches, dead letters kept, and an inbox window that outlasts outbox redelivery |
 
 A new decision gets the next number: `adr/NNNN-kebab-title.md`, in the same format, listed here and in the architecture overview.

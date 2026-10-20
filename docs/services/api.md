@@ -9,7 +9,7 @@ Order matters; `Program.cs` marks it with comments.
 | # | Call | Registers |
 |---|---|---|
 | 1 | `builder.AddObservability()` | Serilog, the request-activity listener, OpenTelemetry when `OTEL_EXPORTER_OTLP_ENDPOINT` is set ([web-common](../building-blocks/web-common.md#observability)) |
-| 2 | `AddInfrastructureCommon(configuration)` | `TimeProvider`, `ConnectionStrings`/`Database`/`Outbox`/`Idempotency`/`Jobs` options, the Dapper connection factory, EF interceptors, the concurrency exception handler, the `platform` context, the recurring-job scheduler ([infrastructure-common](../building-blocks/infrastructure-common.md)). Before `AddWebCommon`, so the concurrency handler runs before the global one. |
+| 2 | `AddInfrastructureCommon(configuration)` | `TimeProvider`, `ConnectionStrings`/`Database`/`Outbox`/`Idempotency`/`Retention`/`Jobs` options, the Dapper connection factory, EF interceptors, the concurrency exception handler, the `platform` context, the recurring-job scheduler ([infrastructure-common](../building-blocks/infrastructure-common.md)). Before `AddWebCommon`, so the concurrency handler runs before the global one. |
 | 3 | `AddWebCommon()` | ProblemDetails customization, the global exception handler, `ICurrentUser`, `ThrowOnBadRequest` ([web-common](../building-blocks/web-common.md)) |
 | 4 | `AddApiLocalization(configuration)` | The `Localization` options, request localization, FluentValidation translations |
 | 5 | `ConfigureHttpJsonOptions` | `JsonStringEnumConverter`: enums are strings in JSON (`"Pending"`) |
@@ -88,6 +88,16 @@ Shared by every module's dispatcher (ADR 0007).
 | `InProgressTimeout` | `00:05:00` (five minutes) | `00:00:05` to `01:00:00`, and not longer than `TimeToLive` | How long a key stays leased to the request running with it. |
 
 The first request with a key holds it as a lease for `InProgressTimeout`; duplicates get 409 meanwhile. Storing the response replaces the lease with `TimeToLive`. If the request dies or its response cannot be stored, the next request with the key after the lease ends runs the endpoint again instead of getting 409 for the whole time to live, so keep `InProgressTimeout` longer than the slowest idempotent request: one that outlives its lease can run twice. Details: [infrastructure-common](../building-blocks/infrastructure-common.md#idempotency).
+
+### `Retention`
+
+How long the building blocks keep what they own before a cleanup job deletes it (ADR 0028; the jobs are in [infrastructure-common](../building-blocks/infrastructure-common.md#cleanup-jobs)). A row goes only when strictly older than the retention. Set a retention to `00:00:00` (or empty) to turn that cleanup off; modules keep their own retentions in their own sections.
+
+| Key | Default | Validation (on start) | Meaning |
+|---|---|---|---|
+| `BatchSize` | `1000` | 1 to 10000 | Most rows one delete statement removes; a run repeats it up to `Jobs:MaxBatchesPerRun` times. |
+| `Outbox` | `7.00:00:00` (7 days) | not negative | How long a published outbox message (and its consumer rows) is kept after `ProcessedAt`. Abandoned messages are never deleted. The job `{Context}OutboxCleanup` runs daily. |
+| `Inbox` | `7.00:00:00` (7 days) | not negative, and zero or at least `1.00:00:00` | How long an inbox row is kept after `ProcessedAt`. Not below one day, so it outlasts outbox redelivery. |
 
 ### `Jobs`
 

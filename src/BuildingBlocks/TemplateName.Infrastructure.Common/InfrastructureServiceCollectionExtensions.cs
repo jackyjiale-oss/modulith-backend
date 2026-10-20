@@ -19,7 +19,7 @@ namespace TemplateName.Infrastructure.Common;
 public static class InfrastructureServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the system clock, the <c>ConnectionStrings</c>, <c>Outbox</c> and <c>Idempotency</c> options (validated on start) and
+    /// Registers the system clock, the <c>ConnectionStrings</c>, <c>Outbox</c>, <c>Idempotency</c> and <c>Retention</c> options (validated on start) and
     /// the <c>Database</c> options, the read-side connection factory and Dapper's <c>DateOnly</c> type handler, the EF Core save
     /// interceptors, the concurrency-conflict exception handler, the <c>platform</c> context (idempotency keys), the messages of
     /// their error codes (<c>InfrastructureErrorMessages</c>), the in-process <see cref="IIntegrationEventPublisher"/> (singleton) and
@@ -38,6 +38,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddOptions<DatabaseOptions>().Bind(configuration.GetSection(DatabaseOptions.SectionName));
         services.AddOptions<OutboxOptions>().Bind(configuration.GetSection(OutboxOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
         services.AddOptions<IdempotencyOptions>().Bind(configuration.GetSection(IdempotencyOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<RetentionOptions>().Bind(configuration.GetSection(RetentionOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
 
         services.AddSingleton<IDbConnectionFactory, SqlConnectionFactory>();
         services.AddScoped<AuditableEntityInterceptor>();
