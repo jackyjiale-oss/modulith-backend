@@ -10,7 +10,7 @@ public sealed class RetentionOptions : IValidatableObject
 {
     internal const string SectionName = "Retention";
 
-    /// <summary>The shortest inbox retention that is not off: the outbox retries a message for about an hour, so a day outlasts any redelivery.</summary>
+    /// <summary>The shortest inbox retention that is not off: the outbox retries a message for 12 min 35 s by default (a day outlasts every Outbox:MaxAttempts up to 28), so a day outlasts redelivery; InboxWindowValidator checks the rest.</summary>
     internal static readonly TimeSpan MinimumInbox = TimeSpan.FromDays(1);
 
     /// <summary>The most rows one delete statement removes, so a transaction and its locks stay small; a run repeats it up to <c>Jobs:MaxBatchesPerRun</c> times.</summary>

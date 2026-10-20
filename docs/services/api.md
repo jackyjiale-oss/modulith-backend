@@ -77,7 +77,7 @@ Shared by every module's dispatcher (ADR 0007).
 | `Enabled` | `true` | — | Runs the background dispatchers. Integration tests set `false` and dispatch by hand. |
 | `PollingInterval` | `00:00:05` | `00:00:01` to `01:00:00` | Pause between polls once the due messages are drained. |
 | `BatchSize` | `20` | 1 to 500 | Most messages one dispatcher claims per batch; a full batch is followed at once by the next. |
-| `MaxAttempts` | `5` | 1 to 100 | Failed attempts after which a message is abandoned (kept unprocessed with its last error). |
+| `MaxAttempts` | `5` | 1 to 100 | Failed attempts after which a message is abandoned (kept unprocessed with its last error). Retries are due 5 s, 30 s, 2 min and 10 min after attempts 1 to 4 and 1 h after each later one, so the default retries for 12 min 35 s and each attempt above 5 adds an hour. `Retention:Inbox` must be longer than that span (checked with `Retention`, below). |
 | `LeaseDuration` | `00:01:00` | `00:00:10` to `1.00:00:00` | How long a claimed batch stays hidden from other dispatchers; keep it longer than the slowest batch. |
 
 ### `Idempotency`
@@ -87,7 +87,7 @@ Shared by every module's dispatcher (ADR 0007).
 | `TimeToLive` | `1.00:00:00` (one day) | `00:01:00` to `30.00:00:00` | How long a key and its stored response are kept; a reused expired key runs again. |
 | `InProgressTimeout` | `00:05:00` (five minutes) | `00:00:05` to `01:00:00`, and not longer than `TimeToLive` | How long a key stays leased to the request running with it. |
 
-The first request with a key holds it as a lease for `InProgressTimeout`; duplicates get 409 meanwhile. Storing the response replaces the lease with `TimeToLive`. If the request dies or its response cannot be stored, the next request with the key after the lease ends runs the endpoint again instead of getting 409 for the whole time to live, so keep `InProgressTimeout` longer than the slowest idempotent request: one that outlives its lease can run twice. Details: [infrastructure-common](../building-blocks/infrastructure-common.md#idempotency).
+The first request with a key holds it as a lease for `InProgressTimeout`; duplicates get 409 meanwhile. Storing the response replaces the lease with `TimeToLive`. If the request dies or its response cannot be stored, the next request with the key after the lease ends runs the endpoint again instead of getting 409 for the whole time to live, so keep `InProgressTimeout` longer than the slowest idempotent request: one that outlives its lease can run twice. Expired rows are deleted every hour by the job `IdempotencyKeysCleanup`, which has no retention setting: `Jobs:IdempotencyKeysCleanup:Enabled = false` turns it off. Details: [infrastructure-common](../building-blocks/infrastructure-common.md#idempotency).
 
 ### `Retention`
 
@@ -97,7 +97,7 @@ How long the building blocks keep what they own before a cleanup job deletes it 
 |---|---|---|---|
 | `BatchSize` | `1000` | 1 to 10000 | Most rows one delete statement removes; a run repeats it up to `Jobs:MaxBatchesPerRun` times. |
 | `Outbox` | `7.00:00:00` (7 days) | not negative | How long a published outbox message (and its consumer rows) is kept after `ProcessedAt`. Abandoned messages are never deleted. The job `{Context}OutboxCleanup` runs daily. |
-| `Inbox` | `7.00:00:00` (7 days) | not negative, and zero or at least `1.00:00:00` | How long an inbox row is kept after `ProcessedAt`. Not below one day, so it outlasts outbox redelivery. |
+| `Inbox` | `7.00:00:00` (7 days) | not negative; zero or at least `1.00:00:00`; and longer than the outbox's retry span for `Outbox:MaxAttempts` (12 min 35 s by default, a day at 28 attempts and more than a day from 29; a longer `MaxAttempts` needs a longer `Inbox`) | How long an inbox row is kept after `ProcessedAt`, so it outlasts outbox redelivery and a late retry never runs a consumer twice. The job `{Context}InboxCleanup` (today `NotificationsInboxCleanup`) runs daily. |
 
 ### `Jobs`
 

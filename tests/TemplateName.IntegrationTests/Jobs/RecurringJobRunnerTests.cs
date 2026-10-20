@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TemplateName.Infrastructure.Common;
@@ -313,6 +314,7 @@ public sealed class RecurringJobRunnerTests(IntegrationTestWebAppFactory factory
         await using var services = new ServiceCollection()
             .AddLogging()
             .AddInfrastructureCommon(configuration)
+            .RemoveAll<RecurringJobRegistration>() // the built-in jobs need a database context; this registry holds only the test's own
             .AddSingleton(Probe)
             .AddRecurringJob<CountingJob>()
             .AddRecurringJob<SameNameAsCountingJob>()
@@ -335,6 +337,7 @@ public sealed class RecurringJobRunnerTests(IntegrationTestWebAppFactory factory
         await using var services = new ServiceCollection()
             .AddLogging()
             .AddInfrastructureCommon(configuration)
+            .RemoveAll<RecurringJobRegistration>() // the built-in jobs need a database context; this registry holds only the test's own
             .AddRecurringJob<DottedNameJob>()
             .BuildServiceProvider();
         var runner = services.GetRequiredService<RecurringJobRunner>();
@@ -350,6 +353,7 @@ public sealed class RecurringJobRunnerTests(IntegrationTestWebAppFactory factory
         await using var services = new ServiceCollection()
             .AddLogging()
             .AddInfrastructureCommon(configuration)
+            .RemoveAll<RecurringJobRegistration>() // the built-in jobs need a database context; this registry holds only the test's own
             .AddRecurringJob<ThrowingJob>()
             .AddRecurringJob<ThrowingJob>()
             .BuildServiceProvider();

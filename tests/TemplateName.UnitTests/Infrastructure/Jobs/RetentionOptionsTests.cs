@@ -92,6 +92,36 @@ public sealed class RetentionOptionsTests
         services.GetRequiredService<IOptions<RetentionOptions>>().Value.BatchSize.ShouldBe(expected);
     }
 
+    [Theory]
+    [InlineData("1.00:00:00", "5")]
+    [InlineData("1.00:00:00", "28")]
+    [InlineData("7.00:00:00", "100")]
+    [InlineData("00:00:00", "100")]
+    [InlineData("", "100")]
+    public void Inbox_retention_that_outlasts_the_outbox_retries_is_allowed(string inbox, string maxAttempts)
+    {
+        using var services = BuildServices(new Dictionary<string, string?> { ["Retention:Inbox"] = inbox, ["Outbox:MaxAttempts"] = maxAttempts });
+
+        var retention = services.GetRequiredService<IOptions<RetentionOptions>>().Value.Inbox;
+
+        (retention is null || retention == TimeSpan.Zero || retention >= RetentionOptions.MinimumInbox).ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData("1.00:00:00", "29")]
+    [InlineData("1.00:00:00", "100")]
+    [InlineData("3.00:00:00", "100")]
+    public void Inbox_retention_that_the_outbox_retries_outlast_is_rejected(string inbox, string maxAttempts)
+    {
+        using var services = BuildServices(new Dictionary<string, string?> { ["Retention:Inbox"] = inbox, ["Outbox:MaxAttempts"] = maxAttempts });
+
+        var exception = Should.Throw<OptionsValidationException>(() => services.GetRequiredService<IOptions<RetentionOptions>>().Value);
+
+        exception.OptionsType.ShouldBe(typeof(RetentionOptions));
+        exception.Message.ShouldContain("Outbox:MaxAttempts");
+        exception.Message.ShouldContain("Retention:Inbox");
+    }
+
     private static ServiceProvider BuildServices(Dictionary<string, string?> settings)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();

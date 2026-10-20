@@ -1,6 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using TemplateName.Infrastructure.Common.Jobs;
 using TemplateName.Infrastructure.Common.Persistence;
@@ -24,8 +22,6 @@ internal sealed class OutboxCleanupJob<TContext>(
     : BatchedCleanupJob(context, timeProvider, jobs, retention)
     where TContext : DbContext
 {
-    private const string DbContextSuffix = "DbContext";
-
     // One batch, one transaction: the messages and their consumers go together or not at all. The statement reports the rows of the
     // first DELETE only (the messages); NOCOUNT hides the consumers, so a batch that deleted fewer messages than @Batch is the last.
     private const string DeleteSqlTemplate = """
@@ -50,9 +46,9 @@ internal sealed class OutboxCleanupJob<TContext>(
 
     public override TimeSpan DefaultInterval => TimeSpan.FromDays(1);
 
-    public override TimeSpan? RetentionPeriod => _retentionPeriod;
+    protected override TimeSpan? RetentionPeriod => _retentionPeriod;
 
-    public override string DeleteSql => _deleteSql ??= BuildDeleteSql();
+    protected override string DeleteSql => _deleteSql ??= BuildDeleteSql();
 
     public override async Task<JobResult> RunAsync(CancellationToken cancellationToken)
     {
@@ -66,23 +62,8 @@ internal sealed class OutboxCleanupJob<TContext>(
         return result;
     }
 
-    private static string ContextNameOf(Type contextType)
-        => contextType.Name.Length > DbContextSuffix.Length && contextType.Name.EndsWith(DbContextSuffix, StringComparison.Ordinal)
-            ? contextType.Name[..^DbContextSuffix.Length]
-            : contextType.Name;
-
     private string BuildDeleteSql()
-    {
-        var helper = Context.GetService<ISqlGenerationHelper>();
-        return DeleteSqlTemplate
-            .Replace("{outbox}", DelimitedTable<OutboxMessage>(helper), StringComparison.Ordinal)
-            .Replace("{consumers}", DelimitedTable<OutboxMessageConsumer>(helper), StringComparison.Ordinal);
-    }
-
-    private string DelimitedTable<TEntity>(ISqlGenerationHelper helper)
-    {
-        var entityType = Context.Model.FindEntityType(typeof(TEntity))
-            ?? throw new InvalidOperationException($"{typeof(TContext).Name} does not map the outbox; call ApplyOutbox() in OnModelCreating.");
-        return helper.DelimitIdentifier(entityType.GetTableName()!, entityType.GetSchema());
-    }
+        => DeleteSqlTemplate
+            .Replace("{outbox}", DelimitedTable<OutboxMessage>(), StringComparison.Ordinal)
+            .Replace("{consumers}", DelimitedTable<OutboxMessageConsumer>(), StringComparison.Ordinal);
 }

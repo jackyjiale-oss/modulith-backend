@@ -1,7 +1,5 @@
-using System.Data.Common;
 using System.Diagnostics.Metrics;
 using System.Globalization;
-using System.Xml.Linq;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -186,6 +184,22 @@ public sealed class OutboxCleanupJobTests(IntegrationTestWebAppFactory factory) 
     }
 
     [Fact]
+    public async Task A_session_that_defaults_to_NOCOUNT_ON_still_counts_the_deleted_messages()
+    {
+        await SeedProcessedAsync(Now - TimeSpan.FromDays(30), consumers: 1);
+        await SeedProcessedAsync(Now - TimeSpan.FromDays(30), consumers: 1);
+
+        await using var scope = Factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<TestDbContext>();
+        await context.Database.OpenConnectionAsync(Ct);
+        await context.Database.ExecuteSqlRawAsync("SET NOCOUNT ON", Ct);
+
+        // With the setting on, SQL Server reports no row counts at all unless the statement turns it off.
+        (await CreateJob(scope, batchSize: 1000, maxBatchesPerRun: 100, SevenDays).RunAsync(Ct)).Processed.ShouldBe(2);
+        (await MessageIdsAsync()).ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Cleanup_predicate_uses_the_filtered_index()
     {
         // Enough rows on either side of the cutoff that a scan is not the obvious plan.
@@ -203,51 +217,12 @@ public sealed class OutboxCleanupJobTests(IntegrationTestWebAppFactory factory) 
         await using var planScope = Factory.Services.CreateAsyncScope();
         var job = CreateJob(planScope, batchSize: 1000, maxBatchesPerRun: 100, SevenDays);
         var connection = planScope.ServiceProvider.GetRequiredService<TestDbContext>().Database.GetDbConnection();
-        await connection.OpenAsync(Ct);
 
         // The job's own statement, compiled but not run: the plan is what the DELETE would do.
-        string plan;
-        try
-        {
-            await ExecuteAsync(connection, "SET SHOWPLAN_XML ON");
-            await using var command = connection.CreateCommand();
-            command.CommandText = $"DECLARE @Batch int = 1000; DECLARE @Cutoff datetime2(3) = '2025-12-25T00:00:00'; {job.DeleteSql}";
-            plan = string.Concat(await ReadPlansAsync(command));
-        }
-        finally
-        {
-            await ExecuteAsync(connection, "SET SHOWPLAN_XML OFF");
-        }
+        var plan = await SqlExecutionPlan.OfDeleteAsync(connection, job.DeleteStatement, Ct);
 
         plan.ShouldContain("IX_OutboxMessages_ProcessedAt");
-        var outboxScans = XDocument.Parse(plan).Descendants()
-            .Where(element => element.Name.LocalName == "RelOp" && (string?)element.Attribute("PhysicalOp") == "Clustered Index Scan")
-            .Where(scan => scan.Descendants().Any(element => element.Name.LocalName == "Object" && (string?)element.Attribute("Table") == "[OutboxMessages]"))
-            .ToList();
-        outboxScans.ShouldBeEmpty("the cleanup must not scan the outbox table");
-    }
-
-    private static async Task ExecuteAsync(DbConnection connection, string sql)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        await command.ExecuteNonQueryAsync(Ct);
-    }
-
-    private static async Task<List<string>> ReadPlansAsync(DbCommand command)
-    {
-        var plans = new List<string>();
-        await using var reader = await command.ExecuteReaderAsync(Ct);
-        do
-        {
-            while (await reader.ReadAsync(Ct))
-            {
-                plans.Add(reader.GetString(0));
-            }
-        }
-        while (await reader.NextResultAsync(Ct));
-
-        return plans;
+        SqlExecutionPlan.ClusteredIndexScansOf(plan, "[OutboxMessages]").ShouldBeEmpty("the cleanup must not scan the outbox table");
     }
 
     /// <summary>The abandoned-messages gauge by its <c>context</c> tag, as the meter reports it now.</summary>

@@ -68,7 +68,7 @@ All deletes are `DELETE TOP (@batch)` loops, at most `Jobs:MaxBatchesPerRun` bat
 Rules that matter:
 
 - **Dead letters stay.** An abandoned outbox message (`ProcessedAt IS NULL`, `AttemptCount >= MaxAttempts`) and a dead-lettered delivery are not deleted by the 7-day job; the outbox job counts them in a gauge so they are visible.
-- **The inbox window must outlast redelivery.** The outbox retries for about 1 hour at most (5 s, 30 s, 2 min, 10 min, 1 h). The inbox retention validator rejects a value below 1 day, so a late retry can never meet a deleted inbox row and run its consumer twice.
+- **The inbox window must outlast redelivery.** The outbox retries 5 s, 30 s, 2 min and 10 min after attempts 1 to 4 and 1 h after each later attempt, up to `Outbox:MaxAttempts` (default 5: 12 min 35 s in all; each attempt above 5 adds an hour). The inbox retention validator rejects a value below 1 day (which outlasts every `MaxAttempts` up to 28) and a value not longer than the retry window of the configured `MaxAttempts`, so a late retry can never meet a deleted inbox row and run its consumer twice (ADR 0028).
 - **Refresh-token reuse detection is not weakened.** Tokens are deleted only after their own `ExpiresAt` plus the grace, when presenting them already fails.
 - **`AuthAuditLogs` are not deleted by default.** The blueprint says "12 months hot, then archive" but names no archive. `Auth:Retention:AuditLogs` exists, is off by default, and when set deletes rows older than the value. An archive target is a decision for the Audit plan (5b).
 - **`RecoveryCodes` and `PasswordHistory` are not time-based** (deleted with MFA disable, capped at five).
