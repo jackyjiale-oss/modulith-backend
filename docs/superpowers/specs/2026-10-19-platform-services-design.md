@@ -1,6 +1,6 @@
 # Plan 5: Platform services — design
 
-- Status: Draft for review
+- Status: Approved 2026-10-20 (D1, D2 and the default retention periods accepted by the user; see section 8)
 - Date: 2026-10-19
 - Roadmap row: 5 of `docs/blueprint-review.md` Section 6 (blueprint 8.1–8.4, 8.9, Phase 3, 11.7)
 - Builds on: Plans 1–4, all merged (main `5a780e9`)
@@ -40,7 +40,7 @@ Write-back of what this plan is for. Correct anything that is wrong before the p
 ### 3.1 Recurring jobs (`Infrastructure.Common/Jobs`)
 
 - `IRecurringJob { string Name; TimeSpan DefaultInterval; Task<JobResult> RunAsync(CancellationToken) }`. `JobResult(int Processed)` is for the metric and the log line.
-- `services.AddRecurringJob<TJob>()` (scoped per run). A module registers its jobs in its `Add{Module}Module`; `AddOutbox<TContext>()` registers the outbox and inbox jobs for that context.
+- `services.AddRecurringJob<TJob>()` (scoped per run). A module registers its jobs in its `Add{Module}Module`; `AddOutbox<TContext>()` registers the outbox cleanup job and `AddInbox<TContext>()` the inbox cleanup job for that context (only Notifications has an inbox); `AddInfrastructureCommon` registers the idempotency job.
 - `RecurringJobService : BackgroundService` ticks every `Jobs:TickInterval` (default 30 s). On each tick it claims due jobs from `platform.JobStates` with the same lease statement shape as the outbox (`UPDATE … OUTPUT … WHERE NextRunAt <= @now AND (LockedUntil IS NULL OR LockedUntil < @now)`), runs each claimed job in its own scope, then writes `LastStartedAt`, `LastFinishedAt`, `LastStatus`, `LastError`, `LastProcessed` and the next `NextRunAt = finish + interval`. A missed interval runs once; there is no catch-up burst.
 - A job that throws is logged, recorded as `Failed` and retried at the next interval; one failing job never blocks another. The lease length is `Jobs:LeaseDuration` (default 15 min) and a job is cancelled at lease end.
 - Per-job config: `Jobs:{JobName}:Enabled` and `Interval`. `Jobs:Enabled = false` turns the service off (tests, a future Worker split).
@@ -134,8 +134,10 @@ Written first, against a real SQL Server (and Valkey via Testcontainers) as in e
 
 The Audit module (Plan 5b); Hangfire and a dashboard; `IBackgroundJobScheduler.Enqueue/Schedule`; a Worker project; distributed locks (`IDistributedLock` has no caller); output caching; tag invalidation; pub/sub L1 invalidation; the notification digest job; archiving (as opposed to deleting) audit logs and deliveries; SMS and email provider pipelines; the Dockerfile, `migrate` mode and encrypted key ring (Plan 6).
 
-## 8. Questions for you
+## 8. Decisions confirmed by the user (2026-10-20)
 
-1. **D1:** is splitting the Audit module into Plan 5b right, or should it stay in this plan?
-2. **D2:** do you accept our own scheduler in place of Hangfire? This is the one change to an accepted review decision.
-3. Are the default retention periods in 3.2 right? They follow blueprint 11.7, and add the MFA tables and the Notifications rows the blueprint does not list.
+1. **D1:** the Audit module is its own Plan 5b. Accepted.
+2. **D2:** our own scheduler in place of Hangfire. Accepted (the one change to an accepted review decision).
+3. The default retention periods in 3.2. Accepted as listed.
+
+Also decided that day, outside this plan: social login (Google, Apple, Microsoft, Facebook, plus a generic OpenID Connect entry) and phone-number OTP login, and push (FCM/APNs) and SMS channels, are separate plans after Plan 5. Every provider and channel is switched on or off by configuration (`Enabled`, off by default).
