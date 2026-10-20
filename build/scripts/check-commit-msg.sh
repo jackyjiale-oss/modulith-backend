@@ -12,7 +12,7 @@ set -euo pipefail
 export LC_ALL=C
 
 ALLOWED_TYPES="feat|fix|perf|refactor|test|docs|build|ci|chore|style|revert"
-ALLOWED_SCOPES="shared-kernel|application|infrastructure|web|host|persistence|outbox|idempotency|observability|security|i18n|architecture|sample|auth|notifications|audit|ci|deps|template|docker|adr|release"
+ALLOWED_SCOPES="shared-kernel|application|infrastructure|web|host|persistence|outbox|idempotency|observability|security|i18n|architecture|sample|auth|notifications|platform|audit|ci|deps|template|docker|adr|release"
 MAX_HEADER_LENGTH=72
 
 allow_autosquash=false
