@@ -146,3 +146,4 @@ The rules for when a boundary is crossed:
 | [0025](../adr/0025-trusted-devices-bound-to-the-security-stamp.md) | Trusted devices are hashed bearer tokens bound to the security stamp, skipping the challenge only (`amr` `pwd`) |
 | [0026](../adr/0026-recurring-jobs-on-our-own-scheduler.md) | Recurring jobs run on our own scheduler with a SQL lease, not Hangfire |
 | [0028](../adr/0028-retention-policy-and-the-inbox-window.md) | Retention per kind of data in bounded delete batches, dead letters kept, and an inbox window that outlasts outbox redelivery |
+| [0029](../adr/0029-standard-http-resilience-pipelines.md) | Standard HTTP resilience pipelines from `Microsoft.Extensions.Http.Resilience`, named and bound from `Resilience:Pipelines`, with a breaker and the `hibp` budget |

@@ -114,6 +114,23 @@ The recurring-job scheduler ([infrastructure-common](../building-blocks/infrastr
 
 `{JobName}` is the job's name (PascalCase, no dots), for example `Jobs__AuthRefreshTokensCleanup__Interval=12:00:00`. An invalid or unreadable value for a registered job stops the host at start with a message naming `Jobs:{JobName}`; a section that names no registered job is ignored.
 
+### `Resilience`
+
+The pipelines of outbound HTTP clients registered with `AddExternalHttpClient` (ADR 0029; behaviour, the failure predicate and how to add a pipeline: [infrastructure-common](../building-blocks/infrastructure-common.md#http-resilience)). Each pipeline has its own section, `Resilience:Pipelines:{pipeline}`, validated on start (a pipeline no client uses is not checked). The built-in pipelines are `external-default`, `external-critical` (the default with 5 retries) and `hibp` (the Auth breached-password lookup); any other name starts from the `external-default` values. A key you leave out keeps the default of its pipeline.
+
+| Key | Default (`external-default`; `external-critical`; `hibp`) | Validation | Meaning |
+|---|---|---|---|
+| `TotalTimeout` | `00:00:30`; `00:00:30`; `00:00:02` | above zero | The most time one call may take in all: every attempt and the delays between them. |
+| `AttemptTimeout` | `00:00:10`; `00:00:10`; `00:00:01` | above zero, not above `TotalTimeout` | The most time one attempt may take; a slower one is cancelled, counts as a failure and is retried. |
+| `Retries` | `3`; `5`; `1` | 0 to 10 | Repeats after the first attempt of a call that failed with a 5xx, 408 or 429 status, a network error or an attempt timeout; 0 turns retrying off. Any other 4xx is never retried. |
+| `BaseDelay` | `00:00:02`; `00:00:02`; `00:00:00.2` | above zero | The first retry delay; later ones grow exponentially, with jitter. |
+| `Breaker:FailureRatio` | `0.5` | above 0, at most 1 | The share of failed attempts in `Breaker:SamplingDuration` at which the circuit breaker opens. |
+| `Breaker:MinimumThroughput` | `10` | at least 2 | The fewest attempts in the sampling window before the ratio counts. |
+| `Breaker:SamplingDuration` | `00:00:30` | at least `00:00:00.5` | The window the ratio is measured over. |
+| `Breaker:BreakDuration` | `00:00:30` | at least `00:00:00.5` | How long an open breaker rejects calls (without a request) before one probe call is let through. |
+
+For example `Resilience__Pipelines__hibp__Retries=0` (the pipeline name is part of the key; a name with a hyphen, as `external-default`, works as an environment variable name in a container but not in every shell). A raised `Retries` needs a `TotalTimeout` that holds the delays: the five delays of `external-critical` add up to between about 23 s and 46 s, more than the default total. Total and attempt timeout, retries and the breaker apply per client; two clients on one pipeline name share the settings, not the breaker.
+
 ### `Cors`
 
 | Key | Default | Validation (on start) | Meaning |

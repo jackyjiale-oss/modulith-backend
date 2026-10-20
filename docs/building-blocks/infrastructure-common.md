@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The infrastructure every module shares: module `DbContext` registration and conventions on SQL Server with audit and soft-delete interceptors (ADR 0006), migrations, the Dapper connection factory, the Data Protection based secret protector (ADR 0017), the per-module transactional outbox (ADR 0007), the in-process integration event publisher and the per-module inbox (ADR 0018), optimistic-concurrency handling, `Idempotency-Key` support with its own `platform` schema, the recurring-job scheduler (state in `platform.JobStates`) and the retention cleanup of the outbox, the inbox and the idempotency keys that runs on it (ADR 0026, 0028). It depends on SharedKernel, Application.Common, EF Core SQL Server, Dapper and ASP.NET Core.
+The infrastructure every module shares: module `DbContext` registration and conventions on SQL Server with audit and soft-delete interceptors (ADR 0006), migrations, the Dapper connection factory, the Data Protection based secret protector (ADR 0017), the per-module transactional outbox (ADR 0007), the in-process integration event publisher and the per-module inbox (ADR 0018), optimistic-concurrency handling, `Idempotency-Key` support with its own `platform` schema, the recurring-job scheduler (state in `platform.JobStates`) and the retention cleanup of the outbox, the inbox and the idempotency keys that runs on it (ADR 0026, 0028), and the standard resilience pipelines for outbound HTTP calls (ADR 0029). It depends on SharedKernel, Application.Common, EF Core SQL Server, Dapper, `Microsoft.Extensions.Http.Resilience` (Polly) and ASP.NET Core.
 
 Code: `src/BuildingBlocks/TemplateName.Infrastructure.Common/`.
 
@@ -28,6 +28,8 @@ Code: `src/BuildingBlocks/TemplateName.Infrastructure.Common/`.
 | `RecurringJobRunner.RunDueAsync(include, cancellationToken)` | Claims and runs every enabled due job that `include` accepts (all when null), one at a time; returns the number run. The background service calls it with `null`; tests pass a job-name filter with `Jobs:Enabled = false`. |
 | `BatchedCleanupJob` | Base class of the retention cleanup jobs: a subclass supplies `Name`, `DefaultInterval` (public) and the `protected` `RetentionPeriod` (`null` or zero turns the job off) and `DeleteSql` (a `DELETE TOP (@Batch)` statement over `@Cutoff` that reports the rows it deleted); the base class computes `cutoff = now - retention`, runs the statement with `NOCOUNT OFF` (a session default of `NOCOUNT ON` cannot hide the row count), repeats it and returns `JobResult(deleted)`. A subclass can name the table of an entity with `DelimitedTable<TEntity>()`, the job's name part with `ContextNameOf(type)`, and replace the cutoff by overriding `CutoffAt(utcNow)` (the idempotency job does). See [Cleanup jobs](#cleanup-jobs). |
 | `OutboxOptions`, `IdempotencyOptions`, `RetentionOptions`, `DatabaseOptions`, `JobsOptions` | The bound option classes. |
+| `services.AddExternalHttpClient(name, pipeline = ResiliencePipelines.Default)` | Registers the named `HttpClient` behind a resilience pipeline (total timeout, retries with exponential backoff and jitter, circuit breaker, attempt timeout) whose settings are `Resilience:Pipelines:{pipeline}`, validated on start. Returns the `IHttpClientBuilder`, so `AddTypedClient` and `ConfigureHttpClient` chain as usual. See [HTTP resilience](#http-resilience). |
+| `ResiliencePipelines` | The constants `Default` (`"external-default"`), `Critical` (`"external-critical"`) and `Hibp` (`"hibp"`). |
 | `endpoint.WithIdempotency()` | Opts an endpoint in to `Idempotency-Key` handling. |
 | `app.UseIdempotency()` | The idempotency middleware: after `UseRouting` and authentication, before the endpoints. |
 
@@ -42,7 +44,7 @@ Error codes (messages in `Resources/InfrastructureErrorMessages.resx`, `.ms.resx
 
 ## Configuration
 
-`ConnectionStrings:Database`, `Database:ApplyMigrationsOnStartup`, `Outbox:*`, `Idempotency:TimeToLive`, `Idempotency:InProgressTimeout`, `Retention:*` and `Jobs:*` (with `Jobs:{Name}:Enabled` and `Interval`), with defaults and validation, are listed in [`docs/services/api.md`](../services/api.md#configuration).
+`ConnectionStrings:Database`, `Database:ApplyMigrationsOnStartup`, `Outbox:*`, `Idempotency:TimeToLive`, `Idempotency:InProgressTimeout`, `Retention:*`, `Jobs:*` (with `Jobs:{Name}:Enabled` and `Interval`) and `Resilience:Pipelines:{pipeline}:*`, with defaults and validation, are listed in [`docs/services/api.md`](../services/api.md#configuration).
 
 ## Persistence
 
@@ -129,6 +131,72 @@ Known limitations:
 - If a request fails in a way that neither stores nor deletes its row (the store itself fails, or the process dies), the key answers 409 until the lease ends, then runs again.
 - The OpenAPI document does not yet describe the `Idempotency-Key` header or the 400/409/422 responses on idempotent endpoints.
 
+## HTTP resilience
+
+An outbound HTTP call fails in ways a request of ours never should: a server that hangs, a 503 that passes in a second, a provider that is down for minutes. `AddExternalHttpClient` gives a named client the same answer to all three, from `Microsoft.Extensions.Http.Resilience` (Polly; ADR 0029) instead of a hand-written loop per caller.
+
+A call goes through four strategies, outermost first:
+
+1. **Total timeout** (`TotalTimeout`): everything below, the delays between attempts included, ends when it runs out.
+2. **Retry** (`Retries`, `BaseDelay`): exponential backoff with jitter; none is added when `Retries` is 0. A `Retry-After` header on a retried answer is honoured (the total timeout still bounds it).
+3. **Circuit breaker** (`Breaker:*`): it opens when `FailureRatio` of the attempts in the last `SamplingDuration` failed and there were at least `MinimumThroughput` of them. While open it rejects calls at once, without reaching the server, for `BreakDuration`; then it lets one call through (half-open) and closes again if that call succeeds. It counts attempts, not calls, so a call with 3 retries adds up to 4.
+4. **Attempt timeout** (`AttemptTimeout`): one attempt that runs longer is cancelled and counts as a failure (and is retried).
+
+**What counts as a failure** is the standard predicate of the package, for the retry and the breaker alike: a 5xx status, 408, 429, an `HttpRequestException` (network error) and the attempt timeout. Any other 4xx status is a final answer: it is returned at once, never retried and never held against the breaker. After the last retry the last response is returned as it is (a 503 stays a 503 for the caller to read); only a timeout or an open breaker throws.
+
+**What the caller sees.** `HttpClient.SendAsync` can throw, besides the usual `HttpRequestException`, `Polly.Timeout.TimeoutRejectedException` (the total timeout, or the attempt timeout of the last attempt) and `Polly.CircuitBreaker.BrokenCircuitException` (the breaker is open). Both derive from `Polly.ExecutionRejectedException`. A caller that must keep working without the service catches that base type, as the Auth breached-password check does (it also keeps its own 2 s budget, and a cancelled caller token still propagates).
+
+**The built-in pipelines** (every key is `Resilience:Pipelines:{pipeline}:{key}`; a host can change any of them):
+
+| Key | `external-default` | `external-critical` | `hibp` | Validation (on start) |
+|---|---|---|---|---|
+| `TotalTimeout` | `00:00:30` | `00:00:30` | `00:00:02` | above zero |
+| `AttemptTimeout` | `00:00:10` | `00:00:10` | `00:00:01` | above zero, not above `TotalTimeout` |
+| `Retries` | `3` | `5` | `1` | 0 to 10 |
+| `BaseDelay` | `00:00:02` | `00:00:02` | `00:00:00.2` | above zero |
+| `Breaker:FailureRatio` | `0.5` | `0.5` | `0.5` | above 0, at most 1 |
+| `Breaker:MinimumThroughput` | `10` | `10` | `10` | at least 2 (Polly's minimum) |
+| `Breaker:SamplingDuration` | `00:00:30` | `00:00:30` | `00:00:30` | at least `00:00:00.5` |
+| `Breaker:BreakDuration` | `00:00:30` | `00:00:30` | `00:00:30` | at least `00:00:00.5` |
+
+A pipeline name that is not built in starts from the `external-default` values. The delays are jittered: the five delays of `external-critical` add up to between about 23 s and 46 s, so with the default `TotalTimeout` of 30 s the last retries are often cut short by the total. Raise `TotalTimeout` (and keep `AttemptTimeout` within it) when you raise `Retries`.
+
+**Time.** The strategies measure time with the registered `TimeProvider`, so a test drives a timeout, a delay or the break with a `FakeTimeProvider`. The client has no `HttpClient.Timeout` of its own (`Timeout.InfiniteTimeSpan`): the total timeout is the limit.
+
+**Metrics.** Polly's meter `Polly` is exported with the host's OpenTelemetry metrics (`AddObservability` adds it next to `TemplateName.Platform`, when an OTLP endpoint is set): the retry, breaker and timeout events and the attempt and pipeline durations, tagged with the pipeline and strategy names (`{pipeline}-retry`, `{pipeline}-breaker`, `{pipeline}-total-timeout`, `{pipeline}-attempt-timeout`).
+
+**Not covered.** MailKit SMTP is not HTTP; the email delivery worker keeps its own retry and dead-letter schedule. No pipeline exists yet for an SMS or an email provider (nothing calls one); the next section shows how to add it.
+
+### Add a pipeline for a new provider
+
+A future SMS or email provider that speaks HTTP (so not SMTP) gets a pipeline name of its own, so its settings are its own:
+
+```csharp
+// In the provider module's registration: the client "sms-provider" on a pipeline of the same name.
+services.AddExternalHttpClient("sms-provider", "sms-provider")
+    .ConfigureHttpClient(client => client.BaseAddress = new Uri("https://sms.example.com/"));
+
+// Or share the settings of a built-in pipeline:
+services.AddExternalHttpClient("email-api", ResiliencePipelines.Critical);
+```
+
+```json
+{
+  "Resilience": {
+    "Pipelines": {
+      "sms-provider": { "AttemptTimeout": "00:00:05", "TotalTimeout": "00:00:20", "Retries": 2 }
+    }
+  }
+}
+```
+
+A name that is not built in needs no further code: it starts from the `external-default` values and reads only the keys you set. Two clients on one pipeline name share its settings but each has its own breaker, so a provider that is down does not open the circuit of another. Then:
+
+- Catch `ExecutionRejectedException` where a failure must degrade the feature instead of failing the request.
+- Do not retry what is not safe to repeat. A POST that is not idempotent (a charge, a message) must carry an idempotency key the provider honours, or the pipeline must have `Retries = 0`.
+- Add a test like `HibpResilienceTests` (the real caller over the pipeline, a scripted handler and a `FakeTimeProvider`) for a timeout and an open breaker.
+- Document the keys in [`docs/services/api.md`](../services/api.md#resilience) and the behaviour in the module's own document.
+
 ## How to use from a module
 
 ```csharp
@@ -185,4 +253,4 @@ catch (DbUpdateException exception) when (Inbox<ReportingDbContext>.IsDuplicate(
 
 ## Tests
 
-Unit: `tests/TemplateName.UnitTests/Infrastructure/` (UTC converter, retry policy, migrations, concurrency handler, idempotency options, secret protector including its purpose). Unit: `Application/InProcessIntegrationEventPublisherTests` (a scope and one instance per handler, a handler that cannot be created, failures collected, cancellation, scanning registers each handler once). Integration (SQL Server in Testcontainers): `Persistence/PersistenceTests`, `Outbox/OutboxTests` (including concurrent dispatchers and lost leases), `Outbox/OutboxMessageContextTests`, `Inbox/InboxTests` (including two concurrent records of one event and the 400-character consumer limit) and `Idempotency/IdempotencyTests`. The cleanup jobs have `Outbox/OutboxCleanupJobTests`, `Inbox/InboxCleanupJobTests` and `Idempotency/IdempotencyCleanupJobTests`: the cutoff to the second (a row exactly at the retention stays), retention off, a backlog drained over runs, a session that defaults to `NOCOUNT ON`, the scheduler running the job, and the execution plan of the job's own statement (`SqlExecutionPlan`, `SET SHOWPLAN_XML ON`) using its index. The retention rules, including the inbox window against `Outbox:MaxAttempts`, are in unit `Jobs/RetentionOptionsTests` and `OutboxRetryPolicyTests`.
+Unit: `tests/TemplateName.UnitTests/Infrastructure/` (UTC converter, retry policy, migrations, concurrency handler, idempotency options, secret protector including its purpose). Unit: `Application/InProcessIntegrationEventPublisherTests` (a scope and one instance per handler, a handler that cannot be created, failures collected, cancellation, scanning registers each handler once). Integration (SQL Server in Testcontainers): `Persistence/PersistenceTests`, `Outbox/OutboxTests` (including concurrent dispatchers and lost leases), `Outbox/OutboxMessageContextTests`, `Inbox/InboxTests` (including two concurrent records of one event and the 400-character consumer limit) and `Idempotency/IdempotencyTests`. The cleanup jobs have `Outbox/OutboxCleanupJobTests`, `Inbox/InboxCleanupJobTests` and `Idempotency/IdempotencyCleanupJobTests`: the cutoff to the second (a row exactly at the retention stays), retention off, a backlog drained over runs, a session that defaults to `NOCOUNT ON`, the scheduler running the job, and the execution plan of the job's own statement (`SqlExecutionPlan`, `SET SHOWPLAN_XML ON`) using its index. The retention rules, including the inbox window against `Outbox:MaxAttempts`, are in unit `Jobs/RetentionOptionsTests` and `OutboxRetryPolicyTests`. The resilience pipelines are in unit `Http/ResiliencePipelineTests` (a scripted `HttpMessageHandler` and a `FakeTimeProvider`: the retry counts, the retried and the final statuses, the attempt and total timeouts, the breaker opening, failing fast and half-opening, one breaker per client, the defaults, the configuration override and the validators); the `hibp` pipeline under the real checker is in `Auth/HibpResilienceTests`.

@@ -12,6 +12,7 @@ using OpenTelemetry.Metrics;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
+using TemplateName.Infrastructure.Common.Http;
 using TemplateName.Infrastructure.Common.Jobs;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
@@ -88,7 +89,7 @@ public static class AuthModule
             .ValidateOnStart();
         services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
         services.AddSingleton<ISecureTokenService, SecureTokenService>();
-        services.AddHttpClient(HibpBreachedPasswordChecker.HttpClientName, client => client.Timeout = HibpBreachedPasswordChecker.RequestBudget);
+        services.AddExternalHttpClient(HibpBreachedPasswordChecker.HttpClientName, ResiliencePipelines.Hibp);
         services.AddSingleton<IBreachedPasswordChecker, HibpBreachedPasswordChecker>();
 
         services.AddOptions<LinksOptions>()
