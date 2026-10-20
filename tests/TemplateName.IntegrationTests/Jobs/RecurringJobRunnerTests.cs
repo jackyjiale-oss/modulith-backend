@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TemplateName.Infrastructure.Common;
 using TemplateName.Infrastructure.Common.Idempotency;
@@ -254,6 +255,46 @@ public sealed class RecurringJobRunnerTests(IntegrationTestWebAppFactory factory
         (await runner.RunDueAsync(CountingOnly, Ct)).ShouldBe(1);
 
         (await StateAsync(CountingJob.JobName)).NextRunAt.ShouldBe(Now.AddMinutes(5));
+    }
+
+    [Theory]
+    [InlineData("00:00:00")]
+    [InlineData("12 hours")]
+    public async Task An_invalid_job_interval_stops_the_host_from_starting_and_names_the_job(string interval)
+    {
+        await using var host = Factory.WithWebHostBuilder(builder => builder.UseSetting($"Jobs:{CountingJob.JobName}:Interval", interval));
+
+        var exception = Should.Throw<Exception>(() => host.Services);
+
+        exception.ToString().ShouldContain($"Jobs:{CountingJob.JobName}");
+        Probe.RunCount.ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData("00:00:00")]
+    [InlineData("12 hours")]
+    public async Task A_job_whose_options_fail_at_run_time_is_skipped_and_the_others_still_run(string interval)
+    {
+        // The start-time check would stop such a host; a runner over options that went bad later must still run the other jobs.
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [$"Jobs:{CountingJob.JobName}:Interval"] = interval })
+            .Build();
+        await using var badOptions = new ServiceCollection().AddLogging().AddInfrastructureCommon(configuration).BuildServiceProvider();
+        var services = Factory.Services;
+        var runner = new RecurringJobRunner(
+            services.GetRequiredService<IServiceScopeFactory>(),
+            services.GetServices<RecurringJobRegistration>(),
+            services.GetRequiredService<IOptions<JobsOptions>>(),
+            badOptions.GetRequiredService<IOptionsMonitor<RecurringJobOptions>>(),
+            services.GetRequiredService<RecurringJobMetrics>(),
+            services.GetRequiredService<TimeProvider>(),
+            services.GetRequiredService<ILogger<RecurringJobRunner>>());
+
+        (await runner.RunDueAsync(CountingAndThrowing, Ct)).ShouldBe(1);
+
+        Probe.RunCount.ShouldBe(0);
+        (await FindStateAsync(CountingJob.JobName)).ShouldBeNull();
+        (await StateAsync(ThrowingJob.JobName)).LastStatus.ShouldBe("Failed");
     }
 
     [Fact]

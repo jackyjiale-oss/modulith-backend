@@ -46,7 +46,7 @@ public static class JobServiceCollectionExtensions
         services.AddMetrics();
         services.TryAddSingleton<RecurringJobMetrics>();
         services.TryAddSingleton(RecurringJobRunner.Create);
-        services.AddHostedService<RecurringJobService>();
+        services.AddHostedService<RecurringJobBackgroundService>();
 
         return services;
     }

@@ -1,4 +1,5 @@
 using System.Data;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -97,8 +98,8 @@ public sealed partial class RecurringJobRunner
                 continue;
             }
 
-            var jobOptions = _jobOptions.Get(job.Name);
-            if (jobOptions.Enabled)
+            // A job whose own options cannot be read is skipped (and logged); the others still run.
+            if (TryGetJobOptions(job.Name, out var jobOptions) && jobOptions.Enabled)
             {
                 eligible.Add(job.Name, new EligibleJob(job, jobOptions.IntervalOr(job.DefaultInterval)));
             }
@@ -125,6 +126,35 @@ public sealed partial class RecurringJobRunner
         }
 
         return runCount;
+    }
+
+    /// <summary>
+    /// Builds the registry and reads every registered job's <c>Jobs:{Name}</c> options, so a host with a duplicate or invalid job
+    /// name, or a job setting that cannot be bound or fails validation, does not start (<c>RecurringJobBackgroundService</c> calls it on
+    /// start, whether or not <c>Jobs:Enabled</c> is set).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The registry cannot be built, or one or more jobs' options are invalid; the message names each job's section.</exception>
+    internal async Task ValidateJobsAsync()
+    {
+        var registry = await GetRegistryAsync();
+
+        var failures = new List<string>();
+        foreach (var job in registry)
+        {
+            try
+            {
+                _ = _jobOptions.Get(job.Name);
+            }
+            catch (Exception exception) when (IsOptionsFailure(exception))
+            {
+                failures.Add($"{JobsOptions.SectionName}:{job.Name}: {exception.Message}");
+            }
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new InvalidOperationException($"The options of recurring jobs are invalid. {string.Join(" ", failures)}");
+        }
     }
 
     /// <summary>Creates the runner the way the container does; tests use it for a second runner over the same database.</summary>
@@ -298,6 +328,24 @@ public sealed partial class RecurringJobRunner
                 cancellationToken);
     }
 
+    private bool TryGetJobOptions(string name, [NotNullWhen(true)] out RecurringJobOptions? jobOptions)
+    {
+        try
+        {
+            jobOptions = _jobOptions.Get(name);
+            return true;
+        }
+        catch (Exception exception) when (IsOptionsFailure(exception))
+        {
+            LogJobOptionsInvalid(_logger, exception, name, $"{JobsOptions.SectionName}:{name}");
+            jobOptions = null;
+            return false;
+        }
+    }
+
+    /// <summary>A value the binder cannot convert (<see cref="InvalidOperationException"/>) or one that fails validation.</summary>
+    private static bool IsOptionsFailure(Exception exception) => exception is OptionsValidationException or InvalidOperationException;
+
     private static string BuildSql(string template, PlatformDbContext context)
     {
         var entityType = context.Model.FindEntityType(typeof(JobStateRecord))!;
@@ -326,6 +374,9 @@ public sealed partial class RecurringJobRunner
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Recurring job {JobName} was cancelled when its lease of {LeaseDuration} ran out")]
     private static partial void LogLeaseEnded(ILogger logger, Exception exception, string jobName, TimeSpan leaseDuration);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Recurring job {JobName} was skipped: its options in {ConfigurationSection} are invalid")]
+    private static partial void LogJobOptionsInvalid(ILogger logger, Exception exception, string jobName, string configurationSection);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Recurring job {JobName} lost its lease to another runner; that runner's outcome stands")]
     private static partial void LogLeaseLost(ILogger logger, string jobName);

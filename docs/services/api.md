@@ -100,9 +100,9 @@ The recurring-job scheduler ([infrastructure-common](../building-blocks/infrastr
 | `LeaseDuration` | `00:15:00` | `00:01:00` to `1.00:00:00`, on start | How long a claimed run keeps other instances off its job; a run still going at the end is cancelled and recorded `Failed`. |
 | `MaxBatchesPerRun` | `100` | 1 to 10000, on start | Most batches a batched job (a cleanup) runs in one run. |
 | `{JobName}:Enabled` | `true` | — | `false` stops that job on this instance. |
-| `{JobName}:Interval` | the job's own default | `00:00:01` to `365.00:00:00`, when the job is first considered | Time from the end of one run to the next. |
+| `{JobName}:Interval` | the job's own default | `00:00:01` to `365.00:00:00`, on start (even with `Enabled` false) | Time from the end of one run to the next. |
 
-`{JobName}` is the job's name (PascalCase, no dots), for example `Jobs__AuthRefreshTokensCleanup__Interval=12:00:00`. A section that names no registered job is ignored.
+`{JobName}` is the job's name (PascalCase, no dots), for example `Jobs__AuthRefreshTokensCleanup__Interval=12:00:00`. An invalid or unreadable value for a registered job stops the host at start with a message naming `Jobs:{JobName}`; a section that names no registered job is ignored.
 
 ### `Cors`
 
