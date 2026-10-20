@@ -91,7 +91,7 @@ The first request with a key holds it as a lease for `InProgressTimeout`; duplic
 
 ### `Retention`
 
-How long the building blocks keep what they own before a cleanup job deletes it (ADR 0028; the jobs are in [infrastructure-common](../building-blocks/infrastructure-common.md#cleanup-jobs)). A row goes only when strictly older than the retention. Set a retention to `00:00:00` (or empty) to turn that cleanup off; modules keep their own retentions in their own sections.
+How long the building blocks keep what they own before a cleanup job deletes it (ADR 0028; the jobs are in [infrastructure-common](../building-blocks/infrastructure-common.md#cleanup-jobs)). A row goes only when strictly older than the retention. Set a retention to `00:00:00` (or empty) to turn that cleanup off; modules keep their own retentions in their own sections (`Auth:Retention`, below).
 
 | Key | Default | Validation (on start) | Meaning |
 |---|---|---|---|
@@ -189,7 +189,7 @@ The endpoint decides which OpenTelemetry services are registered, so it is **rea
 | `AdminEmail` | empty; `admin@localhost.test` set locally (user secrets, an environment variable, or a git-ignored `appsettings.Development.json`) | when seeding: a plain email address, up to 256 characters | The first administrator's email. |
 | `AdminPassword` | empty | when seeding: within `Auth:Password:MinLength`/`MaxLength` | The first administrator's password. **Never in a file**: `dotnet user-secrets set "Auth:Seed:AdminPassword" "…" --project src/Host/TemplateName.Api` or `Auth__Seed__AdminPassword`. Without it no administrator is seeded. **Remove it after the first start**: the account then exists, and an account with that email, even a soft-deleted one, is never re-created (each start logs a warning while the key is still set). |
 
-The Auth module reads the sections below, each with its keys, defaults and ranges in the [Auth module](../modules/auth.md#configuration) document. Eight of them are validated on start (`Auth:Password`, `Auth:Links`, `Auth:Verification`, `Auth:RefreshToken`, `Auth:Lockout`, `Auth:Mfa`, `Auth:StepUp` and `Auth:Jwt`), so an out-of-range value or a bad signing key stops the host. `Auth:DataProtection` is read as it is (a missing name falls back to `TemplateName`), and `Auth:Seed` is checked when the seeder runs.
+The Auth module reads the sections below, each with its keys, defaults and ranges in the [Auth module](../modules/auth.md#configuration) document. Nine of them are validated on start (`Auth:Password`, `Auth:Links`, `Auth:Verification`, `Auth:RefreshToken`, `Auth:Lockout`, `Auth:Mfa`, `Auth:StepUp`, `Auth:Retention` and `Auth:Jwt`), so an out-of-range value or a bad signing key stops the host. `Auth:DataProtection` is read as it is (a missing name falls back to `TemplateName`), and `Auth:Seed` is checked when the seeder runs.
 
 | Section | Holds |
 |---|---|
@@ -200,6 +200,7 @@ The Auth module reads the sections below, each with its keys, defaults and range
 | `Auth:Lockout` | Failed attempts and lockout duration. |
 | `Auth:Mfa` | Two-step verification: `Issuer` (the authenticator issuer name, no `:`), `ChallengeLifetime` and `MaxChallengeAttempts` (the sign-in challenge's lifetime and wrong-code limit), and `TrustedDevicesEnabled` and `TrustedDeviceLifetime` (whether and for how long a device can be remembered). |
 | `Auth:StepUp` | `MaxAge`: how long a step-up (a fresh `auth_time`) satisfies a protected action. |
+| `Auth:Retention` | How long time-bound rows are kept before a cleanup job deletes them (ADR 0028), each a `TimeSpan` that is not negative, with zero or empty turning that cleanup off: `VerificationCodes` (`7.00:00:00`), `RefreshTokens` (`30.00:00:00`, after the token's own expiry), `Sessions` (`90.00:00:00`, after revocation or expiry; the tokens go with them), `MfaChallenges` (`1.00:00:00`), `TrustedDevices` (`30.00:00:00`, after expiry or revocation) and `AuditLogs` (empty: kept, until an archive exists). The jobs `AuthVerificationCodesCleanup` and `AuthMfaChallengesCleanup` run hourly, the other four daily; the keys and the rules are in [Auth module: Cleanup](../modules/auth.md#cleanup). |
 | `Auth:Jwt` | Issuer, audience, lifetime, skew and the signing keys (required outside Development and Testing). |
 | `Auth:DataProtection` | The Data Protection application name. |
 | `Auth:Seed` | Above. |

@@ -23,7 +23,7 @@ public abstract class BatchedCleanupJob(
 
     public abstract TimeSpan DefaultInterval { get; }
 
-    /// <summary>How long a row is kept; <see langword="null"/> or zero turns the job off (a run does nothing).</summary>
+    /// <summary>How long a row is kept; <see langword="null"/> or zero turns the job off (a run does nothing) unless the subclass overrides <see cref="CutoffAt"/>, which then supersedes it.</summary>
     protected abstract TimeSpan? RetentionPeriod { get; }
 
     /// <summary>

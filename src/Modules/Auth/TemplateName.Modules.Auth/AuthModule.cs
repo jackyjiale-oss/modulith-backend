@@ -12,6 +12,7 @@ using OpenTelemetry.Metrics;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
+using TemplateName.Infrastructure.Common.Jobs;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Auth.Application;
@@ -30,6 +31,7 @@ using TemplateName.Modules.Auth.Infrastructure.Authorization;
 using TemplateName.Modules.Auth.Infrastructure.Contracts;
 using TemplateName.Modules.Auth.Infrastructure.Observability;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+using TemplateName.Modules.Auth.Infrastructure.Retention;
 using TemplateName.Modules.Auth.Infrastructure.Security;
 using TemplateName.Modules.Auth.Infrastructure.Tokens;
 using TemplateName.Modules.Auth.Resources;
@@ -50,7 +52,8 @@ public static class AuthModule
     /// access tokens with the JWT bearer handler as the default authentication scheme, the permission checker with its cache, the
     /// permission source and the seeder, two-step verification (<c>Auth:Mfa</c>, the TOTP secret protector, the MFA repositories,
     /// the factor verifier, the recovery-code issuer and the MFA change effects), step-up (<c>Auth:StepUp</c> and its policy),
-    /// and the Data Protection key ring stored in <c>auth.DataProtectionKeys</c>. Call it after
+    /// the retention of time-bound rows (<c>Auth:Retention</c>) with the six recurring cleanup jobs that enforce it, and the Data Protection
+    /// key ring stored in <c>auth.DataProtectionKeys</c>. Call it after
     /// <c>AddInfrastructureCommon</c> and before <c>AddApplicationDecorators</c>.
     /// </summary>
     public static IServiceCollection AddAuthModule(this IServiceCollection services, IConfiguration configuration)
@@ -112,6 +115,7 @@ public static class AuthModule
         AddAccessTokens(services, configuration);
         AddPermissions(services, configuration);
         AddMfa(services, configuration);
+        AddRetention(services, configuration);
 
         // One key ring for every instance, so an outbox event protected by one instance can be read by another (ADR 0017).
         var applicationName = configuration["Auth:DataProtection:ApplicationName"] is { Length: > 0 } configuredName
@@ -224,6 +228,27 @@ public static class AuthModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddScoped<StepUpPolicy>();
+    }
+
+    /// <summary>
+    /// Registers <c>Auth:Retention</c> (validated on start: a negative value is refused) and the six recurring cleanup jobs that delete what
+    /// it covers: <c>AuthVerificationCodesCleanup</c> and <c>AuthMfaChallengesCleanup</c> hourly, <c>AuthRefreshTokensCleanup</c>,
+    /// <c>AuthSessionsCleanup</c>, <c>AuthTrustedDevicesCleanup</c> and <c>AuthAuditLogsCleanup</c> daily (the last is off until
+    /// <c>Auth:Retention:AuditLogs</c> is set). Requires <c>AddInfrastructureCommon</c>, which registers the scheduler and the batch settings.
+    /// </summary>
+    internal static void AddRetention(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<AuthRetentionOptions>()
+            .Bind(configuration.GetSection(AuthRetentionOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.AddRecurringJob<VerificationCodesCleanupJob>();
+        services.AddRecurringJob<RefreshTokensCleanupJob>();
+        services.AddRecurringJob<UserSessionsCleanupJob>();
+        services.AddRecurringJob<MfaChallengesCleanupJob>();
+        services.AddRecurringJob<TrustedDevicesCleanupJob>();
+        services.AddRecurringJob<AuditLogsCleanupJob>();
     }
 
     /// <summary>
