@@ -11,12 +11,18 @@ namespace TemplateName.Platform.Redis;
 /// long. While the circuit is open the inner cache is not called at all, and after the break only its one probe call is. Only the
 /// caller's own cancellation propagates (an <see cref="OperationCanceledException"/> for a cancelled <c>cancellationToken</c>), and it is
 /// not counted as a Redis failure. The synchronous methods rely on the connection's own timeouts (nothing in the template calls them).
+/// <para>
+/// It is deliberately not <see cref="IDisposable"/> and never disposes the inner <c>RedisCache</c>: <c>RedisCache.Dispose</c> closes and
+/// disposes the multiplexer it got from <c>ConnectionMultiplexerFactory</c>, which is the instance's one shared connection (the readiness
+/// check uses it too). The container created that connection and is its only owner; it disposes it when the host stops. The inner
+/// cache holds nothing else worth releasing at shutdown.
+/// </para>
 /// </summary>
 internal sealed class ResilientDistributedCache(
     IDistributedCache inner,
     RedisAvailability availability,
     TimeProvider timeProvider,
-    IOptions<RedisCachingOptions> options) : IDistributedCache, IDisposable
+    IOptions<RedisCachingOptions> options) : IDistributedCache
 {
     private readonly TimeSpan _commandTimeout = options.Value.CommandTimeout;
 
@@ -51,13 +57,6 @@ internal sealed class ResilientDistributedCache(
 
     public Task RemoveAsync(string key, CancellationToken cancellationToken = default)
         => RunAsync(() => inner.RemoveAsync(key, cancellationToken), cancellationToken);
-
-    /// <summary>
-    /// The inner cache is created by this decorator's factory, so the container does not dispose it; the decorator does.
-    /// <c>RedisCache</c> does not close a connection it got from <c>ConnectionMultiplexerFactory</c>, so the connection the readiness
-    /// check and the other Redis users share stays open until the container disposes it.
-    /// </summary>
-    public void Dispose() => (inner as IDisposable)?.Dispose();
 
     private T? Run<T>(Func<T> call)
     {

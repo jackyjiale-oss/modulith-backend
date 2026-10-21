@@ -128,10 +128,31 @@ public sealed class CachingProviderTests
     }
 
     [Fact]
+    public void A_command_timeout_not_shorter_than_the_break_fails_on_start()
+    {
+        // A call may outlive the break otherwise, and its late outcome would free the probe slot while a second probe runs.
+        using var services = BuildServices(new()
+        {
+            ["Caching:Provider"] = "redis",
+            ["ConnectionStrings:Redis"] = "localhost:6379",
+            ["Caching:Redis:CommandTimeout"] = "00:00:05",
+            ["Caching:Redis:BreakDuration"] = "00:00:05",
+        });
+
+        var failure = Should.Throw<OptionsValidationException>(() => services.GetRequiredService<IStartupValidator>().Validate());
+
+        failure.Message.ShouldContain("Caching:Redis:CommandTimeout must be shorter than Caching:Redis:BreakDuration");
+    }
+
+    [Fact]
     public async Task Disposing_the_cache_does_not_close_the_shared_connection()
     {
-        // The readiness check (and later the limiter and the backplane) share the connection the cache got from its factory.
+        // The readiness check (and later the limiter and the backplane) share the connection the cache got from its factory. RedisCache
+        // releases a connection through IDatabase.Multiplexer, so the database must lead back to the shared connection.
         var connection = Substitute.For<IConnectionMultiplexer>();
+        var database = Substitute.For<IDatabase>();
+        database.Multiplexer.Returns(connection);
+        connection.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(database);
         var configuration = Configuration(new()
         {
             ["Caching:Provider"] = "redis",
@@ -141,14 +162,18 @@ public sealed class CachingProviderTests
         var collection = new ServiceCollection().AddLogging().AddInfrastructureCommon(configuration);
         collection.AddSingleton(connection);
         collection.AddPlatformRedis(configuration);
-        using var services = collection.BuildServiceProvider();
+        var services = collection.BuildServiceProvider();
         var cache = services.GetRequiredService<IDistributedCache>();
         await cache.GetAsync("auth:perm:any", TestContext.Current.CancellationToken);
-
-        ((IDisposable)cache).Dispose();
-
         connection.Received().GetDatabase(Arg.Any<int>(), Arg.Any<object?>());
+
+        // What the host does at shutdown: the container disposes the cache (and owns the connection it created itself; this one it
+        // was handed, so only the cache could close it).
+        (cache as IDisposable)?.Dispose();
+        await services.DisposeAsync();
+
         connection.DidNotReceive().Dispose();
+        await connection.DidNotReceive().DisposeAsync();
         connection.DidNotReceive().Close(Arg.Any<bool>());
         await connection.DidNotReceive().CloseAsync(Arg.Any<bool>());
     }

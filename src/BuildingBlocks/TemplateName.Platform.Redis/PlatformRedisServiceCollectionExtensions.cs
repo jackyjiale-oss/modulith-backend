@@ -45,6 +45,9 @@ public static class PlatformRedisServiceCollectionExtensions
         services.AddOptions<RedisCachingOptions>()
             .Bind(configuration.GetSection(RedisCachingOptions.SectionName))
             .ValidateDataAnnotations()
+            .Validate(
+                redis => redis.CommandTimeout < redis.BreakDuration,
+                "Caching:Redis:CommandTimeout must be shorter than Caching:Redis:BreakDuration.")
             .ValidateOnStart();
         services.AddOptions<RedisConnectionStringOptions>()
             .Bind(configuration.GetSection(RedisConnectionStringOptions.SectionName))
@@ -109,7 +112,9 @@ public static class PlatformRedisServiceCollectionExtensions
 
     /// <summary>
     /// Replaces the <see cref="IDistributedCache"/> that <c>AddStackExchangeRedisCache</c> registered with
-    /// <see cref="ResilientDistributedCache"/> around it: a factory builds the original from its own registration and wraps it.
+    /// <see cref="ResilientDistributedCache"/> around it: a factory builds the original from its own registration and wraps it. The
+    /// container does not track an instance a factory builds inside itself, so the inner <c>RedisCache</c> is never disposed, and its
+    /// <c>Dispose</c>, which would close the shared connection, never runs.
     /// </summary>
     private static void DecorateDistributedCache(IServiceCollection services)
     {

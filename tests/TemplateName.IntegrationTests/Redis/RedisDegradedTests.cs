@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Net;
 using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using TemplateName.IntegrationTests.Infrastructure;
 using TemplateName.Modules.Auth.Application;
@@ -144,11 +143,12 @@ public sealed class RedisDegradedTests(IntegrationTestWebAppFactory factory, Val
         }
 
         await valkey.StopAsync(Ct);
-        WebApplicationFactory<Program>? hostA = null;
+
+        // Disposed when the test ends, whatever fails; it starts (on first use, below) while Valkey is down.
+        await using var hostA = RedisTestHosts.Create(Factory, valkey);
         try
         {
             // The host starts with Redis down and checks permissions from the database.
-            hostA = RedisTestHosts.Create(Factory, valkey);
             var (checkerA, readsA) = PermissionCheckers.Recording(hostA.Services);
             (await checkerA.HasPermissionAsync(users[0], AuthPermissions.RoleView, Ct)).ShouldBeTrue();
             (await checkerA.HasPermissionAsync(users[1], AuthPermissions.RoleView, Ct)).ShouldBeTrue();
@@ -159,21 +159,18 @@ public sealed class RedisDegradedTests(IntegrationTestWebAppFactory factory, Val
             await valkey.StartAsync(Ct);
         }
 
-        await using (hostA)
-        {
-            await RedisTestHosts.WaitUntilConnectedAsync(hostA, Ct);
-            Factory.Time.Advance(BreakDuration);
-            var (checkerA, _) = PermissionCheckers.Recording(hostA.Services);
+        await RedisTestHosts.WaitUntilConnectedAsync(hostA, Ct);
+        Factory.Time.Advance(BreakDuration);
+        var (checkerAfter, _) = PermissionCheckers.Recording(hostA.Services);
 
-            (await checkerA.HasPermissionAsync(users[2], AuthPermissions.RoleView, Ct)).ShouldBeTrue();
-            await RedisTestHosts.EventuallyAsync(() => RedisTestHosts.HoldsPermissionsOfAsync(hostA, users[2]), "the set in Redis", Ct);
+        (await checkerAfter.HasPermissionAsync(users[2], AuthPermissions.RoleView, Ct)).ShouldBeTrue();
+        await RedisTestHosts.EventuallyAsync(() => RedisTestHosts.HoldsPermissionsOfAsync(hostA, users[2]), "the set in Redis", Ct);
 
-            // Through Redis: another instance gets the set without reading the database.
-            await using var hostB = RedisTestHosts.Create(Factory, valkey);
-            var (checkerB, readsB) = PermissionCheckers.Recording(hostB.Services);
-            (await checkerB.HasPermissionAsync(users[2], AuthPermissions.RoleView, Ct)).ShouldBeTrue();
-            readsB.OpenedCount.ShouldBe(0);
-        }
+        // Through Redis: another instance gets the set without reading the database.
+        await using var hostB = RedisTestHosts.Create(Factory, valkey);
+        var (checkerB, readsB) = PermissionCheckers.Recording(hostB.Services);
+        (await checkerB.HasPermissionAsync(users[2], AuthPermissions.RoleView, Ct)).ShouldBeTrue();
+        readsB.OpenedCount.ShouldBe(0);
     }
 
     [Fact]
