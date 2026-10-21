@@ -20,6 +20,7 @@ flowchart TD
         Infra["Infrastructure.Common<br/>persistence, outbox, idempotency"]
         App["Application.Common<br/>handlers, decorators, pagination, messages"]
         Kernel["SharedKernel<br/>Result, Error, Entity, AggregateRoot"]
+        Redis["Platform.Redis (optional)<br/>Redis cache level, circuit, readiness"]
     end
 
     Api --> Auth
@@ -28,6 +29,7 @@ flowchart TD
     Api --> Web
     Api --> Infra
     Api --> App
+    Api -. "Caching:Provider = redis" .-> Redis
     Auth -. "other modules only via" .-> Contracts
     Sample -. "other modules only via" .-> Contracts
     Notifications -. "reads Auth only via" .-> Contracts
@@ -48,15 +50,17 @@ flowchart TD
     Web --> Kernel
     Infra --> Kernel
     App --> Kernel
+    Redis --> Infra
+    Redis --> Web
 ```
 
 - **Host** (`src/Host/TemplateName.Api`, [`docs/services/api.md`](../services/api.md)) wires the building blocks and modules in `Program.cs`: services, the middleware pipeline, health checks, OpenAPI and the `/api/v1` route group.
 - **Modules** (`src/Modules/{Module}`, one document per module under [`docs/modules/`](../modules/)) are two projects: `TemplateName.Modules.{Module}` with `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/` and `Resources/` folders (a module that declares notification types also has `Templates/`, its embedded notification templates), and `TemplateName.Modules.{Module}.Contracts`, the only project another module may reference (ADR 0001). The entry point `{Module}Module` (`Add{Module}Module`, `Map{Module}Endpoints`) is the only public type.
 - **Auth** ([`docs/modules/auth.md`](../modules/auth.md)) is the identity module: users, sessions, roles, permissions and the audit log in the `auth` schema, with the sign-in, token, password and administration endpoints, and two-step verification (an authenticator app with single-use recovery codes, a step-up before sensitive actions, trusted devices and an administrator's reset; ADRs 0022 to 0025). It implements `IPermissionChecker` for the whole host; no other module references it (its `TemplateName.Modules.Auth.Contracts` project holds its integration events and `IUserContactDirectory`; Auth publishes the events from its outbox, and the Notifications module consumes them).
 - **Notifications** ([`docs/modules/notifications.md`](../modules/notifications.md)) is the module through which every message the template sends goes (Auth sends no email itself): it consumes the integration events other modules publish and renders and delivers them by email and in-app in the recipient's language. It holds the code-defined notification type catalog with its embedded templates, the recipient culture and time zone rules, its `notify` schema, the consumers of Auth's integration events (which create notification and delivery rows through its inbox), the delivery worker with the email (SMTP, `Notifications:Email`) and in-app channels, the inbox, preference and hub-ticket APIs, the SignalR hub (`/hubs/notifications`) that pushes new in-app notifications, and the administrator's delivery list and retry. It references `TemplateName.Modules.Auth.Contracts` only, never the Auth module, and no module references it.
-- **Building blocks** ([`shared-kernel`](../building-blocks/shared-kernel.md), [`application-common`](../building-blocks/application-common.md), [`infrastructure-common`](../building-blocks/infrastructure-common.md), [`web-common`](../building-blocks/web-common.md)) hold everything every module needs.
+- **Building blocks** ([`shared-kernel`](../building-blocks/shared-kernel.md), [`application-common`](../building-blocks/application-common.md), [`infrastructure-common`](../building-blocks/infrastructure-common.md), [`web-common`](../building-blocks/web-common.md)) hold everything every module needs. [`platform-redis`](../building-blocks/platform-redis.md) is the exception: an optional project only the host references, active with `Caching:Provider = redis`, that a solution without Redis deletes (ADR 0027).
 
-The arrows are project references, and architecture tests (`tests/TemplateName.ArchitectureTests`) enforce them: SharedKernel has no dependencies; Application.Common does not depend on Infrastructure.Common or Web.Common; a module's `Domain` depends on nothing but SharedKernel; its `Application` does not depend on its `Infrastructure` or `Endpoints`; and no module references another module except its `.Contracts`.
+The arrows are project references, and architecture tests (`tests/TemplateName.ArchitectureTests`) enforce them: SharedKernel has no dependencies; Application.Common does not depend on Infrastructure.Common or Web.Common; a module's `Domain` depends on nothing but SharedKernel; its `Application` does not depend on its `Infrastructure` or `Endpoints`; no module references another module except its `.Contracts`; and only the host references Platform.Redis.
 
 ## Request lifecycle
 
@@ -145,5 +149,6 @@ The rules for when a boundary is crossed:
 | [0024](../adr/0024-mfa-challenge-as-a-hashed-server-side-token.md) | The sign-in challenge is an opaque token over a hashed server-side row, with wrong codes counted on it and in the lockout |
 | [0025](../adr/0025-trusted-devices-bound-to-the-security-stamp.md) | Trusted devices are hashed bearer tokens bound to the security stamp, skipping the challenge only (`amr` `pwd`) |
 | [0026](../adr/0026-recurring-jobs-on-our-own-scheduler.md) | Recurring jobs run on our own scheduler with a SQL lease, not Hangfire |
+| [0027](../adr/0027-optional-redis-through-one-project.md) | Optional Redis through one project referenced only by the host (cache second level, rate limiter, backplane), degraded not down when Redis fails, our own fixed-window limiter, Valkey in compose |
 | [0028](../adr/0028-retention-policy-and-the-inbox-window.md) | Retention per kind of data in bounded delete batches, dead letters kept, and an inbox window that outlasts outbox redelivery |
 | [0029](../adr/0029-standard-http-resilience-pipelines.md) | Standard HTTP resilience pipelines from `Microsoft.Extensions.Http.Resilience`, named and bound from `Resilience:Pipelines`, with a breaker and the `hibp` budget |

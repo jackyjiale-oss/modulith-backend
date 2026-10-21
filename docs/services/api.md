@@ -9,7 +9,7 @@ Order matters; `Program.cs` marks it with comments.
 | # | Call | Registers |
 |---|---|---|
 | 1 | `builder.AddObservability()` | Serilog, the request-activity listener, OpenTelemetry when `OTEL_EXPORTER_OTLP_ENDPOINT` is set ([web-common](../building-blocks/web-common.md#observability)) |
-| 2 | `AddInfrastructureCommon(configuration)` | `TimeProvider`, `ConnectionStrings`/`Database`/`Outbox`/`Idempotency`/`Retention`/`Jobs` options, the Dapper connection factory, EF interceptors, the concurrency exception handler, the `platform` context, the recurring-job scheduler ([infrastructure-common](../building-blocks/infrastructure-common.md)). Before `AddWebCommon`, so the concurrency handler runs before the global one. |
+| 2 | `AddInfrastructureCommon(configuration)` | `TimeProvider`, `ConnectionStrings`/`Database`/`Outbox`/`Idempotency`/`Retention`/`Jobs`/`Caching` options, the Dapper connection factory, EF interceptors, the concurrency exception handler, the `platform` context, the recurring-job scheduler ([infrastructure-common](../building-blocks/infrastructure-common.md)). Before `AddWebCommon`, so the concurrency handler runs before the global one. |
 | 3 | `AddWebCommon()` | ProblemDetails customization, the global exception handler, `ICurrentUser`, `ThrowOnBadRequest` ([web-common](../building-blocks/web-common.md)) |
 | 4 | `AddApiLocalization(configuration)` | The `Localization` options, request localization, FluentValidation translations |
 | 5 | `ConfigureHttpJsonOptions` | `JsonStringEnumConverter`: enums are strings in JSON (`"Pending"`) |
@@ -18,6 +18,7 @@ Order matters; `Program.cs` marks it with comments.
 | 8 | `AddHttpSecurity(configuration)` | CORS, the global rate limiter, the `auth-strict` rate-limit policy, forwarded headers |
 | 9 | `AddPermissionAuthorization()` | The permission authorization handler behind `RequirePermission(code)` and the **fallback policy**: every endpoint requires an authenticated user unless it says `.AllowAnonymous()` ([web-common](../building-blocks/web-common.md)). It needs the explicit `UseAuthentication` and `UseAuthorization` of the pipeline (slots 1a and 10): without them `WebApplication` adds `UseAuthorization` ahead of `UseRouting` by itself, where no endpoint is known and the fallback policy answers 401 to every request. |
 | 10 | `AddAuthModule(configuration)`, `AddNotificationsModule(configuration)`, `AddSampleModule()` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme (the default authentication scheme), the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)); the Notifications module also its delivery worker, SignalR, the `HubTicket` authentication scheme (not a default scheme: only the hub's policy uses it) and the rate-limit policy of its ticket route ([Notifications module](../modules/notifications.md)) |
+| 10a | `AddPlatformRedis(configuration)` | Nothing unless `Caching:Provider` is `redis`; then the Redis connection, Redis as the `HybridCache` second level behind a circuit, and the `ready` check `redis` ([platform-redis](../building-blocks/platform-redis.md)). Optional: a solution without Redis deletes this line and the project. |
 | 11 | `AddOptions<KestrelServerOptions>()…Bind("Kestrel")` | Binds the whole `Kestrel` section lazily, so `Kestrel:Limits:*` apply and test overrides work |
 | 12 | `AddApplicationDecorators()` | Validation and logging decorators around every handler registered above; always last |
 
@@ -60,6 +61,8 @@ Sections are bound lazily through `IOptions<T>` and, where marked, validated on 
 |---|---|---|---|
 | `Database` | empty in `appsettings.json` | required, on start: the host does not start without it | SQL Server connection string for every module context and the Dapper connection factory. Supply it with user secrets (`dotnet user-secrets set "ConnectionStrings:Database" "…" --project src/Host/TemplateName.Api`) or the environment (`ConnectionStrings__Database`). |
 
+| `Redis` | empty in `appsettings.json` | required, on start, only when `Caching:Provider` is `redis` | The Redis server, a StackExchange.Redis configuration string (`localhost:6379` for the compose `valkey` service). A password belongs in user secrets or the environment (`ConnectionStrings__Redis`). `abortConnect` and the timeouts are set from `Caching:Redis` whatever the string says ([`Caching`](#caching)). |
+
 A module context can name another entry (`AddModuleDbContext<T>(schema, connectionStringName: "…")`); none does today. Contexts read the string when they are created, never in `Program.cs`, so `WebApplicationFactory` overrides apply.
 
 ### `Database`
@@ -98,6 +101,20 @@ How long the building blocks keep what they own before a cleanup job deletes it 
 | `BatchSize` | `1000` | 1 to 10000 | Most rows one delete statement removes; a run repeats it up to `Jobs:MaxBatchesPerRun` times. |
 | `Outbox` | `7.00:00:00` (7 days) | not negative | How long a published outbox message (and its consumer rows) is kept after `ProcessedAt`. Abandoned messages are never deleted. The job `{Context}OutboxCleanup` runs daily. |
 | `Inbox` | `7.00:00:00` (7 days) | not negative; zero or at least `1.00:00:00`; and longer than the outbox's retry span for `Outbox:MaxAttempts` (12 min 35 s by default, a day at 28 attempts and more than a day from 29; a longer `MaxAttempts` needs a longer `Inbox`) | How long an inbox row is kept after `ProcessedAt`, so it outlasts outbox redelivery and a late retry never runs a consumer twice. The job `{Context}InboxCleanup` (today `NotificationsInboxCleanup`) runs daily. |
+
+### `Caching`
+
+Where `HybridCache` keeps its entries (ADR 0027; [infrastructure-common](../building-blocks/infrastructure-common.md#caching), [platform-redis](../building-blocks/platform-redis.md)). The only entry today is the Auth module's permission set (`auth:perm:{userId}`, 30 seconds).
+
+| Key | Default | Validation (on start) | Meaning |
+|---|---|---|---|
+| `Provider` | `memory` | `memory`, `redis` or `none` (any case); `redis` also needs `AddPlatformRedis` in the host and `ConnectionStrings:Redis` | `memory`: in memory per instance. `redis`: in memory per instance with Redis as the shared second level, so a set one instance loaded is served to the others. `none`: no cache at all, every read goes to the database (for diagnosing). |
+| `Redis:InstanceName` | `TemplateName:` | required (provider `redis`) | The prefix of every Redis key: `{InstanceName}{module}:{entity}:{id}`. |
+| `Redis:FailureThreshold` | `3` | 1 to 100 (provider `redis`) | Consecutive failed Redis calls after which Redis is skipped for `BreakDuration`. |
+| `Redis:BreakDuration` | `00:00:30` | `00:00:01` to `01:00:00` (provider `redis`) | How long Redis is skipped (reads miss to the database, writes are dropped) once the threshold is reached; then it is tried again. |
+| `Redis:CommandTimeout` | `00:00:00.500` | `00:00:00.050` to `00:00:30` (provider `redis`) | The connect, sync and async timeouts: the most a request waits for a Redis that does not answer. |
+
+With Redis down the API keeps serving: cache reads go to the database, one warning is logged per outage and `/health/ready` answers 200 `Degraded`. An instance keeps a permission set in memory for 30 seconds, and a change made through another instance is not pushed to it, so a removed permission can still be used on another instance for up to 30 seconds, with or without Redis ([platform-redis](../building-blocks/platform-redis.md#cross-instance-invalidation-the-honest-limit)).
 
 ### `Jobs`
 
@@ -287,7 +304,9 @@ How long the Notifications module keeps its time-bound rows before a cleanup job
 | Endpoint | Checks | Use |
 |---|---|---|
 | `GET /health/live` | none: 200 while the process serves requests | Liveness probe |
-| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `auth`, `notify`, `sample`, plus one per added module) | Readiness probe, load balancer |
+| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `auth`, `notify`, `sample`, plus one per added module), and with `Caching:Provider = redis` the check `redis` (a `PING`) | Readiness probe, load balancer |
+
+The `redis` check fails as `Degraded`, not `Unhealthy`: with Redis down `/health/ready` answers **200** with the body `Degraded`, because the instance still serves from the database and a load balancer must not drain every instance for a cache outage. A database check that fails still answers 503 `Unhealthy`.
 
 Both are anonymous, exempt from rate limiting, logged at `Verbose` when healthy, and left out of traces.
 

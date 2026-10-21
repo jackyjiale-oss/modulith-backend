@@ -877,6 +877,7 @@
           "Microsoft.Extensions.Caching.StackExchangeRedis": "[10.0.13, )",
           "StackExchange.Redis": "[3.4.5, )",
           "TemplateName.Application.Common": "[0.0.0, )",
+          "TemplateName.Infrastructure.Common": "[0.0.0, )",
           "TemplateName.SharedKernel": "[0.0.0, )",
           "TemplateName.Web.Common": "[0.0.0, )"
         }

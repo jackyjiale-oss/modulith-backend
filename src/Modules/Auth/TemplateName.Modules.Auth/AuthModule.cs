@@ -254,15 +254,17 @@ public static class AuthModule
 
     /// <summary>
     /// Registers the module's permission source (Ruling R2), the permission checker, reader and cache (one singleton for
-    /// <c>IPermissionChecker</c>, <c>IPermissionReader</c> and <c>IPermissionCache</c>) on an in-memory <see cref="HybridCache"/> whose
-    /// clock is the application's <see cref="TimeProvider"/>, and the seeder with <c>Auth:Seed</c>.
+    /// <c>IPermissionChecker</c>, <c>IPermissionReader</c> and <c>IPermissionCache</c>) on <see cref="HybridCache"/> (in memory, whose
+    /// clock is the application's <see cref="TimeProvider"/>, with Redis as its second level when the host adds it), and the seeder with
+    /// <c>Auth:Seed</c>.
     /// </summary>
     internal static void AddPermissions(IServiceCollection services, IConfiguration configuration)
     {
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IPermissionSource, AuthPermissionSource>());
 
-        // In memory only until Plan 5 adds a distributed cache. The local entries live in the shared IMemoryCache, which expires them
-        // by its own clock; give it the application's, so cache lifetimes follow TimeProvider like everything else (and tests can move it).
+        // In memory, with Redis as the second level when the host adds it (Caching:Provider = redis, ADR 0027). The local entries live in
+        // the shared IMemoryCache, which expires them by its own clock; give it the application's, so cache lifetimes follow TimeProvider
+        // like everything else (and tests can move it).
         services.AddHybridCache();
         services.AddOptions<MemoryCacheOptions>()
             .Configure<TimeProvider>((options, timeProvider) => options.Clock = new TimeProviderCacheClock(timeProvider));

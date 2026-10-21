@@ -7,6 +7,7 @@ using TemplateName.Application.Common.Data;
 using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Application.Common.Security;
+using TemplateName.Infrastructure.Common.Caching;
 using TemplateName.Infrastructure.Common.Idempotency;
 using TemplateName.Infrastructure.Common.Jobs;
 using TemplateName.Infrastructure.Common.Messaging;
@@ -28,7 +29,8 @@ public static class InfrastructureServiceCollectionExtensions
     /// Data Protection purpose <c>TemplateName.Secrets.v1</c>) with a Data Protection registration that has no key store of its own, and the
     /// recurring-job scheduler (the <c>Jobs</c> options validated on start, the <see cref="RecurringJobRunner"/> and the background service
     /// that ticks it; jobs come from <c>AddRecurringJob</c>), the hourly job <c>IdempotencyKeysCleanup</c>, and a check on start that
-    /// <c>Retention:Inbox</c> outlasts the retries of the outbox (<c>Outbox:MaxAttempts</c>). Call it before
+    /// <c>Retention:Inbox</c> outlasts the retries of the outbox (<c>Outbox:MaxAttempts</c>), and the <c>Caching</c> options (validated on
+    /// start; with <c>Caching:Provider = none</c> every <c>HybridCache</c> entry skips both cache layers, ADR 0027). Call it before
     /// <c>AddWebCommon</c>, so the concurrency handler runs before the global one, and before any <c>AddModuleDbContext</c> or
     /// <c>AddOutbox</c>, so the <c>platform</c> migrations apply first.
     /// </summary>
@@ -61,6 +63,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddModuleDbContext<PlatformDbContext>(PlatformDbContext.Schema);
         services.AddRecurringJobScheduler(configuration);
         services.AddRecurringJob<IdempotencyCleanupJob>();
+        services.AddCaching(configuration);
 
         // Dapper's type handlers are process-wide; adding the same handler again replaces it.
         SqlMapper.AddTypeHandler(new DateOnlyTypeHandler());
