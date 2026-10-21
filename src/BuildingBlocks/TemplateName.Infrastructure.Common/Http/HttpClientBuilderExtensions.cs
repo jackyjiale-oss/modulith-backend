@@ -13,7 +13,8 @@ public static class HttpClientBuilderExtensions
     /// retries with exponential backoff and jitter, then a circuit breaker, then the timeout of one attempt. Its settings are
     /// <c>Resilience:Pipelines:{pipeline}</c> (defaults and ranges in <c>docs/building-blocks/infrastructure-common.md</c>), validated on
     /// start; two clients may share a pipeline's settings. The pipeline retries 5xx, 408, 429, network errors and its own attempt
-    /// timeout, and any other 4xx answer is neither retried nor held against the breaker. An open breaker throws
+    /// timeout (but a POST, PUT, PATCH, DELETE or CONNECT only when <c>RetryUnsafeMethods</c> is set), and any other 4xx answer is
+    /// neither retried nor held against the breaker. An open breaker throws
     /// <c>Polly.CircuitBreaker.BrokenCircuitException</c> and a timeout <c>Polly.Timeout.TimeoutRejectedException</c>, so a caller that
     /// must degrade handles both (the Auth module's breached-password check does). The pipeline measures time with the registered
     /// <see cref="TimeProvider"/>; the client has no <see cref="HttpClient.Timeout"/> of its own, the total timeout is it.
@@ -51,14 +52,22 @@ public static class HttpClientBuilderExtensions
         // Polly's retry needs at least one attempt, so no retries means no retry strategy.
         if (options.Retries > 0)
         {
-            builder.AddRetry(new HttpRetryStrategyOptions
+            var retry = new HttpRetryStrategyOptions
             {
                 Name = $"{pipeline}-retry",
                 MaxRetryAttempts = options.Retries,
                 Delay = options.BaseDelay,
                 BackoffType = DelayBackoffType.Exponential,
                 UseJitter = true,
-            });
+            };
+
+            // A POST, PUT, PATCH, DELETE or CONNECT is not repeated unless the pipeline says so: a blind retry can send twice.
+            if (!options.RetryUnsafeMethods)
+            {
+                retry.DisableForUnsafeHttpMethods();
+            }
+
+            builder.AddRetry(retry);
         }
 
         builder.AddCircuitBreaker(new HttpCircuitBreakerStrategyOptions

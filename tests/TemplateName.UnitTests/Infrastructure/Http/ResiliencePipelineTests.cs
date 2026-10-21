@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Polly.CircuitBreaker;
 using Polly.Timeout;
@@ -30,18 +31,85 @@ public sealed class ResiliencePipelineTests
     public async Task Critical_pipeline_retries_five_times()
     {
         var handler = ScriptedHttpMessageHandler.Always(HttpStatusCode.ServiceUnavailable);
+        using var host = ResilienceTestHost.Create(ResiliencePipelines.Critical, handler);
 
-        // Five exponential delays add up to between 23 s and 46 s, which the 30 s total of the default cannot always hold, so this
-        // test gives the total room and shows the retry count on its own; the total is a separate setting (see the document).
-        using var host = ResilienceTestHost.Create(
-            ResiliencePipelines.Critical,
-            handler,
-            new Dictionary<string, string?> { ["Resilience:Pipelines:external-critical:TotalTimeout"] = "00:10:00" });
-
+        // The shipped defaults: the 90 s total holds the five jittered delays (23 s to 46 s), so all five retries are made.
         using var response = await host.RunAsync(host.Client.GetAsync(Url, TestContext.Current.CancellationToken), OneSecond);
 
         response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
         handler.Calls.ShouldBe(6);
+    }
+
+    [Fact]
+    public async Task A_GET_is_retried_and_a_POST_is_not_by_default()
+    {
+        var getHandler = ScriptedHttpMessageHandler.Always(HttpStatusCode.ServiceUnavailable);
+        using var getHost = ResilienceTestHost.Create(ResiliencePipelines.Default, getHandler);
+        using var getResponse = await getHost.RunAsync(getHost.Client.GetAsync(Url, TestContext.Current.CancellationToken), OneSecond);
+        getHandler.Calls.ShouldBe(4);
+
+        foreach (var method in new[] { HttpMethod.Post, HttpMethod.Put, HttpMethod.Patch, HttpMethod.Delete })
+        {
+            var handler = ScriptedHttpMessageHandler.Always(HttpStatusCode.ServiceUnavailable);
+            using var host = ResilienceTestHost.Create(ResiliencePipelines.Default, handler);
+            using var request = new HttpRequestMessage(method, Url);
+
+            using var response = await host.Client.SendAsync(request, TestContext.Current.CancellationToken);
+
+            response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+            handler.Calls.ShouldBe(1, method.Method);
+        }
+    }
+
+    [Fact]
+    public async Task A_POST_is_retried_when_RetryUnsafeMethods_is_set()
+    {
+        var handler = ScriptedHttpMessageHandler.Always(HttpStatusCode.ServiceUnavailable);
+        using var host = ResilienceTestHost.Create(
+            ResiliencePipelines.Default,
+            handler,
+            new Dictionary<string, string?> { ["Resilience:Pipelines:external-default:RetryUnsafeMethods"] = "true" });
+        using var content = new StringContent("{}");
+
+        using var response = await host.RunAsync(host.Client.PostAsync(Url, content, TestContext.Current.CancellationToken), OneSecond);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+        handler.Calls.ShouldBe(4);
+    }
+
+    [Fact]
+    public async Task The_breaker_still_counts_the_failures_of_a_POST()
+    {
+        var handler = ScriptedHttpMessageHandler.Always(HttpStatusCode.ServiceUnavailable);
+        using var host = ResilienceTestHost.Create(ResiliencePipelines.Default, handler);
+
+        for (var call = 0; call < 10; call++)
+        {
+            using var content = new StringContent("{}");
+            using var response = await host.Client.PostAsync(Url, content, TestContext.Current.CancellationToken);
+            response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+        }
+
+        handler.Calls.ShouldBe(10);
+        using var next = new StringContent("{}");
+        await Should.ThrowAsync<BrokenCircuitException>(() => host.Client.PostAsync(Url, next, TestContext.Current.CancellationToken));
+        handler.Calls.ShouldBe(10);
+    }
+
+    [Fact]
+    public async Task An_invalid_pipeline_value_stops_the_host_on_start_naming_the_key()
+    {
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Resilience:Pipelines:external-default:AttemptTimeout"] = "00:01:00",
+        });
+        builder.Services.AddExternalHttpClient("fake", ResiliencePipelines.Default);
+        using var host = builder.Build();
+
+        var exception = await Should.ThrowAsync<OptionsValidationException>(() => host.StartAsync(TestContext.Current.CancellationToken));
+
+        exception.Message.ShouldContain("Resilience:Pipelines:external-default:AttemptTimeout");
     }
 
     [Theory]
@@ -109,7 +177,7 @@ public sealed class ResiliencePipelineTests
         call.IsCompleted.ShouldBeFalse();
 
         host.Time.Advance(TimeSpan.FromSeconds(0.2));
-        await Should.ThrowAsync<TimeoutRejectedException>(() => call);
+        await Should.ThrowAsync<TimeoutRejectedException>(() => call.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken));
         handler.Calls.ShouldBe(1);
     }
 
@@ -127,7 +195,7 @@ public sealed class ResiliencePipelineTests
         call.IsCompleted.ShouldBeFalse();
 
         await host.AdvanceAsync(TimeSpan.FromSeconds(2), OneSecond);
-        await Should.ThrowAsync<TimeoutRejectedException>(() => call);
+        await Should.ThrowAsync<TimeoutRejectedException>(() => call.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken));
         handler.Calls.ShouldBeLessThanOrEqualTo(3);
         handler.Calls.ShouldBeGreaterThan(1);
     }
@@ -266,7 +334,7 @@ public sealed class ResiliencePipelineTests
 
     [Theory]
     [InlineData(ResiliencePipelines.Default, 3, 10, 30)]
-    [InlineData(ResiliencePipelines.Critical, 5, 10, 30)]
+    [InlineData(ResiliencePipelines.Critical, 5, 10, 90)]
     [InlineData(ResiliencePipelines.Hibp, 1, 1, 2)]
     public void Each_named_pipeline_has_its_defaults_and_the_breaker_defaults(string pipeline, int retries, int attemptSeconds, int totalSeconds)
     {
@@ -278,6 +346,7 @@ public sealed class ResiliencePipelineTests
         options.AttemptTimeout.ShouldBe(TimeSpan.FromSeconds(attemptSeconds));
         options.TotalTimeout.ShouldBe(TimeSpan.FromSeconds(totalSeconds));
         options.Breaker.FailureRatio.ShouldBe(0.5);
+        options.RetryUnsafeMethods.ShouldBeFalse();
         options.Breaker.MinimumThroughput.ShouldBe(10);
         options.Breaker.SamplingDuration.ShouldBe(TimeSpan.FromSeconds(30));
         options.Breaker.BreakDuration.ShouldBe(TimeSpan.FromSeconds(30));

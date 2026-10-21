@@ -66,7 +66,7 @@ public sealed class HibpResilienceTests
         handler.Calls.ShouldBe(10);
         logger.Entries.Clear();
 
-        var breached = await checker.IsBreachedAsync(Password, TestContext.Current.CancellationToken);
+        var breached = await host.RunAsync(checker.IsBreachedAsync(Password, TestContext.Current.CancellationToken), TimeSpan.FromMilliseconds(100));
 
         breached.ShouldBeFalse();
         handler.Calls.ShouldBe(10);
@@ -112,7 +112,7 @@ public sealed class HibpResilienceTests
         await ResilienceTestHost.WaitForCallsAsync(handler, 1);
         await cancellation.CancelAsync();
 
-        await Should.ThrowAsync<OperationCanceledException>(() => check);
+        await Should.ThrowAsync<OperationCanceledException>(() => check.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken));
     }
 
     private static ResilienceTestHost HostFor(ScriptedHttpMessageHandler handler) =>

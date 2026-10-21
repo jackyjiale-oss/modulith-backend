@@ -138,7 +138,7 @@ An outbound HTTP call fails in ways a request of ours never should: a server tha
 A call goes through four strategies, outermost first:
 
 1. **Total timeout** (`TotalTimeout`): everything below, the delays between attempts included, ends when it runs out.
-2. **Retry** (`Retries`, `BaseDelay`): exponential backoff with jitter; none is added when `Retries` is 0. A `Retry-After` header on a retried answer is honoured (the total timeout still bounds it).
+2. **Retry** (`Retries`, `BaseDelay`): exponential backoff with jitter; none is added when `Retries` is 0. Only a safe method is retried: a POST, PUT, PATCH, DELETE or CONNECT is sent once, whatever the answer, unless the pipeline sets `RetryUnsafeMethods` (below). A `Retry-After` header on a retried answer is honoured (the total timeout still bounds it).
 3. **Circuit breaker** (`Breaker:*`): it opens when `FailureRatio` of the attempts in the last `SamplingDuration` failed and there were at least `MinimumThroughput` of them. While open it rejects calls at once, without reaching the server, for `BreakDuration`; then it lets one call through (half-open) and closes again if that call succeeds. It counts attempts, not calls, so a call with 3 retries adds up to 4.
 4. **Attempt timeout** (`AttemptTimeout`): one attempt that runs longer is cancelled and counts as a failure (and is retried).
 
@@ -150,16 +150,19 @@ A call goes through four strategies, outermost first:
 
 | Key | `external-default` | `external-critical` | `hibp` | Validation (on start) |
 |---|---|---|---|---|
-| `TotalTimeout` | `00:00:30` | `00:00:30` | `00:00:02` | above zero |
+| `TotalTimeout` | `00:00:30` | `00:01:30` | `00:00:02` | above zero |
 | `AttemptTimeout` | `00:00:10` | `00:00:10` | `00:00:01` | above zero, not above `TotalTimeout` |
 | `Retries` | `3` | `5` | `1` | 0 to 10 |
 | `BaseDelay` | `00:00:02` | `00:00:02` | `00:00:00.2` | above zero |
+| `RetryUnsafeMethods` | `false` | `false` | `false` | a boolean |
 | `Breaker:FailureRatio` | `0.5` | `0.5` | `0.5` | above 0, at most 1 |
 | `Breaker:MinimumThroughput` | `10` | `10` | `10` | at least 2 (Polly's minimum) |
 | `Breaker:SamplingDuration` | `00:00:30` | `00:00:30` | `00:00:30` | at least `00:00:00.5` |
 | `Breaker:BreakDuration` | `00:00:30` | `00:00:30` | `00:00:30` | at least `00:00:00.5` |
 
-A pipeline name that is not built in starts from the `external-default` values. The delays are jittered: the five delays of `external-critical` add up to between about 23 s and 46 s, so with the default `TotalTimeout` of 30 s the last retries are often cut short by the total. Raise `TotalTimeout` (and keep `AttemptTimeout` within it) when you raise `Retries`.
+A pipeline name that is not built in starts from the `external-default` values. The delays are jittered: the five delays of `external-critical` add up to between about 23 s and 46 s, which is why its total is 90 s. A pipeline of your own that raises `Retries` must raise `TotalTimeout` with it (and keep `AttemptTimeout` within it), or the total cuts the last retries short.
+
+**Unsafe methods are not retried.** A POST, PUT, PATCH, DELETE or CONNECT is sent once on every pipeline, even when the answer is a 503 or the connection drops, because a blind repeat can do the work twice (a second SMS, a second charge). The breaker still counts their failures. Set `Resilience:Pipelines:{pipeline}:RetryUnsafeMethods` to `true` only for a pipeline whose endpoints are idempotent or carry an idempotency key the provider honours.
 
 **Time.** The strategies measure time with the registered `TimeProvider`, so a test drives a timeout, a delay or the break with a `FakeTimeProvider`. The client has no `HttpClient.Timeout` of its own (`Timeout.InfiniteTimeSpan`): the total timeout is the limit.
 
@@ -193,7 +196,7 @@ services.AddExternalHttpClient("email-api", ResiliencePipelines.Critical);
 A name that is not built in needs no further code: it starts from the `external-default` values and reads only the keys you set. Two clients on one pipeline name share its settings but each has its own breaker, so a provider that is down does not open the circuit of another. Then:
 
 - Catch `ExecutionRejectedException` where a failure must degrade the feature instead of failing the request.
-- Do not retry what is not safe to repeat. A POST that is not idempotent (a charge, a message) must carry an idempotency key the provider honours, or the pipeline must have `Retries = 0`.
+- A provider is called with POST, which the pipeline does not retry. Set `RetryUnsafeMethods` for it only when the call carries an idempotency key the provider honours.
 - Add a test like `HibpResilienceTests` (the real caller over the pipeline, a scripted handler and a `FakeTimeProvider`) for a timeout and an open breaker.
 - Document the keys in [`docs/services/api.md`](../services/api.md#resilience) and the behaviour in the module's own document.
 
@@ -253,4 +256,4 @@ catch (DbUpdateException exception) when (Inbox<ReportingDbContext>.IsDuplicate(
 
 ## Tests
 
-Unit: `tests/TemplateName.UnitTests/Infrastructure/` (UTC converter, retry policy, migrations, concurrency handler, idempotency options, secret protector including its purpose). Unit: `Application/InProcessIntegrationEventPublisherTests` (a scope and one instance per handler, a handler that cannot be created, failures collected, cancellation, scanning registers each handler once). Integration (SQL Server in Testcontainers): `Persistence/PersistenceTests`, `Outbox/OutboxTests` (including concurrent dispatchers and lost leases), `Outbox/OutboxMessageContextTests`, `Inbox/InboxTests` (including two concurrent records of one event and the 400-character consumer limit) and `Idempotency/IdempotencyTests`. The cleanup jobs have `Outbox/OutboxCleanupJobTests`, `Inbox/InboxCleanupJobTests` and `Idempotency/IdempotencyCleanupJobTests`: the cutoff to the second (a row exactly at the retention stays), retention off, a backlog drained over runs, a session that defaults to `NOCOUNT ON`, the scheduler running the job, and the execution plan of the job's own statement (`SqlExecutionPlan`, `SET SHOWPLAN_XML ON`) using its index. The retention rules, including the inbox window against `Outbox:MaxAttempts`, are in unit `Jobs/RetentionOptionsTests` and `OutboxRetryPolicyTests`. The resilience pipelines are in unit `Http/ResiliencePipelineTests` (a scripted `HttpMessageHandler` and a `FakeTimeProvider`: the retry counts, the retried and the final statuses, the attempt and total timeouts, the breaker opening, failing fast and half-opening, one breaker per client, the defaults, the configuration override and the validators); the `hibp` pipeline under the real checker is in `Auth/HibpResilienceTests`.
+Unit: `tests/TemplateName.UnitTests/Infrastructure/` (UTC converter, retry policy, migrations, concurrency handler, idempotency options, secret protector including its purpose). Unit: `Application/InProcessIntegrationEventPublisherTests` (a scope and one instance per handler, a handler that cannot be created, failures collected, cancellation, scanning registers each handler once). Integration (SQL Server in Testcontainers): `Persistence/PersistenceTests`, `Outbox/OutboxTests` (including concurrent dispatchers and lost leases), `Outbox/OutboxMessageContextTests`, `Inbox/InboxTests` (including two concurrent records of one event and the 400-character consumer limit) and `Idempotency/IdempotencyTests`. The cleanup jobs have `Outbox/OutboxCleanupJobTests`, `Inbox/InboxCleanupJobTests` and `Idempotency/IdempotencyCleanupJobTests`: the cutoff to the second (a row exactly at the retention stays), retention off, a backlog drained over runs, a session that defaults to `NOCOUNT ON`, the scheduler running the job, and the execution plan of the job's own statement (`SqlExecutionPlan`, `SET SHOWPLAN_XML ON`) using its index. The retention rules, including the inbox window against `Outbox:MaxAttempts`, are in unit `Jobs/RetentionOptionsTests` and `OutboxRetryPolicyTests`. The resilience pipelines are in unit `Http/ResiliencePipelineTests` (a scripted `HttpMessageHandler` and a `FakeTimeProvider`: the retry counts, the retried and the final statuses, unsafe methods not retried unless `RetryUnsafeMethods`, the attempt and total timeouts, the breaker opening, failing fast and half-opening, one breaker per client, the defaults, the configuration override, the validators and the start-up validation); the `hibp` pipeline under the real checker is in `Auth/HibpResilienceTests`.

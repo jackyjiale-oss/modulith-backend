@@ -116,20 +116,21 @@ The recurring-job scheduler ([infrastructure-common](../building-blocks/infrastr
 
 ### `Resilience`
 
-The pipelines of outbound HTTP clients registered with `AddExternalHttpClient` (ADR 0029; behaviour, the failure predicate and how to add a pipeline: [infrastructure-common](../building-blocks/infrastructure-common.md#http-resilience)). Each pipeline has its own section, `Resilience:Pipelines:{pipeline}`, validated on start (a pipeline no client uses is not checked). The built-in pipelines are `external-default`, `external-critical` (the default with 5 retries) and `hibp` (the Auth breached-password lookup); any other name starts from the `external-default` values. A key you leave out keeps the default of its pipeline.
+The pipelines of outbound HTTP clients registered with `AddExternalHttpClient` (ADR 0029; behaviour, the failure predicate and how to add a pipeline: [infrastructure-common](../building-blocks/infrastructure-common.md#http-resilience)). Each pipeline has its own section, `Resilience:Pipelines:{pipeline}`, validated on start (a pipeline no client uses is not checked). The built-in pipelines are `external-default`, `external-critical` (the default with 5 retries and a 90 s total) and `hibp` (the Auth breached-password lookup); any other name starts from the `external-default` values. A key you leave out keeps the default of its pipeline.
 
 | Key | Default (`external-default`; `external-critical`; `hibp`) | Validation | Meaning |
 |---|---|---|---|
-| `TotalTimeout` | `00:00:30`; `00:00:30`; `00:00:02` | above zero | The most time one call may take in all: every attempt and the delays between them. |
+| `TotalTimeout` | `00:00:30`; `00:01:30`; `00:00:02` | above zero | The most time one call may take in all: every attempt and the delays between them. |
 | `AttemptTimeout` | `00:00:10`; `00:00:10`; `00:00:01` | above zero, not above `TotalTimeout` | The most time one attempt may take; a slower one is cancelled, counts as a failure and is retried. |
-| `Retries` | `3`; `5`; `1` | 0 to 10 | Repeats after the first attempt of a call that failed with a 5xx, 408 or 429 status, a network error or an attempt timeout; 0 turns retrying off. Any other 4xx is never retried. |
+| `Retries` | `3`; `5`; `1` | 0 to 10 | Repeats after the first attempt of a call that failed with a 5xx, 408 or 429 status, a network error or an attempt timeout; 0 turns retrying off. Any other 4xx is never retried, and an unsafe method only with `RetryUnsafeMethods`. |
 | `BaseDelay` | `00:00:02`; `00:00:02`; `00:00:00.2` | above zero | The first retry delay; later ones grow exponentially, with jitter. |
+| `RetryUnsafeMethods` | `false` | a boolean | Retries a POST, PUT, PATCH, DELETE or CONNECT too. Off: such a request is sent once, whatever the answer (a blind repeat can send twice); set it only for endpoints that are idempotent or carry an idempotency key. The breaker counts their failures either way. |
 | `Breaker:FailureRatio` | `0.5` | above 0, at most 1 | The share of failed attempts in `Breaker:SamplingDuration` at which the circuit breaker opens. |
 | `Breaker:MinimumThroughput` | `10` | at least 2 | The fewest attempts in the sampling window before the ratio counts. |
 | `Breaker:SamplingDuration` | `00:00:30` | at least `00:00:00.5` | The window the ratio is measured over. |
 | `Breaker:BreakDuration` | `00:00:30` | at least `00:00:00.5` | How long an open breaker rejects calls (without a request) before one probe call is let through. |
 
-For example `Resilience__Pipelines__hibp__Retries=0` (the pipeline name is part of the key; a name with a hyphen, as `external-default`, works as an environment variable name in a container but not in every shell). A raised `Retries` needs a `TotalTimeout` that holds the delays: the five delays of `external-critical` add up to between about 23 s and 46 s, more than the default total. Total and attempt timeout, retries and the breaker apply per client; two clients on one pipeline name share the settings, not the breaker.
+For example `Resilience__Pipelines__hibp__Retries=0` (the pipeline name is part of the key; a name with a hyphen, as `external-default`, works as an environment variable name in a container but not in every shell). A raised `Retries` needs a `TotalTimeout` that holds the delays: the five delays of `external-critical` add up to between about 23 s and 46 s, which is why its total is 90 s. Total and attempt timeout, retries and the breaker apply per client; two clients on one pipeline name share the settings, not the breaker.
 
 ### `Cors`
 

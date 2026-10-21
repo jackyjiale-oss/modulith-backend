@@ -19,7 +19,9 @@ internal sealed class ResilienceOptionsSetup(IConfiguration configuration) : ICo
         switch (name)
         {
             case ResiliencePipelines.Critical:
+                // Five jittered retries wait 23 s to 46 s in all, so the total must be well above that.
                 options.Retries = 5;
+                options.TotalTimeout = TimeSpan.FromSeconds(90);
                 break;
 
             case ResiliencePipelines.Hibp:

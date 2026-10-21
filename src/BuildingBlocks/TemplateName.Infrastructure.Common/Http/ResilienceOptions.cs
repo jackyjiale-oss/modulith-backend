@@ -19,6 +19,9 @@ internal sealed class ResilienceOptions
     /// <summary>How many times a failed call is repeated after the first attempt; 0 turns retrying off.</summary>
     public int Retries { get; set; } = 3;
 
+    /// <summary>Retries a POST, PUT, PATCH, DELETE or CONNECT as well; off by default because a blind repeat can do the work twice.</summary>
+    public bool RetryUnsafeMethods { get; set; }
+
     /// <summary>The first retry delay; later delays grow exponentially, with jitter.</summary>
     public TimeSpan BaseDelay { get; set; } = TimeSpan.FromSeconds(2);
 
