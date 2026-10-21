@@ -15,6 +15,9 @@ public static class PlatformRedisServiceCollectionExtensions
     /// <summary>The name of the readiness check, tagged <c>ready</c>.</summary>
     internal const string HealthCheckName = "redis";
 
+    /// <summary>The StackExchange.Redis default heartbeat; a shorter <c>CommandTimeout</c> shortens it.</summary>
+    private static readonly TimeSpan MaximumHeartbeatInterval = TimeSpan.FromSeconds(1);
+
     /// <summary>
     /// Makes Redis the shared second level of <c>HybridCache</c> when <c>Caching:Provider</c> is <c>redis</c>; does nothing otherwise
     /// (ADR 0027). It registers the <c>Caching:Redis</c> options and <c>ConnectionStrings:Redis</c> (both validated on start), one
@@ -46,6 +49,9 @@ public static class PlatformRedisServiceCollectionExtensions
         services.AddOptions<RedisConnectionStringOptions>()
             .Bind(configuration.GetSection(RedisConnectionStringOptions.SectionName))
             .ValidateDataAnnotations()
+            .Validate(
+                connection => string.IsNullOrEmpty(connection.Redis) || IsValidConnectionString(connection.Redis),
+                "ConnectionStrings:Redis is not a valid Redis configuration string (for example localhost:6379).")
             .ValidateOnStart();
 
         services.TryAddSingleton<RedisAvailability>();
@@ -68,9 +74,11 @@ public static class PlatformRedisServiceCollectionExtensions
     }
 
     /// <summary>
-    /// The connection settings: <paramref name="connectionString"/> with <c>abortConnect=false</c> and every timeout set to
-    /// <see cref="RedisCachingOptions.CommandTimeout"/>, whatever the string says, so a Redis that does not answer costs a request at
-    /// most that long (and, once the circuit opens, nothing).
+    /// The connection settings: <paramref name="connectionString"/> with, whatever the string says, <c>abortConnect=false</c>, the
+    /// connect, sync and async timeouts set to <see cref="RedisCachingOptions.CommandTimeout"/>, a heartbeat no longer than that
+    /// timeout (StackExchange.Redis checks for timed-out commands on each heartbeat, by default once a second), and the backlog policy
+    /// <see cref="BacklogPolicy.FailFast"/>: while the connection is down a command fails at once instead of waiting in a queue for the
+    /// reconnect. The callers bound every call by <see cref="RedisCachingOptions.CommandTimeout"/> on top of this.
     /// </summary>
     internal static ConfigurationOptions CreateConfiguration(string connectionString, RedisCachingOptions options)
     {
@@ -82,7 +90,21 @@ public static class PlatformRedisServiceCollectionExtensions
         configuration.ConnectTimeout = timeout;
         configuration.SyncTimeout = timeout;
         configuration.AsyncTimeout = timeout;
+        configuration.BacklogPolicy = BacklogPolicy.FailFast;
+        configuration.HeartbeatInterval = TimeSpan.FromMilliseconds(Math.Min(timeout, MaximumHeartbeatInterval.TotalMilliseconds));
         return configuration;
+    }
+
+    private static bool IsValidConnectionString(string connectionString)
+    {
+        try
+        {
+            return ConfigurationOptions.Parse(connectionString).EndPoints.Count > 0;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -95,7 +117,9 @@ public static class PlatformRedisServiceCollectionExtensions
 
         services.Replace(ServiceDescriptor.Singleton<IDistributedCache>(provider => new ResilientDistributedCache(
             (IDistributedCache)CreateInstance(provider, redis),
-            provider.GetRequiredService<RedisAvailability>())));
+            provider.GetRequiredService<RedisAvailability>(),
+            provider.GetRequiredService<TimeProvider>(),
+            provider.GetRequiredService<IOptions<RedisCachingOptions>>())));
     }
 
     private static object CreateInstance(IServiceProvider provider, ServiceDescriptor descriptor)

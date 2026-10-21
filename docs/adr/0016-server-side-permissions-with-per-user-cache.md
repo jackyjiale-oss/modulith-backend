@@ -25,5 +25,5 @@ We chose option 3.
 
 ## Consequences
 - Positive: permission changes apply within seconds, not token lifetimes; tokens stay small and free of authorization data; one cache entry per active user keeps the load on SQL Server low.
-- Negative / trade-offs accepted: up to 30 seconds of staleness on other instances until Redis is added; a cache miss costs one query; the cache is one more piece of state to reason about.
+- Negative / trade-offs accepted: up to 30 seconds of staleness on other instances, with or without Redis (ADR 0027); a cache miss costs one query; the cache is one more piece of state to reason about.
 - Follow-up actions: switch the `HybridCache` backing store to Redis in Plan 5 and test cross-instance invalidation then. (Done in ADR 0027: the test pins the 30-second window; pub/sub invalidation of the local copies is post-v1.)

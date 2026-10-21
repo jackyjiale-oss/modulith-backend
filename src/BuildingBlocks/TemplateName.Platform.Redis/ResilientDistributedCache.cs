@@ -1,15 +1,25 @@
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Options;
 
 namespace TemplateName.Platform.Redis;
 
 /// <summary>
 /// The Redis second level of <c>HybridCache</c>, made safe to lose (spec 3.3): every call goes through <see cref="RedisAvailability"/>.
 /// A failing call never reaches the caller: a read answers a miss (so the value is loaded from its source), and a write, refresh or
-/// remove is dropped. While the circuit is open the inner cache is not called at all. Only the caller's own cancellation propagates
-/// (an <see cref="OperationCanceledException"/> for a cancelled <c>cancellationToken</c>), and it is not counted as a Redis failure.
+/// remove is dropped. An asynchronous call that has not finished after <see cref="RedisCachingOptions.CommandTimeout"/> (measured with
+/// the application's <see cref="TimeProvider"/>) is given up and counts as a failure, so a Redis that hangs costs a request at most that
+/// long. While the circuit is open the inner cache is not called at all, and after the break only its one probe call is. Only the
+/// caller's own cancellation propagates (an <see cref="OperationCanceledException"/> for a cancelled <c>cancellationToken</c>), and it is
+/// not counted as a Redis failure. The synchronous methods rely on the connection's own timeouts (nothing in the template calls them).
 /// </summary>
-internal sealed class ResilientDistributedCache(IDistributedCache inner, RedisAvailability availability) : IDistributedCache, IDisposable
+internal sealed class ResilientDistributedCache(
+    IDistributedCache inner,
+    RedisAvailability availability,
+    TimeProvider timeProvider,
+    IOptions<RedisCachingOptions> options) : IDistributedCache, IDisposable
 {
+    private readonly TimeSpan _commandTimeout = options.Value.CommandTimeout;
+
     public byte[]? Get(string key) => Run(() => inner.Get(key));
 
     public Task<byte[]?> GetAsync(string key, CancellationToken cancellationToken = default)
@@ -42,12 +52,16 @@ internal sealed class ResilientDistributedCache(IDistributedCache inner, RedisAv
     public Task RemoveAsync(string key, CancellationToken cancellationToken = default)
         => RunAsync(() => inner.RemoveAsync(key, cancellationToken), cancellationToken);
 
-    /// <summary>The inner cache is created by this decorator's factory, so the container does not dispose it; the decorator does.</summary>
+    /// <summary>
+    /// The inner cache is created by this decorator's factory, so the container does not dispose it; the decorator does.
+    /// <c>RedisCache</c> does not close a connection it got from <c>ConnectionMultiplexerFactory</c>, so the connection the readiness
+    /// check and the other Redis users share stays open until the container disposes it.
+    /// </summary>
     public void Dispose() => (inner as IDisposable)?.Dispose();
 
     private T? Run<T>(Func<T> call)
     {
-        if (!availability.IsAvailable)
+        if (!availability.TryBeginCall())
         {
             return default;
         }
@@ -67,18 +81,23 @@ internal sealed class ResilientDistributedCache(IDistributedCache inner, RedisAv
 
     private async Task<byte[]?> RunAsync(Func<Task<byte[]?>> call, CancellationToken cancellationToken)
     {
-        if (!availability.IsAvailable)
+        if (!availability.TryBeginCall())
         {
             return null;
         }
 
         try
         {
-            var result = await call();
+            var result = await call().WaitAsync(_commandTimeout, timeProvider, cancellationToken);
             availability.RecordSuccess();
             return result;
         }
-        catch (Exception exception) when (!IsCancellationOf(exception, cancellationToken))
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            availability.AbandonCall();
+            throw;
+        }
+        catch (Exception exception)
         {
             availability.RecordFailure(exception);
             return null;
@@ -87,22 +106,24 @@ internal sealed class ResilientDistributedCache(IDistributedCache inner, RedisAv
 
     private async Task RunAsync(Func<Task> call, CancellationToken cancellationToken)
     {
-        if (!availability.IsAvailable)
+        if (!availability.TryBeginCall())
         {
             return;
         }
 
         try
         {
-            await call();
+            await call().WaitAsync(_commandTimeout, timeProvider, cancellationToken);
             availability.RecordSuccess();
         }
-        catch (Exception exception) when (!IsCancellationOf(exception, cancellationToken))
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            availability.AbandonCall();
+            throw;
+        }
+        catch (Exception exception)
         {
             availability.RecordFailure(exception);
         }
     }
-
-    private static bool IsCancellationOf(Exception exception, CancellationToken cancellationToken)
-        => exception is OperationCanceledException && cancellationToken.IsCancellationRequested;
 }

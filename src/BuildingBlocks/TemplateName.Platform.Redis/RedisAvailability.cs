@@ -4,12 +4,13 @@ using Microsoft.Extensions.Options;
 namespace TemplateName.Platform.Redis;
 
 /// <summary>
-/// The circuit breaker every Redis caller of this instance shares (one singleton): callers record each Redis call's outcome, and after
-/// <see cref="RedisCachingOptions.FailureThreshold"/> consecutive failures <see cref="IsAvailable"/> is false for
-/// <see cref="RedisCachingOptions.BreakDuration"/>, so callers skip Redis (a cache read is a miss) instead of waiting for its timeout on
-/// every request. When the break is over, calls go to Redis again: a success closes the circuit, a failure opens it for another break.
-/// One warning is logged per outage window (from the circuit opening until the next success) and one information line when Redis
-/// answers again. Time is the application's <see cref="TimeProvider"/>. Thread-safe.
+/// The circuit breaker every Redis caller of this instance shares (one singleton). Callers ask <see cref="TryBeginCall"/> before a Redis
+/// call and record its outcome. After <see cref="RedisCachingOptions.FailureThreshold"/> consecutive failures the circuit is open for
+/// <see cref="RedisCachingOptions.BreakDuration"/>: callers skip Redis (a cache read is a miss) instead of waiting for it on every request.
+/// When the break is over the circuit is half-open: exactly one call (the probe) goes to Redis while every other caller still skips it;
+/// the probe's success closes the circuit, its failure opens it for another break. One warning is logged per outage window (from the
+/// circuit opening until the next success) and one information line when Redis answers again. Time is the application's
+/// <see cref="TimeProvider"/>. Thread-safe.
 /// </summary>
 public sealed partial class RedisAvailability(TimeProvider timeProvider, IOptions<RedisCachingOptions> options, ILogger<RedisAvailability> logger)
 {
@@ -18,15 +19,31 @@ public sealed partial class RedisAvailability(TimeProvider timeProvider, IOption
     private int _consecutiveFailures;
     private DateTimeOffset? _openUntil;
     private bool _isInOutage;
+    private bool _probeInFlight;
 
-    /// <summary>False while the circuit is open: skip Redis. True when it is closed or its break is over.</summary>
+    /// <summary>
+    /// True when the circuit is closed, or its break is over and no probe is running (the next call may go to Redis). A read only: it
+    /// does not claim the probe.
+    /// </summary>
     public bool IsAvailable
     {
         get
         {
             lock (_lock)
             {
-                return _openUntil is not { } openUntil || timeProvider.GetUtcNow() >= openUntil;
+                return _openUntil is not { } openUntil || (timeProvider.GetUtcNow() >= openUntil && !_probeInFlight);
+            }
+        }
+    }
+
+    /// <summary>True while the circuit is open and its break is not over: nobody calls Redis now, not even a probe.</summary>
+    internal bool IsInBreak
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _openUntil is { } openUntil && timeProvider.GetUtcNow() < openUntil;
             }
         }
     }
@@ -41,6 +58,7 @@ public sealed partial class RedisAvailability(TimeProvider timeProvider, IOption
             _consecutiveFailures = 0;
             _openUntil = null;
             _isInOutage = false;
+            _probeInFlight = false;
         }
 
         if (outageEnded)
@@ -61,6 +79,7 @@ public sealed partial class RedisAvailability(TimeProvider timeProvider, IOption
         int failures;
         lock (_lock)
         {
+            _probeInFlight = false;
             failures = ++_consecutiveFailures;
             if (failures < _options.FailureThreshold)
             {
@@ -75,6 +94,39 @@ public sealed partial class RedisAvailability(TimeProvider timeProvider, IOption
         if (outageStarted)
         {
             LogUnavailable(logger, failures, _options.BreakDuration, exception);
+        }
+    }
+
+    /// <summary>
+    /// Whether the caller may call Redis now: always while the circuit is closed, never during a break, and after the break for the one
+    /// caller that becomes the probe. A caller that gets true reports with <see cref="RecordSuccess"/>, <see cref="RecordFailure"/> or,
+    /// when it gave up without an outcome (its own cancellation), <see cref="AbandonCall"/>.
+    /// </summary>
+    internal bool TryBeginCall()
+    {
+        lock (_lock)
+        {
+            if (_openUntil is not { } openUntil)
+            {
+                return true;
+            }
+
+            if (timeProvider.GetUtcNow() < openUntil || _probeInFlight)
+            {
+                return false;
+            }
+
+            _probeInFlight = true;
+            return true;
+        }
+    }
+
+    /// <summary>Ends a call that has no outcome (cancelled by its own caller): a probe it held is free for the next caller.</summary>
+    internal void AbandonCall()
+    {
+        lock (_lock)
+        {
+            _probeInFlight = false;
         }
     }
 

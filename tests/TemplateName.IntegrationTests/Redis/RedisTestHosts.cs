@@ -19,11 +19,27 @@ internal static class RedisTestHosts
     /// <summary>
     /// Another host of the factory (same SQL database, same clock) with <c>Caching:Provider = redis</c> on <paramref name="valkey"/>.
     /// Each call is a separate instance with its own local cache and its own Redis connection, as two API instances would be.
+    /// <paramref name="settings"/> are further host settings.
     /// </summary>
-    internal static WebApplicationFactory<Program> Create(IntegrationTestWebAppFactory factory, ValkeyFixture valkey)
-        => factory.WithWebHostBuilder(builder => builder
-            .UseSetting("Caching:Provider", "redis")
-            .UseSetting("ConnectionStrings:Redis", valkey.ConnectionString));
+    internal static WebApplicationFactory<Program> Create(
+        IntegrationTestWebAppFactory factory,
+        ValkeyFixture valkey,
+        params (string Key, string Value)[] settings)
+        => factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Caching:Provider", "redis").UseSetting("ConnectionStrings:Redis", valkey.ConnectionString);
+            foreach (var (key, value) in settings)
+            {
+                builder.UseSetting(key, value);
+            }
+        });
+
+    /// <summary>Waits, in real time, until the host's Redis connection has noticed that Valkey is gone.</summary>
+    internal static Task WaitUntilDisconnectedAsync(WebApplicationFactory<Program> host, CancellationToken cancellationToken)
+    {
+        var multiplexer = host.Services.GetRequiredService<IConnectionMultiplexer>();
+        return EventuallyAsync(() => Task.FromResult(!multiplexer.IsConnected), "the host's Redis connection to drop", cancellationToken);
+    }
 
     /// <summary>The Redis key under which <paramref name="host"/> keeps the permission set of <paramref name="userId"/>.</summary>
     internal static RedisKey PermissionKey(WebApplicationFactory<Program> host, Guid userId)

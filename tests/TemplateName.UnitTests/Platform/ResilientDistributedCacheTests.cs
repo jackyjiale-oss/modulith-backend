@@ -17,6 +17,7 @@ public sealed class ResilientDistributedCacheTests
     private static readonly byte[] Value = [9, 9, 9];
     private static readonly DistributedCacheEntryOptions EntryOptions = new() { AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(30) };
     private static readonly TimeSpan BreakDuration = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan CommandTimeout = TimeSpan.FromMilliseconds(500);
 
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     private readonly ScriptedDistributedCache _inner = new();
@@ -131,10 +132,89 @@ public sealed class ResilientDistributedCacheTests
         availability.IsAvailable.ShouldBeTrue();
     }
 
+    [Fact]
+    public async Task After_the_break_only_one_probe_reaches_the_inner_cache_until_it_reports()
+    {
+        var (cache, availability) = CreateCache();
+        await FailThreeTimesAsync(cache);
+        _time.Advance(BreakDuration);
+        _inner.Fails = false;
+        _inner.Hang = true;
+
+        // The first call after the break is the probe and waits on Redis; a second, concurrent call is a miss without calling it.
+        var probe = cache.GetAsync(Key, Ct);
+        (await cache.GetAsync(Key, Ct)).ShouldBeNull();
+        await cache.SetAsync(Key, Value, EntryOptions, Ct);
+        _inner.Calls.ShouldBe(4);
+        availability.IsAvailable.ShouldBeFalse();
+        probe.IsCompleted.ShouldBeFalse();
+
+        // The probe gives up after the command timeout and opens the circuit for another break.
+        _time.Advance(CommandTimeout);
+        (await probe).ShouldBeNull();
+        availability.IsAvailable.ShouldBeFalse();
+        _inner.Calls.ShouldBe(4);
+    }
+
+    [Fact]
+    public async Task A_successful_probe_closes_the_circuit_for_every_caller()
+    {
+        var (cache, availability) = CreateCache();
+        await FailThreeTimesAsync(cache);
+        _time.Advance(BreakDuration);
+        _inner.Fails = false;
+
+        (await cache.GetAsync(Key, Ct)).ShouldBe(ScriptedDistributedCache.StoredValue);
+        await Task.WhenAll(cache.GetAsync(Key, Ct), cache.RefreshAsync(Key, Ct), cache.RemoveAsync(Key, Ct));
+
+        _inner.Calls.ShouldBe(7);
+        availability.IsAvailable.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_call_that_hangs_is_given_up_after_the_command_timeout_as_a_failure()
+    {
+        var (cache, availability) = CreateCache(new RedisCachingOptions { FailureThreshold = 1 });
+        _inner.Hang = true;
+
+        var read = cache.GetAsync(Key, Ct);
+        _time.Advance(CommandTimeout - TimeSpan.FromMilliseconds(1));
+        read.IsCompleted.ShouldBeFalse();
+
+        _time.Advance(TimeSpan.FromMilliseconds(1));
+        (await read).ShouldBeNull();
+        availability.IsAvailable.ShouldBeFalse();
+
+        var write = cache.SetAsync(Key, Value, EntryOptions, Ct);
+        await write;
+        _inner.Calls.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_probe_cancelled_by_its_caller_frees_the_probe_for_the_next_call()
+    {
+        var (cache, availability) = CreateCache();
+        await FailThreeTimesAsync(cache);
+        _time.Advance(BreakDuration);
+        _inner.Hang = true;
+        using var cancellation = new CancellationTokenSource();
+
+        var probe = cache.GetAsync(Key, cancellation.Token);
+        await cancellation.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(() => probe);
+        availability.IsAvailable.ShouldBeTrue();
+        _inner.Hang = false;
+        _inner.Fails = false;
+        (await cache.GetAsync(Key, Ct)).ShouldBe(ScriptedDistributedCache.StoredValue);
+        _inner.Calls.ShouldBe(5);
+    }
+
     private (ResilientDistributedCache Cache, RedisAvailability Availability) CreateCache(RedisCachingOptions? options = null)
     {
-        var availability = new RedisAvailability(_time, Options.Create(options ?? new RedisCachingOptions()), new RecordingLogger<RedisAvailability>());
-        return (new ResilientDistributedCache(_inner, availability), availability);
+        var settings = Options.Create(options ?? new RedisCachingOptions());
+        var availability = new RedisAvailability(_time, settings, new RecordingLogger<RedisAvailability>());
+        return (new ResilientDistributedCache(_inner, availability, _time, settings), availability);
     }
 
     private async Task FailThreeTimesAsync(ResilientDistributedCache cache)

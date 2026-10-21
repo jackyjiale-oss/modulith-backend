@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 using StackExchange.Redis;
 using TemplateName.Infrastructure.Common;
 using TemplateName.Infrastructure.Common.Caching;
@@ -96,6 +97,60 @@ public sealed class CachingProviderTests
         connection.ConnectTimeout.ShouldBe(500);
         connection.SyncTimeout.ShouldBe(500);
         connection.AsyncTimeout.ShouldBe(500);
+        connection.HeartbeatInterval.ShouldBe(TimeSpan.FromMilliseconds(500));
+        connection.BacklogPolicy.ShouldBeSameAs(BacklogPolicy.FailFast);
+    }
+
+    [Fact]
+    public void The_heartbeat_is_never_longer_than_one_second_nor_than_the_command_timeout()
+    {
+        var slow = PlatformRedisServiceCollectionExtensions.CreateConfiguration(
+            "localhost:6379",
+            new RedisCachingOptions { CommandTimeout = TimeSpan.FromSeconds(5) });
+        var fast = PlatformRedisServiceCollectionExtensions.CreateConfiguration(
+            "localhost:6379",
+            new RedisCachingOptions { CommandTimeout = TimeSpan.FromMilliseconds(100) });
+
+        slow.HeartbeatInterval.ShouldBe(TimeSpan.FromSeconds(1));
+        fast.HeartbeatInterval.ShouldBe(TimeSpan.FromMilliseconds(100));
+    }
+
+    [Theory]
+    [InlineData("localhost:6379,notAnOption=1")]
+    [InlineData(",abortConnect=false")]
+    public void A_malformed_connection_string_fails_on_start(string connectionString)
+    {
+        using var services = BuildServices(new() { ["Caching:Provider"] = "redis", ["ConnectionStrings:Redis"] = connectionString });
+
+        var failure = Should.Throw<OptionsValidationException>(() => services.GetRequiredService<IStartupValidator>().Validate());
+
+        failure.Message.ShouldContain("ConnectionStrings:Redis is not a valid Redis configuration string");
+    }
+
+    [Fact]
+    public async Task Disposing_the_cache_does_not_close_the_shared_connection()
+    {
+        // The readiness check (and later the limiter and the backplane) share the connection the cache got from its factory.
+        var connection = Substitute.For<IConnectionMultiplexer>();
+        var configuration = Configuration(new()
+        {
+            ["Caching:Provider"] = "redis",
+            ["ConnectionStrings:Redis"] = "localhost:6379",
+            ["ConnectionStrings:Database"] = "Server=.;Database=Tests",
+        });
+        var collection = new ServiceCollection().AddLogging().AddInfrastructureCommon(configuration);
+        collection.AddSingleton(connection);
+        collection.AddPlatformRedis(configuration);
+        using var services = collection.BuildServiceProvider();
+        var cache = services.GetRequiredService<IDistributedCache>();
+        await cache.GetAsync("auth:perm:any", TestContext.Current.CancellationToken);
+
+        ((IDisposable)cache).Dispose();
+
+        connection.Received().GetDatabase(Arg.Any<int>(), Arg.Any<object?>());
+        connection.DidNotReceive().Dispose();
+        connection.DidNotReceive().Close(Arg.Any<bool>());
+        await connection.DidNotReceive().CloseAsync(Arg.Any<bool>());
     }
 
     [Theory]

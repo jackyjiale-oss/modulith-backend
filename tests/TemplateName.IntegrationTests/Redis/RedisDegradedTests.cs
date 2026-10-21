@@ -1,4 +1,7 @@
+using System.Diagnostics;
 using System.Net;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using TemplateName.IntegrationTests.Infrastructure;
 using TemplateName.Modules.Auth.Application;
@@ -18,6 +21,10 @@ public sealed class RedisDegradedTests(IntegrationTestWebAppFactory factory, Val
 
     private static readonly TimeSpan LocalLifetime = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan BreakDuration = TimeSpan.FromSeconds(30);
+
+    // Three calls each waited at least the 500 ms command timeout before the fix (a queued command, then the timeout checked on a
+    // one-second heartbeat): 1.5 s at the very least. With Valkey refusing connections they now fail at once.
+    private static readonly TimeSpan ThreeCallsCeiling = TimeSpan.FromSeconds(1.2);
 
     public override async ValueTask InitializeAsync()
     {
@@ -80,6 +87,92 @@ public sealed class RedisDegradedTests(IntegrationTestWebAppFactory factory, Val
         finally
         {
             await valkey.StartAsync(Ct);
+        }
+    }
+
+    [Fact]
+    public async Task Valkey_stopped_readiness_and_cache_reads_do_not_wait_for_Redis()
+    {
+        // A threshold the test never reaches keeps the circuit closed, so every call really goes to the stopped Valkey.
+        await using var host = RedisTestHosts.Create(Factory, valkey, ("Caching:Redis:FailureThreshold", "100"));
+        using var client = host.CreateClient();
+        var cache = host.Services.GetRequiredService<IDistributedCache>();
+        using (var healthy = await client.GetAsync("/health/ready", Ct))
+        {
+            (await healthy.Content.ReadAsStringAsync(Ct)).ShouldBe("Healthy");
+        }
+
+        await valkey.StopAsync(Ct);
+        try
+        {
+            await RedisTestHosts.WaitUntilDisconnectedAsync(host, Ct);
+
+            var reads = Stopwatch.StartNew();
+            for (var read = 0; read < 3; read++)
+            {
+                (await cache.GetAsync($"auth:perm:{Guid.NewGuid():D}", Ct)).ShouldBeNull();
+            }
+
+            reads.Stop();
+
+            var checks = Stopwatch.StartNew();
+            for (var check = 0; check < 3; check++)
+            {
+                using var response = await client.GetAsync("/health/ready", Ct);
+                response.StatusCode.ShouldBe(HttpStatusCode.OK);
+                (await response.Content.ReadAsStringAsync(Ct)).ShouldBe("Degraded");
+            }
+
+            checks.Stop();
+
+            reads.Elapsed.ShouldBeLessThan(ThreeCallsCeiling);
+            checks.Elapsed.ShouldBeLessThan(ThreeCallsCeiling);
+        }
+        finally
+        {
+            await valkey.StartAsync(Ct);
+        }
+    }
+
+    [Fact]
+    public async Task Valkey_down_at_start_the_cache_works_from_the_database_then_through_Redis_once_it_is_back()
+    {
+        var users = new List<Guid>();
+        for (var index = 0; index < 3; index++)
+        {
+            users.Add((await AuthTestHarness.SignInAsync(Factory.Services, [AuthPermissions.RoleView], AuthTestHarness.DefaultLocale, Ct)).UserId);
+        }
+
+        await valkey.StopAsync(Ct);
+        WebApplicationFactory<Program>? hostA = null;
+        try
+        {
+            // The host starts with Redis down and checks permissions from the database.
+            hostA = RedisTestHosts.Create(Factory, valkey);
+            var (checkerA, readsA) = PermissionCheckers.Recording(hostA.Services);
+            (await checkerA.HasPermissionAsync(users[0], AuthPermissions.RoleView, Ct)).ShouldBeTrue();
+            (await checkerA.HasPermissionAsync(users[1], AuthPermissions.RoleView, Ct)).ShouldBeTrue();
+            readsA.OpenedCount.ShouldBe(2);
+        }
+        finally
+        {
+            await valkey.StartAsync(Ct);
+        }
+
+        await using (hostA)
+        {
+            await RedisTestHosts.WaitUntilConnectedAsync(hostA, Ct);
+            Factory.Time.Advance(BreakDuration);
+            var (checkerA, _) = PermissionCheckers.Recording(hostA.Services);
+
+            (await checkerA.HasPermissionAsync(users[2], AuthPermissions.RoleView, Ct)).ShouldBeTrue();
+            await RedisTestHosts.EventuallyAsync(() => RedisTestHosts.HoldsPermissionsOfAsync(hostA, users[2]), "the set in Redis", Ct);
+
+            // Through Redis: another instance gets the set without reading the database.
+            await using var hostB = RedisTestHosts.Create(Factory, valkey);
+            var (checkerB, readsB) = PermissionCheckers.Recording(hostB.Services);
+            (await checkerB.HasPermissionAsync(users[2], AuthPermissions.RoleView, Ct)).ShouldBeTrue();
+            readsB.OpenedCount.ShouldBe(0);
         }
     }
 

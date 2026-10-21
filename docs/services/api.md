@@ -60,8 +60,7 @@ Sections are bound lazily through `IOptions<T>` and, where marked, validated on 
 | Key | Default | Validation | Meaning |
 |---|---|---|---|
 | `Database` | empty in `appsettings.json` | required, on start: the host does not start without it | SQL Server connection string for every module context and the Dapper connection factory. Supply it with user secrets (`dotnet user-secrets set "ConnectionStrings:Database" "…" --project src/Host/TemplateName.Api`) or the environment (`ConnectionStrings__Database`). |
-
-| `Redis` | empty in `appsettings.json` | required, on start, only when `Caching:Provider` is `redis` | The Redis server, a StackExchange.Redis configuration string (`localhost:6379` for the compose `valkey` service). A password belongs in user secrets or the environment (`ConnectionStrings__Redis`). `abortConnect` and the timeouts are set from `Caching:Redis` whatever the string says ([`Caching`](#caching)). |
+| `Redis` | empty in `appsettings.json` | required and must parse with at least one server, on start, only when `Caching:Provider` is `redis` | The Redis server, a StackExchange.Redis configuration string (`localhost:6379` for the compose `valkey` service). A password belongs in user secrets or the environment (`ConnectionStrings__Redis`). `abortConnect` and the timeouts are set from `Caching:Redis` whatever the string says ([`Caching`](#caching)). |
 
 A module context can name another entry (`AddModuleDbContext<T>(schema, connectionStringName: "…")`); none does today. Contexts read the string when they are created, never in `Program.cs`, so `WebApplicationFactory` overrides apply.
 
@@ -112,7 +111,7 @@ Where `HybridCache` keeps its entries (ADR 0027; [infrastructure-common](../buil
 | `Redis:InstanceName` | `TemplateName:` | required (provider `redis`) | The prefix of every Redis key: `{InstanceName}{module}:{entity}:{id}`. |
 | `Redis:FailureThreshold` | `3` | 1 to 100 (provider `redis`) | Consecutive failed Redis calls after which Redis is skipped for `BreakDuration`. |
 | `Redis:BreakDuration` | `00:00:30` | `00:00:01` to `01:00:00` (provider `redis`) | How long Redis is skipped (reads miss to the database, writes are dropped) once the threshold is reached; then it is tried again. |
-| `Redis:CommandTimeout` | `00:00:00.500` | `00:00:00.050` to `00:00:30` (provider `redis`) | The connect, sync and async timeouts: the most a request waits for a Redis that does not answer. |
+| `Redis:CommandTimeout` | `00:00:00.500` | `00:00:00.050` to `00:00:30` (provider `redis`) | The connect, sync and async timeouts, and the bound on every asynchronous cache call and readiness `PING`: the most a request or a check waits for a Redis that does not answer. While the connection is down commands fail at once (`FailFast`), and the heartbeat that detects timed-out commands is shortened to this value (at most one second). |
 
 With Redis down the API keeps serving: cache reads go to the database, one warning is logged per outage and `/health/ready` answers 200 `Degraded`. An instance keeps a permission set in memory for 30 seconds, and a change made through another instance is not pushed to it, so a removed permission can still be used on another instance for up to 30 seconds, with or without Redis ([platform-redis](../building-blocks/platform-redis.md#cross-instance-invalidation-the-honest-limit)).
 

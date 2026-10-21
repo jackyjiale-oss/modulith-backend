@@ -6,7 +6,8 @@ namespace TemplateName.UnitTests.Platform;
 /// <summary>
 /// The inner cache of <c>ResilientDistributedCache</c> in the tests: it counts every call and, while <see cref="Fails"/> is set, fails
 /// each one the way an unreachable Redis does (a <see cref="RedisConnectionException"/>; a faulted task for the asynchronous methods).
-/// While it works, every read finds <see cref="StoredValue"/>.
+/// While it works, every read finds <see cref="StoredValue"/>. While <see cref="Hang"/> is set, every asynchronous call is counted and
+/// then never finishes on its own (until the caller's token is cancelled), like a Redis that stopped answering.
 /// </summary>
 internal sealed class ScriptedDistributedCache : IDistributedCache
 {
@@ -15,6 +16,8 @@ internal sealed class ScriptedDistributedCache : IDistributedCache
     public static byte[] StoredValue { get; } = [1, 2, 3];
 
     public bool Fails { get; set; } = true;
+
+    public bool Hang { get; set; }
 
     public int Calls => Volatile.Read(ref _calls);
 
@@ -45,7 +48,18 @@ internal sealed class ScriptedDistributedCache : IDistributedCache
     {
         cancellationToken.ThrowIfCancellationRequested();
         Interlocked.Increment(ref _calls);
+        if (Hang)
+        {
+            return HangAsync<T>(cancellationToken);
+        }
+
         return Fails ? Task.FromException<T>(Failure()) : Task.FromResult(result);
+    }
+
+    private static async Task<T> HangAsync<T>(CancellationToken cancellationToken)
+    {
+        await Task.Delay(Timeout.Infinite, cancellationToken);
+        throw new InvalidOperationException("Unreachable: the delay never ends on its own.");
     }
 
     private static RedisConnectionException Failure()
