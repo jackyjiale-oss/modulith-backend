@@ -10,6 +10,7 @@ using TemplateName.Modules.Auth.Application;
 using TemplateName.Modules.Auth.Application.Mfa;
 using TemplateName.Modules.Auth.Contracts.IntegrationEvents;
 using TemplateName.Modules.Auth.Domain.Mfa;
+using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Sessions.Events;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Domain.Users.Events;
@@ -327,6 +328,23 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
         var phone = await SignInOnDeviceAsync("Phone", address: "198.51.100.77");
         await SignInOnDeviceAsync("Phone");
         await SignInOnDeviceAsync("Laptop");
+        await DispatchNotificationsAsync();
+
+        var message = await OutboxMessageAsync<NewDeviceSignedInDomainEvent>();
+        Factory.IntegrationEvents.Events.OfType<NewDeviceSignedInIntegrationEvent>().ShouldHaveSingleItem()
+            .ShouldBe(new NewDeviceSignedInIntegrationEvent(message.Id, OccurredAt(message), user.Id, phone.SessionId, "198.51.100.77"));
+    }
+
+    [Fact]
+    public async Task A_dormant_account_whose_sessions_were_cleaned_up_still_publishes_new_device()
+    {
+        var user = await CreateUserAsync(Email);
+        await SignInOnDeviceAsync("Laptop");
+
+        // As AuthSessionsCleanup leaves a dormant account: it signed in before, but none of its sessions is stored any more.
+        await QueryAsync(context => context.Set<UserSession>().Where(session => session.UserId == user.Id).ExecuteDeleteAsync(Ct));
+
+        var phone = await SignInOnDeviceAsync("Phone", address: "198.51.100.77");
         await DispatchNotificationsAsync();
 
         var message = await OutboxMessageAsync<NewDeviceSignedInDomainEvent>();

@@ -43,7 +43,7 @@ internal sealed class SessionRepository(AuthDbContext context) : ISessionReposit
 
         return counts switch
         {
-            null => DeviceFamiliarity.FirstSignIn,
+            null => DeviceFamiliarity.NoStoredSession,
             { Matching: > 0 } => DeviceFamiliarity.Known,
             _ => DeviceFamiliarity.New,
         };
