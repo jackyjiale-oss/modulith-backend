@@ -34,5 +34,6 @@ We chose option 3 (decision D4), our own fixed-window limiter (D5) and Valkey in
 - **A stale permission set for up to 30 s on other instances** after a change, as before Redis, now documented next to the setting.
 - **Our own limiter to maintain**, and while Redis is down every instance limits on its own, so the effective limit is `instances × limit` until Redis returns.
 - **The circuit is per instance.** Each instance learns separately that Redis is down; until its own circuit opens, a request can wait up to the command timeout once per Redis call while Redis hangs (a refused connection fails at once).
+- **The SignalR backplane is not ours, so it is not on the circuit.** It gets the shared connection through its `ConnectionFactory` (wrapped so its `Dispose` cannot close it) and is bounded by the connection's own timeouts only. While Redis is down every live push fails (the pusher logs it; the delivery and the inbox row are unaffected) and new hub connections are closed after the handshake; when Redis is back pushes cross instances again without a restart.
 - **Valkey, not Redis, in development.** A feature only Redis has (none used today) would not work locally; swapping the image line is the way back.
 - Follow-up actions: pub/sub invalidation of the first level (post-v1).

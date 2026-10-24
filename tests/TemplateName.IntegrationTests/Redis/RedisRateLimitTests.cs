@@ -1,10 +1,12 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using StackExchange.Redis;
 using TemplateName.IntegrationTests.Infrastructure;
+using TemplateName.Web.Common.Security;
 
 namespace TemplateName.IntegrationTests.Redis;
 
@@ -100,6 +102,53 @@ public sealed class RedisRateLimitTests(IntegrationTestWebAppFactory factory, Va
         timeToLive.ShouldBeGreaterThan(TimeSpan.Zero);
         timeToLive.ShouldBeLessThanOrEqualTo(Window);
         (await CountAsync(host, $"global:ip:{Address}")).ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task A_zero_permit_request_neither_creates_nor_extends_a_window()
+    {
+        // Asking for no permit asks whether any is left. INCRBY by 0 would create a missing key, and the next real request would then
+        // see a count equal to its permits and restart the window's expiry.
+        const string Partition = "ip:203.0.113.11";
+        await using var host = await CreateHostAsync();
+        using var limiter = host.Services.GetRequiredService<IFixedWindowLimiterFactory>().Create("global", Partition, permitLimit: 2, Window);
+        var database = Database(host);
+        var key = Key($"global:{Partition}");
+
+        using (var lease = await limiter.AcquireAsync(0, Ct))
+        {
+            lease.IsAcquired.ShouldBeTrue();
+        }
+
+        (await database.KeyExistsAsync(key)).ShouldBeFalse();
+
+        // An existing window: no permit neither counts nor touches its expiry.
+        using (await limiter.AcquireAsync(1, Ct))
+        {
+        }
+
+        await database.KeyExpireAsync(key, TimeSpan.FromSeconds(20));
+        using (var lease = await limiter.AcquireAsync(0, Ct))
+        {
+            lease.IsAcquired.ShouldBeTrue();
+        }
+
+        (await CountAsync(host, $"global:{Partition}")).ShouldBe(1);
+        (await database.KeyTimeToLiveAsync(key)).ShouldNotBeNull().ShouldBeLessThanOrEqualTo(TimeSpan.FromSeconds(20));
+
+        // An exhausted window: no permit is refused, with Retry-After.
+        using (await limiter.AcquireAsync(1, Ct))
+        {
+        }
+
+        using (var refused = await limiter.AcquireAsync(0, Ct))
+        {
+            refused.IsAcquired.ShouldBeFalse();
+            refused.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter).ShouldBeTrue();
+            retryAfter.ShouldBeGreaterThanOrEqualTo(TimeSpan.FromSeconds(1));
+        }
+
+        (await CountAsync(host, $"global:{Partition}")).ShouldBe(2);
     }
 
     [Fact]

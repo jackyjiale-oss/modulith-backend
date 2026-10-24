@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.SignalR.StackExchangeRedis;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.StackExchangeRedis;
 using Microsoft.Extensions.Configuration;
@@ -16,6 +17,9 @@ public static class PlatformRedisServiceCollectionExtensions
     /// <summary>The name of the readiness check, tagged <c>ready</c>.</summary>
     internal const string HealthCheckName = "redis";
 
+    /// <summary>What follows <c>InstanceName</c> in the prefix of every pub/sub channel: <c>{InstanceName}signalr</c>.</summary>
+    private const string SignalRChannelPrefix = "signalr";
+
     /// <summary>The StackExchange.Redis default heartbeat; a shorter <c>CommandTimeout</c> shortens it.</summary>
     private static readonly TimeSpan MaximumHeartbeatInterval = TimeSpan.FromSeconds(1);
 
@@ -28,7 +32,9 @@ public static class PlatformRedisServiceCollectionExtensions
     /// <c>Caching:Redis:InstanceName</c> and wrapped by a decorator that never lets a Redis failure reach the caller,
     /// <see cref="RedisFixedWindowLimiterFactory"/> in place of the in-memory <see cref="IFixedWindowLimiterFactory"/> (so the
     /// <c>global</c>, <c>auth-strict</c> and <c>notifications-hub-tickets</c> windows are shared by every instance, and counted in memory
-    /// while Redis is down), and the readiness check <c>redis</c> (a <c>PING</c>; failure status <see cref="HealthStatus.Degraded"/>, tag
+    /// while Redis is down), SignalR's Redis backplane on the same connection (channels prefixed <c>{InstanceName}signalr</c>, so a push
+    /// made on one instance reaches the connections on every instance; see <see cref="AddSignalRBackplane"/>), and the readiness check
+    /// <c>redis</c> (a <c>PING</c>; failure status <see cref="HealthStatus.Degraded"/>, tag
     /// <c>ready</c>). Call it after <c>AddInfrastructureCommon</c> (before or after <c>AddHttpSecurity</c>). Only the host references this
     /// project, so a solution without Redis deletes the project and this call.
     /// </summary>
@@ -77,6 +83,8 @@ public static class PlatformRedisServiceCollectionExtensions
         // Replace, not TryAdd: AddHttpSecurity may already have registered the in-memory default (it only adds one when none exists).
         services.Replace(ServiceDescriptor.Singleton<IFixedWindowLimiterFactory, RedisFixedWindowLimiterFactory>());
 
+        AddSignalRBackplane(services);
+
         services.AddHealthChecks().AddCheck<RedisHealthCheck>(HealthCheckName, HealthStatus.Degraded, ["ready"]);
 
         return services;
@@ -87,7 +95,9 @@ public static class PlatformRedisServiceCollectionExtensions
     /// connect, sync and async timeouts set to <see cref="RedisCachingOptions.CommandTimeout"/>, a heartbeat no longer than that
     /// timeout (StackExchange.Redis checks for timed-out commands on each heartbeat, by default once a second), and the backlog policy
     /// <see cref="BacklogPolicy.FailFast"/>: while the connection is down a command fails at once instead of waiting in a queue for the
-    /// reconnect. The callers bound every call by <see cref="RedisCachingOptions.CommandTimeout"/> on top of this.
+    /// reconnect. The callers bound every call by <see cref="RedisCachingOptions.CommandTimeout"/> on top of this (the SignalR backplane,
+    /// which is not ours, relies on the timeouts alone). The channel prefix is <c>{InstanceName}signalr</c>, whatever the string says:
+    /// StackExchange.Redis puts it in front of every pub/sub channel of the connection, and only the backplane uses pub/sub.
     /// </summary>
     internal static ConfigurationOptions CreateConfiguration(string connectionString, RedisCachingOptions options)
     {
@@ -101,7 +111,28 @@ public static class PlatformRedisServiceCollectionExtensions
         configuration.AsyncTimeout = timeout;
         configuration.BacklogPolicy = BacklogPolicy.FailFast;
         configuration.HeartbeatInterval = TimeSpan.FromMilliseconds(Math.Min(timeout, MaximumHeartbeatInterval.TotalMilliseconds));
+        configuration.ChannelPrefix = RedisChannel.Literal(options.InstanceName + SignalRChannelPrefix);
         return configuration;
+    }
+
+    /// <summary>
+    /// SignalR's Redis backplane (<c>AddSignalR().AddStackExchangeRedis()</c>; it replaces the in-memory <c>HubLifetimeManager</c>
+    /// whatever the order of the hub's own <c>AddSignalR</c>) on the instance's shared connection: its <see cref="RedisOptions.ConnectionFactory"/>
+    /// hands it that connection, as a <see cref="BorrowedConnection"/> (the lifetime manager disposes the connection it was given when
+    /// it is disposed), instead of letting it open one of its own. Its channels are prefixed by the connection's
+    /// <c>ChannelPrefix</c> (<see cref="CreateConfiguration"/>), which the backplane, the only user of pub/sub, cannot set itself when it
+    /// is handed a connection.
+    /// </summary>
+    private static void AddSignalRBackplane(IServiceCollection services)
+    {
+        services.AddSignalR().AddStackExchangeRedis();
+        services.AddOptions<RedisOptions>().Configure<IOptions<RedisConnectionStringOptions>, IOptions<RedisCachingOptions>, IServiceProvider>(
+            (backplane, connection, redis, provider) =>
+            {
+                // The same settings as the shared connection, so what the backplane logs and holds is true; the factory decides.
+                backplane.Configuration = CreateConfiguration(connection.Value.Redis, redis.Value);
+                backplane.ConnectionFactory = _ => Task.FromResult(BorrowedConnection.Lend(provider.GetRequiredService<IConnectionMultiplexer>()));
+            });
     }
 
     private static bool IsValidConnectionString(string connectionString)

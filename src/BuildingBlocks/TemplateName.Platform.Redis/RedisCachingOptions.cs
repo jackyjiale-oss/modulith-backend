@@ -12,7 +12,8 @@ public sealed class RedisCachingOptions
 
     /// <summary>
     /// The prefix of every key this application writes, so applications can share one server: a key is
-    /// <c>{InstanceName}{module}:{entity}:{id}</c>, for example <c>TemplateName:auth:perm:{userId}</c>.
+    /// <c>{InstanceName}{module}:{entity}:{id}</c>, for example <c>TemplateName:auth:perm:{userId}</c>. The SignalR backplane's channels
+    /// start with <c>{InstanceName}signalr</c>.
     /// </summary>
     [Required]
     public string InstanceName { get; set; } = "TemplateName:";

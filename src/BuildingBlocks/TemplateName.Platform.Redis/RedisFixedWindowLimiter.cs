@@ -8,7 +8,8 @@ namespace TemplateName.Platform.Redis;
 /// <see cref="RateLimiter.AcquireAsync(int, CancellationToken)"/> runs <see cref="Script"/> once on the key
 /// <c>{InstanceName}rl:{policy}:{partitionKey}</c>: the count goes up by the permits asked for (1 for an HTTP request), the key gets the
 /// window as its expiry when the count is new or when the key has none (so a key that lost its expiry is repaired), and the script
-/// answers the count and the key's remaining time in milliseconds. The request is allowed while the count is within the limit; a refusal
+/// answers the count and the key's remaining time in milliseconds (a request for no permit only reads them, never creating or extending
+/// a window). The request is allowed while the count is within the limit; a refusal
 /// carries <see cref="MetadataName.RetryAfter"/> of that remaining time, at least one second. Requests are never queued.
 /// <para>
 /// Redis is optional (spec section 4). Every call goes through the shared <see cref="RedisAvailability"/> circuit, exactly like the
@@ -35,10 +36,15 @@ internal sealed class RedisFixedWindowLimiter : RateLimiter
 {
     /// <summary>
     /// KEYS[1] is the key, ARGV[1] the permits asked for, ARGV[2] the window in milliseconds. <c>PTTL</c> is -1 for a key without an
-    /// expiry. Keys and values are always passed as arguments, never written into the script, so the script (and its cached hash) is the
-    /// same for every key, and no partition key (<c>ip:::1</c>, <c>user:{sub}</c>) can change what it does.
+    /// expiry (and -2 for a missing one). Asking for no permit only reads the count and the time to live: <c>INCRBY</c> by 0 would create
+    /// a missing key, and the next real request would then find a count equal to its permits and start the window again. Keys and values
+    /// are always passed as arguments, never written into the script, so the script (and its cached hash) is the same for every key, and
+    /// no partition key (<c>ip:::1</c>, <c>user:{sub}</c>) can change what it does.
     /// </summary>
     internal const string Script = """
+        if tonumber(ARGV[1]) == 0 then
+            return { tonumber(redis.call('GET', KEYS[1]) or '0'), redis.call('PTTL', KEYS[1]) }
+        end
         local count = redis.call('INCRBY', KEYS[1], ARGV[1])
         local ttl = redis.call('PTTL', KEYS[1])
         if count == tonumber(ARGV[1]) or ttl < 0 then
