@@ -13,8 +13,10 @@ using Respawn.Graph;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common.Inbox;
+using TemplateName.Infrastructure.Common.Jobs;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
+using TemplateName.IntegrationTests.Jobs;
 using TemplateName.IntegrationTests.Notifications;
 using TemplateName.IntegrationTests.Outbox;
 using TemplateName.IntegrationTests.Persistence;
@@ -88,6 +90,9 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     /// <summary>Parks the gate outbox test handler inside a message.</summary>
     public HandlerGate HandlerGate { get; } = new();
 
+    /// <summary>Counts and controls the runs of the <see cref="CountingJob"/> test job on every host built by this factory.</summary>
+    public CountingJobProbe CountingJobProbe { get; } = new();
+
     public async ValueTask InitializeAsync()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -146,6 +151,9 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             {
                 ["Outbox:Enabled"] = "false",
 
+                // Tests run recurring jobs through RecurringJobRunner.RunDueAsync with a job-name filter.
+                ["Jobs:Enabled"] = "false",
+
                 // Tests run the delivery worker by hand (DispatchNotificationsAsync, or the dispatcher itself).
                 ["Notifications:Delivery:Enabled"] = "false",
 
@@ -190,6 +198,9 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.AddSingleton(MessageContextRecorder);
             services.AddSingleton(FlakySwitch);
             services.AddSingleton(HandlerGate);
+            services.AddSingleton(CountingJobProbe);
+            services.AddRecurringJob<CountingJob>();
+            services.AddRecurringJob<ThrowingJob>();
             services.AddSingleton<IStartupFilter, ProtectedTestEndpointStartupFilter>();
             services.AddSingleton<IStartupFilter, TestClientAddressStartupFilter>();
         });

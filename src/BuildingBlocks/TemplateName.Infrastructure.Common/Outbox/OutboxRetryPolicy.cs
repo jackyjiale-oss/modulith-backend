@@ -24,7 +24,24 @@ public static class OutboxRetryPolicy
             return null;
         }
 
-        var delay = Delays[Math.Clamp(attemptCount, 1, Delays.Length) - 1];
-        return utcNow + delay;
+        return utcNow + DelayAfter(attemptCount);
     }
+
+    /// <summary>
+    /// How long a message is retried when it is tried up to <paramref name="maxAttempts"/> times: the sum of the delays after attempts 1 to
+    /// <paramref name="maxAttempts"/> - 1, so 755 s (about 12.6 min) for the default 5, and one more hour for each attempt after the fifth.
+    /// An inbox row must be kept longer than this (<c>Retention:Inbox</c>, ADR 0028).
+    /// </summary>
+    public static TimeSpan RetryWindow(int maxAttempts)
+    {
+        var window = TimeSpan.Zero;
+        for (var attemptCount = 1; attemptCount < maxAttempts; attemptCount++)
+        {
+            window += DelayAfter(attemptCount);
+        }
+
+        return window;
+    }
+
+    private static TimeSpan DelayAfter(int attemptCount) => Delays[Math.Clamp(attemptCount, 1, Delays.Length) - 1];
 }

@@ -12,7 +12,8 @@ namespace TemplateName.Modules.Auth.Application.Authentication;
 /// client's user agent and address with a first refresh token (only its hash is stored) and issues the access token, whose
 /// <c>auth_time</c> is <c>now</c> and whose <c>amr</c> is <c>authMethods</c>. It saves nothing and audits nothing: the caller adds its
 /// audit rows and saves everything at once, so a lost save keeps none of it. A sign-in that is not through a trusted device from a
-/// device none of the user's stored sessions used raises <c>NewDeviceSignedInDomainEvent</c> on the new session (D15).
+/// device none of the user's stored sessions used raises <c>NewDeviceSignedInDomainEvent</c> on the new session (D15), unless it is the
+/// account's first sign-in ever: no stored session and no earlier <c>LastLoginAt</c>.
 /// </summary>
 internal sealed class SessionStarter(
     ISessionRepository sessions,
@@ -41,6 +42,8 @@ internal sealed class SessionStarter(
     {
         ArgumentNullException.ThrowIfNull(user);
 
+        // Read before this sign-in is recorded: whether the account signed in before, whatever is left of its sessions.
+        var signedInBefore = user.LastLoginAt is not null;
         user.RecordSuccessfulSignIn(now);
 
         var refreshToken = tokens.Generate();
@@ -57,11 +60,16 @@ internal sealed class SessionStarter(
             refreshTokens.AbsoluteLifetime,
             now);
 
-        // Before the session is added, so it can never match itself. The stored (cut) values are the ones compared (D15).
-        if (!viaTrustedDevice
-            && await sessions.GetDeviceFamiliarityAsync(user.Id, session.DeviceName, session.UserAgent, cancellationToken) == DeviceFamiliarity.New)
+        // Before the session is added, so it can never match itself. The stored (cut) values are the ones compared (D15). No stored
+        // session is the account's first sign-in only when it never signed in before: the cleanup deletes every session of a dormant
+        // account, and its next sign-in, from whatever device, is still a new device.
+        if (!viaTrustedDevice)
         {
-            session.NoteNewDevice();
+            var familiarity = await sessions.GetDeviceFamiliarityAsync(user.Id, session.DeviceName, session.UserAgent, cancellationToken);
+            if (familiarity == DeviceFamiliarity.New || (familiarity == DeviceFamiliarity.NoStoredSession && signedInBefore))
+            {
+                session.NoteNewDevice();
+            }
         }
 
         sessions.Add(session);

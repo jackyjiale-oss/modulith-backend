@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Polly;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Application.Passwords;
 
@@ -10,7 +11,8 @@ namespace TemplateName.Modules.Auth.Infrastructure.Security;
 /// <summary>
 /// Checks a password against Have I Been Pwned with k-anonymity: only the first five characters of its SHA-1 leave the process,
 /// and the match is made here against the returned suffixes. The whole lookup (request, headers and body) has one time budget and
-/// the body one size cap; any failure, timeout or excess answers "not breached" and logs a warning.
+/// the body one size cap; any failure, timeout, excess or call refused by the <c>hibp</c> resilience pipeline (its breaker is open)
+/// answers "not breached" and logs a warning.
 /// </summary>
 internal sealed partial class HibpBreachedPasswordChecker : IBreachedPasswordChecker
 {
@@ -53,7 +55,7 @@ internal sealed partial class HibpBreachedPasswordChecker : IBreachedPasswordChe
         _maxBodyBytes = maxBodyBytes;
     }
 
-    /// <summary>The time the whole lookup may take, also the timeout of the named client.</summary>
+    /// <summary>The time the whole lookup may take; the total timeout of the <c>hibp</c> resilience pipeline is the same 2 s.</summary>
     internal static TimeSpan RequestBudget { get; } = TimeSpan.FromSeconds(2);
 
     public async Task<bool> IsBreachedAsync(string password, CancellationToken cancellationToken)
@@ -105,11 +107,12 @@ internal sealed partial class HibpBreachedPasswordChecker : IBreachedPasswordChe
 
             return false;
         }
-        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException or IOException
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException or IOException or ExecutionRejectedException
             && !cancellationToken.IsCancellationRequested)
         {
-            // The caller's own cancellation is not caught: only the budget running out or a transport error fails open. The
-            // exception text is not logged, so nothing about the request can reach the log.
+            // The caller's own cancellation is not caught: only the budget running out, a transport error or the pipeline refusing
+            // the call (an open breaker, or its own timeout) fails open. The exception text is not logged, so nothing about the
+            // request can reach the log.
             LogFailed(_logger, exception.GetType().Name);
             return false;
         }

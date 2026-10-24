@@ -33,12 +33,12 @@ public sealed class SessionStarterTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Theory]
-    [InlineData(nameof(DeviceFamiliarity.FirstSignIn), false, false)]
+    [InlineData(nameof(DeviceFamiliarity.NoStoredSession), false, false)]
     [InlineData(nameof(DeviceFamiliarity.Known), false, false)]
     [InlineData(nameof(DeviceFamiliarity.New), false, true)]
     [InlineData(nameof(DeviceFamiliarity.New), true, false)]
     [InlineData(nameof(DeviceFamiliarity.Known), true, false)]
-    [InlineData(nameof(DeviceFamiliarity.FirstSignIn), true, false)]
+    [InlineData(nameof(DeviceFamiliarity.NoStoredSession), true, false)]
     public async Task SessionStarter_notes_a_new_device_only_for_New_and_never_via_a_trusted_device(
         string familiarityName,
         bool viaTrustedDevice,
@@ -58,6 +58,32 @@ public sealed class SessionStarterTests
         {
             started.Session.DomainEvents.ShouldBeEmpty();
         }
+    }
+
+    [Fact]
+    public async Task A_user_who_signed_in_before_but_has_no_stored_session_left_is_on_a_new_device()
+    {
+        // As after AuthSessionsCleanup on a dormant account: an earlier sign-in, but every session of it deleted.
+        var user = GivenUser();
+        user.RecordSuccessfulSignIn(Now.AddDays(-200));
+        _sessions.GetDeviceFamiliarityAsync(user.Id, "Pixel 9", UserAgent, Ct).Returns(DeviceFamiliarity.NoStoredSession);
+
+        var started = await _sut.StartAsync(user, "pwd", "Pixel 9", viaTrustedDevice: false, Now, Ct);
+
+        started.Session.DomainEvents.ShouldHaveSingleItem()
+            .ShouldBe(new NewDeviceSignedInDomainEvent(user.Id, started.Session.Id, IpAddress));
+        user.LastLoginAt.ShouldBe(Now);
+    }
+
+    [Fact]
+    public async Task A_user_who_signed_in_before_through_a_trusted_device_with_no_stored_session_is_not_on_a_new_device()
+    {
+        var user = GivenUser();
+        user.RecordSuccessfulSignIn(Now.AddDays(-200));
+
+        var started = await _sut.StartAsync(user, "pwd", "Pixel 9", viaTrustedDevice: true, Now, Ct);
+
+        started.Session.DomainEvents.ShouldBeEmpty();
     }
 
     [Fact]

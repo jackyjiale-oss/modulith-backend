@@ -9,7 +9,7 @@ Order matters; `Program.cs` marks it with comments.
 | # | Call | Registers |
 |---|---|---|
 | 1 | `builder.AddObservability()` | Serilog, the request-activity listener, OpenTelemetry when `OTEL_EXPORTER_OTLP_ENDPOINT` is set ([web-common](../building-blocks/web-common.md#observability)) |
-| 2 | `AddInfrastructureCommon(configuration)` | `TimeProvider`, `ConnectionStrings`/`Database`/`Outbox`/`Idempotency` options, the Dapper connection factory, EF interceptors, the concurrency exception handler, the `platform` context ([infrastructure-common](../building-blocks/infrastructure-common.md)). Before `AddWebCommon`, so the concurrency handler runs before the global one. |
+| 2 | `AddInfrastructureCommon(configuration)` | `TimeProvider`, `ConnectionStrings`/`Database`/`Outbox`/`Idempotency`/`Retention`/`Jobs`/`Caching` options, the Dapper connection factory, EF interceptors, the concurrency exception handler, the `platform` context, the recurring-job scheduler ([infrastructure-common](../building-blocks/infrastructure-common.md)). Before `AddWebCommon`, so the concurrency handler runs before the global one. |
 | 3 | `AddWebCommon()` | ProblemDetails customization, the global exception handler, `ICurrentUser`, `ThrowOnBadRequest` ([web-common](../building-blocks/web-common.md)) |
 | 4 | `AddApiLocalization(configuration)` | The `Localization` options, request localization, FluentValidation translations |
 | 5 | `ConfigureHttpJsonOptions` | `JsonStringEnumConverter`: enums are strings in JSON (`"Pending"`) |
@@ -18,6 +18,7 @@ Order matters; `Program.cs` marks it with comments.
 | 8 | `AddHttpSecurity(configuration)` | CORS, the global rate limiter, the `auth-strict` rate-limit policy, forwarded headers |
 | 9 | `AddPermissionAuthorization()` | The permission authorization handler behind `RequirePermission(code)` and the **fallback policy**: every endpoint requires an authenticated user unless it says `.AllowAnonymous()` ([web-common](../building-blocks/web-common.md)). It needs the explicit `UseAuthentication` and `UseAuthorization` of the pipeline (slots 1a and 10): without them `WebApplication` adds `UseAuthorization` ahead of `UseRouting` by itself, where no endpoint is known and the fallback policy answers 401 to every request. |
 | 10 | `AddAuthModule(configuration)`, `AddNotificationsModule(configuration)`, `AddSampleModule()` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme (the default authentication scheme), the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)); the Notifications module also its delivery worker, SignalR, the `HubTicket` authentication scheme (not a default scheme: only the hub's policy uses it) and the rate-limit policy of its ticket route ([Notifications module](../modules/notifications.md)) |
+| 10a | `AddPlatformRedis(configuration)` | Nothing unless `Caching:Provider` is `redis`; then the Redis connection, Redis as the `HybridCache` second level behind a circuit, the rate-limit windows counted in Redis, the SignalR backplane, and the `ready` check `redis` ([platform-redis](../building-blocks/platform-redis.md)). Optional: a solution without Redis deletes this line and the project. |
 | 11 | `AddOptions<KestrelServerOptions>()…Bind("Kestrel")` | Binds the whole `Kestrel` section lazily, so `Kestrel:Limits:*` apply and test overrides work |
 | 12 | `AddApplicationDecorators()` | Validation and logging decorators around every handler registered above; always last |
 
@@ -59,6 +60,7 @@ Sections are bound lazily through `IOptions<T>` and, where marked, validated on 
 | Key | Default | Validation | Meaning |
 |---|---|---|---|
 | `Database` | empty in `appsettings.json` | required, on start: the host does not start without it | SQL Server connection string for every module context and the Dapper connection factory. Supply it with user secrets (`dotnet user-secrets set "ConnectionStrings:Database" "…" --project src/Host/TemplateName.Api`) or the environment (`ConnectionStrings__Database`). |
+| `Redis` | empty in `appsettings.json` | required and must parse with at least one server, on start, only when `Caching:Provider` is `redis` | The Redis server, a StackExchange.Redis configuration string (`localhost:6379` for the compose `valkey` service). A password belongs in user secrets or the environment (`ConnectionStrings__Redis`). `abortConnect` and the timeouts are set from `Caching:Redis` whatever the string says ([`Caching`](#caching)). |
 
 A module context can name another entry (`AddModuleDbContext<T>(schema, connectionStringName: "…")`); none does today. Contexts read the string when they are created, never in `Program.cs`, so `WebApplicationFactory` overrides apply.
 
@@ -77,7 +79,7 @@ Shared by every module's dispatcher (ADR 0007).
 | `Enabled` | `true` | — | Runs the background dispatchers. Integration tests set `false` and dispatch by hand. |
 | `PollingInterval` | `00:00:05` | `00:00:01` to `01:00:00` | Pause between polls once the due messages are drained. |
 | `BatchSize` | `20` | 1 to 500 | Most messages one dispatcher claims per batch; a full batch is followed at once by the next. |
-| `MaxAttempts` | `5` | 1 to 100 | Failed attempts after which a message is abandoned (kept unprocessed with its last error). |
+| `MaxAttempts` | `5` | 1 to 100 | Failed attempts after which a message is abandoned (kept unprocessed with its last error). Retries are due 5 s, 30 s, 2 min and 10 min after attempts 1 to 4 and 1 h after each later one, so the default retries for 12 min 35 s and each attempt above 5 adds an hour. `Retention:Inbox` must be longer than that span (checked with `Retention`, below). |
 | `LeaseDuration` | `00:01:00` | `00:00:10` to `1.00:00:00` | How long a claimed batch stays hidden from other dispatchers; keep it longer than the slowest batch. |
 
 ### `Idempotency`
@@ -87,7 +89,64 @@ Shared by every module's dispatcher (ADR 0007).
 | `TimeToLive` | `1.00:00:00` (one day) | `00:01:00` to `30.00:00:00` | How long a key and its stored response are kept; a reused expired key runs again. |
 | `InProgressTimeout` | `00:05:00` (five minutes) | `00:00:05` to `01:00:00`, and not longer than `TimeToLive` | How long a key stays leased to the request running with it. |
 
-The first request with a key holds it as a lease for `InProgressTimeout`; duplicates get 409 meanwhile. Storing the response replaces the lease with `TimeToLive`. If the request dies or its response cannot be stored, the next request with the key after the lease ends runs the endpoint again instead of getting 409 for the whole time to live, so keep `InProgressTimeout` longer than the slowest idempotent request: one that outlives its lease can run twice. Details: [infrastructure-common](../building-blocks/infrastructure-common.md#idempotency).
+The first request with a key holds it as a lease for `InProgressTimeout`; duplicates get 409 meanwhile. Storing the response replaces the lease with `TimeToLive`. If the request dies or its response cannot be stored, the next request with the key after the lease ends runs the endpoint again instead of getting 409 for the whole time to live, so keep `InProgressTimeout` longer than the slowest idempotent request: one that outlives its lease can run twice. Expired rows are deleted every hour by the job `IdempotencyKeysCleanup`, which has no retention setting: `Jobs:IdempotencyKeysCleanup:Enabled = false` turns it off. Details: [infrastructure-common](../building-blocks/infrastructure-common.md#idempotency).
+
+### `Retention`
+
+How long the building blocks keep what they own before a cleanup job deletes it (ADR 0028; the jobs are in [infrastructure-common](../building-blocks/infrastructure-common.md#cleanup-jobs)). A row goes only when strictly older than the retention. Set a retention to `00:00:00` (or empty) to turn that cleanup off; modules keep their own retentions in their own sections (`Auth:Retention` and `Notifications:Retention`, below).
+
+| Key | Default | Validation (on start) | Meaning |
+|---|---|---|---|
+| `BatchSize` | `1000` | 1 to 10000 | Most rows one delete statement removes; a run repeats it up to `Jobs:MaxBatchesPerRun` times. |
+| `Outbox` | `7.00:00:00` (7 days) | not negative | How long a published outbox message (and its consumer rows) is kept after `ProcessedAt`. Abandoned messages are never deleted. The job `{Context}OutboxCleanup` runs daily. |
+| `Inbox` | `7.00:00:00` (7 days) | not negative; zero or at least `1.00:00:00`; and longer than the outbox's retry span for `Outbox:MaxAttempts` (12 min 35 s by default, just under a day at 28 attempts (23 h 12 min 35 s) and more than a day from 29; a longer `MaxAttempts` needs a longer `Inbox`) | How long an inbox row is kept after `ProcessedAt`, so it outlasts outbox redelivery and a late retry never runs a consumer twice. The job `{Context}InboxCleanup` (today `NotificationsInboxCleanup`) runs daily. |
+
+### `Caching`
+
+Where `HybridCache` keeps its entries (ADR 0027; [infrastructure-common](../building-blocks/infrastructure-common.md#caching), [platform-redis](../building-blocks/platform-redis.md)). The only entry today is the Auth module's permission set (`auth:perm:{userId}`, 30 seconds).
+
+| Key | Default | Validation (on start) | Meaning |
+|---|---|---|---|
+| `Provider` | `memory` | `memory`, `redis` or `none` (any case); `redis` also needs `AddPlatformRedis` in the host and `ConnectionStrings:Redis` | `memory`: in memory per instance. `redis`: in memory per instance with Redis as the shared second level, so a set one instance loaded is served to the others. `none`: no cache at all, every read goes to the database (for diagnosing). |
+| `Redis:InstanceName` | `TemplateName:` | required (provider `redis`) | The prefix of every Redis key (`{InstanceName}{module}:{entity}:{id}`, the rate-limit windows `{InstanceName}rl:…`) and of the SignalR channels (`{InstanceName}signalr…`), so applications can share one server. **Unique per deployment** sharing a Redis, for example `MyApp:prod:` and `MyApp:staging:`, because deployments that share a server with the same prefix share rate-limit counts, SignalR channels (pushes) and cached permission sets; staging and production sharing one Redis with the default would count each other's requests and, when staging's database is a restored copy of production (the same user ids), serve each other's permission sets and pushes. |
+| `Redis:FailureThreshold` | `3` | 1 to 100 (provider `redis`) | Consecutive failed Redis calls after which Redis is skipped for `BreakDuration`. |
+| `Redis:BreakDuration` | `00:00:30` | `00:00:01` to `01:00:00` (provider `redis`) | How long Redis is skipped (reads miss to the database, writes are dropped) once the threshold is reached; then it is tried again. |
+| `Redis:CommandTimeout` | `00:00:00.500` | `00:00:00.050` to `00:00:30`, and shorter than `BreakDuration` (provider `redis`) | The connect, sync and async timeouts, and the bound on every asynchronous cache call and readiness `PING`: the most a request or a check waits for a Redis that does not answer. While the connection is down commands fail at once (`FailFast`), and the heartbeat that detects timed-out commands is shortened to this value (at most one second). |
+
+With Redis down the API keeps serving: cache reads go to the database, one warning is logged per outage and `/health/ready` answers 200 `Degraded`. One warning per outage is the circuit's own log only: the health-check service (`Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService`) also logs every check that ends `Degraded` at Warning (and `Unhealthy` at Error), with the check's exception, so a readiness probe every few seconds writes a Warning each time for the whole outage (checked against the installed 10.0 framework). To keep only the circuit's line, set `Serilog:MinimumLevel:Override:Microsoft.Extensions.Diagnostics.HealthChecks` to `Error` (`Serilog__MinimumLevel__Override__Microsoft.Extensions.Diagnostics.HealthChecks=Error` in the environment); an `Unhealthy` check, such as the database's, still logs. An instance keeps a permission set in memory for 30 seconds, and a change made through another instance is not pushed to it, so a removed permission can still be used on another instance for up to 30 seconds, with or without Redis ([platform-redis](../building-blocks/platform-redis.md#cross-instance-invalidation-the-honest-limit)).
+
+### `Jobs`
+
+The recurring-job scheduler ([infrastructure-common](../building-blocks/infrastructure-common.md#recurring-jobs)).
+
+| Key | Default | Validation | Meaning |
+|---|---|---|---|
+| `Enabled` | `true` | — | Runs the scheduler's background service. Integration tests set `false` and run jobs through `RecurringJobRunner.RunDueAsync`. |
+| `TickInterval` | `00:00:30` | `00:00:05` to `01:00:00`, on start | How often the scheduler looks for due jobs. |
+| `LeaseDuration` | `00:15:00` | `00:01:00` to `1.00:00:00`, on start | How long a claimed run keeps other instances off its job; a run still going at the end is cancelled and recorded `Failed`. |
+| `MaxBatchesPerRun` | `100` | 1 to 10000, on start | Most batches a batched job (a cleanup) runs in one run. |
+| `{JobName}:Enabled` | `true` | — | `false` stops that job on this instance. |
+| `{JobName}:Interval` | the job's own default | `00:00:01` to `365.00:00:00`, on start (even with `Enabled` false) | Time from the end of one run to the next. |
+
+`{JobName}` is the job's name (PascalCase, no dots), for example `Jobs__AuthRefreshTokensCleanup__Interval=12:00:00`. An invalid or unreadable value for a registered job stops the host at start with a message naming `Jobs:{JobName}`; a section that names no registered job is ignored. The scheduler's SQL reads job names with `OPENJSON`, so the database needs SQL Server compatibility level 130 or later.
+
+### `Resilience`
+
+The pipelines of outbound HTTP clients registered with `AddExternalHttpClient` (ADR 0029; behaviour, the failure predicate and how to add a pipeline: [infrastructure-common](../building-blocks/infrastructure-common.md#http-resilience)). Each pipeline has its own section, `Resilience:Pipelines:{pipeline}`, validated on start (a pipeline no client uses is not checked). The built-in pipelines are `external-default`, `external-critical` (the default with 5 retries and a 90 s total) and `hibp` (the Auth breached-password lookup); any other name starts from the `external-default` values. A key you leave out keeps the default of its pipeline.
+
+| Key | Default (`external-default`; `external-critical`; `hibp`) | Validation | Meaning |
+|---|---|---|---|
+| `TotalTimeout` | `00:00:30`; `00:01:30`; `00:00:02` | above zero | The most time one call may take in all: every attempt and the delays between them. |
+| `AttemptTimeout` | `00:00:10`; `00:00:10`; `00:00:01` | above zero, not above `TotalTimeout` | The most time one attempt may take; a slower one is cancelled, counts as a failure and is retried. |
+| `Retries` | `3`; `5`; `1` | 0 to 10 | Repeats after the first attempt of a call that failed with a 5xx, 408 or 429 status, a network error or an attempt timeout; 0 turns retrying off. Any other 4xx is never retried, and an unsafe method only with `RetryUnsafeMethods`. |
+| `BaseDelay` | `00:00:02`; `00:00:02`; `00:00:00.2` | above zero | The first retry delay; later ones grow exponentially, with jitter. |
+| `RetryUnsafeMethods` | `false` | a boolean | Retries a POST, PUT, PATCH, DELETE or CONNECT too. Off: such a request is sent once, whatever the answer (a blind repeat can send twice); set it only for endpoints that are idempotent or carry an idempotency key. The breaker counts their failures either way. |
+| `Breaker:FailureRatio` | `0.5` | above 0, at most 1 | The share of failed attempts in `Breaker:SamplingDuration` at which the circuit breaker opens. |
+| `Breaker:MinimumThroughput` | `10` | at least 2 | The fewest attempts in the sampling window before the ratio counts. |
+| `Breaker:SamplingDuration` | `00:00:30` | at least `00:00:00.5` | The window the ratio is measured over. |
+| `Breaker:BreakDuration` | `00:00:30` | at least `00:00:00.5` | How long an open breaker rejects calls (without a request) before one probe call is let through. |
+
+For example `Resilience__Pipelines__hibp__Retries=0` (the pipeline name is part of the key; a name with a hyphen, as `external-default`, works as an environment variable name in a container but not in every shell). A raised `Retries` needs a `TotalTimeout` that holds the delays: the five delays of `external-critical` add up to between about 23 s and 46 s, which is why its total is 90 s. Total and attempt timeout, retries and the breaker apply per client; two clients on one pipeline name share the settings, not the breaker.
 
 ### `Cors`
 
@@ -164,7 +223,7 @@ The endpoint decides which OpenTelemetry services are registered, so it is **rea
 | `AdminEmail` | empty; `admin@localhost.test` set locally (user secrets, an environment variable, or a git-ignored `appsettings.Development.json`) | when seeding: a plain email address, up to 256 characters | The first administrator's email. |
 | `AdminPassword` | empty | when seeding: within `Auth:Password:MinLength`/`MaxLength` | The first administrator's password. **Never in a file**: `dotnet user-secrets set "Auth:Seed:AdminPassword" "…" --project src/Host/TemplateName.Api` or `Auth__Seed__AdminPassword`. Without it no administrator is seeded. **Remove it after the first start**: the account then exists, and an account with that email, even a soft-deleted one, is never re-created (each start logs a warning while the key is still set). |
 
-The Auth module reads the sections below, each with its keys, defaults and ranges in the [Auth module](../modules/auth.md#configuration) document. Eight of them are validated on start (`Auth:Password`, `Auth:Links`, `Auth:Verification`, `Auth:RefreshToken`, `Auth:Lockout`, `Auth:Mfa`, `Auth:StepUp` and `Auth:Jwt`), so an out-of-range value or a bad signing key stops the host. `Auth:DataProtection` is read as it is (a missing name falls back to `TemplateName`), and `Auth:Seed` is checked when the seeder runs.
+The Auth module reads the sections below, each with its keys, defaults and ranges in the [Auth module](../modules/auth.md#configuration) document. Nine of them are validated on start (`Auth:Password`, `Auth:Links`, `Auth:Verification`, `Auth:RefreshToken`, `Auth:Lockout`, `Auth:Mfa`, `Auth:StepUp`, `Auth:Retention` and `Auth:Jwt`), so an out-of-range value or a bad signing key stops the host. `Auth:DataProtection` is read as it is (a missing name falls back to `TemplateName`), and `Auth:Seed` is checked when the seeder runs.
 
 | Section | Holds |
 |---|---|
@@ -175,6 +234,7 @@ The Auth module reads the sections below, each with its keys, defaults and range
 | `Auth:Lockout` | Failed attempts and lockout duration. |
 | `Auth:Mfa` | Two-step verification: `Issuer` (the authenticator issuer name, no `:`), `ChallengeLifetime` and `MaxChallengeAttempts` (the sign-in challenge's lifetime and wrong-code limit), and `TrustedDevicesEnabled` and `TrustedDeviceLifetime` (whether and for how long a device can be remembered). |
 | `Auth:StepUp` | `MaxAge`: how long a step-up (a fresh `auth_time`) satisfies a protected action. |
+| `Auth:Retention` | How long time-bound rows are kept before a cleanup job deletes them (ADR 0028), each a `TimeSpan` that is not negative, with zero or empty turning that cleanup off: `VerificationCodes` (`7.00:00:00`), `RefreshTokens` (`30.00:00:00`, after the token's own expiry), `Sessions` (`90.00:00:00`, after revocation or expiry; the tokens go with them), `MfaChallenges` (`1.00:00:00`), `TrustedDevices` (`30.00:00:00`, after expiry or revocation) and `AuditLogs` (empty: kept, until an archive exists). The jobs `AuthVerificationCodesCleanup` and `AuthMfaChallengesCleanup` run hourly, the other four daily; the keys and the rules are in [Auth module: Cleanup](../modules/auth.md#cleanup). |
 | `Auth:Jwt` | Issuer, audience, lifetime, skew and the signing keys (required outside Development and Testing). |
 | `Auth:DataProtection` | The Data Protection application name. |
 | `Auth:Seed` | Above. |
@@ -222,6 +282,16 @@ The notification hub and its single-use tickets ([Notifications module](../modul
 |---|---|---|---|
 | `ProductName` | `TemplateName` | required, at most 100 characters | The product's name as recipients know it: `{{ product_name }}` in every notification template and the email footer ([Notifications module](../modules/notifications.md#templates-and-rendering)). |
 
+### `Notifications:Retention`
+
+How long the Notifications module keeps its time-bound rows before a cleanup job deletes them (ADR 0028; the jobs and their rules are in [Notifications module: Cleanup](../modules/notifications.md#cleanup)). Each key is a `TimeSpan` that is not negative: a row goes only when strictly older than it, and `00:00:00` or an empty value turns that cleanup off. Validated on start. The batch size and the most batches per run are the building-block settings under [`Retention`](#retention) and [`Jobs`](#jobs).
+
+| Key | Default | Validation (on start) | Meaning |
+|---|---|---|---|
+| `HubTickets` | `01:00:00` (1 hour) | not negative | How long a hub ticket is kept after its `ExpiresAt`, consumed or not. The job `NotificationsHubTicketsCleanup` runs hourly. |
+| `Notifications` | `180.00:00:00` (180 days) | not negative | How long a notification is kept after its `CreatedAt`; its deliveries, dead-lettered ones included, go with it, and one with a delivery still pending stays. The job `NotificationsRowsCleanup` runs daily. |
+| `InAppNotifications` | `180.00:00:00` (180 days) | not negative | How long an inbox row is kept after its `CreatedAt`, read or unread. The job `NotificationsInAppCleanup` runs daily. |
+
 ### Other keys
 
 | Key | Default | Meaning |
@@ -233,7 +303,9 @@ The notification hub and its single-use tickets ([Notifications module](../modul
 | Endpoint | Checks | Use |
 |---|---|---|
 | `GET /health/live` | none: 200 while the process serves requests | Liveness probe |
-| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `auth`, `notify`, `sample`, plus one per added module) | Readiness probe, load balancer |
+| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `auth`, `notify`, `sample`, plus one per added module), and with `Caching:Provider = redis` the check `redis` (a `PING`) | Readiness probe, load balancer |
+
+The `redis` check fails as `Degraded`, not `Unhealthy`: with Redis down `/health/ready` answers **200** with the body `Degraded`, because the instance still serves from the database and a load balancer must not drain every instance for a cache outage. A database check that fails still answers 503 `Unhealthy`.
 
 Both are anonymous, exempt from rate limiting, logged at `Verbose` when healthy, and left out of traces.
 
@@ -273,11 +345,11 @@ HTTP security:
 - CORS preflight requests are answered before the rate limiter, so they are not counted. 401 and 403 responses are counted: the limiter (slot 9a) runs before authorization (slot 10), so an anonymous request to a protected or unknown route and a signed-in request without the permission each use up the caller's allowance (an anonymous caller is partitioned by address, a signed-in one by `user:{sub}`).
 - An anonymous request to a route that does not exist gets 401, not 404: the fallback policy also covers requests that matched no endpoint, so anonymous callers cannot probe which routes exist. A signed-in caller gets 404.
 - IPv6 and IPv4-mapped addresses are partition keys as plain strings, so one client can appear as two addresses.
-- The limiter keeps its counters in memory per instance: with N instances a client gets up to N × `GlobalPermitLimit` (a Redis-backed limiter is Plan 5).
+- With the default `Caching:Provider` (`memory`) the limiters keep their counters in memory per instance: with N instances a client gets up to N × `GlobalPermitLimit`. With `redis` every fixed window (global, `auth-strict`, hub tickets) is one count in Redis shared by the instances, and while Redis is down each instance counts on its own again ([platform-redis](../building-blocks/platform-redis.md#rate-limiting)).
 - A bare `Accept-Language: zh` gets English, because `zh` is not a supported culture and `zh-Hans` is its child, not its parent.
 
 Notifications:
-- The SignalR hub pushes only to the connections on the instance that delivered the notification, and the per-user hub ticket limit is counted per instance (no Redis backplane until Plan 5); the inbox endpoints are always complete. More: [Notifications: Operations and known limits](../modules/notifications.md#operations-and-known-limits).
+- With `Caching:Provider = redis` the SignalR hub pushes to the user's connections on every instance (the Redis backplane) and the per-user hub ticket limit is one count shared by the instances; without it, the hub pushes only to the connections on the instance that delivered the notification and each instance counts tickets alone. While Redis is down no push is live. The inbox endpoints are always complete. More: [Notifications: Operations and known limits](../modules/notifications.md#operations-and-known-limits).
 - A rejected sender address (a wrong `Notifications:Email:From`) fails every email; it is retried for about 81 minutes before the emails are dead-lettered: watch the retry Warnings and the dead-letter metric.
 
 Observability:

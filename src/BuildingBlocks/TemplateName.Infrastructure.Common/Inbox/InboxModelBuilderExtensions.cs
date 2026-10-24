@@ -18,6 +18,9 @@ public static class InboxModelBuilderExtensions
             builder.ToTable("InboxMessages");
             builder.HasKey(message => new { message.MessageId, message.Consumer }).HasName(InboxMessage.PrimaryKeyName);
             builder.Property(message => message.Consumer).HasMaxLength(InboxMessage.ConsumerMaxLength);
+
+            // The cleanup job deletes the messages processed before the retention cutoff.
+            builder.HasIndex(message => message.ProcessedAt);
         });
 
         return modelBuilder;

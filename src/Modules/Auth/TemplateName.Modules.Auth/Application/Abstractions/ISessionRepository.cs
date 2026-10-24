@@ -18,9 +18,10 @@ internal interface ISessionRepository
 
     /// <summary>
     /// How a device compares with the sessions the user has stored in any state (active, expired or revoked): none at all is
-    /// <see cref="DeviceFamiliarity.FirstSignIn"/>; one with the same device name and user agent (ordinal, a missing agent equal only to
-    /// a missing agent) is <see cref="DeviceFamiliarity.Known"/>; otherwise <see cref="DeviceFamiliarity.New"/>. One query, without
-    /// tracking. Pass the values as stored (cut to their columns), and call it before the new session is added.
+    /// <see cref="DeviceFamiliarity.NoStoredSession"/> (whether that is the first sign-in is the caller's question); one with the
+    /// same device name and user agent (ordinal, a missing agent equal only to a missing agent) is <see cref="DeviceFamiliarity.Known"/>;
+    /// otherwise <see cref="DeviceFamiliarity.New"/>. One query, without tracking. Pass the values as stored (cut to their columns), and
+    /// call it before the new session is added.
     /// </summary>
     Task<DeviceFamiliarity> GetDeviceFamiliarityAsync(Guid userId, string deviceName, string? userAgent, CancellationToken cancellationToken);
 

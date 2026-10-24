@@ -110,7 +110,7 @@ public sealed class DocumentationTests
             .Select(assembly => DocumentPaths.KebabCase(assembly.GetName().Name![(root.Length + 1)..]))
             .ToList();
 
-        expected.ShouldBe(["shared-kernel", "application-common", "infrastructure-common", "web-common"], ignoreOrder: true);
+        expected.ShouldBe(["shared-kernel", "application-common", "infrastructure-common", "web-common", "platform-redis"], ignoreOrder: true);
         var missing = expected
             .Select(name => Path.Combine(DocsDirectory, "building-blocks", $"{name}.md"))
             .Where(path => !File.Exists(path))

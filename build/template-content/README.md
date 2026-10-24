@@ -45,6 +45,8 @@ With these settings the API applies the module migrations on startup and seeds t
 | Aspire dashboard (logs, traces, metrics) | <http://localhost:18888> |
 | Mailpit inbox (emails the API sends) | <http://localhost:8025> |
 
+**Optional: Redis.** By default the permission cache, the rate-limit counters and the SignalR pushes live in the memory of one instance, and nothing needs Redis. To share them across instances, start the Valkey service (a Redis-compatible server, behind the compose profile `redis`) and switch the provider on: `docker compose --profile redis up -d`, then `Caching__Provider=redis ConnectionStrings__Redis=localhost:6379 dotnet run --project src/Host/TemplateName.Api`. With Redis down the API keeps serving from the database and `/health/ready` answers 200 `Degraded` ([`docs/building-blocks/platform-redis.md`](docs/building-blocks/platform-redis.md)).
+
 ## Modules
 
 | Module | Document |
@@ -107,7 +109,7 @@ The index is [`docs/README.md`](docs/README.md).
 
 - [`docs/architecture/overview.md`](docs/architecture/overview.md): module map, request lifecycle, data ownership, decisions
 - [`docs/services/api.md`](docs/services/api.md): pipeline, every configuration section with defaults, health, environments, migrations
-- [`docs/building-blocks/`](docs/building-blocks/): SharedKernel, Application.Common, Infrastructure.Common, Web.Common
+- [`docs/building-blocks/`](docs/building-blocks/): SharedKernel, Application.Common, Infrastructure.Common, Web.Common, Platform.Redis (optional)
 - [`docs/modules/`](docs/modules/): one page per module
 - [`docs/adr/`](docs/adr/): architecture decisions
 - [`docs/coding-conventions.md`](docs/coding-conventions.md): naming, files and code style

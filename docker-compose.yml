@@ -1,6 +1,8 @@
 # Local development dependencies. Copy .env.example to .env first: `docker compose up -d`.
 # Ports are published on loopback only: the SA password is a local default, the dashboard allows anonymous access and Mailpit has no login.
 # Mailpit catches every email the API sends (Notifications module) (SMTP on 1025, inbox UI at http://localhost:8025); nothing leaves the machine.
+# Valkey (BSD-3, Redis protocol; ADR 0027) starts only with its profile: `docker compose --profile redis up -d`, then run the API with
+# Caching__Provider=redis and ConnectionStrings__Redis=localhost:6379. It has no password, so it is published on loopback only.
 services:
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
@@ -26,6 +28,13 @@ services:
     ports:
       - "127.0.0.1:1025:1025" # SMTP (Notifications:Email:Host=localhost, Port=1025)
       - "127.0.0.1:8025:8025" # web UI and REST API
+
+  valkey:
+    # Keep this tag in step with ValkeyFixture.Image in tests/TemplateName.IntegrationTests/Infrastructure/ValkeyFixture.cs (a test checks it).
+    image: valkey/valkey:9.1.2-alpine
+    profiles: ["redis"]
+    ports:
+      - "127.0.0.1:6379:6379" # Redis protocol (ConnectionStrings:Redis=localhost:6379)
 
 volumes:
   sqldata:

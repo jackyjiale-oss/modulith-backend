@@ -14,6 +14,7 @@ using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common.Inbox;
+using TemplateName.Infrastructure.Common.Jobs;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Notifications.Application;
 using TemplateName.Modules.Notifications.Application.Abstractions;
@@ -26,9 +27,11 @@ using TemplateName.Modules.Notifications.Infrastructure.Deliveries;
 using TemplateName.Modules.Notifications.Infrastructure.Hubs;
 using TemplateName.Modules.Notifications.Infrastructure.Observability;
 using TemplateName.Modules.Notifications.Infrastructure.Persistence;
+using TemplateName.Modules.Notifications.Infrastructure.Retention;
 using TemplateName.Modules.Notifications.Endpoints;
 using TemplateName.Modules.Notifications.Infrastructure.Templates;
 using TemplateName.Modules.Notifications.Resources;
+using TemplateName.Web.Common.Security;
 using HubOptions = TemplateName.Modules.Notifications.Application.HubTickets.HubOptions;
 
 namespace TemplateName.Modules.Notifications;
@@ -44,7 +47,8 @@ public static class NotificationsModule
     /// <see cref="INotificationTypeSource"/>), the hosted service that validates it when the host starts, the template renderer with
     /// its options (<c>Notifications:Templates</c>), the delivery worker (<see cref="DeliveryDispatcher"/>, its hosted service and
     /// options <c>Notifications:Delivery</c>), the email channel (see <see cref="AddEmailChannel"/>), the in-app channel, and the
-    /// notification hub with its tickets and the in-app pusher (see <see cref="AddHub"/>), and the module's permission source
+    /// notification hub with its tickets and the in-app pusher (see <see cref="AddHub"/>), the retention of its time-bound rows and the
+    /// recurring jobs that enforce it (see <see cref="AddRetention"/>), and the module's permission source
     /// (<see cref="NotificationsPermissionSource"/>), which the Auth seeder syncs like every <c>IPermissionSource</c>. Call it after <c>AddAuthModule</c> (whose
     /// <c>IUserContactDirectory</c> the scheduler uses) and before <c>AddApplicationDecorators</c>.
     /// </summary>
@@ -95,6 +99,7 @@ public static class NotificationsModule
         services.AddScoped<INotificationChannel, InAppChannel>();
         AddEmailChannel(services, configuration);
         AddHub(services, configuration);
+        AddRetention(services, configuration);
 
         return services;
     }
@@ -104,7 +109,8 @@ public static class NotificationsModule
     /// <c>HubTicket</c> authentication scheme (<see cref="HubTicketAuthenticationHandler"/>; not a default scheme, so it runs only where
     /// a policy names it: the hub), SignalR with string enums in its JSON payloads, <see cref="SubClaimUserIdProvider"/> and
     /// <see cref="SignalRInAppNotificationPusher"/> as the in-app pusher (a singleton over the singleton hub context), and the rate-limit
-    /// policy of the ticket endpoint (<see cref="HubTicketRateLimit"/>).
+    /// policy of the ticket endpoint (<see cref="HubTicketRateLimit"/>, whose windows come from the <see cref="IFixedWindowLimiterFactory"/>
+    /// that <c>AddHttpSecurity</c> registers, so the host calls it too).
     /// </summary>
     internal static void AddHub(IServiceCollection services, IConfiguration configuration)
     {
@@ -119,7 +125,26 @@ public static class NotificationsModule
         services.AddSingleton<IUserIdProvider, SubClaimUserIdProvider>();
         services.AddSingleton<IInAppNotificationPusher, SignalRInAppNotificationPusher>();
         services.AddOptions<RateLimiterOptions>()
-            .Configure<IOptions<HubOptions>>((limiterOptions, hubOptions) => HubTicketRateLimit.AddPolicy(limiterOptions, hubOptions.Value));
+            .Configure<IOptions<HubOptions>, IFixedWindowLimiterFactory>(
+                (limiterOptions, hubOptions, limiterFactory) => HubTicketRateLimit.AddPolicy(limiterOptions, hubOptions.Value, limiterFactory));
+    }
+
+    /// <summary>
+    /// Registers <c>Notifications:Retention</c> (validated on start: a negative value is refused) and the three recurring cleanup jobs that
+    /// delete what it covers: <c>NotificationsHubTicketsCleanup</c> hourly, <c>NotificationsRowsCleanup</c> (notifications with their
+    /// deliveries, unless one is still pending) and <c>NotificationsInAppCleanup</c> daily. Requires <c>AddInfrastructureCommon</c>, which
+    /// registers the scheduler and the batch settings.
+    /// </summary>
+    internal static void AddRetention(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<NotificationsRetentionOptions>()
+            .Bind(configuration.GetSection(NotificationsRetentionOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.AddRecurringJob<HubTicketsCleanupJob>();
+        services.AddRecurringJob<NotificationsCleanupJob>();
+        services.AddRecurringJob<InAppNotificationsCleanupJob>();
     }
 
     /// <summary>

@@ -13,5 +13,8 @@ internal sealed class HubTicketConfiguration : IEntityTypeConfiguration<HubTicke
         // The key is the SHA-256 hash of the ticket, never the ticket (a database or log leak yields nothing usable).
         builder.HasKey(ticket => ticket.TokenHash);
         builder.Property(ticket => ticket.TokenHash).HasMaxLength(HubTicket.TokenHashLength).ValueGeneratedNever();
+
+        // The cleanup job deletes the tickets past their expiry.
+        builder.HasIndex(ticket => ticket.ExpiresAt);
     }
 }

@@ -54,11 +54,19 @@ public abstract class IntegrationTestBase(IntegrationTestWebAppFactory factory) 
     /// Notifications consumers), then the Notifications delivery worker, again and again until neither finds anything due. The clock does
     /// not move, so a delivery rescheduled after a failure, or deferred by quiet hours, waits for the test to move it.
     /// </summary>
-    protected async Task DispatchNotificationsAsync()
+    protected Task DispatchNotificationsAsync() => DispatchNotificationsAsync(Factory.Services);
+
+    /// <summary>
+    /// <see cref="DispatchNotificationsAsync()"/> on the host whose services are <paramref name="services"/> (a host derived with
+    /// <c>WithWebHostBuilder</c>), so the delivery and its live push happen on that instance.
+    /// </summary>
+    protected static async Task DispatchNotificationsAsync(IServiceProvider services)
     {
+        ArgumentNullException.ThrowIfNull(services);
+
         const int MaxRounds = 100;
-        var outbox = Factory.Services.GetRequiredService<OutboxDispatcher<AuthDbContext>>();
-        var deliveries = Factory.Services.GetRequiredService<DeliveryDispatcher>();
+        var outbox = services.GetRequiredService<OutboxDispatcher<AuthDbContext>>();
+        var deliveries = services.GetRequiredService<DeliveryDispatcher>();
 
         for (var round = 0; round < MaxRounds; round++)
         {

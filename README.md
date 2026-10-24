@@ -12,6 +12,9 @@ Modulith is a `dotnet new` template for production-ready backends: an ASP.NET Co
 - EF Core for writes and Dapper for reads, one `DbContext` and schema per module, SQL Server-ordered sequential GUIDs
 - Cursor (keyset) pagination for list endpoints, with allow-listed sorts and opaque cursors that detect a changed sort or filter
 - Per-module transactional outbox with leased, multi-instance-safe dispatch
+- Recurring jobs on a built-in scheduler with a SQL lease, running cleanup jobs under a retention policy for the outbox, inbox, idempotency keys and the Auth and Notifications tables
+- Optional Redis (`Caching:Provider = redis`) for a shared permission cache, shared rate limits and a SignalR backplane, degraded rather than down when Redis fails; Valkey in `docker-compose.yml`
+- Standard HTTP resilience pipelines (timeout, retries, circuit breaker) for outbound calls, configured under `Resilience:Pipelines`
 - `Idempotency-Key` support for unsafe requests
 - Serilog with sensitive-data masking, OpenTelemetry traces and metrics, Aspire dashboard locally
 - Security headers, CORS, rate limiting, forwarded headers, request size limits and health checks
@@ -22,7 +25,7 @@ Modulith is a `dotnet new` template for production-ready backends: an ASP.NET Co
 
 ## Status
 
-Pre-release: Plan 1 (foundation and core baseline), Plan 2 (the Auth module), Plan 3 (notifications) and Plan 4 (two-step verification) are implemented; platform services, delivery and packaging follow. Expect breaking changes until the first release. The Malay and Simplified Chinese messages are drafts awaiting native review (release checklist in [`CONTRIBUTING.md`](CONTRIBUTING.md), Section 5).
+Pre-release: Plan 1 (foundation and core baseline), Plan 2 (the Auth module), Plan 3 (notifications), Plan 4 (two-step verification) and Plan 5 (platform services: cleanup jobs, optional Redis, HTTP resilience) are implemented; the Audit module, social login with phone-number OTP login, push and SMS channels, delivery and packaging follow. Expect breaking changes until the first release. The Malay and Simplified Chinese messages are drafts awaiting native review (release checklist in [`CONTRIBUTING.md`](CONTRIBUTING.md), Section 5).
 
 ## Prerequisites
 
@@ -79,6 +82,8 @@ Local development settings are not committed: `appsettings.Development.json` is 
 
 With these settings the API applies the migrations and seeds the roles, the permissions and the first administrator, `admin@localhost.test`, with the password you put in user secrets (12 to 128 characters; choose your own, never commit it). Sign in as that administrator with `POST /api/v1/auth/login` in Scalar (<https://localhost:5001/scalar/v1>) and send the `accessToken` as a bearer token. Register a user the same way (`POST /api/v1/auth/register`, with `locale` `en`, `ms` or `zh-Hans`): the confirmation email is not sent anywhere; **Mailpit** catches it, rendered in the user's language, and its inbox is at <http://localhost:8025>. The email is sent by the Notifications module in the background, so it arrives a few seconds after the request (the Auth outbox and the delivery worker each poll every 5 seconds: two polling intervals, about 10 s, plus processing). Once signed in, `GET /api/v1/notifications/inbox` lists the user's in-app notifications (changing the password creates one, and an email), `GET /api/v1/notifications/inbox/unread-count` counts the unread ones, and a browser opens the SignalR hub at `/hubs/notifications` with a single-use ticket from `POST /api/v1/notifications/hub-tickets` to get new ones live ([`docs/modules/notifications.md`](docs/modules/notifications.md#realtime-hub) has a client example). The SMTP settings are `Notifications:Email:*` (they were `Auth:Email:*` in earlier versions: the API refuses to start while the old section is set). Remove `Auth:Seed:AdminPassword` from user secrets after the first start. Health is at <https://localhost:5001/health/ready>.
 
+**Optional: Redis.** By default the permission cache, the rate-limit counters and the SignalR pushes live in the memory of one instance, and nothing needs Redis. To share them across instances, start the Valkey service (a Redis-compatible server, behind the compose profile `redis`) and switch the provider on: `docker compose --profile redis up -d`, then `Caching__Provider=redis ConnectionStrings__Redis=localhost:6379 dotnet run --project src/Host/TemplateName.Api`. With Redis down the API keeps serving from the database and `/health/ready` answers 200 `Degraded` ([`docs/building-blocks/platform-redis.md`](docs/building-blocks/platform-redis.md)).
+
 ## Repository layout
 
 ```text
@@ -88,7 +93,7 @@ build/licenses/          licence allow-list and licence-URL mappings for the lic
 build/scripts/           commit-message check, template smoke test, GitHub repository setup
 build/template-content/  files that replace their root counterparts in generated projects (README, CHANGELOG, CLAUDE.md, release manifest, Version.props)
 docs/                    architecture, host, building-block and module documents, ADRs, conventions, plans
-src/BuildingBlocks/      SharedKernel, Application.Common, Infrastructure.Common, Web.Common
+src/BuildingBlocks/      SharedKernel, Application.Common, Infrastructure.Common, Web.Common, Platform.Redis (optional)
 src/Host/                TemplateName.Api, the ASP.NET Core host
 src/Modules/             business modules (Sample shows every pattern)
 tests/                   unit, architecture and integration tests
@@ -137,9 +142,9 @@ These ship with every generated project (index: [`docs/README.md`](docs/README.m
 
 - [`docs/architecture/overview.md`](docs/architecture/overview.md): module map, request lifecycle, data ownership, decisions
 - [`docs/services/api.md`](docs/services/api.md): the host's pipeline, every configuration section, health, environments, migrations
-- [`docs/building-blocks/`](docs/building-blocks/): SharedKernel, Application.Common, Infrastructure.Common, Web.Common
+- [`docs/building-blocks/`](docs/building-blocks/): SharedKernel, Application.Common, Infrastructure.Common, Web.Common, Platform.Redis
 - [`docs/modules/`](docs/modules/): one page per module, from [`_template.md`](docs/modules/_template.md)
-- [`docs/adr/`](docs/adr/): architecture decision records 0001 to 0025
+- [`docs/adr/`](docs/adr/): architecture decision records 0001 to 0029
 - [`docs/coding-conventions.md`](docs/coding-conventions.md): naming, files and code style
 - [`CONTRIBUTING.md`](CONTRIBUTING.md): branches, Conventional Commits, pull requests, releases and licences
 
@@ -147,7 +152,7 @@ These are about the template repository only and are not generated:
 
 - [`BACKEND_TEMPLATE_BLUEPRINT.md`](BACKEND_TEMPLATE_BLUEPRINT.md): the original blueprint
 - [`docs/blueprint-review.md`](docs/blueprint-review.md): the review of the blueprint; it wins where they differ
-- [`docs/superpowers/plans/`](docs/superpowers/plans/): implementation plans
+- [`docs/superpowers/`](docs/superpowers/): the design specs and implementation plans
 - [`docs/repository-management.md`](docs/repository-management.md): repository settings, branch protection and releases
 - [`SECURITY.md`](SECURITY.md): reporting a vulnerability
 

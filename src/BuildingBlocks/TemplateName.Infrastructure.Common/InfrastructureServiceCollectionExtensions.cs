@@ -2,11 +2,14 @@ using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using TemplateName.Application.Common.Data;
 using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Application.Common.Security;
+using TemplateName.Infrastructure.Common.Caching;
 using TemplateName.Infrastructure.Common.Idempotency;
+using TemplateName.Infrastructure.Common.Jobs;
 using TemplateName.Infrastructure.Common.Messaging;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
@@ -18,12 +21,16 @@ namespace TemplateName.Infrastructure.Common;
 public static class InfrastructureServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the system clock, the <c>ConnectionStrings</c>, <c>Outbox</c> and <c>Idempotency</c> options (validated on start) and
+    /// Registers the system clock, the <c>ConnectionStrings</c>, <c>Outbox</c>, <c>Idempotency</c> and <c>Retention</c> options (validated on start) and
     /// the <c>Database</c> options, the read-side connection factory and Dapper's <c>DateOnly</c> type handler, the EF Core save
     /// interceptors, the concurrency-conflict exception handler, the <c>platform</c> context (idempotency keys), the messages of
     /// their error codes (<c>InfrastructureErrorMessages</c>), the in-process <see cref="IIntegrationEventPublisher"/> (singleton) and
     /// the <see cref="IOutboxMessageContext"/> the outbox dispatcher sets (scoped), and the <see cref="ISecretProtector"/> (singleton,
-    /// Data Protection purpose <c>TemplateName.Secrets.v1</c>) with a Data Protection registration that has no key store of its own. Call it before
+    /// Data Protection purpose <c>TemplateName.Secrets.v1</c>) with a Data Protection registration that has no key store of its own, and the
+    /// recurring-job scheduler (the <c>Jobs</c> options validated on start, the <see cref="RecurringJobRunner"/> and the background service
+    /// that ticks it; jobs come from <c>AddRecurringJob</c>), the hourly job <c>IdempotencyKeysCleanup</c>, and a check on start that
+    /// <c>Retention:Inbox</c> outlasts the retries of the outbox (<c>Outbox:MaxAttempts</c>), and the <c>Caching</c> options (validated on
+    /// start; with <c>Caching:Provider = none</c> every <c>HybridCache</c> entry skips both cache layers, ADR 0027). Call it before
     /// <c>AddWebCommon</c>, so the concurrency handler runs before the global one, and before any <c>AddModuleDbContext</c> or
     /// <c>AddOutbox</c>, so the <c>platform</c> migrations apply first.
     /// </summary>
@@ -35,6 +42,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddOptions<DatabaseOptions>().Bind(configuration.GetSection(DatabaseOptions.SectionName));
         services.AddOptions<OutboxOptions>().Bind(configuration.GetSection(OutboxOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
         services.AddOptions<IdempotencyOptions>().Bind(configuration.GetSection(IdempotencyOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<RetentionOptions>().Bind(configuration.GetSection(RetentionOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<RetentionOptions>, InboxWindowValidator>());
 
         services.AddSingleton<IDbConnectionFactory, SqlConnectionFactory>();
         services.AddScoped<AuditableEntityInterceptor>();
@@ -51,6 +61,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddExceptionHandler<ConcurrencyExceptionHandler>();
         services.AddErrorMessages<InfrastructureErrorMessages>();
         services.AddModuleDbContext<PlatformDbContext>(PlatformDbContext.Schema);
+        services.AddRecurringJobScheduler(configuration);
+        services.AddRecurringJob<IdempotencyCleanupJob>();
+        services.AddCaching(configuration);
 
         // Dapper's type handlers are process-wide; adding the same handler again replaces it.
         SqlMapper.AddTypeHandler(new DateOnlyTypeHandler());

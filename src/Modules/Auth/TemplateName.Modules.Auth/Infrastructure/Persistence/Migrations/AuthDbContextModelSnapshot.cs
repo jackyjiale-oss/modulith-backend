@@ -84,6 +84,9 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                     b.HasIndex("OccurredAt")
                         .HasFilter("[ProcessedAt] IS NULL");
 
+                    b.HasIndex("ProcessedAt")
+                        .HasFilter("[ProcessedAt] IS NOT NULL");
+
                     b.ToTable("OutboxMessages", "auth");
                 });
 
@@ -207,6 +210,8 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
 
                     b.HasIndex("TokenHash")
                         .IsUnique();
@@ -443,6 +448,8 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ExpiresAt");
+
                     b.HasIndex("SessionId");
 
                     b.HasIndex("TokenHash")
@@ -507,6 +514,11 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("RevokedAt")
+                        .HasFilter("[RevokedAt] IS NOT NULL");
+
                     b.HasIndex("UserId", "CreatedAt", "Id");
 
                     b.HasIndex("UserId", "LastSeenAt", "Id");
@@ -558,6 +570,11 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("RevokedAt")
+                        .HasFilter("[RevokedAt] IS NOT NULL");
 
                     b.HasIndex("TokenHash")
                         .IsUnique();
@@ -758,6 +775,8 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
 
                     b.HasIndex("TokenHash")
                         .IsUnique();

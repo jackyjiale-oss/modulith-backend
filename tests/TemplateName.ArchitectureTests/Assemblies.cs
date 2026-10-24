@@ -9,6 +9,7 @@ using TemplateName.Modules.Notifications;
 using TemplateName.Modules.Notifications.Resources;
 using TemplateName.Modules.Sample;
 using TemplateName.Modules.Sample.Resources;
+using TemplateName.Platform.Redis;
 using TemplateName.SharedKernel;
 using TemplateName.Web.Common.Resources;
 using TemplateName.Web.Common.Results;
@@ -28,6 +29,9 @@ public static class Assemblies
     public static Assembly InfrastructureCommon { get; } = typeof(OutboxOptions).Assembly;
 
     public static Assembly WebCommon { get; } = typeof(ResultExtensions).Assembly;
+
+    /// <summary>The optional Redis project (ADR 0027): only the host may reference it, so removing it removes its packages.</summary>
+    public static Assembly PlatformRedis { get; } = typeof(RedisCachingOptions).Assembly;
 
     public static Assembly Api { get; } = typeof(Program).Assembly;
 
@@ -52,6 +56,7 @@ public static class Assemblies
         ApplicationCommon,
         InfrastructureCommon,
         WebCommon,
+        PlatformRedis,
     ];
 
     /// <summary>The marker class of every <c>*ErrorMessages</c> resource set (neutral English plus one <c>.resx</c> per translation).</summary>

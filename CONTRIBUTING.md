@@ -76,7 +76,7 @@ A scope is the area the change lives in. Use one from this list, or leave it out
 
 | Group | Scopes |
 |---|---|
-| Building blocks | `shared-kernel`, `application`, `infrastructure`, `web`, `host` |
+| Building blocks | `shared-kernel`, `application`, `infrastructure`, `web`, `platform`, `host` |
 | Cross-cutting | `persistence`, `outbox`, `idempotency`, `observability`, `security`, `i18n`, `architecture` |
 | Modules | `sample`, `auth`, `notifications`, `audit` |
 | Repository | `ci`, `deps`, `template`, `docker`, `adr`, `release` |
@@ -139,7 +139,7 @@ Update the matching document **in the same PR** when you change any of these:
 | You changed… | Update |
 |---|---|
 | an endpoint, error code, event, table, configuration key or background job of a module | `docs/modules/{module}.md` |
-| a building block (SharedKernel, Application.Common, Infrastructure.Common, Web.Common) | `docs/building-blocks/{name}.md` |
+| a building block (SharedKernel, Application.Common, Infrastructure.Common, Web.Common, Platform.Redis) | `docs/building-blocks/{name}.md` |
 | host pipeline, configuration sections, health checks, hosting | `docs/services/api.md` |
 | module boundaries or cross-module flows | `docs/architecture/overview.md` |
 | a significant or hard-to-reverse decision | a new `docs/adr/NNNN-*.md` |

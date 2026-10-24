@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace TemplateName.Web.Common.Security;
@@ -17,13 +18,17 @@ public static class HttpSecurityExtensions
 {
     internal const string RateLimitExceededCode = "rate_limit.exceeded";
 
+    /// <summary>The policy name the global limiter passes to <see cref="IFixedWindowLimiterFactory"/> (a Redis key segment, for instance).</summary>
+    internal const string GlobalLimiterPolicy = "global";
+
     // English default; CustomizeProblemDetails replaces it with the CommonErrorMessages entry for the caller's language.
     private const string RateLimitExceededDetail = "Too many requests. Try again later.";
 
     /// <summary>
     /// Registers CORS (listed origins only), the global rate limiter, the <see cref="RateLimitPolicies.AuthStrict"/> policy and
     /// forwarded-headers handling. Options are bound from the <c>Cors</c>, <c>RateLimiting</c> and <c>ForwardedHeaders</c> sections,
-    /// validated on start and read lazily.
+    /// validated on start and read lazily. Both limiters get each partition's fixed window from <see cref="IFixedWindowLimiterFactory"/>,
+    /// which is registered here as the in-memory default unless one is registered already (<c>AddPlatformRedis</c> replaces it either way).
     /// </summary>
     public static IServiceCollection AddHttpSecurity(this IServiceCollection services, IConfiguration configuration)
     {
@@ -42,12 +47,15 @@ public static class HttpSecurityExtensions
                 // Response headers browser code needs that are not CORS-safelisted.
                 .WithExposedHeaders("X-Trace-Id", "Location", "Retry-After", "Idempotency-Replayed")));
 
+        services.TryAddSingleton<IFixedWindowLimiterFactory, InMemoryFixedWindowLimiterFactory>();
         services.AddRateLimiter(options => options.OnRejected = WriteRateLimitProblemAsync);
-        services.AddOptions<RateLimiterOptions>().Configure<IOptions<RateLimitingOptions>>(
-            (limiterOptions, rateLimitingOptions) =>
+        services.AddOptions<RateLimiterOptions>().Configure<IOptions<RateLimitingOptions>, IFixedWindowLimiterFactory>(
+            (limiterOptions, rateLimitingOptions, limiterFactory) =>
             {
-                limiterOptions.GlobalLimiter = CreateGlobalLimiter(rateLimitingOptions.Value);
-                limiterOptions.AddPolicy(RateLimitPolicies.AuthStrict, httpContext => CreateAuthStrictPartition(httpContext, rateLimitingOptions.Value));
+                limiterOptions.GlobalLimiter = CreateGlobalLimiter(rateLimitingOptions.Value, limiterFactory);
+                limiterOptions.AddPolicy(
+                    RateLimitPolicies.AuthStrict,
+                    httpContext => CreateAuthStrictPartition(httpContext, rateLimitingOptions.Value, limiterFactory));
             });
 
         services.AddOptions<ForwardedHeadersOptions>().Configure<IOptions<ApiForwardedHeadersOptions>>(
@@ -56,28 +64,19 @@ public static class HttpSecurityExtensions
         return services;
     }
 
-    private static PartitionedRateLimiter<HttpContext> CreateGlobalLimiter(RateLimitingOptions options)
-        => PartitionedRateLimiter.Create<HttpContext, string>(httpContext => RateLimitPartition.GetFixedWindowLimiter(
+    private static PartitionedRateLimiter<HttpContext> CreateGlobalLimiter(RateLimitingOptions options, IFixedWindowLimiterFactory limiterFactory)
+        => PartitionedRateLimiter.Create<HttpContext, string>(httpContext => RateLimitPartition.Get(
             ResolvePartitionKey(httpContext),
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = options.GlobalPermitLimit,
-                Window = options.GlobalWindow,
-                QueueLimit = 0,
-                AutoReplenishment = true,
-            }));
+            partitionKey => limiterFactory.Create(GlobalLimiterPolicy, partitionKey, options.GlobalPermitLimit, options.GlobalWindow)));
 
     /// <summary>A fixed window per client address, whoever is signed in: the credential endpoints it guards are anonymous.</summary>
-    private static RateLimitPartition<string> CreateAuthStrictPartition(HttpContext httpContext, RateLimitingOptions options)
-        => RateLimitPartition.GetFixedWindowLimiter(
+    private static RateLimitPartition<string> CreateAuthStrictPartition(
+        HttpContext httpContext,
+        RateLimitingOptions options,
+        IFixedWindowLimiterFactory limiterFactory)
+        => RateLimitPartition.Get(
             ClientAddressPartitionKey(httpContext),
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = options.AuthStrictPermitLimit,
-                Window = options.AuthStrictWindow,
-                QueueLimit = 0,
-                AutoReplenishment = true,
-            });
+            partitionKey => limiterFactory.Create(RateLimitPolicies.AuthStrict, partitionKey, options.AuthStrictPermitLimit, options.AuthStrictWindow));
 
     /// <summary><c>user:{sub}</c> for an authenticated caller, else <see cref="ClientAddressPartitionKey"/>.</summary>
     private static string ResolvePartitionKey(HttpContext httpContext)

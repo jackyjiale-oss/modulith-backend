@@ -19,5 +19,8 @@ internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refre
         builder.Property(token => token.TokenHash).HasMaxLength(TokenHashLength);
 
         builder.HasIndex(token => token.TokenHash).IsUnique();
+
+        // The cleanup job deletes the tokens that expired before the retention cutoff.
+        builder.HasIndex(token => token.ExpiresAt);
     }
 }

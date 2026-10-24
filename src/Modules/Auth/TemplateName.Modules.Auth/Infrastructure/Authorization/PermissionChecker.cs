@@ -9,7 +9,7 @@ namespace TemplateName.Modules.Auth.Infrastructure.Authorization;
 
 /// <summary>
 /// Resolves a user's permission codes on the server (ADR 0016): one Dapper query on a cache miss, then the set from
-/// <see cref="HybridCache"/> under <c>perm:{userId}</c> for <see cref="PermissionCache.Lifetime"/>. An unknown, suspended or
+/// <see cref="HybridCache"/> under <c>auth:perm:{userId}</c> for <see cref="PermissionCache.Lifetime"/>. An unknown, suspended or
 /// soft-deleted user has the empty set, which is cached like any other. Codes are compared exactly (ordinal). As the
 /// <see cref="IPermissionReader"/> it hands out the same cached set, so <c>GET /api/v1/auth/me</c> shows exactly what the checks allow.
 /// </summary>
@@ -68,7 +68,7 @@ internal sealed class PermissionChecker(IDbConnectionFactory connectionFactory, 
             PermissionCache.EntryOptions,
             cancellationToken: cancellationToken);
 
-    // A string array, so HybridCache can serialize it when a distributed cache is added (Plan 5).
+    // A string array, so HybridCache can serialize it for Redis when Caching:Provider is redis (ADR 0027).
     private static async ValueTask<string[]> LoadAsync(IDbConnectionFactory connectionFactory, Guid userId, CancellationToken cancellationToken)
     {
         await using var connection = await connectionFactory.OpenConnectionAsync(cancellationToken);

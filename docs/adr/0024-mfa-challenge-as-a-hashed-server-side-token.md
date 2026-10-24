@@ -29,9 +29,9 @@ We chose option 2 (decisions D6, D7, D8 and D19 of Plan 4).
 
 ## Consequences
 - Positive: single use and the cap are one statement each, race-free across requests and instances; the token is useless to any other route; the challenge dies with every stamp rotation without a revocation call anywhere.
-- **One more table to clean up.** Expired and consumed challenges stay until the retention job of Plan 5 removes them (a few rows per sign-in of an MFA account).
+- **One more table to clean up.** Expired and consumed challenges stay until the hourly job `AuthMfaChallengesCleanup` removes them a day after they expire ([ADR 0028](0028-retention-policy-and-the-inbox-window.md), `Auth:Retention:MfaChallenges`); a few rows per sign-in of an MFA account.
 - **The lockout coupling is a denial of service for whoever knows the password.** Someone with the email and the password can lock the owner out for `Auth:Lockout:Duration` (15 minutes) with five wrong codes, the same denial of service wrong passwords already allow (Plan 2); the lockout email tells the owner the password is known. Without the coupling the code would be guessable without limit.
 - **A double tap.** Two simultaneous verifies with one code: one claims the code and the challenge; the other loses the code's claim, which counts as a wrong code (on the challenge and the user row) and may change the user row between the winner's read and save. The winner therefore retries its save once on the user read again (still bound to the challenge's stamp, allowed to sign in and not locked), so exactly one request gets the session; a second conflict is answered `auth.invalid_mfa_challenge`.
 - **`rcvr` is not in RFC 8176.** Clients that read `amr` must accept it (as for step-up, ADR 0023).
 - **The login schema changed.** The token members of the login answer are optional now (`LoginResult`); generated clients change. The template is unreleased.
-- Follow-up actions: trusted devices skip the challenge for a remembered device and issue the device token at verify (`rememberDevice`; done in Plan 4, ADR 0025); the challenge cleanup in Plan 5.
+- Follow-up actions: trusted devices skip the challenge for a remembered device and issue the device token at verify (`rememberDevice`; done in Plan 4, ADR 0025); the challenge cleanup (done in Plan 5: `AuthMfaChallengesCleanup`).

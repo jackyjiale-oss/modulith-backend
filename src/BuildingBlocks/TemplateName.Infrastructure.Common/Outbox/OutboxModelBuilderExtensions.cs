@@ -20,6 +20,9 @@ public static class OutboxModelBuilderExtensions
 
             // Pending messages only: the dispatcher's claim query reads them in OccurredAt order.
             builder.HasIndex(message => message.OccurredAt).HasFilter("[ProcessedAt] IS NULL");
+
+            // Published messages only: the cleanup job deletes them once they are older than the retention.
+            builder.HasIndex(message => message.ProcessedAt).HasFilter("[ProcessedAt] IS NOT NULL");
         });
 
         modelBuilder.Entity<OutboxMessageConsumer>(builder =>

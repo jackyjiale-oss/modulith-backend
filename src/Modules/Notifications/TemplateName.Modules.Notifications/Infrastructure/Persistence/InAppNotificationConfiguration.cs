@@ -25,5 +25,9 @@ internal sealed class InAppNotificationConfiguration : IEntityTypeConfiguration<
 
         // The unread count and mark-all-read touch only unread rows, which are few.
         builder.HasIndex(notification => notification.UserId).HasFilter("[ReadAt] IS NULL");
+
+        // The cleanup job deletes the notifications older than the retention across all users, which the (UserId, CreatedAt, Id) index
+        // above cannot serve because it leads with UserId.
+        builder.HasIndex(notification => notification.CreatedAt);
     }
 }
