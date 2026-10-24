@@ -2,8 +2,9 @@ namespace TemplateName.Infrastructure.Common.Jobs;
 
 /// <summary>
 /// The schedule and the last outcome of a recurring job (a row of <c>platform.JobStates</c>, keyed by the job's name). The scheduler
-/// claims a due row by moving <see cref="LockedUntil"/> forward, so one instance runs a job at a time; <see cref="RowVersion"/> guards
-/// the row against a second writer.
+/// claims a due row by moving <see cref="LockedUntil"/> forward, so one instance runs a job at a time, and finishes it with an update that
+/// matches the lease it claimed: the lease keeps a second writer off. SQL Server maintains <see cref="RowVersion"/>, but nothing reads it
+/// today (the scheduler writes with <c>ExecuteUpdate</c>, outside the change tracker).
 /// </summary>
 internal sealed class JobStateRecord
 {

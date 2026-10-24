@@ -2,7 +2,10 @@ namespace TemplateName.Infrastructure.Common.Jobs;
 
 /// <summary>
 /// Work that runs on a fixed interval on one instance at a time, registered with <c>AddRecurringJob</c>. The scheduler resolves the job
-/// in a scope of its own for every run.
+/// in a scope of its own for every run. "One instance at a time" rests on two assumptions: the instances' clocks agree (the lease is
+/// compared with each instance's own <see cref="TimeProvider"/>, so a clock that runs ahead can claim a lease another instance still
+/// holds), and a run stops when its lease ends (the token is cancelled then, but cancellation is cooperative: a run that does not
+/// observe it keeps going while another instance claims the job). So a job must be idempotent and safe to overlap with itself.
 /// </summary>
 public interface IRecurringJob
 {

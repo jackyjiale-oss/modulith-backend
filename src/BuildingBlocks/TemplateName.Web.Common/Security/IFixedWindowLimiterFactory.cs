@@ -11,6 +11,12 @@ namespace TemplateName.Web.Common.Security;
 /// The ASP.NET Core rate limiter keeps one limiter per partition key while the partition is in use and disposes it when it has been idle
 /// for a while, so an implementation creates something cheap and owns only what it creates.
 /// </para>
+/// <para>
+/// A caller other than that middleware must acquire with <c>AcquireAsync</c>. The Redis limiter's synchronous <c>AttemptAcquire</c>
+/// cannot wait for Redis, so while Redis can be called it refuses without counting: right for the middleware, which calls
+/// <c>AttemptAcquire</c> first and <c>AcquireAsync</c> after a refusal, but a caller that used only <c>AttemptAcquire</c> would be
+/// refused every time.
+/// </para>
 /// </summary>
 public interface IFixedWindowLimiterFactory
 {

@@ -37,8 +37,9 @@ builder.Services.AddPermissionAuthorization();
 builder.Services.AddAuthModule(builder.Configuration);
 builder.Services.AddNotificationsModule(builder.Configuration);
 builder.Services.AddSampleModule();
-// Optional Redis (Caching:Provider = redis; a no-op otherwise, ADR 0027): the HybridCache second level and the readiness check "redis".
-// After AddInfrastructureCommon and AddHealthChecks. A solution without Redis deletes this line and the TemplateName.Platform.Redis project.
+// Optional Redis (Caching:Provider = redis; a no-op otherwise, ADR 0027): the HybridCache second level, the readiness check "redis", the
+// Redis rate limiter (it replaces the in-memory IFixedWindowLimiterFactory of AddHttpSecurity) and the SignalR backplane. After
+// AddInfrastructureCommon and AddHealthChecks. A solution without Redis deletes this line and the TemplateName.Platform.Redis project.
 builder.Services.AddPlatformRedis(builder.Configuration);
 
 // Kestrel binds only its endpoints from the "Kestrel" section; bind Limits (e.g. MaxRequestBodySize) lazily so test overrides apply.

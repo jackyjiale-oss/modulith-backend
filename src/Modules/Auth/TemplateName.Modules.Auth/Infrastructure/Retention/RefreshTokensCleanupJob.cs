@@ -8,8 +8,10 @@ namespace TemplateName.Modules.Auth.Infrastructure.Retention;
 
 /// <summary>
 /// Deletes the refresh tokens whose own <c>ExpiresAt</c> is more than <c>Auth:Retention:RefreshTokens</c> ago, whatever their session's state.
-/// A token is deleted only once presenting it already fails for age, so the reuse detection (a used or revoked token presented inside its
-/// lifetime revokes the session) is not weakened, and the unexpired tokens of a live session stay. Named <c>AuthRefreshTokensCleanup</c>, daily.
+/// A token is deleted only once presenting it already fails for age, and the unexpired tokens of a live session stay. Reuse detection
+/// still loses something: a used token presented after its own expiry still answers <c>auth.refresh_token_reused</c> and revokes the
+/// session while it exists, and once the job has deleted it the same token answers <c>auth.invalid_refresh_token</c> and revokes nothing
+/// (the post-expiry theft signal lasts <c>Auth:Retention:RefreshTokens</c>). Named <c>AuthRefreshTokensCleanup</c>, daily.
 /// </summary>
 internal sealed class RefreshTokensCleanupJob(
     AuthDbContext context,
