@@ -99,7 +99,7 @@ How long the building blocks keep what they own before a cleanup job deletes it 
 |---|---|---|---|
 | `BatchSize` | `1000` | 1 to 10000 | Most rows one delete statement removes; a run repeats it up to `Jobs:MaxBatchesPerRun` times. |
 | `Outbox` | `7.00:00:00` (7 days) | not negative | How long a published outbox message (and its consumer rows) is kept after `ProcessedAt`. Abandoned messages are never deleted. The job `{Context}OutboxCleanup` runs daily. |
-| `Inbox` | `7.00:00:00` (7 days) | not negative; zero or at least `1.00:00:00`; and longer than the outbox's retry span for `Outbox:MaxAttempts` (12 min 35 s by default, a day at 28 attempts and more than a day from 29; a longer `MaxAttempts` needs a longer `Inbox`) | How long an inbox row is kept after `ProcessedAt`, so it outlasts outbox redelivery and a late retry never runs a consumer twice. The job `{Context}InboxCleanup` (today `NotificationsInboxCleanup`) runs daily. |
+| `Inbox` | `7.00:00:00` (7 days) | not negative; zero or at least `1.00:00:00`; and longer than the outbox's retry span for `Outbox:MaxAttempts` (12 min 35 s by default, just under a day at 28 attempts (23 h 12 min 35 s) and more than a day from 29; a longer `MaxAttempts` needs a longer `Inbox`) | How long an inbox row is kept after `ProcessedAt`, so it outlasts outbox redelivery and a late retry never runs a consumer twice. The job `{Context}InboxCleanup` (today `NotificationsInboxCleanup`) runs daily. |
 
 ### `Caching`
 
@@ -128,7 +128,7 @@ The recurring-job scheduler ([infrastructure-common](../building-blocks/infrastr
 | `{JobName}:Enabled` | `true` | — | `false` stops that job on this instance. |
 | `{JobName}:Interval` | the job's own default | `00:00:01` to `365.00:00:00`, on start (even with `Enabled` false) | Time from the end of one run to the next. |
 
-`{JobName}` is the job's name (PascalCase, no dots), for example `Jobs__AuthRefreshTokensCleanup__Interval=12:00:00`. An invalid or unreadable value for a registered job stops the host at start with a message naming `Jobs:{JobName}`; a section that names no registered job is ignored.
+`{JobName}` is the job's name (PascalCase, no dots), for example `Jobs__AuthRefreshTokensCleanup__Interval=12:00:00`. An invalid or unreadable value for a registered job stops the host at start with a message naming `Jobs:{JobName}`; a section that names no registered job is ignored. The scheduler's SQL reads job names with `OPENJSON`, so the database needs SQL Server compatibility level 130 or later.
 
 ### `Resilience`
 

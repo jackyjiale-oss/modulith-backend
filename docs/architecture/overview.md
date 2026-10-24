@@ -17,10 +17,10 @@ flowchart TD
 
     subgraph BuildingBlocks["Building blocks (src/BuildingBlocks)"]
         Web["Web.Common<br/>ProblemDetails, security, localization, observability"]
-        Infra["Infrastructure.Common<br/>persistence, outbox, idempotency"]
+        Infra["Infrastructure.Common<br/>persistence, outbox, inbox, jobs, idempotency, HTTP resilience"]
         App["Application.Common<br/>handlers, decorators, pagination, messages"]
         Kernel["SharedKernel<br/>Result, Error, Entity, AggregateRoot"]
-        Redis["Platform.Redis (optional)<br/>Redis cache level, circuit, readiness"]
+        Redis["Platform.Redis (optional)<br/>Redis cache level, rate limiter, SignalR backplane"]
     end
 
     Api --> Auth
@@ -85,18 +85,28 @@ Inside an endpoint (the Sample module's `LeaveRequestEndpoints` is the worked ex
 5. The endpoint maps the `Result`: success to `200`/`201`/`204`, failure to RFC 9457 ProblemDetails via `ToProblem()` (ADR 0002). Every problem response carries `code`, `traceId` (equal to the `X-Trace-Id` header) and, when the error has parameters, `params`; `detail` is localized from the signed-in user's saved `locale` claim, else from `Accept-Language` (ADR 0009).
 6. After the response, the module's outbox background service dispatches the saved domain events to their `IDomainEventHandler<>`s, at least once per handler (ADR 0007).
 
+## Background work and several instances
+
+Work that does not belong to a request runs in hosted services of the API process, and each takes its work under a SQL lease, so a second instance joins in without a second process and without doing the same work twice:
+
+- **Outbox dispatchers**, one per module context with an outbox, publish saved domain events (ADR 0007).
+- **The delivery worker** of the Notifications module sends emails and writes the in-app inbox ([Notifications](../modules/notifications.md#background-processing)).
+- **The recurring-job scheduler** (`RecurringJobBackgroundService`, ADR 0026) runs the jobs that `AddRecurringJob` registered, one instance at a time per job, and records each run in `platform.JobStates`. Today every job is a cleanup that deletes what has outlived its retention in bounded batches: the outbox and inbox of each context, `platform.IdempotencyKeys`, and the Auth and Notifications tables ([`infrastructure-common`](../building-blocks/infrastructure-common.md#cleanup-jobs), ADR 0028).
+
+State that is shared between instances is per instance by default: the permission cache, the rate-limit counters, the SignalR pushes. With `Caching:Provider = redis` the optional Platform.Redis project shares them, and the API serves from the database, degraded, when Redis fails (ADR 0027). Outbound HTTP calls go through named resilience pipelines with a timeout, retries and a circuit breaker (ADR 0029).
+
 ## Data ownership
 
 One SQL Server database, one schema per owner, each with its own `__EFMigrationsHistory` table and its own `ready` health check named after the schema (ADR 0003). No module reads or writes another schema; cross-module data flows through integration events or `*.Contracts` interfaces.
 
 | Schema | Owner | Context | Tables | Migrations |
 |---|---|---|---|---|
-| `platform` | Infrastructure.Common (building block) | `PlatformDbContext` | `IdempotencyKeys` | `src/BuildingBlocks/TemplateName.Infrastructure.Common/Idempotency/Migrations/` |
+| `platform` | Infrastructure.Common (building block) | `PlatformDbContext` | `IdempotencyKeys`, `JobStates` | `src/BuildingBlocks/TemplateName.Infrastructure.Common/Idempotency/Migrations/` |
 | `auth` | Auth module | `AuthDbContext` | `Users`, `PasswordHistory`, `UserRoles`, `Roles`, `Permissions`, `RolePermissions`, `UserSessions`, `RefreshTokens`, `VerificationCodes`, `UserMfaMethods`, `RecoveryCodes`, `MfaChallenges`, `TrustedDevices`, `AuthAuditLogs`, `DataProtectionKeys`, `OutboxMessages`, `OutboxMessageConsumers` | `src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Persistence/Migrations/` |
 | `notify` | Notifications module | `NotificationsDbContext` | `Notifications`, `Deliveries`, `InAppNotifications`, `UserPreferences`, `UserSettings`, `HubTickets`, `InboxMessages` (no outbox) | `src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Persistence/Migrations/` |
 | `sample` | Sample module | `SampleDbContext` | `LeaveRequests`, `OutboxMessages`, `OutboxMessageConsumers` | `src/Modules/Sample/TemplateName.Modules.Sample/Infrastructure/Persistence/Migrations/` |
 
-`MigrateModuleDatabasesAsync` applies every registered context's migrations in registration order (`platform` first, because `AddInfrastructureCommon` registers it before any module). The tables of each module are described in its document; `platform.IdempotencyKeys` in [`infrastructure-common`](../building-blocks/infrastructure-common.md#idempotency).
+`MigrateModuleDatabasesAsync` applies every registered context's migrations in registration order (`platform` first, because `AddInfrastructureCommon` registers it before any module). The tables of each module are described in its document; `platform.IdempotencyKeys` in [`infrastructure-common`](../building-blocks/infrastructure-common.md#idempotency) and `platform.JobStates` under [recurring jobs](../building-blocks/infrastructure-common.md#recurring-jobs).
 
 ## Cross-module communication
 

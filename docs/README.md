@@ -19,9 +19,9 @@ Everything about how this service is built and run. Documents are part of the de
 |---|---|
 | [`building-blocks/shared-kernel.md`](building-blocks/shared-kernel.md) | `SharedKernel`: entities, aggregates, domain events, `Result`/`Error`, sequential GUIDs |
 | [`building-blocks/application-common.md`](building-blocks/application-common.md) | `Application.Common`: handlers and decorators, current user, error messages, cursor pagination |
-| [`building-blocks/infrastructure-common.md`](building-blocks/infrastructure-common.md) | `Infrastructure.Common`: module `DbContext`s, migrations, outbox, idempotency |
+| [`building-blocks/infrastructure-common.md`](building-blocks/infrastructure-common.md) | `Infrastructure.Common`: module `DbContext`s, migrations, outbox, inbox, recurring jobs and cleanup, idempotency, caching provider, HTTP resilience |
 | [`building-blocks/web-common.md`](building-blocks/web-common.md) | `Web.Common`: ProblemDetails, HTTP security, localization, observability |
-| [`building-blocks/platform-redis.md`](building-blocks/platform-redis.md) | `Platform.Redis` (optional, host only): Redis as the shared cache level, its circuit and readiness check |
+| [`building-blocks/platform-redis.md`](building-blocks/platform-redis.md) | `Platform.Redis` (optional, host only): Redis as the shared cache level, the shared rate limiter and the SignalR backplane, with a circuit and a readiness check |
 
 ## Modules
 

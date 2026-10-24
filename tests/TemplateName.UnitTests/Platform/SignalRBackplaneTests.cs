@@ -28,6 +28,14 @@ public sealed class SignalRBackplaneTests
     }
 
     [Fact]
+    public void The_order_of_AddSignalR_and_AddPlatformRedis_does_not_matter()
+    {
+        using var services = BuildServices("redis", SharedConnection(), signalRFirst: false);
+
+        services.GetRequiredService<HubLifetimeManager<PingHub>>().ShouldBeOfType<RedisHubLifetimeManager<PingHub>>();
+    }
+
+    [Fact]
     public void Memory_provider_keeps_the_in_memory_hub_lifetime_manager()
     {
         using var services = BuildServices("memory", connection: null);
@@ -76,7 +84,7 @@ public sealed class SignalRBackplaneTests
         return connection;
     }
 
-    private static ServiceProvider BuildServices(string provider, IConnectionMultiplexer? connection)
+    private static ServiceProvider BuildServices(string provider, IConnectionMultiplexer? connection, bool signalRFirst = true)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -90,9 +98,18 @@ public sealed class SignalRBackplaneTests
             services.AddSingleton(connection);
         }
 
-        // What a module with a hub does (Notifications' AddHub), in either order with AddPlatformRedis.
-        services.AddSignalR();
+        // What a module with a hub does (Notifications' AddHub) is AddSignalR; the host calls AddPlatformRedis before or after it.
+        if (signalRFirst)
+        {
+            services.AddSignalR();
+        }
+
         services.AddPlatformRedis(configuration);
+        if (!signalRFirst)
+        {
+            services.AddSignalR();
+        }
+
         return services.BuildServiceProvider();
     }
 

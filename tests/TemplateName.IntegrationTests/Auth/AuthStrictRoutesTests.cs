@@ -9,7 +9,7 @@ namespace TemplateName.IntegrationTests.Auth;
 
 /// <summary>
 /// Pins which routes of the real host carry the <c>auth-strict</c> rate-limit policy. A route that checks a password, a code or a
-/// token must keep it (the Redis limiter of Plan 5 inherits this list), and a new route that gets it must be added here and to
+/// token must keep it (the Redis limiter inherits this list), and a new route that gets it must be added here and to
 /// <c>docs/modules/auth.md</c> and <c>docs/services/api.md</c>. It only reads the route table of the shared host, so it does not derive from
 /// <see cref="IntegrationTestBase"/> and the databases are not reset for it.
 /// </summary>

@@ -5,7 +5,7 @@
 - Deciders: Lee Jia Le
 
 ## Context
-Plan 5 needs work that runs on a fixed interval on one instance at a time: the cleanup of what the earlier plans left to grow (processed outbox and inbox rows, idempotency keys, verification codes, refresh tokens, sessions, MFA challenges, trusted devices, hub tickets, notifications). Blueprint review 2.9 accepted Hangfire for background jobs.
+Plan 5 needs work that runs on a fixed interval on one instance at a time: the cleanup of what the earlier plans left to grow (processed outbox and inbox rows, idempotency keys, verification codes, refresh tokens, sessions, MFA challenges, trusted devices, hub tickets, notifications). The blueprint review took Hangfire for background jobs (roadmap row 5, its licence in section 3 and its dashboard in 2.9).
 
 The work in this plan is only interval-driven deletes. Nothing needs fire-and-forget or delayed jobs: reliable asynchronous work already has two engines, the outbox (domain events, with retries and a lease) and the notification delivery worker.
 
@@ -26,9 +26,10 @@ We chose option 4 (decision D2 of the Plan 5 design).
 
 ## Consequences
 - Positive: no new package, licence or schema owner; the lease pattern is the one the outbox and the delivery worker already use and test; tests run one job by name through `RunDueAsync` with a fake clock; the state of every job is a row anyone can read.
-- **This deviates from the accepted review (2.9).** The review took Hangfire for a wider need than the one that exists.
+- **This deviates from the accepted review.** The review took Hangfire for a wider need than the one that exists; its roadmap (Section 6) and licence notes now record that the own scheduler replaced it for v1.
 - **No dashboard and no manual triggering.** Job state is `platform.JobStates` and the `platform.jobs.*` metrics; an operator runs a job early by setting its `NextRunAt` in the database.
 - **Intervals, not cron.** A job runs `Interval` after the end of its last run; there is no "at 02:00". A schedule that needs a wall-clock time is a reason to revisit this decision.
 - **Time-bound by the lease.** A run is cancelled when `Jobs:LeaseDuration` (15 minutes) ends; a job that cannot finish in that time must work in bounded steps, as the batched cleanups do.
+- **SQL Server compatibility level 130 or later.** The claim and the insert of missing state rows read the job names with `OPENJSON`, which a database at a lower level does not have.
 - **One job per claim**, the most overdue first, so a long job delays the others on that instance for the length of its run; another instance may take them meanwhile.
 - Follow-up actions: a Hangfire engine behind `IRecurringJob`, with its licence ADR, if fire-and-forget or delayed jobs ever have a consumer.

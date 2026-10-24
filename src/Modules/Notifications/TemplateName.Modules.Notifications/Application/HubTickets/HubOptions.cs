@@ -20,7 +20,8 @@ internal sealed class HubOptions
 
     /// <summary>
     /// The most tickets one user may get per minute (a fixed window). Opening a connection takes two; the rest covers reconnects and
-    /// several tabs. A ticket row stays until the hub ticket cleanup job deletes it (an hour after it expires, by default), so this bounds what one account can add to the table.
+    /// several tabs. A ticket row stays until the hub ticket cleanup job deletes it (an hour after it expires, by default), so this
+    /// bounds what one account can add to the table.
     /// </summary>
     [Range(1, 1000)]
     public int TicketsPerMinute { get; set; } = 30;

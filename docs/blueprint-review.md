@@ -28,7 +28,7 @@ Section 7.8 puts one outbox in the `platform` schema, written "inside the busine
 Section 10.2 has Auth raise an event and Notifications write `notify.*` rows "in same transaction (outbox)". Different modules use different `DbContext`s and so different transactions. **Amendment:** Auth writes to `auth.OutboxMessages`. The dispatcher publishes an integration event, and the Notifications module consumes it idempotently (inbox) and creates its rows. Delivery is reliable and eventually consistent.
 
 ### 2.3 `AuditTrailInterceptor` writing to `audit.*` from every module's context
-Same problem as 2.1. **Amendment:** the interceptor turns entity changes into outbox messages in the owning module's schema, and the Audit module consumes them. This is deferred to the Platform plan.
+Same problem as 2.1. **Amendment:** the interceptor turns entity changes into outbox messages in the owning module's schema, and the Audit module consumes them. This is deferred to its own plan, 5b (Section 6): Plan 5 delivered the platform services without it.
 
 ### 2.4 UUID v7 does not give sequential inserts on SQL Server
 `Guid.CreateVersion7()` puts the timestamp in the first bytes, but SQL Server orders `uniqueidentifier` by bytes 10–15 first. To SQL Server, v7 IDs look random, so the clustered-index benefit claimed in ADR-0005 does not apply.
@@ -48,6 +48,7 @@ Email verification and password reset need to send mail. **Amendment:** the Auth
 
 ### 2.9 Hangfire dashboard can't be protected by a JWT permission
 A browser navigating to `/jobs` sends no bearer token. **Amendment:** the dashboard is off by default. When enabled it uses a separate scheme (cookie/BFF, or basic auth over HTTPS) or is exposed only on an internal port.
+**Update (Plan 5):** v1 has no Hangfire and so no dashboard. The accepted Hangfire decision was replaced by the template's own recurring-job scheduler, because the work in Plan 5 is only fixed-interval cleanup (ADR 0026). Hangfire stays a post-v1 engine behind the same `IRecurringJob` interface, and this amendment applies if it is ever added.
 
 ### 2.10 SignalR with JWT puts the token in the query string
 WebSockets send the token as `?access_token=`, which ends up in request logs. **Amendment (Notifications plan):** strip or mask `access_token` in request logging and proxy logs.
@@ -76,7 +77,7 @@ WebSockets send the token as `?access_token=`, which ends up in request logs. **
 | FluentAssertions | v8+ commercial (Xceed) | **Shouldly** (blueprint listed both) |
 | MassTransit | v9+ commercial; v8 remains Apache-2.0 | When RabbitMQ is added: pin v8 or evaluate Rebus/Wolverine; record in an ADR |
 | QuestPDF | Free Community licence below a revenue threshold | Keep, with an ADR noting the threshold |
-| Hangfire | LGPL core | Fine; Pro features not used |
+| Hangfire | LGPL core | Not used in v1: the own scheduler replaced it (ADR 0026). LGPL-3.0 is not on the allow-list, so adding it later needs an ADR and an allow-list entry |
 
 ---
 
@@ -117,11 +118,14 @@ Each plan produces working, tested software on its own.
 | **2. Auth core** (done) | Identity in `auth` schema, register / verify email / login / forgot / reset / change password, JWT ES256 + JWKS (key from config), refresh rotation + reuse detection, sessions, logout(-all), RBAC + `.RequirePermission()`, permission cache, auth audit log, admin users/roles, minimal SMTP `IEmailSender`, Mailpit (delivered in Plan 2, PR #4) | 9 (core), Phase 2 |
 | **3. Notifications** (done) | Integration events + inbox, types, Scriban templates, email + in-app (SignalR) channels, delivery worker with retries / dead-letter, preferences, quiet hours, security notifications wired to auth events (delivered in Plan 3, PR #6) | 10 (email + in-app), Phase 4 (part) |
 | **4. MFA** (done) | TOTP + recovery codes, MFA challenge flow, step-up, trusted devices (delivered in Plan 4, PR #7; the role and tenant MFA policy, email and SMS codes, magic links and passkeys stay deferred). Action plan: `docs/superpowers/plans/2026-10-17-mfa.md` | 9 (MFA), Phase 5 (part) |
-| 5. Platform services | HybridCache + Redis, Hangfire + cleanup jobs, HttpClient resilience, audit trail via outbox | 8.1–8.4, 8.9, Phase 3 |
+| **5. Platform services** (done) | HybridCache with optional Redis (`Caching:Provider = redis`: the shared permission cache, rate limits and SignalR backplane, degraded not down when Redis fails), recurring jobs on **our own scheduler** with a SQL lease (Hangfire was replaced for v1, ADR 0026) running the cleanup of outbox, inbox, idempotency, Auth and Notifications rows under a retention policy (ADR 0028), HttpClient resilience pipelines (ADR 0029); delivered in Plan 5, PR to be linked. The audit trail moved to Plan 5b. Spec: `docs/superpowers/specs/2026-10-19-platform-services-design.md`; action plan: `docs/superpowers/plans/2026-10-20-platform-services.md` | 8.1–8.4, Phase 3 |
+| 5b. Audit module | The audit trail via outbox (Section 2.3). Needs its own spec first: the cross-module change-record contract (the interceptor must emit a change record that a module outside the changed module consumes, without every module's `.Contracts` being referenced), the overlap with `auth.AuthAuditLogs`, and the archive target for audit logs (`Auth:Retention:AuditLogs` stays off until one exists, ADR 0028) | 8.9, 11.5 |
+| Social login and phone-number OTP login | Social login with Google, Apple, Microsoft and Facebook plus a generic OpenID Connect entry, and phone-number OTP login (which depends on the SMS channel of the next plan). Decided by the user on 2026-10-20. Every provider is off by default and switched by `Enabled` in configuration | 9.1, 9.7 |
+| Push and SMS channels | FCM and APNs push and SMS as Notifications channels, each with its resilience pipeline (Plan 5 added the pattern, `sms-provider` among the names the blueprint expects). Decided by the user on 2026-10-20. Every channel is off by default and switched by `Enabled` in configuration | 10.1–10.4, 8.4 |
 | 6. Delivery pipeline | Dockerfile (non-root, healthcheck), `cd.yml` gated on CI, `migrate` mode, IIS script, CodeQL, gitleaks | 13.3–13.5, 16, Phase 7 |
 | 7. Packaging → **v1.0** | Switches (`notifications`, `includeSample`, `caching`), matrix generation CI, `modulith-module` item template, pack + publish, README / runbooks | 15, Phase 8 |
 
-**Post-v1 backlog:** OTP / magic link, passkeys, social login, API keys, impersonation, SMS / push / webhook channels, digest, optional read-only DAB sidecar over reporting views (Section 9), file storage, exports, feature flags, multi-tenancy + tenant SSO, OpenIddict, BFF, RabbitMQ, PostgreSQL, Aspire AppHost, k6 / ZAP, learning-track repo.
+**Post-v1 backlog:** email OTP / magic link, passkeys, API keys, impersonation, webhook channels, digest, optional read-only DAB sidecar over reporting views (Section 9), file storage, exports, feature flags, multi-tenancy + tenant SSO, OpenIddict, BFF, RabbitMQ, PostgreSQL, Aspire AppHost, k6 / ZAP, learning-track repo.
 
 ---
 
@@ -142,7 +146,7 @@ ADRs are numbered sequentially when they are written, not reserved up front. Pla
 | 0009 | Internationalization: stable error codes, localized details, `.resx` per module | — |
 | 0010 | Cursor (keyset) pagination; Data API builder not used as the API layer | — |
 
-Later plans add the remaining blueprint ADRs (JWT/BFF, server-side permissions, HybridCache, Hangfire, password hashing, tenancy) when they introduce the decision.
+Later plans add the remaining blueprint ADRs (JWT/BFF, server-side permissions, HybridCache, password hashing, tenancy) when they introduce the decision. Hangfire has no ADR of its own: Plan 5 decided against it for v1 in ADR 0026 (own scheduler), with ADRs 0027 to 0029 for optional Redis, retention and HTTP resilience.
 
 ---
 
@@ -288,7 +292,7 @@ A module document must contain these sections, in this order: **Purpose and boun
 ### 11.4 Licence compliance
 
 - The template is **MIT** (`LICENSE`); the generated project chooses its own.
-- CI runs a licence check (the `nuget-license` .NET tool or equivalent) against an allow-list in `build/licenses/allowed-licenses.json`: `MIT`, `Apache-2.0`, `BSD-2-Clause`, `BSD-3-Clause`. Anything else fails the build until an ADR adds it (e.g. Hangfire's LGPL-3.0 in Plan 5). This automates the blueprint's "check licences of every third-party package".
+- CI runs a licence check (the `nuget-license` .NET tool or equivalent) against an allow-list in `build/licenses/allowed-licenses.json`: `MIT`, `Apache-2.0`, `BSD-2-Clause`, `BSD-3-Clause`. Anything else fails the build until an ADR adds it (e.g. Hangfire's LGPL-3.0, which Plan 5 avoided by building its own scheduler, ADR 0026). This automates the blueprint's "check licences of every third-party package".
 - `THIRD-PARTY-NOTICES.md` is generated by the release workflow and included in the template package. It isn't committed on every PR, so Dependabot bumps don't fail CI.
 
 ### 11.5 CLAUDE.md

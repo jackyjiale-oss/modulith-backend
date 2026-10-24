@@ -133,7 +133,7 @@ public sealed class TrustedDeviceTests(IntegrationTestWebAppFactory factory) : I
         (await ChallengeOrTokensAsync(Email, first.DeviceToken, NewPassword)).ShouldBeTrue();
         (await ChallengeOrTokensAsync(Email, second.DeviceToken, NewPassword)).ShouldBeTrue();
 
-        // The rows are still there (cleanup is Plan 5's), but the list leaves them out: they can never be used again.
+        // The rows are still there (AuthTrustedDevicesCleanup deletes them only after their retention), but the list leaves them out: they can never be used again.
         (await QueryAsync(context => context.Set<TrustedDevice>().CountAsync(Ct))).ShouldBe(2);
         var page = await ListAsync(second.AccessToken);
         page.GetProperty("items").GetArrayLength().ShouldBe(0);

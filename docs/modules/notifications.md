@@ -382,13 +382,13 @@ These consumers are the only way Auth's emails are sent: Auth has no email code 
 | `Notifications:Delivery:PollingInterval` | `00:00:05` | The pause between polls once the due deliveries are drained; `00:00:01` to `01:00:00`. |
 | `Notifications:Delivery:BatchSize` | `10` | The most deliveries one worker claims per batch; 1 to 100. A full batch is followed at once by the next. |
 | `Notifications:Delivery:MaxAttempts` | `5` | The attempts a delivery gets before it is dead-lettered (blueprint 10.4); 1 to 10. |
+| `Notifications:Delivery:LeaseDuration` | `00:05:00` | How long a claimed batch stays hidden from other workers; `00:00:30` to `01:00:00`. Keep it longer than the slowest batch of sends. A fifth of it (at least 30 seconds, at most half) is the safety margin: no delivery starts with less lease left ([Background processing](#background-processing)). |
 | `Notifications:Hub:TicketLifetime` | `00:00:30` | How long a hub ticket can be used; `00:00:05` to `00:05:00`. |
 | `Notifications:Hub:ConnectionLifetime` | `00:10:00` | How long a hub connection opened with a ticket stays open before the hub closes it; `00:01:00` to `01:00:00`. |
 | `Notifications:Hub:TicketsPerMinute` | `30` | The most hub tickets one user gets per minute (a connection takes two); 1 to 1000. Beyond it, 429 `rate_limit.exceeded`. |
 | `Notifications:Retention:HubTickets` | `01:00:00` (1 hour) | How long a hub ticket is kept after its `ExpiresAt`, consumed or not, before the hourly `NotificationsHubTicketsCleanup` deletes it. |
 | `Notifications:Retention:Notifications` | `180.00:00:00` (180 days) | How long a notification is kept after its `CreatedAt`, with its deliveries (dead-lettered ones included), unless a delivery is still pending (`NotificationsRowsCleanup`, daily). |
 | `Notifications:Retention:InAppNotifications` | `180.00:00:00` (180 days) | How long an inbox row is kept after its `CreatedAt`, read or unread (`NotificationsInAppCleanup`, daily). |
-| `Notifications:Delivery:LeaseDuration` | `00:05:00` | How long a claimed batch stays hidden from other workers; `00:00:30` to `01:00:00`. Keep it longer than the slowest batch of sends. A fifth of it (at least 30 seconds, at most half) is the safety margin: no delivery starts with less lease left ([Background processing](#background-processing)). |
 
 Every `Notifications:Retention` key is a `TimeSpan`: a row goes only when strictly older than it, `00:00:00` or an empty value turns that cleanup off, and a negative value stops the host at start. The batch size (`Retention:BatchSize`) and the most batches a run may take (`Jobs:MaxBatchesPerRun`) are building-block settings ([API host](../services/api.md#retention)); `Jobs:{JobName}:Enabled` and `Jobs:{JobName}:Interval` (for example `Jobs:NotificationsRowsCleanup:Interval`) stop or reschedule one job.
 
@@ -544,7 +544,7 @@ What to watch and what the module does not do. Metrics and logs: [Observability]
 - **`ms` and `zh-Hans` are drafts.** The templates, the layouts and the error messages in those two languages await native review (Plan 3 Part C1).
 - **The `unreadOnly` plan is reasoned, not measured** ([Inbox](#inbox)); mark-read races keep the last save's time; a push's `createdAt` is not millisecond-rounded like the row's.
 - **Admin retries are not audited** beyond a log line with the delivery id and the administrator's id ([Delivery administration](#delivery-administration)).
-- **Not built (D17):** scheduling and cancellation, digests, push (FCM), SMS, webhooks, provider callbacks and delivery tracking beyond `Sent`, a suppression list, bulk sends, attachments, fallback channels, an admin template editor with preview and test send, a global mute and a synced `NotificationTypes` table. Each is a backlog item with its blueprint section.
+- **Not built (D17):** scheduling and cancellation, digests, push (FCM, APNs) and SMS channels (planned as their own plan, each channel switched on by an `Enabled` setting and off by default), webhooks, provider callbacks and delivery tracking beyond `Sent`, a suppression list, bulk sends, attachments, fallback channels, an admin template editor with preview and test send, a global mute and a synced `NotificationTypes` table. Each is a backlog item with its blueprint section.
 
 ## Changelog
 
