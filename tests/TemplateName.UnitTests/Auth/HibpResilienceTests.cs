@@ -32,7 +32,9 @@ public sealed class HibpResilienceTests
 
         breached.ShouldBeFalse();
         elapsed.ShouldBeGreaterThanOrEqualTo(TimeSpan.FromSeconds(1));
-        elapsed.ShouldBeLessThanOrEqualTo(TimeSpan.FromSeconds(2.1));
+        // The host steps the fake clock by 100 ms and lets the thread pool run between steps, so under load it can observe
+        // the 2 s expiry a few steps late; the ceiling leaves room for that and still fails for the 30 s default pipeline.
+        elapsed.ShouldBeLessThanOrEqualTo(TimeSpan.FromSeconds(2.5));
         handler.Calls.ShouldBeInRange(1, 2);
         AssertOneWarningWithoutRequestDetails(logger);
     }
