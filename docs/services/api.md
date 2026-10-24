@@ -345,11 +345,11 @@ HTTP security:
 - CORS preflight requests are answered before the rate limiter, so they are not counted. 401 and 403 responses are counted: the limiter (slot 9a) runs before authorization (slot 10), so an anonymous request to a protected or unknown route and a signed-in request without the permission each use up the caller's allowance (an anonymous caller is partitioned by address, a signed-in one by `user:{sub}`).
 - An anonymous request to a route that does not exist gets 401, not 404: the fallback policy also covers requests that matched no endpoint, so anonymous callers cannot probe which routes exist. A signed-in caller gets 404.
 - IPv6 and IPv4-mapped addresses are partition keys as plain strings, so one client can appear as two addresses.
-- The limiter keeps its counters in memory per instance: with N instances a client gets up to N × `GlobalPermitLimit` (a Redis-backed limiter is Plan 5).
+- With the default `Caching:Provider` (`memory`) the limiters keep their counters in memory per instance: with N instances a client gets up to N × `GlobalPermitLimit`. With `redis` every fixed window (global, `auth-strict`, hub tickets) is one count in Redis shared by the instances, and while Redis is down each instance counts on its own again ([platform-redis](../building-blocks/platform-redis.md#rate-limiting)).
 - A bare `Accept-Language: zh` gets English, because `zh` is not a supported culture and `zh-Hans` is its child, not its parent.
 
 Notifications:
-- The SignalR hub pushes only to the connections on the instance that delivered the notification, and the per-user hub ticket limit is counted per instance (no Redis backplane until Plan 5); the inbox endpoints are always complete. More: [Notifications: Operations and known limits](../modules/notifications.md#operations-and-known-limits).
+- The SignalR hub pushes only to the connections on the instance that delivered the notification, (no Redis backplane until Plan 5), and the per-user hub ticket limit is counted per instance unless `Caching:Provider` is `redis`; the inbox endpoints are always complete. More: [Notifications: Operations and known limits](../modules/notifications.md#operations-and-known-limits).
 - A rejected sender address (a wrong `Notifications:Email:From`) fails every email; it is retried for about 81 minutes before the emails are dead-lettered: watch the retry Warnings and the dead-letter metric.
 
 Observability:

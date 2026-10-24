@@ -7,6 +7,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using TemplateName.Infrastructure.Common.Caching;
+using TemplateName.Web.Common.Security;
 
 namespace TemplateName.Platform.Redis;
 
@@ -24,10 +25,12 @@ public static class PlatformRedisServiceCollectionExtensions
     /// <see cref="IConnectionMultiplexer"/> for the whole instance (<c>abortConnect=false</c>, so a Redis that is down at start does not
     /// stop the host, and connect, synchronous and asynchronous timeouts of <c>Caching:Redis:CommandTimeout</c>), the
     /// <see cref="RedisAvailability"/> circuit, <c>AddStackExchangeRedisCache</c> on that connection with keys prefixed by
-    /// <c>Caching:Redis:InstanceName</c> and wrapped by a decorator that never lets a Redis failure reach the caller, and the readiness
-    /// check <c>redis</c> (a <c>PING</c>; failure status <see cref="HealthStatus.Degraded"/>, tag <c>ready</c>). Call it after
-    /// <c>AddInfrastructureCommon</c>. Only the host references this project, so a solution without Redis deletes the project and this
-    /// call.
+    /// <c>Caching:Redis:InstanceName</c> and wrapped by a decorator that never lets a Redis failure reach the caller,
+    /// <see cref="RedisFixedWindowLimiterFactory"/> in place of the in-memory <see cref="IFixedWindowLimiterFactory"/> (so the
+    /// <c>global</c>, <c>auth-strict</c> and <c>notifications-hub-tickets</c> windows are shared by every instance, and counted in memory
+    /// while Redis is down), and the readiness check <c>redis</c> (a <c>PING</c>; failure status <see cref="HealthStatus.Degraded"/>, tag
+    /// <c>ready</c>). Call it after <c>AddInfrastructureCommon</c> (before or after <c>AddHttpSecurity</c>). Only the host references this
+    /// project, so a solution without Redis deletes the project and this call.
     /// </summary>
     public static IServiceCollection AddPlatformRedis(this IServiceCollection services, IConfiguration configuration)
     {
@@ -70,6 +73,9 @@ public static class PlatformRedisServiceCollectionExtensions
             cache.ConnectionMultiplexerFactory = () => Task.FromResult(provider.GetRequiredService<IConnectionMultiplexer>());
         });
         DecorateDistributedCache(services);
+
+        // Replace, not TryAdd: AddHttpSecurity may already have registered the in-memory default (it only adds one when none exists).
+        services.Replace(ServiceDescriptor.Singleton<IFixedWindowLimiterFactory, RedisFixedWindowLimiterFactory>());
 
         services.AddHealthChecks().AddCheck<RedisHealthCheck>(HealthCheckName, HealthStatus.Degraded, ["ready"]);
 

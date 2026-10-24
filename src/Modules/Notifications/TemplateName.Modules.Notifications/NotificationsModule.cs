@@ -31,6 +31,7 @@ using TemplateName.Modules.Notifications.Infrastructure.Retention;
 using TemplateName.Modules.Notifications.Endpoints;
 using TemplateName.Modules.Notifications.Infrastructure.Templates;
 using TemplateName.Modules.Notifications.Resources;
+using TemplateName.Web.Common.Security;
 using HubOptions = TemplateName.Modules.Notifications.Application.HubTickets.HubOptions;
 
 namespace TemplateName.Modules.Notifications;
@@ -108,7 +109,8 @@ public static class NotificationsModule
     /// <c>HubTicket</c> authentication scheme (<see cref="HubTicketAuthenticationHandler"/>; not a default scheme, so it runs only where
     /// a policy names it: the hub), SignalR with string enums in its JSON payloads, <see cref="SubClaimUserIdProvider"/> and
     /// <see cref="SignalRInAppNotificationPusher"/> as the in-app pusher (a singleton over the singleton hub context), and the rate-limit
-    /// policy of the ticket endpoint (<see cref="HubTicketRateLimit"/>).
+    /// policy of the ticket endpoint (<see cref="HubTicketRateLimit"/>, whose windows come from the <see cref="IFixedWindowLimiterFactory"/>
+    /// that <c>AddHttpSecurity</c> registers, so the host calls it too).
     /// </summary>
     internal static void AddHub(IServiceCollection services, IConfiguration configuration)
     {
@@ -123,7 +125,8 @@ public static class NotificationsModule
         services.AddSingleton<IUserIdProvider, SubClaimUserIdProvider>();
         services.AddSingleton<IInAppNotificationPusher, SignalRInAppNotificationPusher>();
         services.AddOptions<RateLimiterOptions>()
-            .Configure<IOptions<HubOptions>>((limiterOptions, hubOptions) => HubTicketRateLimit.AddPolicy(limiterOptions, hubOptions.Value));
+            .Configure<IOptions<HubOptions>, IFixedWindowLimiterFactory>(
+                (limiterOptions, hubOptions, limiterFactory) => HubTicketRateLimit.AddPolicy(limiterOptions, hubOptions.Value, limiterFactory));
     }
 
     /// <summary>
