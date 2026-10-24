@@ -10,7 +10,8 @@ namespace TemplateName.Infrastructure.Common.Outbox;
 /// <c>Retention:Outbox</c> ago, with their <c>OutboxMessageConsumers</c> (no foreign key joins the two tables, so each batch deletes the
 /// consumers of the messages it deletes in the same transaction). Pending messages and abandoned ones (<c>ProcessedAt IS NULL</c>) are
 /// never touched; after every run, whether or not the retention is on, the job reports how many are abandoned in
-/// <see cref="OutboxAbandonedGauge"/>. Named <c>{Context}OutboxCleanup</c> (the context's name without <c>DbContext</c>), daily.
+/// <see cref="OutboxAbandonedGauge"/>, which reports the count until the job's next run is due (its configured interval) and then
+/// nothing. Named <c>{Context}OutboxCleanup</c> (the context's name without <c>DbContext</c>), daily.
 /// </summary>
 internal sealed class OutboxCleanupJob<TContext>(
     TContext context,
@@ -57,7 +58,7 @@ internal sealed class OutboxCleanupJob<TContext>(
         var maxAttempts = outbox.Value.MaxAttempts;
         var abandoned = await Context.Set<OutboxMessage>()
             .CountAsync(message => message.ProcessedAt == null && message.AttemptCount >= maxAttempts, cancellationToken);
-        abandonedGauge.Set(ContextName, abandoned);
+        abandonedGauge.Set(ContextName, abandoned, this);
 
         return result;
     }
