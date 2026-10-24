@@ -621,7 +621,9 @@
         "dependencies": {
           "Dapper": "[2.1.89, )",
           "Microsoft.EntityFrameworkCore.SqlServer": "[10.0.13, )",
+          "Microsoft.Extensions.Caching.Hybrid": "[10.11.0, )",
           "Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore": "[10.0.13, )",
+          "Microsoft.Extensions.Http.Resilience": "[10.11.0, )",
           "TemplateName.Application.Common": "[0.0.0, )",
           "TemplateName.SharedKernel": "[0.0.0, )"
         }

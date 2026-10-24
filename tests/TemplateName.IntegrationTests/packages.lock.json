@@ -95,11 +95,11 @@
       },
       "Testcontainers.Redis": {
         "type": "Direct",
-        "requested": "[4.15.0, )",
-        "resolved": "4.15.0",
-        "contentHash": "au2OSaAQwn3W6Q2QZsYUig2Smbi0xdAZQhyjynjK10Hhf0HokhsADtGjRdXefqjSIpq49Yqpkh7QjhD7hvMwAQ==",
+        "requested": "[4.16.0, )",
+        "resolved": "4.16.0",
+        "contentHash": "IFYPaYLgM34OTe46kNVsSylcid6wm7zgkiZv3k7Oe6fioPcHByhyPW93fLxIfQIFvDwQcwpELxwRRSDyQmYvoA==",
         "dependencies": {
-          "Testcontainers": "4.15.0"
+          "Testcontainers": "4.16.0"
         }
       },
       "xunit.runner.visualstudio": {
@@ -821,7 +821,9 @@
         "dependencies": {
           "Dapper": "[2.1.89, )",
           "Microsoft.EntityFrameworkCore.SqlServer": "[10.0.13, )",
+          "Microsoft.Extensions.Caching.Hybrid": "[10.11.0, )",
           "Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore": "[10.0.13, )",
+          "Microsoft.Extensions.Http.Resilience": "[10.11.0, )",
           "TemplateName.Application.Common": "[0.0.0, )",
           "TemplateName.SharedKernel": "[0.0.0, )"
         }
