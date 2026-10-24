@@ -102,6 +102,18 @@ public sealed class CachingProviderTests
     }
 
     [Fact]
+    public void Redis_exceptions_never_name_the_key()
+    {
+        // StackExchange.Redis 3.4.5 includes the key in its exception messages unless told not to, and our keys can hold a client address
+        // (rate limits) or a user id (permission sets).
+        new ConfigurationOptions().IncludeDetailInExceptions.ShouldBeTrue();
+
+        var connection = PlatformRedisServiceCollectionExtensions.CreateConfiguration("localhost:6379", new RedisCachingOptions());
+
+        connection.IncludeDetailInExceptions.ShouldBeFalse();
+    }
+
+    [Fact]
     public void The_heartbeat_is_never_longer_than_one_second_nor_than_the_command_timeout()
     {
         var slow = PlatformRedisServiceCollectionExtensions.CreateConfiguration(

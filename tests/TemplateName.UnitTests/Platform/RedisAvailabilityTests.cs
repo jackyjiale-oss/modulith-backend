@@ -57,6 +57,29 @@ public sealed class RedisAvailabilityTests
     }
 
     [Fact]
+    public void The_outage_warning_names_the_exception_type_but_never_its_message()
+    {
+        // StackExchange.Redis names the key in its messages by default, and a key can hold a client address or a user id.
+        const string Key = "TemplateName:rl:auth-strict:ip:203.0.113.7";
+        var availability = CreateAvailability();
+
+        for (var failure = 0; failure < 3; failure++)
+        {
+            availability.RecordFailure(new RedisTimeoutException(CommandFlags.None, $"Timeout performing EVALSHA (500ms), key: {Key}, inst: 1", CommandStatus.Sent));
+        }
+
+        var warning = Warnings().ShouldHaveSingleItem();
+        warning.Message.ShouldContain(nameof(RedisTimeoutException));
+        foreach (var text in warning.Properties.Values.Select(value => value?.ToString() ?? string.Empty).Append(warning.Message))
+        {
+            text.ShouldNotContain("203.0.113.7");
+            text.ShouldNotContain("auth-strict");
+        }
+
+        _logger.Exceptions.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Failures_below_the_threshold_log_no_warning()
     {
         var availability = CreateAvailability();

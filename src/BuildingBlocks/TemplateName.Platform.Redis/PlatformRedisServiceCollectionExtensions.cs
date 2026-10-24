@@ -98,6 +98,8 @@ public static class PlatformRedisServiceCollectionExtensions
     /// reconnect. The callers bound every call by <see cref="RedisCachingOptions.CommandTimeout"/> on top of this (the SignalR backplane,
     /// which is not ours, relies on the timeouts alone). The channel prefix is <c>{InstanceName}signalr</c>, whatever the string says:
     /// StackExchange.Redis puts it in front of every pub/sub channel of the connection, and only the backplane uses pub/sub.
+    /// <c>IncludeDetailInExceptions</c> is off (StackExchange.Redis turns it on by default): its exception messages would otherwise name
+    /// the key, and our keys hold client addresses (rate limits) and user ids (permission sets), which must not reach the logs.
     /// </summary>
     internal static ConfigurationOptions CreateConfiguration(string connectionString, RedisCachingOptions options)
     {
@@ -112,6 +114,7 @@ public static class PlatformRedisServiceCollectionExtensions
         configuration.BacklogPolicy = BacklogPolicy.FailFast;
         configuration.HeartbeatInterval = TimeSpan.FromMilliseconds(Math.Min(timeout, MaximumHeartbeatInterval.TotalMilliseconds));
         configuration.ChannelPrefix = RedisChannel.Literal(options.InstanceName + SignalRChannelPrefix);
+        configuration.IncludeDetailInExceptions = false;
         return configuration;
     }
 

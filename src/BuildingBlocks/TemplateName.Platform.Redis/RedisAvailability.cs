@@ -9,8 +9,8 @@ namespace TemplateName.Platform.Redis;
 /// <see cref="RedisCachingOptions.BreakDuration"/>: callers skip Redis (a cache read is a miss, a rate limit is counted in memory)
 /// instead of waiting for it on every request. When the break is over the circuit is half-open: exactly one call (the probe) goes to
 /// Redis while every other caller still skips it; the probe's success closes the circuit, its failure opens it for another break. One
-/// warning is logged per outage window (from the circuit opening until the next success) and one information line when Redis answers
-/// again. Time is the application's <see cref="TimeProvider"/>. Thread-safe.
+/// warning is logged per outage window (from the circuit opening until the next success), naming the exception's type but never its
+/// message, and one information line when Redis answers again. Time is the application's <see cref="TimeProvider"/>. Thread-safe.
 /// </summary>
 public sealed partial class RedisAvailability(TimeProvider timeProvider, IOptions<RedisCachingOptions> options, ILogger<RedisAvailability> logger)
 {
@@ -69,7 +69,8 @@ public sealed partial class RedisAvailability(TimeProvider timeProvider, IOption
 
     /// <summary>
     /// Records a Redis call that failed. At the threshold (and at every failure after it, until a success) the circuit opens for a
-    /// break; the first opening of an outage logs the warning, with <paramref name="exception"/>.
+    /// break; the first opening of an outage logs the warning, with the type of <paramref name="exception"/> only: a Redis exception's
+    /// message and data can name the key, and a key can hold a client address or a user id.
     /// </summary>
     public void RecordFailure(Exception exception)
     {
@@ -93,7 +94,7 @@ public sealed partial class RedisAvailability(TimeProvider timeProvider, IOption
 
         if (outageStarted)
         {
-            LogUnavailable(logger, failures, _options.BreakDuration, exception);
+            LogUnavailable(logger, failures, _options.BreakDuration, exception.GetType().Name);
         }
     }
 
@@ -132,8 +133,8 @@ public sealed partial class RedisAvailability(TimeProvider timeProvider, IOption
 
     [LoggerMessage(
         Level = LogLevel.Warning,
-        Message = "Redis failed {FailureCount} times in a row and is skipped for {BreakDuration} at a time until it answers again; cache reads go to the database and rate limits are counted in memory by each instance meanwhile")]
-    private static partial void LogUnavailable(ILogger logger, int failureCount, TimeSpan breakDuration, Exception exception);
+        Message = "Redis failed {FailureCount} times in a row ({ExceptionType}) and is skipped for {BreakDuration} at a time until it answers again; cache reads go to the database and rate limits are counted in memory by each instance meanwhile")]
+    private static partial void LogUnavailable(ILogger logger, int failureCount, TimeSpan breakDuration, string exceptionType);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Redis answers again; the cache and the rate limiters use it")]
     private static partial void LogAvailableAgain(ILogger logger);

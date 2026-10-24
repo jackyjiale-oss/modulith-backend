@@ -6,6 +6,9 @@ internal sealed class RecordingLogger<T> : ILogger<T>
 {
     public List<(LogLevel Level, string Message, IReadOnlyDictionary<string, object?> Properties)> Entries { get; } = [];
 
+    /// <summary>The exceptions attached to the entries, in order (an entry without one adds nothing).</summary>
+    public List<Exception> Exceptions { get; } = [];
+
     public IDisposable? BeginScope<TState>(TState state)
         where TState : notnull
         => null;
@@ -23,5 +26,9 @@ internal sealed class RecordingLogger<T> : ILogger<T>
             ? pairs.ToDictionary(pair => pair.Key, pair => pair.Value)
             : [];
         Entries.Add((logLevel, formatter(state, exception), properties));
+        if (exception is not null)
+        {
+            Exceptions.Add(exception);
+        }
     }
 }
