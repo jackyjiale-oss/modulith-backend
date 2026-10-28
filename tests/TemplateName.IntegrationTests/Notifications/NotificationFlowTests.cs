@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using TemplateName.Application.Common.Auditing;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.IntegrationTests.Infrastructure;
 using TemplateName.Modules.Auth.Domain.Users;
@@ -156,7 +157,8 @@ public sealed class NotificationFlowTests(IntegrationTestWebAppFactory factory) 
         await DispatchNotificationsAsync();
 
         (await OutboxMessageAsync()).ProcessedAt.ShouldNotBeNull();
-        var published = Factory.IntegrationEvents.Events;
+        // The audit change sets of the registration are published too; this counts the verification event's deliveries.
+        var published = Factory.IntegrationEvents.Events.Where(integrationEvent => integrationEvent is not EntityChangesRecordedIntegrationEvent).ToList();
         published.Count.ShouldBe(2);
         published.Select(integrationEvent => integrationEvent.Id).Distinct().Count().ShouldBe(1);
         Factory.EmailSender.Sent.ShouldHaveSingleItem();

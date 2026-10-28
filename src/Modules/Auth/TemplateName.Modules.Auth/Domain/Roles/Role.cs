@@ -1,4 +1,5 @@
 using TemplateName.SharedKernel;
+using TemplateName.SharedKernel.Auditing;
 
 namespace TemplateName.Modules.Auth.Domain.Roles;
 
@@ -6,6 +7,7 @@ namespace TemplateName.Modules.Auth.Domain.Roles;
 /// A named set of permissions that can be assigned to users. System roles (<see cref="SystemRoles"/>) are seeded: they cannot be
 /// renamed or deleted, and the permission set of <see cref="SystemRoles.SuperAdmin"/> is maintained by the seeder only.
 /// </summary>
+[Audited]
 internal sealed class Role : AggregateRoot<Guid>, IAuditable, ISoftDeletable
 {
     /// <summary>The column limit of <see cref="Name"/>.</summary>
@@ -24,6 +26,7 @@ internal sealed class Role : AggregateRoot<Guid>, IAuditable, ISoftDeletable
     public string Name { get; private set; } = string.Empty;
 
     /// <summary>The form of the name used for lookups and the unique index: trimmed and upper-case.</summary>
+    [AuditIgnore]
     public string NormalizedName { get; private set; } = string.Empty;
 
     public string Description { get; private set; } = string.Empty;

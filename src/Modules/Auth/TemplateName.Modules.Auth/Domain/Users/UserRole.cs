@@ -1,8 +1,10 @@
 using TemplateName.SharedKernel;
+using TemplateName.SharedKernel.Auditing;
 
 namespace TemplateName.Modules.Auth.Domain.Users;
 
 /// <summary>The assignment of a role to a user.</summary>
+[Audited]
 internal sealed class UserRole
 {
     // EF Core materializes the entity through this constructor; the user creates assignments.

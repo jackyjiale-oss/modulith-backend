@@ -1,9 +1,11 @@
 using TemplateName.Modules.Sample.Domain.LeaveRequests.Events;
 using TemplateName.SharedKernel;
+using TemplateName.SharedKernel.Auditing;
 
 namespace TemplateName.Modules.Sample.Domain.LeaveRequests;
 
 /// <summary>An employee's request for time off. It starts pending and is approved by another person.</summary>
+[Audited]
 internal sealed class LeaveRequest : AggregateRoot<Guid>, IAuditable, ISoftDeletable
 {
     // EF Core materializes the aggregate through this constructor; callers use Submit.
