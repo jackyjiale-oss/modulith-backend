@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using TemplateName.Application.Common.Identity;
 using TemplateName.IntegrationTests.Infrastructure;
+using TemplateName.Modules.Audit.Application;
 using TemplateName.Modules.Auth;
 using TemplateName.Modules.Auth.Application;
 using TemplateName.Modules.Auth.Application.Abstractions;
@@ -39,18 +40,19 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
         "auth.audit.view",
     ];
 
-    // The Auth defaults plus the two Notifications permissions, which are flagged AdminDefault too.
+    // The Auth defaults plus the two Notifications permissions and the Audit one, which are flagged AdminDefault too.
     private static readonly string[] AdminDefaults =
     [
         .. AuthAdminDefaults,
         NotificationsPermissions.DeliveryView,
         NotificationsPermissions.DeliveryRetry,
+        AuditPermissions.TrailsView,
     ];
 
     private readonly List<AsyncServiceScope> _scopes = [];
 
-    /// <summary>The codes the modules declare: those of the Auth, Sample and Notifications modules (through their <c>IPermissionSource</c>).</summary>
-    private static IEnumerable<string> ModuleCodes => new IPermissionSource[] { new AuthPermissionSource(), new SamplePermissionSource(), new NotificationsPermissionSource() }
+    /// <summary>The codes the modules declare: those of the Auth, Sample, Notifications and Audit modules (through their <c>IPermissionSource</c>).</summary>
+    private static IEnumerable<string> ModuleCodes => new IPermissionSource[] { new AuthPermissionSource(), new SamplePermissionSource(), new NotificationsPermissionSource(), new AuditPermissionSource() }
         .SelectMany(source => source.Permissions)
         .Select(permission => permission.Code);
 
@@ -123,9 +125,9 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
         admin.ShouldNotContain(AuthPermissions.UserAssignRoles);
         admin.ShouldNotContain(AuthPermissions.RoleManage);
 
-        // The only additions are the other modules' flagged permissions (Notifications here; Sample flags none).
+        // The only additions are the other modules' flagged permissions (Notifications and Audit here; Sample flags none).
         admin.Where(code => !code.StartsWith("auth.", StringComparison.Ordinal)).ShouldBe(
-            [NotificationsPermissions.DeliveryView, NotificationsPermissions.DeliveryRetry],
+            [NotificationsPermissions.DeliveryView, NotificationsPermissions.DeliveryRetry, AuditPermissions.TrailsView],
             ignoreOrder: true);
         (await GrantedCodesAsync(SystemRoles.User)).ShouldBeEmpty();
         (await GrantedCodesAsync(SystemRoles.SuperAdmin)).ShouldBe(ModuleCodes, ignoreOrder: true);

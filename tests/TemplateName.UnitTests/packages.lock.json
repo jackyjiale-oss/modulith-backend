@@ -1012,6 +1012,15 @@
           "TemplateName.SharedKernel": "[0.0.0, )"
         }
       },
+      "templatename.modules.audit": {
+        "type": "Project",
+        "dependencies": {
+          "TemplateName.Application.Common": "[0.0.0, )",
+          "TemplateName.Infrastructure.Common": "[0.0.0, )",
+          "TemplateName.SharedKernel": "[0.0.0, )",
+          "TemplateName.Web.Common": "[0.0.0, )"
+        }
+      },
       "templatename.modules.auth": {
         "type": "Project",
         "dependencies": {

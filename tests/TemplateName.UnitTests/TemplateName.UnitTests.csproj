@@ -9,6 +9,7 @@
     <ProjectReference Include="..\..\src\Modules\Auth\TemplateName.Modules.Auth\TemplateName.Modules.Auth.csproj" />
     <ProjectReference Include="..\..\src\Modules\Notifications\TemplateName.Modules.Notifications\TemplateName.Modules.Notifications.csproj" />
     <ProjectReference Include="..\..\src\Modules\Sample\TemplateName.Modules.Sample\TemplateName.Modules.Sample.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Audit\TemplateName.Modules.Audit\TemplateName.Modules.Audit.csproj" />
   </ItemGroup>
 
   <ItemGroup>

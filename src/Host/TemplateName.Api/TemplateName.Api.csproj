@@ -13,6 +13,7 @@
     <ProjectReference Include="..\..\Modules\Auth\TemplateName.Modules.Auth\TemplateName.Modules.Auth.csproj" />
     <ProjectReference Include="..\..\Modules\Notifications\TemplateName.Modules.Notifications\TemplateName.Modules.Notifications.csproj" />
     <ProjectReference Include="..\..\Modules\Sample\TemplateName.Modules.Sample\TemplateName.Modules.Sample.csproj" />
+    <ProjectReference Include="..\..\Modules\Audit\TemplateName.Modules.Audit\TemplateName.Modules.Audit.csproj" />
   </ItemGroup>
 
   <ItemGroup>

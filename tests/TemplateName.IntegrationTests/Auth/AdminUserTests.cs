@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.IntegrationTests.Infrastructure;
+using TemplateName.Modules.Audit.Application;
 using TemplateName.Modules.Auth.Application;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Roles;
@@ -418,10 +419,16 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
     [Fact]
     public async Task Assigning_a_role_grants_access_on_the_next_request()
     {
-        // The actor holds every permission of Admin (the Auth defaults and the Notifications ones the role is flagged to get), so it may
-        // grant the role (the grant rule).
+        // The actor holds every permission of Admin (the Auth defaults and the Notifications and Audit ones the role is flagged to get), so
+        // it may grant the role (the grant rule).
         await SignInAsync(
-            [AuthPermissions.UserAssignRoles, .. AuthSeeder.AdminDefaultPermissions, NotificationsPermissions.DeliveryView, NotificationsPermissions.DeliveryRetry],
+            [
+                AuthPermissions.UserAssignRoles,
+                .. AuthSeeder.AdminDefaultPermissions,
+                NotificationsPermissions.DeliveryView,
+                NotificationsPermissions.DeliveryRetry,
+                AuditPermissions.TrailsView,
+            ],
             AuthTestHarness.DefaultLocale);
         var target = await CreateUserAsync("target@example.com");
         var tokens = await LoginAsync("target@example.com", Password);

@@ -2,6 +2,7 @@ using System.Reflection;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Resources;
+using TemplateName.Modules.Audit;
 using TemplateName.Modules.Auth;
 using TemplateName.Modules.Auth.Contracts.Users;
 using TemplateName.Modules.Auth.Resources;
@@ -18,7 +19,7 @@ namespace TemplateName.ArchitectureTests;
 
 /// <summary>
 /// The assemblies the architecture rules inspect. Adding a module means adding one line to <see cref="Modules"/> (and one to <see cref="Contracts"/> when it has a contracts project) and one to
-/// <see cref="ErrorMessageResources"/>.
+/// <see cref="ErrorMessageResources"/> when it defines error codes.
 /// </summary>
 public static class Assemblies
 {
@@ -41,6 +42,7 @@ public static class Assemblies
         typeof(AuthModule).Assembly,
         typeof(NotificationsModule).Assembly,
         typeof(SampleModule).Assembly,
+        typeof(AuditModule).Assembly,
     ];
 
     /// <summary>One entry per <c>*.Contracts</c> assembly: the public surface a module offers the others (see <c>ContractsTests</c>).</summary>
