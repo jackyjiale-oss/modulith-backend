@@ -8,6 +8,7 @@ using TemplateName.Infrastructure.Common.Inbox;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Audit.Application;
 using TemplateName.Modules.Audit.Application.Abstractions;
+using TemplateName.Modules.Audit.Endpoints;
 using TemplateName.Modules.Audit.Infrastructure.Persistence;
 
 namespace TemplateName.Modules.Audit;
@@ -41,6 +42,6 @@ public static class AuditModule
         return services;
     }
 
-    /// <summary>Maps the module's endpoints; <paramref name="app"/> is the host's <c>/api/v1</c> group. The module has none yet.</summary>
-    public static IEndpointRouteBuilder MapAuditEndpoints(this IEndpointRouteBuilder app) => app;
+    /// <summary>Maps the module's endpoints; <paramref name="app"/> is the host's <c>/api/v1</c> group: the audit trail list (<c>admin/audit/trails</c>).</summary>
+    public static IEndpointRouteBuilder MapAuditEndpoints(this IEndpointRouteBuilder app) => app.MapAdminAuditTrailEndpoints();
 }

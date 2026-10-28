@@ -43,6 +43,50 @@ internal static class SqlExecutionPlan
             .Where(scan => scan.Descendants().Any(element => element.Name.LocalName == "Object" && (string?)element.Attribute("Table") == table))
             .ToList();
 
+    /// <summary>
+    /// The plan SQL Server cached for the most recently run list statement (<c>SELECT TOP (@Take)</c>) whose text contains
+    /// <paramref name="statementFragment"/>: the plan of the SQL an application really sent (a Dapper query, say) with the parameter
+    /// values it sniffed, without the test having the SQL text. Fails if no cached statement matches. Needs <c>VIEW SERVER STATE</c>;
+    /// opens <paramref name="connection"/> if it is closed.
+    /// </summary>
+    public static async Task<string> OfCachedStatementAsync(DbConnection connection, string statementFragment, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentException.ThrowIfNullOrEmpty(statementFragment);
+
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT TOP (1) CAST(plan_data.query_plan AS nvarchar(max))
+            FROM sys.dm_exec_query_stats AS stats
+            CROSS APPLY sys.dm_exec_sql_text(stats.sql_handle) AS statement_text
+            CROSS APPLY sys.dm_exec_query_plan(stats.plan_handle) AS plan_data
+            WHERE CHARINDEX(@Fragment, statement_text.text) > 0
+                AND CHARINDEX(N'SELECT TOP (@Take)', statement_text.text) > 0
+                AND CHARINDEX(N'dm_exec_query_stats', statement_text.text) = 0
+            ORDER BY stats.last_execution_time DESC
+            """;
+        var fragment = command.CreateParameter();
+        fragment.ParameterName = "@Fragment";
+        fragment.Value = statementFragment;
+        command.Parameters.Add(fragment);
+
+        return await command.ExecuteScalarAsync(cancellationToken) as string
+            ?? throw new InvalidOperationException($"No cached plan for a list statement containing '{statementFragment}'.");
+    }
+
+    /// <summary>The physical operators of <paramref name="plan"/> (<c>Index Seek</c>, <c>Index Scan</c>, <c>Sort</c>, <c>Top N Sort</c>, <c>Key Lookup</c>, ...), in plan order.</summary>
+    public static List<string> PhysicalOperatorsOf(string plan)
+        => XDocument.Parse(plan).Descendants()
+            .Where(element => element.Name.LocalName == "RelOp")
+            .Select(element => (string?)element.Attribute("PhysicalOp") ?? string.Empty)
+            .ToList();
+
     private static async Task<string> PlanAsync(DbConnection connection, string statement, CancellationToken cancellationToken)
     {
         if (connection.State != System.Data.ConnectionState.Open)
