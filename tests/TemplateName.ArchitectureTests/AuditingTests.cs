@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using TemplateName.Modules.Audit;
+using TemplateName.SharedKernel;
 using TemplateName.SharedKernel.Auditing;
 
 namespace TemplateName.ArchitectureTests;
@@ -15,6 +16,12 @@ namespace TemplateName.ArchitectureTests;
 public sealed class AuditingTests
 {
     private static readonly string[] SecretNameSuffixes = ["Hash", "Secret", "Token", "Salt", "Key", "Stamp"];
+
+    private static readonly string[] AuditableColumns =
+        [nameof(IAuditable.CreatedAt), nameof(IAuditable.CreatedBy), nameof(IAuditable.UpdatedAt), nameof(IAuditable.UpdatedBy)];
+
+    private static readonly string[] SoftDeletableColumns =
+        [nameof(ISoftDeletable.IsDeleted), nameof(ISoftDeletable.DeletedAt), nameof(ISoftDeletable.DeletedBy)];
 
     private static readonly Type[] AuditTypes =
     [
@@ -135,6 +142,30 @@ public sealed class AuditingTests
         => IsSecretName(propertyName).ShouldBe(flagged);
 
     [Fact]
+    public void A_store_generated_property_of_an_audited_entity_is_a_row_version_a_stamp_or_ignored()
+    {
+        // The extractor skips every store-generated value; an unmarked one (HasDefaultValue, HasDefaultValueSql) would be a silent gap.
+        var entityTypes = AuditedEntityTypes();
+        entityTypes.ShouldNotBeEmpty();
+
+        var unmarked = UnmarkedStoreGeneratedProperties(entityTypes);
+
+        unmarked.ShouldBeEmpty(StoreGeneratedMessage(unmarked));
+    }
+
+    [Fact]
+    public void The_store_generated_rule_flags_an_unmarked_default_value_column_and_lets_the_skipped_ones_through()
+    {
+        using var context = new StoreGeneratedRuleDbContext();
+        var entityTypes = context.GetService<IDesignTimeModel>().Model.GetEntityTypes().ToList();
+
+        var unmarked = UnmarkedStoreGeneratedProperties(entityTypes);
+
+        unmarked.ShouldBe(["DefaultedRecord.IsActive (OnAdd)", "DefaultedRecord.Rank (OnAdd)"], ignoreOrder: true);
+        StoreGeneratedMessage(unmarked).ShouldContain("a store-generated or HasDefaultValue column is never audited");
+    }
+
+    [Fact]
     public void The_audit_attributes_and_change_types_are_declared_in_the_shared_kernel()
     {
         AuditTypes.ShouldAllBe(type => type.Assembly == Assemblies.SharedKernel && type.Namespace == "TemplateName.SharedKernel.Auditing");
@@ -188,6 +219,30 @@ public sealed class AuditingTests
         => property is not null
             && (property.IsDefined(typeof(AuditIgnoreAttribute), inherit: true) || property.IsDefined(typeof(AuditMaskAttribute), inherit: true));
 
+    /// <summary>
+    /// The non-key properties of the audited types in <paramref name="entityTypes"/> that the extractor would skip as store-generated
+    /// although they are not a concurrency token, a column it skips by rule or marked <see cref="AuditIgnoreAttribute"/>.
+    /// </summary>
+    private static List<string> UnmarkedStoreGeneratedProperties(IEnumerable<IEntityType> entityTypes)
+        => [.. entityTypes
+            .Where(entityType => entityType.ClrType.IsDefined(typeof(AuditedAttribute), inherit: false))
+            .SelectMany(entityType => entityType.GetProperties()
+                .Where(property => property.ValueGenerated != ValueGenerated.Never
+                    && !property.IsPrimaryKey()
+                    && !property.IsConcurrencyToken
+                    && !SkippedByRule(entityType.ClrType, property.Name)
+                    && property.PropertyInfo?.IsDefined(typeof(AuditIgnoreAttribute), inherit: true) != true)
+                .Select(property => $"{entityType.ClrType.Name}.{property.Name} ({property.ValueGenerated})"))];
+
+    // The columns EntityChangeExtractor never records: the IAuditable stamps and the ISoftDeletable flag and stamps.
+    private static bool SkippedByRule(Type clrType, string propertyName)
+        => (typeof(IAuditable).IsAssignableFrom(clrType) && AuditableColumns.Contains(propertyName))
+            || (typeof(ISoftDeletable).IsAssignableFrom(clrType) && SoftDeletableColumns.Contains(propertyName));
+
+    private static string StoreGeneratedMessage(IReadOnlyCollection<string> properties)
+        => $"{string.Join(", ", properties)}: a store-generated or HasDefaultValue column is never audited; remove the default, or mark the "
+            + "property [AuditIgnore] to make the gap deliberate.";
+
     private static List<Type> AuditedTypes()
         => [.. Assemblies.All.Concat(Assemblies.Contracts)
             .SelectMany(assembly => assembly.GetTypes())
@@ -222,5 +277,75 @@ public sealed class AuditingTests
         }
 
         return models;
+    }
+
+    /// <summary>
+    /// A model that breaks the store-generated rule twice (<c>IsActive</c>, <c>Rank</c>) next to every store-generated column the rule lets
+    /// through: a row version, a stamp, the soft-delete flag, an ignored property and a property of an entity that is not audited. It is
+    /// built without connecting to a database.
+    /// </summary>
+    private sealed class StoreGeneratedRuleDbContext : DbContext
+    {
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) => optionsBuilder.UseSqlServer("Server=unused;Database=unused");
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<DefaultedRecord>(builder =>
+            {
+                builder.HasKey(record => record.Id);
+                builder.Property(record => record.Id).ValueGeneratedNever();
+                builder.Property(record => record.IsActive).HasDefaultValue(false);
+                builder.Property(record => record.Rank).HasDefaultValueSql("(1)");
+                builder.Property(record => record.Flag).HasDefaultValue(false);
+                builder.Property(record => record.RowVersion).IsRowVersion();
+                builder.Property(record => record.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
+                builder.Property(record => record.IsDeleted).HasDefaultValue(false);
+            });
+
+            modelBuilder.Entity<UnauditedRecord>(builder =>
+            {
+                builder.HasKey(record => record.Id);
+                builder.Property(record => record.Id).ValueGeneratedNever();
+                builder.Property(record => record.IsActive).HasDefaultValue(false);
+            });
+        }
+    }
+
+    [Audited]
+    private sealed class DefaultedRecord : IAuditable, ISoftDeletable
+    {
+        public Guid Id { get; set; }
+
+        public string Name { get; set; } = string.Empty;
+
+        public bool IsActive { get; set; }
+
+        public int Rank { get; set; }
+
+        [AuditIgnore]
+        public bool Flag { get; set; }
+
+        public byte[]? RowVersion { get; set; }
+
+        public DateTime CreatedAt { get; set; }
+
+        public Guid? CreatedBy { get; set; }
+
+        public DateTime? UpdatedAt { get; set; }
+
+        public Guid? UpdatedBy { get; set; }
+
+        public bool IsDeleted { get; set; }
+
+        public DateTime? DeletedAt { get; set; }
+
+        public Guid? DeletedBy { get; set; }
+    }
+
+    private sealed class UnauditedRecord
+    {
+        public Guid Id { get; set; }
+
+        public bool IsActive { get; set; }
     }
 }

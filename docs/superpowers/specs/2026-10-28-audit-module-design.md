@@ -1,6 +1,6 @@
 # Plan 5b: Audit module — design
 
-- Status: Draft 2026-10-28, waiting for the user's review (decisions D1 to D7: D1 to D6 were agreed section by section in the design session, D7 is new and flagged in section 10)
+- Status: Approved 2026-10-28 (decisions D1 to D7: D1 to D6 were agreed section by section in the design session, D7 is new and flagged in section 10)
 - Date: 2026-10-28
 - Roadmap row: 5b of `docs/blueprint-review.md` Section 6 (review 2.3, blueprint 8.9, 11.5)
 - Builds on: Plans 1–5, all merged (main `ba6957f`)
@@ -242,7 +242,7 @@ Updated in the same change as the code, as the definition of done requires.
 
 - **New:** `docs/modules/audit.md` (from `_template.md`, with operations and the limits of section 2); `docs/adr/0030-audit-trail-through-the-owning-modules-outbox.md`, titled "Audit trail through the owning module's outbox" (the options of D5, with D2 and D3 as part of the decision); a short section on the attributes, the event and the interceptor in `docs/building-blocks/shared-kernel.md`, `application-common.md` and `infrastructure-common.md`.
 - **Changed:** `docs/architecture/overview.md` (the module list, the `audit` row of the schema table, the interceptor order in the request flow); `docs/modules/auth.md` and `docs/modules/sample.md` (the entities each audits, that Auth's log and Audit's trail are two logs, and the retention text for `AuditLogs`, which no longer says "until an archive exists"); `docs/adr/0028-retention-policy-and-the-inbox-window.md` (the follow-up is closed by this plan); `docs/README.md` (index); `build/template-content/CLAUDE.md` and `build/template-content/README.md` (the module list and the rule "audit a new entity with `[Audited]`"); `docs/blueprint-review.md` (row 5b done, and review 2.3 points at the ADR).
-- **Configuration:** `Audit:Retention:Trails` and its default go into `appsettings.json`, and the module page lists it.
+- **Configuration:** like every other retention key (`appsettings.json` holds none), `Audit:Retention:Trails` is not listed in `appsettings.json`; its default (`null`, off) and its meaning are in the module page.
 
 ## 10. Open questions for the review
 

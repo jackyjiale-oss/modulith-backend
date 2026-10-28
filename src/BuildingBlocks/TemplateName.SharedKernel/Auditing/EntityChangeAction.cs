@@ -1,20 +1,23 @@
 namespace TemplateName.SharedKernel.Auditing;
 
-/// <summary>What happened to an audited entity in one save.</summary>
+/// <summary>
+/// What happened to an audited entity in one save. An outbox row stores it as its number, so the values are explicit and never change
+/// or get reused.
+/// </summary>
 public enum EntityChangeAction
 {
     /// <summary>The entity was added.</summary>
-    Created,
+    Created = 0,
 
     /// <summary>The entity was modified.</summary>
-    Updated,
+    Updated = 1,
 
     /// <summary>The entity row was removed.</summary>
-    Deleted,
+    Deleted = 2,
 
     /// <summary>The entity was marked deleted and kept (<see cref="ISoftDeletable"/>).</summary>
-    SoftDeleted,
+    SoftDeleted = 3,
 
     /// <summary>A soft-deleted entity was made visible again.</summary>
-    Restored,
+    Restored = 4,
 }

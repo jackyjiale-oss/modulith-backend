@@ -154,6 +154,46 @@ public sealed class AuditTrailEndToEndTests(IntegrationTestWebAppFactory factory
     }
 
     [Fact]
+    public async Task Deleting_a_role_writes_a_SoftDeleted_row_and_a_Deleted_row_per_grant_and_keeps_the_earlier_trails()
+    {
+        await SignInAsync(AuthPermissions.RoleManage, AuthPermissions.UserView, AuthPermissions.UserLock);
+        Guid roleId;
+        using (var created = await Client.PostAsJsonAsync(RolesRoute, new { name = "Reviewers", description = "Review accounts" }, Ct))
+        {
+            created.StatusCode.ShouldBe(HttpStatusCode.Created);
+            roleId = (await created.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("id").GetGuid();
+        }
+
+        Guid[] grants = [await PermissionIdAsync(AuthPermissions.UserView), await PermissionIdAsync(AuthPermissions.UserLock)];
+        await SetPermissionsAsync(roleId, grants);
+
+        using (var deleted = await Client.DeleteAsync($"{RolesRoute}/{roleId}", Ct))
+        {
+            deleted.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        }
+
+        await DispatchAsync<AuthDbContext>();
+
+        var role = await TrailsAsync("Role", roleId.ToString());
+        role.Select(trail => trail.Action).ShouldBe([EntityChangeAction.Created, EntityChangeAction.SoftDeleted], ignoreOrder: true);
+        role.ShouldAllBe(trail => trail.Module == "auth");
+        var softDeleted = role.Single(trail => trail.Action == EntityChangeAction.SoftDeleted);
+
+        foreach (var permissionId in grants)
+        {
+            var grant = await TrailsAsync("RolePermission", $"RoleId={roleId};PermissionId={permissionId}");
+            grant.Select(trail => trail.Action).ShouldBe([EntityChangeAction.Created, EntityChangeAction.Deleted], ignoreOrder: true);
+
+            // The grants go in the save that deletes the role: one change set.
+            var grantDeleted = grant.Single(trail => trail.Action == EntityChangeAction.Deleted);
+            grantDeleted.ChangeSetId.ShouldBe(softDeleted.ChangeSetId);
+            var oldValues = JsonDocument.Parse(grantDeleted.Changes).RootElement;
+            oldValues.GetProperty("RoleId").GetProperty("old").GetGuid().ShouldBe(roleId);
+            oldValues.GetProperty("PermissionId").GetProperty("old").GetGuid().ShouldBe(permissionId);
+        }
+    }
+
+    [Fact]
     public async Task Suspending_a_user_writes_the_status_change_and_no_secret_or_row_version()
     {
         await SignInAsync(AuthPermissions.UserLock);
