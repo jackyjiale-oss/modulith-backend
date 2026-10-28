@@ -7,6 +7,7 @@ using TemplateName.Application.Common.Data;
 using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Application.Common.Security;
+using TemplateName.Infrastructure.Common.Auditing;
 using TemplateName.Infrastructure.Common.Caching;
 using TemplateName.Infrastructure.Common.Idempotency;
 using TemplateName.Infrastructure.Common.Jobs;
@@ -15,6 +16,7 @@ using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Infrastructure.Common.Resources;
 using TemplateName.Infrastructure.Common.Security;
+using TemplateName.SharedKernel.Auditing;
 
 namespace TemplateName.Infrastructure.Common;
 
@@ -23,9 +25,10 @@ public static class InfrastructureServiceCollectionExtensions
     /// <summary>
     /// Registers the system clock, the <c>ConnectionStrings</c>, <c>Outbox</c>, <c>Idempotency</c> and <c>Retention</c> options (validated on start) and
     /// the <c>Database</c> options, the read-side connection factory and Dapper's <c>DateOnly</c> type handler, the EF Core save
-    /// interceptors, the concurrency-conflict exception handler, the <c>platform</c> context (idempotency keys), the messages of
-    /// their error codes (<c>InfrastructureErrorMessages</c>), the in-process <see cref="IIntegrationEventPublisher"/> (singleton) and
-    /// the <see cref="IOutboxMessageContext"/> the outbox dispatcher sets (scoped), and the <see cref="ISecretProtector"/> (singleton,
+    /// interceptors (the audit trail among them), the domain event handler that publishes an audit change set from any module's outbox
+    /// as an <c>EntityChangesRecordedIntegrationEvent</c>, the concurrency-conflict exception handler, the <c>platform</c> context
+    /// (idempotency keys), the messages of their error codes (<c>InfrastructureErrorMessages</c>), the in-process
+    /// <see cref="IIntegrationEventPublisher"/> (singleton) and the <see cref="IOutboxMessageContext"/> the outbox dispatcher sets (scoped), and the <see cref="ISecretProtector"/> (singleton,
     /// Data Protection purpose <c>TemplateName.Secrets.v1</c>) with a Data Protection registration that has no key store of its own, and the
     /// recurring-job scheduler (the <c>Jobs</c> options validated on start, the <see cref="RecurringJobRunner"/> and the background service
     /// that ticks it; jobs come from <c>AddRecurringJob</c>), the hourly job <c>IdempotencyKeysCleanup</c>, and a check on start that
@@ -49,10 +52,15 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IDbConnectionFactory, SqlConnectionFactory>();
         services.AddScoped<AuditableEntityInterceptor>();
         services.AddScoped<SoftDeleteInterceptor>();
+        services.AddScoped<AuditTrailInterceptor>();
         services.AddSingleton<DomainEventsToOutboxInterceptor>();
         services.AddScoped<OutboxMessageContext>();
         services.AddScoped<IOutboxMessageContext>(provider => provider.GetRequiredService<OutboxMessageContext>());
         services.AddSingleton<IIntegrationEventPublisher, InProcessIntegrationEventPublisher>();
+
+        // Every module's outbox carries the audit change sets; its dispatcher resolves this handler from the scope of each message.
+        services.TryAddEnumerable(
+            ServiceDescriptor.Scoped<IDomainEventHandler<EntityChangesRecordedDomainEvent>, EntityChangesRecordedDomainEventHandler>());
 
         // Data Protection without a key store: the module that owns the key ring adds the application name and the persistence
         // (Auth: auth.DataProtectionKeys). Without one the keys are kept on the local file system.

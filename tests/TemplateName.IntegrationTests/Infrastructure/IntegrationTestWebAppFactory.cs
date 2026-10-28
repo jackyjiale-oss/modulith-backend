@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Time.Testing;
 using Respawn;
 using Respawn.Graph;
+using TemplateName.Application.Common.Auditing;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common.Inbox;
@@ -76,7 +77,7 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     public EventRecorder EventRecorder { get; } = new();
 
     /// <summary>
-    /// The Auth integration events the hosts built by this factory published, recorded by
+    /// The Auth integration events and the audit change sets the hosts built by this factory published, recorded by
     /// <see cref="RecordingIntegrationEventHandler{TEvent}"/> next to the consuming modules' own consumers; empty at the start of every test.
     /// </summary>
     public IntegrationEventRecorder IntegrationEvents { get; } = new();
@@ -189,6 +190,9 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             AddRecordingIntegrationEventHandler<RefreshTokenReuseDetectedIntegrationEvent>(services);
             AddRecordingIntegrationEventHandler<MfaChangedIntegrationEvent>(services);
             AddRecordingIntegrationEventHandler<NewDeviceSignedInIntegrationEvent>(services);
+
+            // And one for the change sets every module's outbox publishes.
+            AddRecordingIntegrationEventHandler<EntityChangesRecordedIntegrationEvent>(services);
             services.AddSingleton(IntegrationEvents);
             services.AddApplicationHandlers(typeof(IntegrationTestWebAppFactory).Assembly);
             services.AddOutbox<TestDbContext>(typeof(IntegrationTestWebAppFactory).Assembly);

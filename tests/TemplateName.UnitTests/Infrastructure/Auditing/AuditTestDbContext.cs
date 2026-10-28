@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.SharedKernel;
 using TemplateName.SharedKernel.Auditing;
@@ -6,10 +7,12 @@ using TemplateName.SharedKernel.Auditing;
 namespace TemplateName.UnitTests.Infrastructure.Auditing;
 
 /// <summary>
-/// A context for the change extraction tests. It is never saved and never opens a connection: the tests track entities and call
-/// <c>ChangeTracker.DetectChanges()</c> only.
+/// A context for the change extraction and audit interceptor tests, with no outbox mapping. It never opens a connection: the extraction
+/// tests track entities and call <c>ChangeTracker.DetectChanges()</c> only, and a test that saves passes interceptors that fail or
+/// suppress the save before it reaches the database.
 /// </summary>
-internal sealed class AuditTestDbContext : DbContext
+/// <param name="interceptors">The interceptors the context runs, in order.</param>
+internal sealed class AuditTestDbContext(params IInterceptor[] interceptors) : DbContext
 {
     public DbSet<AuditedItem> Items => Set<AuditedItem>();
 
@@ -20,7 +23,7 @@ internal sealed class AuditTestDbContext : DbContext
     public DbSet<UnauditedItem> UnauditedItems => Set<UnauditedItem>();
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
-        optionsBuilder.UseSqlServer("Server=unused;Database=unused");
+        optionsBuilder.UseSqlServer("Server=unused;Database=unused").AddInterceptors(interceptors);
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder) =>
         configurationBuilder.ApplyDefaultConventions();
