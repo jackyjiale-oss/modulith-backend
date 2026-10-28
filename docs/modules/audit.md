@@ -57,7 +57,11 @@ Any other failure is thrown, so the publishing module's outbox retries the messa
 
 ## Configuration
 
-None of its own. The inbox rows follow the shared `Retention:Inbox` setting.
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `Audit:Retention:Trails` | `TimeSpan?` | `null` (off) | How long a trail is kept after its `OccurredAt`. A trail goes only when it is strictly older than this; `null` or zero turns the cleanup off, and a negative value is refused when the host starts. |
+
+The default is off (ADR 0028): the template ships no archive, so deleting a trail would lose it, and `appsettings.json` carries no `Audit` key because JSON cannot express `null` with a comment. An operator who sets a window accepts that older trails are gone; one who must archive them does so from the database (`audit.AuditTrails`) before they pass the window. The batch size and the batches per run are the shared `Retention:BatchSize` and `Jobs:MaxBatchesPerRun` settings. The inbox rows follow the shared `Retention:Inbox` setting.
 
 ## Data
 
@@ -77,6 +81,8 @@ Migrations (`Infrastructure/Persistence/Migrations/`), in order:
 
 The module runs no hosted service of its own. Its consumer runs when an owning module's outbox dispatcher publishes a change set. `AddInbox<AuditDbContext>()` registers the recurring job `AuditInboxCleanup` (daily), which deletes inbox rows older than `Retention:Inbox`.
 
+`AddRetention` registers the recurring job `AuditTrailsCleanup` (daily, `AuditTrailsCleanupJob`, a `BatchedCleanupJob`). Each run deletes in bounded batches, `DELETE TOP (@Batch) FROM [audit].[AuditTrails] WHERE OccurredAt < @Cutoff;`, where the cutoff is now minus `Audit:Retention:Trails`; the `(OccurredAt, Id)` index serves the predicate. It does nothing while the retention is `null` or zero, which is the default, and a backlog larger than one run drains over the following runs.
+
 ## Observability
 
 The readiness check `audit` (tag `ready`, part of `/health/ready`) checks that `AuditDbContext` can reach the database. The module has no meter and no log messages of its own; a failed consumer surfaces in the publishing module's outbox logs and its `platform.outbox.abandoned` gauge.
@@ -84,7 +90,8 @@ The readiness check `audit` (tag `ready`, part of `/health/ready`) checks that `
 ## Testing
 
 - Integration tests, `tests/TemplateName.IntegrationTests/Audit/`: `AuditPersistenceTests` checks the migrated schema (tables, column types, the `ISJSON` check refusing text that is not JSON, the four indexes by column list), that `audit.trails.view` is seeded and held by `SuperAdmin` and `Admin`, and the `audit` readiness check. `AuditConsumerTests` publishes change sets through the host's `IIntegrationEventPublisher`: one row per change with the event's id, time, user, session, module and trace id; a duplicate delivery writing the rows once; and a delivery that races past the inbox check being dropped as processed. `AuditTrailEndpointTests` calls the route through the host with rows inserted through `AuditDbContext`: 401 and 403 without the permission, each filter alone and combined, an empty page for a combination that matches nothing, `changes` as a JSON object, the default and ascending order, ties on `OccurredAt` kept in `Id` order across pages forward and backward, `includeTotalCount`, a cursor replayed with another filter answering `pagination.cursor_mismatch`, the validation errors (`to` before `from` under `errors.to`), and, on 60,000 seeded rows, the plans SQL Server cached for the unfiltered list and the history of one record (`SqlExecutionPlan.OfCachedStatementAsync`): the expected index and no sort operator. The OpenAPI snapshot holds the route (ADR 0011).
-- Unit tests, `tests/TemplateName.UnitTests/Audit/`: `ListAuditTrailsQueryValidatorTests` covers the page size, the exact `action` names, ISO 8601 dates (UTC without an offset) and the `to` not earlier than `from` rule.
+- `AuditTrailsCleanupJobTests` runs the job: registered daily under its name, a trail strictly older than the cutoff deleted and one exactly at it kept, a backlog larger than one batch drained over several runs, `null` and zero deleting nothing (and the host's own configuration keeping everything), and the plan of the job's statement on 200,000 seeded rows seeking `IX_AuditTrails_OccurredAt_Id` without scanning the table.
+- Unit tests, `tests/TemplateName.UnitTests/Audit/`: `AuditRetentionOptionsTests` covers the `null` default, a negative value refused on start, and zero and `null` accepted. `ListAuditTrailsQueryValidatorTests` covers the page size, the exact `action` names, ISO 8601 dates (UTC without an offset) and the `to` not earlier than `from` rule.
 - Architecture tests: the module is in `Assemblies.Modules`, so the layering, boundary, naming and documentation rules apply to it.
 
 ## Changelog
