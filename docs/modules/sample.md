@@ -58,7 +58,7 @@ The response is `{ items, pageSize, nextCursor, previousCursor, totalCount? }`. 
 
 <!-- Aggregates, their invariants and life cycle. Draw state machines as a Mermaid stateDiagram-v2. -->
 
-`LeaveRequest` (aggregate root, `Domain/LeaveRequests/`) is auditable (`CreatedAt/By`, `UpdatedAt/By`), soft-deletable (`IsDeleted`, `DeletedAt/By`) and guarded by a `RowVersion` concurrency token.
+`LeaveRequest` (aggregate root, `Domain/LeaveRequests/`) is auditable (`CreatedAt/By`, `UpdatedAt/By`), soft-deletable (`IsDeleted`, `DeletedAt/By`), guarded by a `RowVersion` concurrency token and marked `[Audited]` (see [Audited entities](#audited-entities)).
 
 - `LeaveRequest.Submit(...)` creates it as `Pending`; the end date must not be before the start date.
 - `Approve(approverId)` moves `Pending` to `Approved` and records the approver (the endpoint passes the signed-in caller's id); any other status fails with `leave.not_pending`.
@@ -71,6 +71,10 @@ stateDiagram-v2
 ```
 
 `LeaveRequestStatus` is stored as `tinyint`: `Pending = 1`, `Approved = 2`, `Rejected = 3`, `Canceled = 4`. `Rejected` and `Canceled` are reserved values with no transition yet; the numbers never change or get reused.
+
+### Audited entities
+
+`LeaveRequest` is the worked example of the audit trail ([Audit module](audit.md), [ADR 0030](../adr/0030-audit-trail-through-the-owning-modules-outbox.md)). The class carries `[Audited]` and its key is `ValueGeneratedNever()` (`SequentialGuid.Create`, which an audited entity needs). Every save that changes it writes its field changes to `audit.AuditTrails` through this module's outbox, in the same save: `Created` with `EmployeeId`, `StartDate`, `EndDate`, `Reason` and `Status` (and `ApproverId` when set), then `Updated` with `Status` and `ApproverId` as `old` and `new` when it is approved, and `SoftDeleted` and `Restored` when it is soft-deleted or restored. Nothing is ignored or masked: `RowVersion` (store-generated) and the audit and soft-delete stamps are skipped by rule. `Status` is written by its name (`Pending`, `Approved`), although the column holds a number, because the enum has no value converter ([Audit: What is recorded](audit.md#what-is-recorded)). Submitting and approving through the API leaves two change sets with the caller's user and session id (`AuditTrailEndToEndTests`).
 
 ## Error codes
 
@@ -103,7 +107,7 @@ The list endpoint returns the cursor-pagination codes (declared in `PaginationEr
 | `LeaveRequestSubmittedDomainEvent(LeaveRequestId, EmployeeId)` | Domain | A request is submitted | `LeaveRequestSubmittedDomainEventHandler` (logs; the Notifications plan replaces it with a notification) |
 | `LeaveRequestApprovedDomainEvent(LeaveRequestId, ApproverId)` | Domain | A request is approved | None yet |
 
-Domain events are written to `sample.OutboxMessages` in the same save as the aggregate and dispatched by the outbox (ADR 0007). The module publishes no integration events.
+Domain events are written to `sample.OutboxMessages` in the same save as the aggregate and dispatched by the outbox (ADR 0007). The module publishes no integration events of its own; the same outbox also carries the audit change sets of `LeaveRequest` (`EntityChangesRecordedDomainEvent`), which a handler registered by the host publishes as `EntityChangesRecordedIntegrationEvent` for the [Audit module](audit.md#events).
 
 ## Configuration
 
@@ -127,7 +131,7 @@ Schema `sample`, owned by `SampleDbContext` (`Infrastructure/Persistence/`). Wri
 | Table | Purpose | Indexes |
 |---|---|---|
 | `sample.LeaveRequests` | The `LeaveRequest` aggregate. `Reason nvarchar(500)`, `Status tinyint`, `StartDate`/`EndDate date`, `RowVersion rowversion`, timestamps `datetime2(3)` UTC. | `PK_LeaveRequests`, `IX_LeaveRequests_EmployeeId_CreatedAt_Id`, `IX_LeaveRequests_CreatedAt_Id`, `IX_LeaveRequests_StartDate_Id` |
-| `sample.OutboxMessages` | Domain events waiting for dispatch. | `PK_OutboxMessages`, `IX_OutboxMessages_OccurredAt` (filtered: `ProcessedAt IS NULL`) |
+| `sample.OutboxMessages` | Domain events waiting for dispatch, and the audit change sets of `LeaveRequest` ([Audited entities](#audited-entities)). | `PK_OutboxMessages`, `IX_OutboxMessages_OccurredAt` (filtered: `ProcessedAt IS NULL`) |
 | `sample.OutboxMessageConsumers` | Which handler has processed which message. | `PK_OutboxMessageConsumers` (`OutboxMessageId`, `Name`) |
 | `sample.__EFMigrationsHistory` | Applied migrations of this module. | — |
 
