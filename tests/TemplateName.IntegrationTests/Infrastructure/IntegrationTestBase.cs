@@ -31,9 +31,10 @@ public abstract class IntegrationTestBase(IntegrationTestWebAppFactory factory) 
         Factory.Time.AdjustTime(Factory.Time.Start);
         Factory.PermissionSource.Reset();
 
-        // The reset removed the seeded roles and permissions; seed them again.
-        await Factory.Services.SeedAuthModuleAsync(Ct);
+        // The reset removed the seeded roles and permissions; seed them again as the host does, with no current user (a user an earlier
+        // test forced would otherwise be stamped on the seeded rows and their audit trail).
         Factory.CurrentUser.UserId = null;
+        await Factory.Services.SeedAuthModuleAsync(Ct);
         Factory.EventRecorder.Clear();
         Factory.IntegrationEvents.Clear();
         Factory.MessageContextRecorder.Clear();

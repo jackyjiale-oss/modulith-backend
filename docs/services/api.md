@@ -17,7 +17,7 @@ Order matters; `Program.cs` marks it with comments.
 | 7 | `AddHealthChecks()` | Health checks; each module context adds its own `ready` check |
 | 8 | `AddHttpSecurity(configuration)` | CORS, the global rate limiter, the `auth-strict` rate-limit policy, forwarded headers |
 | 9 | `AddPermissionAuthorization()` | The permission authorization handler behind `RequirePermission(code)` and the **fallback policy**: every endpoint requires an authenticated user unless it says `.AllowAnonymous()` ([web-common](../building-blocks/web-common.md)). It needs the explicit `UseAuthentication` and `UseAuthorization` of the pipeline (slots 1a and 10): without them `WebApplication` adds `UseAuthorization` ahead of `UseRouting` by itself, where no endpoint is known and the fallback policy answers 401 to every request. |
-| 10 | `AddAuthModule(configuration)`, `AddNotificationsModule(configuration)`, `AddSampleModule()` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme (the default authentication scheme), the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)); the Notifications module also its delivery worker, SignalR, the `HubTicket` authentication scheme (not a default scheme: only the hub's policy uses it) and the rate-limit policy of its ticket route ([Notifications module](../modules/notifications.md)) |
+| 10 | `AddAuthModule(configuration)`, `AddNotificationsModule(configuration)`, `AddSampleModule()`, `AddAuditModule(configuration)` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme (the default authentication scheme), the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)); the Notifications module also its delivery worker, SignalR, the `HubTicket` authentication scheme (not a default scheme: only the hub's policy uses it) and the rate-limit policy of its ticket route ([Notifications module](../modules/notifications.md)); the Audit module its inbox, the consumer of the audit change sets every module's outbox publishes, the optional trail retention and its permission source ([Audit module](../modules/audit.md)); it can be registered at any position among the modules |
 | 10a | `AddPlatformRedis(configuration)` | Nothing unless `Caching:Provider` is `redis`; then the Redis connection, Redis as the `HybridCache` second level behind a circuit, the rate-limit windows counted in Redis, the SignalR backplane, and the `ready` check `redis` ([platform-redis](../building-blocks/platform-redis.md)). Optional: a solution without Redis deletes this line and the project. |
 | 11 | `AddOptions<KestrelServerOptions>()…Bind("Kestrel")` | Binds the whole `Kestrel` section lazily, so `Kestrel:Limits:*` apply and test overrides work |
 | 12 | `AddApplicationDecorators()` | Validation and logging decorators around every handler registered above; always last |
@@ -93,7 +93,7 @@ The first request with a key holds it as a lease for `InProgressTimeout`; duplic
 
 ### `Retention`
 
-How long the building blocks keep what they own before a cleanup job deletes it (ADR 0028; the jobs are in [infrastructure-common](../building-blocks/infrastructure-common.md#cleanup-jobs)). A row goes only when strictly older than the retention. Set a retention to `00:00:00` (or empty) to turn that cleanup off; modules keep their own retentions in their own sections (`Auth:Retention` and `Notifications:Retention`, below).
+How long the building blocks keep what they own before a cleanup job deletes it (ADR 0028; the jobs are in [infrastructure-common](../building-blocks/infrastructure-common.md#cleanup-jobs)). A row goes only when strictly older than the retention. Set a retention to `00:00:00` (or empty) to turn that cleanup off; modules keep their own retentions in their own sections (`Auth:Retention`, `Notifications:Retention` and `Audit:Retention`, below).
 
 | Key | Default | Validation (on start) | Meaning |
 |---|---|---|---|
@@ -234,7 +234,7 @@ The Auth module reads the sections below, each with its keys, defaults and range
 | `Auth:Lockout` | Failed attempts and lockout duration. |
 | `Auth:Mfa` | Two-step verification: `Issuer` (the authenticator issuer name, no `:`), `ChallengeLifetime` and `MaxChallengeAttempts` (the sign-in challenge's lifetime and wrong-code limit), and `TrustedDevicesEnabled` and `TrustedDeviceLifetime` (whether and for how long a device can be remembered). |
 | `Auth:StepUp` | `MaxAge`: how long a step-up (a fresh `auth_time`) satisfies a protected action. |
-| `Auth:Retention` | How long time-bound rows are kept before a cleanup job deletes them (ADR 0028), each a `TimeSpan` that is not negative, with zero or empty turning that cleanup off: `VerificationCodes` (`7.00:00:00`), `RefreshTokens` (`30.00:00:00`, after the token's own expiry), `Sessions` (`90.00:00:00`, after revocation or expiry; the tokens go with them), `MfaChallenges` (`1.00:00:00`), `TrustedDevices` (`30.00:00:00`, after expiry or revocation) and `AuditLogs` (empty: kept, until an archive exists). The jobs `AuthVerificationCodesCleanup` and `AuthMfaChallengesCleanup` run hourly, the other four daily; the keys and the rules are in [Auth module: Cleanup](../modules/auth.md#cleanup). |
+| `Auth:Retention` | How long time-bound rows are kept before a cleanup job deletes them (ADR 0028), each a `TimeSpan` that is not negative, with zero or empty turning that cleanup off: `VerificationCodes` (`7.00:00:00`), `RefreshTokens` (`30.00:00:00`, after the token's own expiry), `Sessions` (`90.00:00:00`, after revocation or expiry; the tokens go with them), `MfaChallenges` (`1.00:00:00`), `TrustedDevices` (`30.00:00:00`, after expiry or revocation) and `AuditLogs` (empty: kept; the template ships no archive, [ADR 0030](../adr/0030-audit-trail-through-the-owning-modules-outbox.md)). The jobs `AuthVerificationCodesCleanup` and `AuthMfaChallengesCleanup` run hourly, the other four daily; the keys and the rules are in [Auth module: Cleanup](../modules/auth.md#cleanup). |
 | `Auth:Jwt` | Issuer, audience, lifetime, skew and the signing keys (required outside Development and Testing). |
 | `Auth:DataProtection` | The Data Protection application name. |
 | `Auth:Seed` | Above. |
@@ -292,6 +292,14 @@ How long the Notifications module keeps its time-bound rows before a cleanup job
 | `Notifications` | `180.00:00:00` (180 days) | not negative | How long a notification is kept after its `CreatedAt`; its deliveries, dead-lettered ones included, go with it, and one with a delivery still pending stays. The job `NotificationsRowsCleanup` runs daily. |
 | `InAppNotifications` | `180.00:00:00` (180 days) | not negative | How long an inbox row is kept after its `CreatedAt`, read or unread. The job `NotificationsInAppCleanup` runs daily. |
 
+### `Audit:Retention`
+
+How long the Audit module keeps its audit trails before a cleanup job deletes them (ADR 0028, [ADR 0030](../adr/0030-audit-trail-through-the-owning-modules-outbox.md); the job and its rules are in [Audit module: Background processing](../modules/audit.md#background-processing)). A `TimeSpan` that is not negative: a trail goes only when strictly older than it, and `00:00:00` or an empty value turns the cleanup off. Validated on start. The batch size and the most batches per run are the building-block settings under [`Retention`](#retention) and [`Jobs`](#jobs).
+
+| Key | Default | Validation (on start) | Meaning |
+|---|---|---|---|
+| `Trails` | empty (off) | not negative | How long an audit trail is kept after its `OccurredAt`. Off by default: the template ships no archive, so deleting a trail would lose it; an operator who must keep trails longer copies them from `audit.AuditTrails` first. The job `AuditTrailsCleanup` runs daily. The file has no `Audit` key because JSON cannot express an empty `TimeSpan?` with a comment. |
+
 ### Other keys
 
 | Key | Default | Meaning |
@@ -303,7 +311,7 @@ How long the Notifications module keeps its time-bound rows before a cleanup job
 | Endpoint | Checks | Use |
 |---|---|---|
 | `GET /health/live` | none: 200 while the process serves requests | Liveness probe |
-| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `auth`, `notify`, `sample`, plus one per added module), and with `Caching:Provider = redis` the check `redis` (a `PING`) | Readiness probe, load balancer |
+| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `auth`, `notify`, `sample`, `audit`, plus one per added module), and with `Caching:Provider = redis` the check `redis` (a `PING`) | Readiness probe, load balancer |
 
 The `redis` check fails as `Degraded`, not `Unhealthy`: with Redis down `/health/ready` answers **200** with the body `Degraded`, because the instance still serves from the database and a load balancer must not drain every instance for a cache outage. A database check that fails still answers 503 `Unhealthy`.
 

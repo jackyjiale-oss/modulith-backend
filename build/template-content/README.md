@@ -53,6 +53,7 @@ With these settings the API applies the module migrations on startup and seeds t
 |---|---|
 | Auth (sign-in, tokens, sessions, two-step verification with recovery codes, step-up and trusted devices, roles, permissions, audit log) | [`docs/modules/auth.md`](docs/modules/auth.md) |
 | Notifications (every email and in-app message, the inbox, the SignalR hub, preferences, quiet hours) | [`docs/modules/notifications.md`](docs/modules/notifications.md) |
+| Audit (the audit trail of field changes: who changed what, from which value to which, `GET /api/v1/admin/audit/trails`) | [`docs/modules/audit.md`](docs/modules/audit.md) |
 | Sample (leave requests) | [`docs/modules/sample.md`](docs/modules/sample.md) |
 
 A new module gets its own page, copied from [`docs/modules/_template.md`](docs/modules/_template.md).

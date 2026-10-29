@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using TemplateName.Application.Common.Auditing;
 using TemplateName.Application.Common.Security;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.IntegrationTests.Infrastructure;
@@ -17,6 +18,7 @@ using TemplateName.Modules.Auth.Domain.Users.Events;
 using TemplateName.Modules.Auth.Domain.Verification;
 using TemplateName.Modules.Auth.Domain.Verification.Events;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+using TemplateName.SharedKernel;
 
 namespace TemplateName.IntegrationTests.Auth;
 
@@ -52,7 +54,7 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
         Factory.IntegrationEvents.Events.ShouldBeEmpty();
         await DispatchNotificationsAsync();
 
-        var published = Factory.IntegrationEvents.Events.ShouldHaveSingleItem().ShouldBeOfType<EmailVerificationRequestedIntegrationEvent>();
+        var published = AuthIntegrationEvents().ShouldHaveSingleItem().ShouldBeOfType<EmailVerificationRequestedIntegrationEvent>();
         var user = await QueryAsync(context => context.Set<User>().SingleAsync(Ct));
         var code = await QueryAsync(context => context.Set<VerificationCode>().SingleAsync(Ct));
         var message = await OutboxMessageAsync<VerificationCodeIssuedDomainEvent>();
@@ -85,7 +87,7 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
 
         var message = await OutboxMessageAsync<VerificationCodeIssuedDomainEvent>();
         message.ProcessedAt.ShouldNotBeNull();
-        var published = Factory.IntegrationEvents.Events.Cast<EmailVerificationRequestedIntegrationEvent>().ToList();
+        var published = AuthIntegrationEvents().Cast<EmailVerificationRequestedIntegrationEvent>().ToList();
         published.Count.ShouldBe(2);
         published.ShouldAllBe(integrationEvent => integrationEvent.Id == message.Id && integrationEvent.OccurredAt == OccurredAt(message));
 
@@ -107,7 +109,7 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
         var codes = await QueryAsync(context => context.Set<VerificationCode>().OrderBy(code => code.CreatedAt).ToListAsync(Ct));
         codes.Count.ShouldBe(2);
         codes[0].InvalidatedAt.ShouldNotBeNull();
-        var published = Factory.IntegrationEvents.Events.ShouldHaveSingleItem().ShouldBeOfType<PasswordResetRequestedIntegrationEvent>();
+        var published = AuthIntegrationEvents().ShouldHaveSingleItem().ShouldBeOfType<PasswordResetRequestedIntegrationEvent>();
         published.Reason.ShouldBe(PasswordResetReason.SelfService);
         published.ExpiresAt.ShouldBe(codes[1].ExpiresAt);
         Unprotect(published.ProtectedActionUrl).ShouldBe(ResetPasswordUrl + Uri.EscapeDataString(Factory.EmailSender.LastLinkToken(Email)));
@@ -196,7 +198,7 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
         var reuse = await OutboxMessageAsync<RefreshTokenReuseDetectedDomainEvent>();
         var change = await OutboxMessageAsync<PasswordChangedDomainEvent>();
         var lockout = await OutboxMessageAsync<UserLockedOutDomainEvent>();
-        var events = Factory.IntegrationEvents.Events;
+        var events = AuthIntegrationEvents();
         events.Count.ShouldBe(3);
         events.OfType<RefreshTokenReuseDetectedIntegrationEvent>().ShouldHaveSingleItem()
             .ShouldBe(new RefreshTokenReuseDetectedIntegrationEvent(reuse.Id, OccurredAt(reuse), user.Id, first.SessionId));
@@ -286,7 +288,7 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
 
         await DispatchNotificationsAsync();
 
-        Factory.IntegrationEvents.Events.ShouldBeEmpty();
+        AuthIntegrationEvents().ShouldBeEmpty();
     }
 
     [Fact]
@@ -445,6 +447,13 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
             }
         }
     }
+
+    /// <summary>
+    /// The recorded events without the audit change sets (<see cref="EntityChangesRecordedIntegrationEvent"/>) that every save of a user,
+    /// role or grant also publishes; the scans for secrets read every recorded event instead.
+    /// </summary>
+    private List<IIntegrationEvent> AuthIntegrationEvents()
+        => [.. Factory.IntegrationEvents.Events.Where(integrationEvent => integrationEvent is not EntityChangesRecordedIntegrationEvent)];
 
     private static DateTimeOffset OccurredAt(OutboxMessage message)
         => new(DateTime.SpecifyKind(message.OccurredAt, DateTimeKind.Utc));

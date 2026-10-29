@@ -2,7 +2,7 @@
 
 ## Overview
 
-`TemplateName` is a modular monolith on ASP.NET Core 10 with SQL Server. Each business module is two projects: `TemplateName.Modules.{Module}` (Domain, Application, Infrastructure and Endpoints as folders, `internal` by default) and `TemplateName.Modules.{Module}.Contracts` (the only public surface other modules may reference). Building blocks live under `src/BuildingBlocks/`, the host under `src/Host/`.
+`TemplateName` is a modular monolith on ASP.NET Core 10 with SQL Server. Each business module is two projects: `TemplateName.Modules.{Module}` (Domain, Application, Infrastructure and Endpoints as folders, `internal` by default) and `TemplateName.Modules.{Module}.Contracts` (the only public surface other modules may reference); a module with nothing to offer other modules ships the first project only (Notifications, Audit). Building blocks live under `src/BuildingBlocks/`, the host under `src/Host/`.
 
 ## Commands
 
@@ -20,9 +20,10 @@ dotnet ef migrations add {Verb}{What} \
 
 ## Where things go
 
-- A module has `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/`, `Resources/` and `{Module}Module.cs`; the layout is fixed. A module that declares notification types adds `Templates/` (embedded Scriban files) at the project root, as Notifications does.
+- A module has `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/`, `Resources/` (its error messages, so a module with no error code, such as Audit, has none) and `{Module}Module.cs`; the layout is fixed. A module that declares notification types adds `Templates/` (embedded Scriban files) at the project root, as Notifications does.
 - Each command or query gets its own folder under `Application/{Aggregates}/{UseCase}/` holding the message, handler and validator.
 - Modules talk to each other only through `*.Contracts` (integration events and public interfaces). Never reference another module's project or read its tables. Messages to users go through the Notifications module (an integration event in, email and in-app out); a module never sends mail itself. Today only Auth's types exist; see `docs/modules/notifications.md` before adding one.
+- Audit a new entity with `[Audited]` (`TemplateName.SharedKernel.Auditing`) when an administrator may need to know who changed it; the Audit module records the field changes, in the same save, through the module's own outbox. Its key is `ValueGeneratedNever()`; a secret carries `[AuditIgnore]` or `[AuditMask]` (and a `byte[]` column `[AuditIgnore]`); a column with a default value is not audited, so it carries `[AuditIgnore]`. Holders of `audit.trails.view` (only `SuperAdmin` by default; grant it to another role deliberately) read every audited property of every module, whatever that module's own permissions, so marking an entity widens what they see. See `docs/modules/audit.md`.
 - Tests mirror the source: `tests/{TestProject}/{Module or Area}/{Subject}Tests.cs`.
 
 ## Definition of done

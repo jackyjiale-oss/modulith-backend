@@ -12,7 +12,7 @@ Modulith is a `dotnet new` template for production-ready backends: an ASP.NET Co
 - EF Core for writes and Dapper for reads, one `DbContext` and schema per module, SQL Server-ordered sequential GUIDs
 - Cursor (keyset) pagination for list endpoints, with allow-listed sorts and opaque cursors that detect a changed sort or filter
 - Per-module transactional outbox with leased, multi-instance-safe dispatch
-- Recurring jobs on a built-in scheduler with a SQL lease, running cleanup jobs under a retention policy for the outbox, inbox, idempotency keys and the Auth and Notifications tables
+- Recurring jobs on a built-in scheduler with a SQL lease, running cleanup jobs under a retention policy for the outbox, inbox, idempotency keys and the Auth, Notifications and Audit tables
 - Optional Redis (`Caching:Provider = redis`) for a shared permission cache, shared rate limits and a SignalR backplane, degraded rather than down when Redis fails; Valkey in `docker-compose.yml`
 - Standard HTTP resilience pipelines (timeout, retries, circuit breaker) for outbound calls, configured under `Resilience:Pipelines`
 - `Idempotency-Key` support for unsafe requests
@@ -20,12 +20,13 @@ Modulith is a `dotnet new` template for production-ready backends: an ASP.NET Co
 - Security headers, CORS, rate limiting, forwarded headers, request size limits and health checks
 - OpenAPI with Scalar and literal `/api/v1` routes
 - Auth module: registration with email confirmation, login with lockout, ES256 access tokens with a JWKS, rotating refresh tokens with reuse detection, sessions, password reset and change, two-step verification with an authenticator app (TOTP) and recovery codes, step-up before sensitive actions, trusted devices, role-based permissions, administration endpoints and an audit log (Mailpit catches the emails locally)
+- Audit module: an entity marked `[Audited]` has its field changes (who, when, old and new values, secrets ignored or masked) written in the same save through its module's outbox and recorded by the Audit module, which serves them to administrators at `GET /api/v1/admin/audit/trails`; the Auth security log stays separate
 - Architecture tests (NetArchTest), unit tests and Testcontainers integration tests; CI with an 80 % coverage gate and a template smoke test
 - Conventional Commits enforced by a git hook and CI
 
 ## Status
 
-Pre-release: Plan 1 (foundation and core baseline), Plan 2 (the Auth module), Plan 3 (notifications), Plan 4 (two-step verification) and Plan 5 (platform services: cleanup jobs, optional Redis, HTTP resilience) are implemented; the Audit module, social login with phone-number OTP login, push and SMS channels, delivery and packaging follow. Expect breaking changes until the first release. The Malay and Simplified Chinese messages are drafts awaiting native review (release checklist in [`CONTRIBUTING.md`](CONTRIBUTING.md), Section 5).
+Pre-release: Plan 1 (foundation and core baseline), Plan 2 (the Auth module), Plan 3 (notifications), Plan 4 (two-step verification) and Plan 5 (platform services: cleanup jobs, optional Redis, HTTP resilience) and Plan 5b (the Audit module) are implemented; social login with phone-number OTP login, push and SMS channels, delivery and packaging follow. Expect breaking changes until the first release. The Malay and Simplified Chinese messages are drafts awaiting native review (release checklist in [`CONTRIBUTING.md`](CONTRIBUTING.md), Section 5).
 
 ## Prerequisites
 

@@ -41,6 +41,10 @@ Code: `src/BuildingBlocks/TemplateName.Application.Common/`.
 | `IPermissionChecker` | `Task<bool> HasPermissionAsync(Guid userId, string permission, CancellationToken)`: whether the user holds the permission through any role. The Auth module implements it (cached per user, ADR 0016); other modules depend on the interface only. |
 | `IDbConnectionFactory` | `Task<DbConnection> OpenConnectionAsync(CancellationToken)`: an open connection for Dapper reads. Infrastructure.Common implements it. |
 
+### Auditing
+
+`EntityChangesRecordedIntegrationEvent` (`Application.Common/Auditing`, [ADR 0030](../adr/0030-audit-trail-through-the-owning-modules-outbox.md)) is the one integration event that does not live in a module's `.Contracts` project: `sealed record (Guid Id, DateTimeOffset OccurredAt, Guid? UserId, Guid? SessionId, string? TraceId, string Module, IReadOnlyList<EntityChange> Changes) : IIntegrationEvent`. It sits here because every module's outbox publishes it and the Audit module, which consumes it, must not reference every module's contracts. `Id` is the outbox message id of the audit row, which is also the id of the change set (the same on every republish, so the Audit module's inbox recognizes a repeat); `OccurredAt` is the outbox message's. `EntityChange` and `EntityChangeAction` are in [SharedKernel](shared-kernel.md#auditing). The handler that publishes it is in [infrastructure-common](infrastructure-common.md#audit-trail); the consumer is the [Audit module](../modules/audit.md#events).
+
 ### Security
 
 | Type | What it is |

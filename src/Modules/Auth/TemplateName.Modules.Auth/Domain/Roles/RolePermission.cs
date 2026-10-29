@@ -1,6 +1,9 @@
+using TemplateName.SharedKernel.Auditing;
+
 namespace TemplateName.Modules.Auth.Domain.Roles;
 
 /// <summary>The grant of a permission to a role.</summary>
+[Audited]
 internal sealed class RolePermission
 {
     // EF Core materializes the entity through this constructor; the role creates grants.

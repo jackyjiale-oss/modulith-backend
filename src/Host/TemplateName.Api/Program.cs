@@ -7,6 +7,7 @@ using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common;
 using TemplateName.Infrastructure.Common.Idempotency;
 using TemplateName.Infrastructure.Common.Persistence;
+using TemplateName.Modules.Audit;
 using TemplateName.Modules.Auth;
 using TemplateName.Modules.Notifications;
 using TemplateName.Modules.Sample;
@@ -37,6 +38,8 @@ builder.Services.AddPermissionAuthorization();
 builder.Services.AddAuthModule(builder.Configuration);
 builder.Services.AddNotificationsModule(builder.Configuration);
 builder.Services.AddSampleModule();
+// Consumes the change sets every module's outbox publishes (EntityChangesRecordedIntegrationEvent); any position among the modules works.
+builder.Services.AddAuditModule(builder.Configuration);
 // Optional Redis (Caching:Provider = redis; a no-op otherwise, ADR 0027): the HybridCache second level, the readiness check "redis", the
 // Redis rate limiter (it replaces the in-memory IFixedWindowLimiterFactory of AddHttpSecurity) and the SignalR backplane. After
 // AddInfrastructureCommon and AddHealthChecks. A solution without Redis deletes this line and the TemplateName.Platform.Redis project.
@@ -120,6 +123,7 @@ app.MapAuthWellKnownEndpoints();
 api.MapNotificationsEndpoints();
 app.MapNotificationsHub();
 api.MapSampleEndpoints();
+api.MapAuditEndpoints();
 
 app.Run();
 

@@ -29,6 +29,7 @@ Everything about how this service is built and run. Documents are part of the de
 |---|---|
 | [`modules/auth.md`](modules/auth.md) | Auth: registration, sign-in, tokens, sessions, passwords, two-step verification (TOTP, recovery codes, step-up, trusted devices), roles, permissions and the audit log |
 | [`modules/notifications.md`](modules/notifications.md) | Notifications: every email and in-app message, from Auth's integration events to SMTP, the inbox and the SignalR hub; templates, preferences, quiet hours, delivery worker, administration |
+| [`modules/audit.md`](modules/audit.md) | Audit: the audit trail of field changes (who changed what, from which value to which), fed by every module's outbox, the admin trail list, optional retention |
 | [`modules/sample.md`](modules/sample.md) | Sample: leave requests, the worked example of every pattern |
 | [`modules/_template.md`](modules/_template.md) | The required outline; copy it to `modules/{module}.md` when you add a module |
 
@@ -65,5 +66,6 @@ Everything about how this service is built and run. Documents are part of the de
 | [0027](adr/0027-optional-redis-through-one-project.md) | Optional Redis through one project referenced only by the host (cache second level, rate limiter, backplane), degraded not down when Redis fails, our own fixed-window limiter, Valkey in compose |
 | [0028](adr/0028-retention-policy-and-the-inbox-window.md) | Retention per kind of data in bounded delete batches, dead letters kept, and an inbox window that outlasts outbox redelivery |
 | [0029](adr/0029-standard-http-resilience-pipelines.md) | Standard HTTP resilience pipelines from `Microsoft.Extensions.Http.Resilience`, named and bound from `Resilience:Pipelines`, with a breaker and the `hibp` budget |
+| [0030](adr/0030-audit-trail-through-the-owning-modules-outbox.md) | Audit trail through the owning module's outbox: `[Audited]` entities, one change set per save, consumed by the Audit module through its inbox; both logs kept, a delete window and no archive |
 
 A new decision gets the next number: `adr/NNNN-kebab-title.md`, in the same format, listed here and in the architecture overview.

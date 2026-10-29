@@ -17,6 +17,9 @@
   <Folder Name="/src/Modules/Notifications/">
     <Project Path="src/Modules/Notifications/TemplateName.Modules.Notifications/TemplateName.Modules.Notifications.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Audit/">
+    <Project Path="src/Modules/Audit/TemplateName.Modules.Audit/TemplateName.Modules.Audit.csproj" />
+  </Folder>
   <Folder Name="/src/Host/">
     <Project Path="src/Host/TemplateName.Api/TemplateName.Api.csproj" />
   </Folder>

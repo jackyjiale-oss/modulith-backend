@@ -421,7 +421,12 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
         // The actor holds every permission of Admin (the Auth defaults and the Notifications ones the role is flagged to get), so it may
         // grant the role (the grant rule).
         await SignInAsync(
-            [AuthPermissions.UserAssignRoles, .. AuthSeeder.AdminDefaultPermissions, NotificationsPermissions.DeliveryView, NotificationsPermissions.DeliveryRetry],
+            [
+                AuthPermissions.UserAssignRoles,
+                .. AuthSeeder.AdminDefaultPermissions,
+                NotificationsPermissions.DeliveryView,
+                NotificationsPermissions.DeliveryRetry,
+            ],
             AuthTestHarness.DefaultLocale);
         var target = await CreateUserAsync("target@example.com");
         var tokens = await LoginAsync("target@example.com", Password);

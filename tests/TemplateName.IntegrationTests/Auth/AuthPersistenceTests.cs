@@ -245,7 +245,7 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
 
         var context = NewScope().GetRequiredService<AuthDbContext>();
         (await context.Set<User>().CountAsync(Ct)).ShouldBe(1);
-        var message = await context.Set<OutboxMessage>().SingleAsync(Ct);
+        var message = await context.Set<OutboxMessage>().WithoutAuditRows().SingleAsync(Ct);
         message.Type.ShouldBe(typeof(UserRegisteredDomainEvent).FullName);
         message.Content.ShouldContain(user.Id.ToString());
         message.ProcessedAt.ShouldBeNull();
@@ -503,7 +503,7 @@ public sealed class AuthPersistenceTests(IntegrationTestWebAppFactory factory) :
         var context = NewScope().GetRequiredService<AuthDbContext>();
         (await context.Set<User>().CountAsync(Ct)).ShouldBe(1);
         (await context.Set<AuthAuditLog>().CountAsync(Ct)).ShouldBe(0);
-        (await context.Set<OutboxMessage>().CountAsync(Ct)).ShouldBe(1);
+        (await context.Set<OutboxMessage>().WithoutAuditRows().CountAsync(Ct)).ShouldBe(1);
 
         // The context dropped the refused changes, so a later save does not try them again.
         scope.GetRequiredService<AuthDbContext>().ChangeTracker.Entries().ShouldBeEmpty();

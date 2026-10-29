@@ -2,6 +2,7 @@ using System.Globalization;
 using TemplateName.Modules.Auth.Domain.Mfa;
 using TemplateName.Modules.Auth.Domain.Users.Events;
 using TemplateName.SharedKernel;
+using TemplateName.SharedKernel.Auditing;
 
 namespace TemplateName.Modules.Auth.Domain.Users;
 
@@ -9,6 +10,7 @@ namespace TemplateName.Modules.Auth.Domain.Users;
 /// A person who can sign in. The aggregate owns the sign-in state (confirmation, lockout, suspension), the password history and the
 /// role assignments. A user without a password hash (created by an administrator) is valid until a password is set.
 /// </summary>
+[Audited]
 internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
 {
     /// <summary>The column limit of <see cref="Email"/> and <see cref="NormalizedEmail"/>; the validators refuse longer addresses.</summary>
@@ -32,13 +34,16 @@ internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
 
     public string Email { get; private set; } = string.Empty;
 
+    [AuditIgnore]
     public string NormalizedEmail { get; private set; } = string.Empty;
 
     public bool EmailConfirmed { get; private set; }
 
+    [AuditIgnore]
     public string? PasswordHash { get; private set; }
 
     /// <summary>Changes whenever the credentials or the account state change, so tokens issued before the change can be refused.</summary>
+    [AuditIgnore]
     public string SecurityStamp { get; private set; } = string.Empty;
 
     public UserStatus Status { get; private set; }
@@ -51,10 +56,12 @@ internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
 
     public DateTimeOffset? PasswordChangedAt { get; private set; }
 
+    [AuditIgnore]
     public DateTimeOffset? LastLoginAt { get; private set; }
 
     public DateTimeOffset? LockoutEnd { get; private set; }
 
+    [AuditIgnore]
     public int AccessFailedCount { get; private set; }
 
     /// <summary>The current and previous password hashes, oldest first, newest last.</summary>

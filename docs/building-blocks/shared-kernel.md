@@ -25,6 +25,21 @@ Code: `src/BuildingBlocks/TemplateName.SharedKernel/`.
 
 `Error.Parameters` go to clients as `params`, so they never hold secrets or personal data. Records compare `Parameters` by reference: compare errors that carry parameters by `Code`.
 
+### Auditing
+
+`TemplateName.SharedKernel.Auditing` holds what a module's `Domain` needs to take part in the audit trail ([ADR 0030](../adr/0030-audit-trail-through-the-owning-modules-outbox.md), [Audit module](../modules/audit.md)); a `Domain` folder may depend on nothing else, so the types live here.
+
+| Type | What it is |
+|---|---|
+| `[Audited]` | Class attribute (`AttributeTargets.Class`, not inherited): the entity's changes are written to the audit trail. Opt-in, so a forgotten attribute loses a trail where it was wanted, never a secret into one. |
+| `[AuditIgnore]` | Property attribute: the property is never written to the trail. Use it for secrets, derived columns and high-frequency noise. |
+| `[AuditMask]` | Property attribute: a change is recorded, the old and new values are replaced by `"****"`. Use it for a secret whose change is worth proving. |
+| `EntityChangeAction` | `Created`, `Updated`, `Deleted`, `SoftDeleted`, `Restored`; stored as its name. |
+| `EntityChange` | `sealed record (string EntityType, string EntityId, EntityChangeAction Action, string Changes)`: one changed entity. `EntityType` is the CLR type name without namespace, `EntityId` the key as text (invariant culture; a composite key is `Name=value;Name=value`), `Changes` JSON object text keyed by property name (`{"Status":{"old":"Pending","new":"Approved"}}`). |
+| `EntityChangesRecordedDomainEvent` | `sealed record (Guid? UserId, Guid? SessionId, string? TraceId, string Module, IReadOnlyList<EntityChange> Changes) : IDomainEvent`: the change set of one save, the payload of the audit outbox row. No aggregate raises it; `AuditTrailInterceptor` writes it. Its full name is stored in outbox rows, so it is kept stable like a published contract: renaming it would orphan pending rows. |
+
+Rules for an audited entity: its key is `ValueGeneratedNever()` (an application-generated key such as `SequentialGuid.Create`; an architecture test enforces it), it has no owned or complex property, a secret-looking property (a name ending in `Hash`, `Secret`, `Token`, `Salt`, `Key` or `Stamp`, or `Password`) carries `[AuditIgnore]` or `[AuditMask]` (also tested), and a store-generated column, including one with `HasDefaultValue` or `HasDefaultValueSql`, is skipped by rule and so not audited. [Audit: What is recorded](../modules/audit.md#what-is-recorded) has the full rules.
+
 ## Configuration
 
 None.
@@ -63,4 +78,4 @@ New ids come from `SequentialGuid.Create(timeProvider.GetUtcNow())`. Every error
 
 ## Tests
 
-`tests/TemplateName.UnitTests/SharedKernel/`: `ResultTests`, `AggregateRootTests`, `SequentialGuidTests` (including SQL Server sort order).
+`tests/TemplateName.UnitTests/SharedKernel/`: `ResultTests`, `AggregateRootTests`, `SequentialGuidTests` (including SQL Server sort order), `Auditing/EntityChangesRecordedEventTests` (the domain event round-trips through System.Text.Json; the attributes' targets and inheritance).

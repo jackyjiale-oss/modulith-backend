@@ -27,7 +27,7 @@ public sealed class InboxCleanupJobTests(IntegrationTestWebAppFactory factory) :
             .Where(job => job.Name.EndsWith("InboxCleanup", StringComparison.Ordinal))
             .ToDictionary(job => job.Name, job => job.DefaultInterval);
 
-        jobs.Keys.ShouldBe(["NotificationsInboxCleanup", JobName], ignoreOrder: true);
+        jobs.Keys.ShouldBe(["NotificationsInboxCleanup", "AuditInboxCleanup", JobName], ignoreOrder: true);
         jobs.Values.ShouldAllBe(interval => interval == TimeSpan.FromDays(1));
     }
 
