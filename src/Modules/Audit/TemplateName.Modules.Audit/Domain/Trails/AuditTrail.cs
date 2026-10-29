@@ -79,7 +79,7 @@ internal sealed class AuditTrail : Entity<long>
             EntityId = Clamp(change.EntityId, MaxEntityIdLength),
             Action = change.Action,
             Changes = change.Changes,
-            TraceId = traceId,
+            TraceId = traceId is null ? null : Clamp(traceId, MaxTraceIdLength),
         };
     }
 
