@@ -46,6 +46,27 @@ public sealed class AuditConsumerTests(IntegrationTestWebAppFactory factory) : I
     }
 
     [Fact]
+    public async Task Values_longer_than_their_columns_are_cut_so_the_change_set_is_still_written()
+    {
+        var changeSet = new EntityChangesRecordedIntegrationEvent(
+            Guid.NewGuid(),
+            Factory.Time.GetUtcNow().AddMilliseconds(-1_250),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            TraceId,
+            new string('m', AuditTrail.MaxModuleLength + 10),
+            [new EntityChange(new string('t', AuditTrail.MaxEntityTypeLength + 10), new string('k', AuditTrail.MaxEntityIdLength + 10), EntityChangeAction.Created, """{"Reason":{"new":"Holiday"}}""")]);
+
+        await Should.NotThrowAsync(() => PublishAsync(Factory.Services, changeSet));
+
+        var trail = (await TrailsAsync()).ShouldHaveSingleItem();
+        trail.Module.ShouldBe(new string('m', AuditTrail.MaxModuleLength - 1) + "…");
+        trail.EntityType.ShouldBe(new string('t', AuditTrail.MaxEntityTypeLength - 1) + "…");
+        trail.EntityId.ShouldBe(new string('k', AuditTrail.MaxEntityIdLength - 1) + "…");
+        (await InboxAsync(changeSet.Id)).ShouldBe([Consumer]);
+    }
+
+    [Fact]
     public async Task Duplicate_delivery_writes_the_rows_once()
     {
         var changeSet = TwoChanges();

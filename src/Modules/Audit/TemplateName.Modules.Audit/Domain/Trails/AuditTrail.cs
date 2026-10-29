@@ -9,6 +9,8 @@ namespace TemplateName.Modules.Audit.Domain.Trails;
 /// </summary>
 internal sealed class AuditTrail : Entity<long>
 {
+    private const string Ellipsis = "…";
+
     /// <summary>The column limit of <see cref="Module"/>.</summary>
     public const int MaxModuleLength = 64;
 
@@ -72,12 +74,35 @@ internal sealed class AuditTrail : Entity<long>
             OccurredAt = occurredAt,
             UserId = userId,
             SessionId = sessionId,
-            Module = module,
-            EntityType = change.EntityType,
-            EntityId = change.EntityId,
+            Module = Clamp(module, MaxModuleLength),
+            EntityType = Clamp(change.EntityType, MaxEntityTypeLength),
+            EntityId = Clamp(change.EntityId, MaxEntityIdLength),
             Action = change.Action,
             Changes = change.Changes,
             TraceId = traceId,
         };
+    }
+
+    /// <summary>
+    /// Cuts a value to its column limit, ending in <c>…</c> so a cut value shows as cut. An over-long value would otherwise fail the
+    /// save, and the owning module's outbox would retry the whole change set until it was abandoned; one odd key must not cost the
+    /// trail of every other change in its save.
+    /// </summary>
+    private static string Clamp(string value, int maxLength)
+    {
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        var keptLength = maxLength - Ellipsis.Length;
+
+        // Do not leave half of a surrogate pair at the cut.
+        if (char.IsHighSurrogate(value[keptLength - 1]))
+        {
+            keptLength--;
+        }
+
+        return string.Concat(value.AsSpan(0, keptLength), Ellipsis);
     }
 }
