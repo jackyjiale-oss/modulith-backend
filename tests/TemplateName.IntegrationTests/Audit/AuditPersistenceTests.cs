@@ -83,7 +83,7 @@ public sealed class AuditPersistenceTests(IntegrationTestWebAppFactory factory) 
     }
 
     [Fact]
-    public async Task Trails_view_permission_is_seeded_and_held_by_super_admin_and_admin()
+    public async Task Trails_view_permission_is_seeded_and_held_by_super_admin_only()
     {
         var context = NewScope().GetRequiredService<AuthDbContext>();
 
@@ -96,7 +96,8 @@ public sealed class AuditPersistenceTests(IntegrationTestWebAppFactory factory) 
             .Where(role => role.Permissions.Any(grant => grant.PermissionId == permission.Id))
             .Select(role => role.Name)
             .ToListAsync(Ct);
-        holders.ShouldBe([SystemRoles.SuperAdmin, SystemRoles.Admin], ignoreOrder: true);
+        holders.ShouldBe([SystemRoles.SuperAdmin]);
+        holders.ShouldNotContain(SystemRoles.Admin);
     }
 
     [Fact]

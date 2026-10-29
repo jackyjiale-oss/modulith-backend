@@ -155,7 +155,7 @@ Any other failure is thrown, so the publishing module's outbox retries the messa
 
 ### 6.3 The API
 
-`GET /api/v1/admin/audit/trails`, permission `audit.trails.view`. `AuditPermissionSource` declares it (`AdminDefault: true`) and the Auth seeder picks it up like the Notifications permissions; Audit never references Auth. 401 without a token, 403 without the permission (ruling R13).
+`GET /api/v1/admin/audit/trails`, permission `audit.trails.view`. `AuditPermissionSource` declares it (`AdminDefault: false`; changed after the final review: the permission reads every audited module's data, so only SuperAdmin holds it by default) and the Auth seeder picks it up like the Notifications permissions; Audit never references Auth. 401 without a token, 403 without the permission (ruling R13).
 
 - Paging (ADR 0010): `pageSize`, `cursor`, `sort` (`occurredAt` only, default `-occurredAt`) and `includeTotalCount`; `Id` is the tie-breaker. A cursor is bound to the filters through the filter hash.
 - Filters: `entityType`, `entityId`, `userId`, `changeSetId`, `module`, `action` (one of the `EntityChangeAction` names, compared exactly), `from` and `to` (inclusive, ISO 8601, UTC when written without an offset; `to` not earlier than `from`), validated like the Auth audit log list.

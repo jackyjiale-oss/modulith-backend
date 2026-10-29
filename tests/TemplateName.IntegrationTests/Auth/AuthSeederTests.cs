@@ -40,13 +40,13 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
         "auth.audit.view",
     ];
 
-    // The Auth defaults plus the two Notifications permissions and the Audit one, which are flagged AdminDefault too.
+    // The Auth defaults plus the two Notifications permissions, which are flagged AdminDefault too. The Audit permission is not: it reads
+    // every audited module's data, so only SuperAdmin holds it by default.
     private static readonly string[] AdminDefaults =
     [
         .. AuthAdminDefaults,
         NotificationsPermissions.DeliveryView,
         NotificationsPermissions.DeliveryRetry,
-        AuditPermissions.TrailsView,
     ];
 
     private readonly List<AsyncServiceScope> _scopes = [];
@@ -125,10 +125,11 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
         admin.ShouldNotContain(AuthPermissions.UserAssignRoles);
         admin.ShouldNotContain(AuthPermissions.RoleManage);
 
-        // The only additions are the other modules' flagged permissions (Notifications and Audit here; Sample flags none).
+        // The only additions are the other modules' flagged permissions (Notifications here; Sample and Audit flag none).
         admin.Where(code => !code.StartsWith("auth.", StringComparison.Ordinal)).ShouldBe(
-            [NotificationsPermissions.DeliveryView, NotificationsPermissions.DeliveryRetry, AuditPermissions.TrailsView],
+            [NotificationsPermissions.DeliveryView, NotificationsPermissions.DeliveryRetry],
             ignoreOrder: true);
+        admin.ShouldNotContain(AuditPermissions.TrailsView);
         (await GrantedCodesAsync(SystemRoles.User)).ShouldBeEmpty();
         (await GrantedCodesAsync(SystemRoles.SuperAdmin)).ShouldBe(ModuleCodes, ignoreOrder: true);
     }
