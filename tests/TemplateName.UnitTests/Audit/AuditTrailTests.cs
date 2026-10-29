@@ -73,7 +73,36 @@ public sealed class AuditTrailTests
         trail.TraceId.ShouldBe("trace");
     }
 
-    private static AuditTrail Create(string module, string entityType, string entityId)
+    [Fact]
+    public void A_trace_id_at_its_limit_is_kept_whole_and_a_missing_one_stays_missing()
+    {
+        var traceId = new string('a', AuditTrail.MaxTraceIdLength);
+
+        Create("sample", "LeaveRequest", "1", traceId).TraceId.ShouldBe(traceId);
+        Create("sample", "LeaveRequest", "1", traceId: null).TraceId.ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_trace_id_over_its_limit_is_cut_to_the_limit_and_ends_in_an_ellipsis()
+    {
+        var trail = Create("sample", "LeaveRequest", "1", new string('a', AuditTrail.MaxTraceIdLength + 1));
+
+        trail.TraceId.ShouldBe(new string('a', AuditTrail.MaxTraceIdLength - 1) + Ellipsis);
+        trail.TraceId!.Length.ShouldBe(AuditTrail.MaxTraceIdLength);
+    }
+
+    [Fact]
+    public void A_trace_id_cut_never_leaves_half_of_a_surrogate_pair()
+    {
+        var traceId = new string('a', AuditTrail.MaxTraceIdLength - 2) + "😀" + "tail";
+
+        var trail = Create("sample", "LeaveRequest", "1", traceId);
+
+        trail.TraceId.ShouldBe(new string('a', AuditTrail.MaxTraceIdLength - 2) + Ellipsis);
+        trail.TraceId!.ShouldNotContain(character => char.IsSurrogate(character));
+    }
+
+    private static AuditTrail Create(string module, string entityType, string entityId, string? traceId = null)
         => AuditTrail.Create(
             Guid.NewGuid(),
             DateTimeOffset.UnixEpoch,
@@ -81,5 +110,5 @@ public sealed class AuditTrailTests
             sessionId: null,
             module,
             new EntityChange(entityType, entityId, EntityChangeAction.Created, "{}"),
-            traceId: null);
+            traceId);
 }

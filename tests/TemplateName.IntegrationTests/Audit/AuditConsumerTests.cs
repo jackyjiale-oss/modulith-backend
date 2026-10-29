@@ -53,7 +53,7 @@ public sealed class AuditConsumerTests(IntegrationTestWebAppFactory factory) : I
             Factory.Time.GetUtcNow().AddMilliseconds(-1_250),
             Guid.NewGuid(),
             Guid.NewGuid(),
-            TraceId,
+            new string('a', AuditTrail.MaxTraceIdLength + 10),
             new string('m', AuditTrail.MaxModuleLength + 10),
             [new EntityChange(new string('t', AuditTrail.MaxEntityTypeLength + 10), new string('k', AuditTrail.MaxEntityIdLength + 10), EntityChangeAction.Created, """{"Reason":{"new":"Holiday"}}""")]);
 
@@ -63,6 +63,7 @@ public sealed class AuditConsumerTests(IntegrationTestWebAppFactory factory) : I
         trail.Module.ShouldBe(new string('m', AuditTrail.MaxModuleLength - 1) + "…");
         trail.EntityType.ShouldBe(new string('t', AuditTrail.MaxEntityTypeLength - 1) + "…");
         trail.EntityId.ShouldBe(new string('k', AuditTrail.MaxEntityIdLength - 1) + "…");
+        trail.TraceId.ShouldBe(new string('a', AuditTrail.MaxTraceIdLength - 1) + "…");
         (await InboxAsync(changeSet.Id)).ShouldBe([Consumer]);
     }
 
