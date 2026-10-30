@@ -61,7 +61,8 @@ Its limits, which review covers:
 1. **Confirm that old and new contracts must coexist.** If not (no client has the old shape yet, or every client is ours and ships with the backend), change the contract in place, mark the title `!`, and say what clients must do in the `BREAKING CHANGE:` footer.
 2. **Add the version.** `/api/v1` is a literal route group and there is one OpenAPI document, `v1` ([ADR 0008](adr/0008-literal-v1-routes.md)). The first break that has to coexist adopts `Asp.Versioning` with URL-segment versioning, which keeps `/api/v1` as it is: a `/api/v2` group, a second OpenAPI document `v2`, the snapshot and the gate run once per document, and each module's version-specific request and response types beside its endpoints (`Endpoints/V2/`). That change has its own ADR, which supersedes ADR 0008 and updates the trigger in ADR 0031.
 3. **Register it.** Add the row to the version register as `Active`. `Register_matches_the_committed_openapi_snapshot` fails for a served version without a row.
-4. **Share the behaviour, version the contract.** Handlers stay shared where behaviour is the same; each version has its own request and response types, and the old response type is filled from the current model (`ProductV1Dto` and `ProductV2Dto` from one entity).5. **Deprecate the old version.** Set its register row to `Deprecated` with the date and the retirement criteria, tell clients, and start sending the headers (section "Retiring a version").
+4. **Share the behaviour, version the contract.** Handlers stay shared where behaviour is the same; each version has its own request and response types, and the old response type is filled from the current model (`ProductV1Dto` and `ProductV2Dto` from one entity).
+5. **Deprecate the old version.** Set its register row to `Deprecated` with the date and the retirement criteria, tell clients, and start sending the headers (section "Retiring a version").
 
 ## Changing the database: expand, migrate, contract
 
@@ -69,7 +70,7 @@ For a schema change that old clients or old code can still observe (a rename, a 
 
 | Phase | What happens | Release | Tool in this template |
 |---|---|---|---|
-| **Expand** | Add the new column or table next to the old one; nothing is removed. Plan how old and new code read and write during the transition. | Release N | A migration that only adds (`dotnet ef migrations add`, [`docs/services/api.md`](services/api.md#migrations)). Applied by the `migrate` command in production (Plan 6). |
+| **Expand** | Add the new column or table next to the old one; nothing is removed. Plan how old and new code read and write during the transition. | Release N | A migration that only adds (`dotnet ef migrations add`, [`docs/services/api.md`](services/api.md#migrations)). In production it is applied by the `migrate` mode that Plan 6 adds; until then only local start-up migration (`Database:ApplyMigrationsOnStartup`) exists. |
 | **Migrate** | Backfill existing rows into the new structure, and move the code to it. | Release N (the backfill) and N or N+1 (the code) | The backfill is a migration or a batched job; the module's reads and writes move to the new structure. |
 | **Transition and monitor** | Release compatible backend and client changes; watch for use of the old code path; check everything that may read the old structure. | N+1 up to the later release | Logs and metrics (section "Retiring a version"); the checklist below. |
 | **Contract** | Confirm nothing reads or writes the old structure; remove it in a later migration, and remove the compatibility code. | A later release, after the checklist | A migration that drops or renames, marked `[ContractMigration]`. |
