@@ -20,6 +20,7 @@ using TemplateName.Modules.Auth.Application.Registration.ResendConfirmation;
 using TemplateName.Modules.Auth.Application.Sessions.List;
 using TemplateName.Modules.Auth.Application.Sessions.Revoke;
 using TemplateName.Modules.Auth.Application.StepUp;
+using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.SharedKernel;
 using TemplateName.Web.Common.Results;
 using TemplateName.Web.Common.Security;
@@ -148,8 +149,9 @@ internal static class AuthEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
-        // Authenticated, and it checks a password or a code that counts towards the lockout, so it is limited per client address too;
-        // the answer carries an access token, so it is never stored.
+        // Authenticated, and it checks a password or a code that counts towards the lockout, or a provider's proof that does not (the
+        // per-address limit bounds those tries), so it is limited per client address too; the answer carries an access token, so it is
+        // never stored.
         group.MapPost("step-up", StepUpAsync)
             .WithName("StepUp")
             .RequireAuthorization()
@@ -158,7 +160,9 @@ internal static class AuthEndpoints
             .Produces<StepUpResponse>()
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // Two-step verification: auth/mfa/... and auth/trusted-devices/..., in the same group and tag.
         group.MapMfaEndpoints();
@@ -212,21 +216,33 @@ internal static class AuthEndpoints
     }
 
     // 200 with a new access token of the same session (fresh auth_time, amr what was proved); 400 auth.current_password_incorrect,
-    // auth.invalid_mfa_code or auth.step_up_method_not_allowed. A token whose user is gone or suspended, or whose session is not the
-    // caller's active session, gets the body-less 401 of a request without a valid token, as PUT me does.
+    // auth.invalid_mfa_code, auth.step_up_method_not_allowed or auth.step_up_identity_mismatch; 401 auth.invalid_external_token; 404
+    // auth.external_provider_not_found; 503 auth.external_provider_unavailable. A token whose user is gone or suspended, or whose session
+    // is not the caller's active session, gets the body-less 401 of a request without a valid token, as PUT me does.
     private static async Task<IResult> StepUpAsync(
         StepUpRequest request,
         ICommandHandler<StepUpCommand, StepUpResponse> handler,
         CancellationToken cancellationToken)
     {
-        var result = await handler.HandleAsync(new StepUpCommand(request.Password, request.Code, request.RecoveryCode), cancellationToken);
+        var result = await handler.HandleAsync(
+            new StepUpCommand(
+                request.Password,
+                request.Code,
+                request.RecoveryCode,
+                request.Provider,
+                request.IdToken,
+                request.AccessToken,
+                request.Nonce),
+            cancellationToken);
 
         if (result.IsSuccess)
         {
             return TypedResults.Ok(result.Value);
         }
 
-        return result.Error.Type == ErrorType.NotFound ? TypedResults.Unauthorized() : result.ToProblem();
+        // The provider's own 404 is a problem the client can act on; any other not-found is the caller's missing user or session.
+        var callerGone = result.Error.Type == ErrorType.NotFound && result.Error.Code != ExternalLoginErrors.ProviderNotFound.Code;
+        return callerGone ? TypedResults.Unauthorized() : result.ToProblem();
     }
 
     // 200 with the next token pair of the same session; 401 auth.invalid_refresh_token (unknown token or ended session, alike),

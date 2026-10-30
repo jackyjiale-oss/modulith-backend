@@ -25,6 +25,22 @@ public sealed class StepUpCommandHandlerTests
     private const string ProtectedSecret = "protected-secret";
     private const string AccessTokenValue = "header.payload.signature";
     private const string RecoveryCodeText = "ABCD-EFGH-JKMN-PQRS";
+    private const string Subject = "google-subject-0001";
+    private const string IdToken = "header.payload.signature-of-the-id-token";
+    private const string Nonce = "nonce-0123456789abcdef";
+
+    private static readonly ExternalProvider Google = new(
+        "google",
+        "Google",
+        ExternalProviderKind.Oidc,
+        "https://accounts.google.com",
+        ["https://accounts.google.com"],
+        ["client.apps.example"],
+        ExternalEmailRule.EmailVerifiedClaim,
+        TrustEmail: true,
+        TenantId: null,
+        AppId: null,
+        AppSecret: null);
 
     // Not on a whole second, so the test sees that the step-up expiry counts from the token's whole-second auth_time.
     private static readonly DateTimeOffset Now = new(2026, 10, 17, 9, 0, 10, 500, TimeSpan.Zero);
@@ -37,6 +53,8 @@ public sealed class StepUpCommandHandlerTests
     private readonly IRecoveryCodeRepository _recoveryCodes = Substitute.For<IRecoveryCodeRepository>();
     private readonly IMfaSecretProtector _secretProtector = Substitute.For<IMfaSecretProtector>();
     private readonly IPasswordHasher _passwordHasher = Substitute.For<IPasswordHasher>();
+    private readonly IExternalProviderCatalog _catalog = Substitute.For<IExternalProviderCatalog>();
+    private readonly IExternalIdentityVerifier _identityVerifier = Substitute.For<IExternalIdentityVerifier>();
     private readonly IAccessTokenIssuer _accessTokenIssuer = Substitute.For<IAccessTokenIssuer>();
     private readonly ICurrentUser _currentUser = Substitute.For<ICurrentUser>();
     private readonly IAuthAuditWriter _auditWriter = Substitute.For<IAuthAuditWriter>();
@@ -44,6 +62,7 @@ public sealed class StepUpCommandHandlerTests
     private readonly IAuthMetrics _metrics = Substitute.For<IAuthMetrics>();
     private readonly List<AuthAuditLog> _auditEntries = [];
     private readonly List<AccessTokenRequest> _tokenRequests = [];
+    private readonly List<ExternalProof> _proofs = [];
     private readonly byte[] _secret = Totp.NewSecret();
     private readonly User _user;
     private readonly UserSession _session;
@@ -89,6 +108,9 @@ public sealed class StepUpCommandHandlerTests
         _accessTokenIssuer.Issue(Arg.Do<AccessTokenRequest>(_tokenRequests.Add)).Returns(new AccessToken(AccessTokenValue, Now.AddMinutes(10)));
         _auditWriter.Record(Arg.Do<AuthAuditLog>(_auditEntries.Add));
         _passwordHasher.Verify(StoredHash, Password).Returns(PasswordVerification.Success);
+        _catalog.Find(Arg.Is<string>(name => name != null && name.Trim().Equals("google", StringComparison.OrdinalIgnoreCase))).Returns(Google);
+        _identityVerifier.VerifyAsync(Arg.Any<ExternalProvider>(), Arg.Do<ExternalProof>(_proofs.Add), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new VerifiedExternalIdentity("google", Subject, "alice@example.com", HasUsableEmail: true, Name: "Alice")));
 
         var verifier = new MfaFactorVerifier(_methods, _recoveryCodes, _secretProtector, new RecordingLogger<MfaFactorVerifier>());
         _sut = new StepUpCommandHandler(
@@ -97,6 +119,8 @@ public sealed class StepUpCommandHandlerTests
             _methods,
             verifier,
             _passwordHasher,
+            _catalog,
+            _identityVerifier,
             _accessTokenIssuer,
             _currentUser,
             _auditWriter,
@@ -400,7 +424,7 @@ public sealed class StepUpCommandHandlerTests
     {
         var pipeline = new ValidationDecorator.CommandHandler<StepUpCommand, StepUpResponse>(
             _sut,
-            [new StepUpCommandValidator(Options.Create(new PasswordOptions()))]);
+            [new StepUpCommandValidator(Options.Create(new PasswordOptions()), _catalog)]);
 
         var result = await pipeline.HandleAsync(new StepUpCommand(new string('p', length), null, null), Ct);
 
@@ -415,6 +439,305 @@ public sealed class StepUpCommandHandlerTests
         new StepUpResponse(AccessTokenValue, Now, Now).ToString().ShouldBe(nameof(StepUpResponse));
     }
 
+    [Fact]
+    public async Task Provider_step_up_of_a_password_less_account_replaces_amr_with_fed_and_a_fresh_auth_time()
+    {
+        var (social, session) = GivenSocialCaller();
+
+        var result = await _sut.HandleAsync(ProofCommand(), Ct);
+
+        var whole = DateTimeOffset.FromUnixTimeSeconds(Now.ToUnixTimeSeconds());
+        result.Value.ShouldBe(new StepUpResponse(AccessTokenValue, Now.AddMinutes(10), whole.AddMinutes(10)));
+        session.AuthMethods.ShouldBe("fed");
+        session.AuthenticatedAt.ShouldBe(Now);
+        session.CreatedAt.ShouldBe(SignedInAt);
+        _tokenRequests.ShouldHaveSingleItem().ShouldBe(new AccessTokenRequest(social.Id, session.Id, session.SecurityStamp, "fed", Now, "en"));
+        var audit = _auditEntries.ShouldHaveSingleItem();
+        audit.EventType.ShouldBe(AuthAuditEvents.StepUpSucceeded);
+        audit.Succeeded.ShouldBeTrue();
+        audit.UserId.ShouldBe(social.Id);
+        audit.SessionId.ShouldBe(session.Id);
+        audit.Details.ShouldBe("""{"factor":"external","provider":"google"}""");
+        social.DomainEvents.ShouldBeEmpty();
+        social.AccessFailedCount.ShouldBe(0);
+        await _unitOfWork.Received(1).SaveChangesAsync(CancellationToken.None);
+        await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
+        _passwordHasher.DidNotReceiveWithAnyArgs().Verify(default!, default!);
+        _passwordHasher.DidNotReceiveWithAnyArgs().SpendVerificationCost(default!);
+        _metrics.Received(1).RecordStepUp(true);
+    }
+
+    [Fact]
+    public async Task The_proof_goes_to_the_verifier_for_the_catalog_provider_with_blank_values_as_absent()
+    {
+        GivenSocialCaller();
+
+        var result = await _sut.HandleAsync(new StepUpCommand(" ", string.Empty, null, " GOOGLE ", IdToken, "  ", Nonce), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        var proof = _proofs.ShouldHaveSingleItem();
+        proof.IdToken.ShouldBe(IdToken);
+        proof.AccessToken.ShouldBeNull();
+        proof.Nonce.ShouldBe(Nonce);
+        await _identityVerifier.Received(1).VerifyAsync(Google, Arg.Any<ExternalProof>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("another subject at the provider")]
+    [InlineData("the caller's subject at another provider")]
+    public async Task Proof_of_an_identity_that_is_not_the_callers_is_an_identity_mismatch_and_not_counted(string scenario)
+    {
+        var (social, session) = GivenSocialCaller();
+        GivenIdentity(scenario == "another subject at the provider"
+            ? new VerifiedExternalIdentity("google", "somebody-elses-subject", null, HasUsableEmail: false, Name: null)
+            : new VerifiedExternalIdentity("microsoft", Subject, null, HasUsableEmail: false, Name: null));
+
+        var result = await _sut.HandleAsync(ProofCommand(), Ct);
+
+        result.Error.ShouldBe(ExternalLoginErrors.StepUpIdentityMismatch);
+        session.AuthMethods.ShouldBe("fed");
+        session.AuthenticatedAt.ShouldBe(SignedInAt);
+        social.AccessFailedCount.ShouldBe(0);
+        await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
+        AssertFailureAudit(social, session, "auth.step_up_identity_mismatch");
+        _accessTokenIssuer.DidNotReceiveWithAnyArgs().Issue(default!);
+        await _unitOfWork.Received(1).SaveChangesAsync(CancellationToken.None);
+        _metrics.Received(1).RecordStepUp(false);
+    }
+
+    [Fact]
+    public async Task Password_account_with_a_proof_is_method_not_allowed_and_nothing_is_verified()
+    {
+        var result = await _sut.HandleAsync(ProofCommand(), Ct);
+
+        result.Error.ShouldBe(MfaErrors.StepUpMethodNotAllowed);
+        await _identityVerifier.DidNotReceiveWithAnyArgs().VerifyAsync(default!, default!, Ct);
+        _catalog.DidNotReceiveWithAnyArgs().Find(default!);
+        await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
+        _user.AccessFailedCount.ShouldBe(0);
+        _session.AuthenticatedAt.ShouldBe(SignedInAt);
+        AssertFailureAudit("auth.step_up_method_not_allowed");
+        _accessTokenIssuer.DidNotReceiveWithAnyArgs().Issue(default!);
+        _metrics.Received(1).RecordStepUp(false);
+    }
+
+    [Theory]
+    [InlineData("password")]
+    [InlineData("code")]
+    [InlineData("recovery code")]
+    public async Task Provider_proof_beside_another_proof_is_method_not_allowed_even_when_the_validator_was_skipped(string other)
+    {
+        // The validator refuses this in the pipeline; the handler fails closed all the same and verifies nothing.
+        GivenSocialCaller();
+        var command = other switch
+        {
+            "password" => ProofCommand() with { Password = Password },
+            "code" => ProofCommand() with { Code = "123456" },
+            _ => ProofCommand() with { RecoveryCode = RecoveryCodeText },
+        };
+
+        var result = await _sut.HandleAsync(command, Ct);
+
+        result.Error.ShouldBe(MfaErrors.StepUpMethodNotAllowed);
+        await _identityVerifier.DidNotReceiveWithAnyArgs().VerifyAsync(default!, default!, Ct);
+        await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Mfa_account_with_a_proof_is_method_not_allowed_and_nothing_is_verified(bool hasPassword)
+    {
+        User user;
+        UserSession session;
+        if (hasPassword)
+        {
+            GivenMfa();
+            (user, session) = (_user, _session);
+        }
+        else
+        {
+            (user, session) = GivenSocialCaller();
+            _methods.HasConfirmedAsync(user.Id, Arg.Any<CancellationToken>()).Returns(true);
+        }
+
+        var result = await _sut.HandleAsync(ProofCommand(), Ct);
+
+        result.Error.ShouldBe(MfaErrors.StepUpMethodNotAllowed);
+        await _identityVerifier.DidNotReceiveWithAnyArgs().VerifyAsync(default!, default!, Ct);
+        await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
+        user.AccessFailedCount.ShouldBe(0);
+        session.AuthenticatedAt.ShouldBe(SignedInAt);
+        AssertFailureAudit(user, session, "auth.step_up_method_not_allowed");
+        _accessTokenIssuer.DidNotReceiveWithAnyArgs().Issue(default!);
+    }
+
+    [Fact]
+    public async Task Invalid_proof_is_invalid_token_and_is_not_counted_toward_the_lockout()
+    {
+        var (social, session) = GivenSocialCaller();
+        _identityVerifier.VerifyAsync(Arg.Any<ExternalProvider>(), Arg.Any<ExternalProof>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Failure<VerifiedExternalIdentity>(ExternalLoginErrors.InvalidToken));
+
+        var result = await _sut.HandleAsync(ProofCommand(), Ct);
+
+        result.Error.ShouldBe(ExternalLoginErrors.InvalidToken);
+        social.AccessFailedCount.ShouldBe(0);
+        await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
+        AssertFailureAudit(social, session, "auth.invalid_external_token");
+        _auditEntries[0].Details.ShouldBe("""{"factor":"external","provider":"google"}""");
+        session.AuthMethods.ShouldBe("fed");
+        session.AuthenticatedAt.ShouldBe(SignedInAt);
+        _accessTokenIssuer.DidNotReceiveWithAnyArgs().Issue(default!);
+        await _unitOfWork.Received(1).SaveChangesAsync(CancellationToken.None);
+        _metrics.Received(1).RecordStepUp(false);
+    }
+
+    [Fact]
+    public async Task Provider_outage_is_provider_unavailable_and_nothing_is_counted()
+    {
+        var (social, session) = GivenSocialCaller();
+        _identityVerifier.VerifyAsync(Arg.Any<ExternalProvider>(), Arg.Any<ExternalProof>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Failure<VerifiedExternalIdentity>(ExternalLoginErrors.ProviderUnavailable));
+
+        var result = await _sut.HandleAsync(ProofCommand(), Ct);
+
+        result.Error.ShouldBe(ExternalLoginErrors.ProviderUnavailable);
+        social.AccessFailedCount.ShouldBe(0);
+        await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
+        session.AuthenticatedAt.ShouldBe(SignedInAt);
+        _accessTokenIssuer.DidNotReceiveWithAnyArgs().Issue(default!);
+    }
+
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("disabled")]
+    public async Task Unknown_or_disabled_provider_is_provider_not_found_and_nothing_is_verified(string provider)
+    {
+        // The catalog lists enabled providers only, so a disabled one is as unknown to it as a made-up name.
+        var (social, session) = GivenSocialCaller();
+
+        var result = await _sut.HandleAsync(new StepUpCommand(null, null, null, provider, IdToken, null, Nonce), Ct);
+
+        result.Error.ShouldBe(ExternalLoginErrors.ProviderNotFound);
+        await _identityVerifier.DidNotReceiveWithAnyArgs().VerifyAsync(default!, default!, Ct);
+        social.AccessFailedCount.ShouldBe(0);
+        await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
+        session.AuthenticatedAt.ShouldBe(SignedInAt);
+        _accessTokenIssuer.DidNotReceiveWithAnyArgs().Issue(default!);
+    }
+
+    [Fact]
+    public async Task Locked_account_is_refused_before_the_proof_is_verified_and_nothing_is_counted()
+    {
+        var (social, session) = GivenSocialCaller();
+        FailBeforehand(social, times: 5);
+
+        var result = await _sut.HandleAsync(ProofCommand(), Ct);
+
+        // Indistinguishable from a wrong proof, and the nonce is not spent.
+        result.Error.ShouldBe(ExternalLoginErrors.InvalidToken);
+        await _identityVerifier.DidNotReceiveWithAnyArgs().VerifyAsync(default!, default!, Ct);
+        _catalog.DidNotReceiveWithAnyArgs().Find(default!);
+        await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
+        social.AccessFailedCount.ShouldBe(5);
+        social.LockoutEnd.ShouldBe(Now + LockoutDuration - TimeSpan.FromMinutes(1));
+        var audit = _auditEntries.ShouldHaveSingleItem();
+        audit.EventType.ShouldBe(AuthAuditEvents.StepUpFailed);
+        audit.FailureReason.ShouldBe(StepUpCommandHandler.LockedFailureReason);
+        session.AuthenticatedAt.ShouldBe(SignedInAt);
+        _accessTokenIssuer.DidNotReceiveWithAnyArgs().Issue(default!);
+        _metrics.Received(1).RecordStepUp(false);
+    }
+
+    [Fact]
+    public async Task Refused_methods_come_before_the_lock_so_a_locked_password_account_gets_method_not_allowed()
+    {
+        FailBeforehand(_user, times: 5);
+
+        var result = await _sut.HandleAsync(ProofCommand(), Ct);
+
+        result.Error.ShouldBe(MfaErrors.StepUpMethodNotAllowed);
+        await _identityVerifier.DidNotReceiveWithAnyArgs().VerifyAsync(default!, default!, Ct);
+        _auditEntries.ShouldHaveSingleItem().FailureReason.ShouldBe("auth.step_up_method_not_allowed");
+    }
+
+    [Fact]
+    public async Task Caller_without_an_active_session_never_reaches_the_verifier()
+    {
+        GivenSocialCaller();
+        _currentUser.UserId.Returns((Guid?)null);
+
+        var result = await _sut.HandleAsync(ProofCommand(), Ct);
+
+        result.Error.Type.ShouldBe(ErrorType.NotFound);
+        result.Error.Code.ShouldBe("auth.user_not_found");
+        await _identityVerifier.DidNotReceiveWithAnyArgs().VerifyAsync(default!, default!, Ct);
+        _catalog.DidNotReceiveWithAnyArgs().Find(default!);
+        _auditEntries.ShouldBeEmpty();
+        await _unitOfWork.DidNotReceiveWithAnyArgs().SaveChangesAsync(Ct);
+    }
+
+    [Fact]
+    public async Task Password_less_account_sending_a_password_is_still_a_counted_wrong_password()
+    {
+        // Unchanged by the provider proof: only a proof of a login steps such an account up.
+        var (social, session) = GivenSocialCaller();
+
+        var result = await _sut.HandleAsync(new StepUpCommand(Password, null, null), Ct);
+
+        result.Error.ShouldBe(UserErrors.CurrentPasswordIncorrect);
+        _passwordHasher.Received(1).SpendVerificationCost(Password);
+        social.AccessFailedCount.ShouldBe(1);
+        await _identityVerifier.DidNotReceiveWithAnyArgs().VerifyAsync(default!, default!, Ct);
+        AssertFailureAudit(social, session, "auth.current_password_incorrect");
+    }
+
+    [Fact]
+    public void Command_text_never_shows_a_provider_proof()
+    {
+        var text = ProofCommand().ToString();
+
+        text.ShouldBe(nameof(StepUpCommand));
+    }
+
+    private static StepUpCommand ProofCommand() => new(null, null, null, "google", IdToken, null, Nonce);
+
+    private void GivenIdentity(VerifiedExternalIdentity identity) =>
+        _identityVerifier.VerifyAsync(Arg.Any<ExternalProvider>(), Arg.Any<ExternalProof>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(identity));
+
+    // A user who registered with Google: no password, one login (google, Subject), a session that started with the login.
+    private (User User, UserSession Session) GivenSocialCaller()
+    {
+        var social = User.RegisterExternal("bob@example.com", "Bob", "en", "google", Subject, "bob@example.com", SignedInAt.AddDays(-1)).Value;
+        social.ClearDomainEvents();
+        var (session, _) = UserSession.Start(
+            social.Id,
+            AuthenticationMethods.Federated,
+            "Phone",
+            userAgent: null,
+            ipAddress: null,
+            social.SecurityStamp,
+            [.. Enumerable.Range(1, 32).Select(value => (byte)value)],
+            TimeSpan.FromDays(14),
+            TimeSpan.FromDays(90),
+            SignedInAt);
+
+        _users.GetByIdAsync(social.Id, Arg.Any<CancellationToken>()).Returns(social);
+        _users.RecordFailedSignInAsync(social.Id, Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                social.RecordFailedSignIn(call.ArgAt<DateTimeOffset>(1), call.ArgAt<int>(2), call.ArgAt<TimeSpan>(3));
+                social.ClearDomainEvents();
+                return new FailedSignIn(social.AccessFailedCount, social.LockoutEnd);
+            });
+        _sessions.GetByIdAsync(session.Id, Arg.Any<CancellationToken>()).Returns(session);
+        _currentUser.UserId.Returns(social.Id);
+        _currentUser.SessionId.Returns(session.Id);
+        return (social, session);
+    }
+
     private void GivenMfa()
     {
         _methods.HasConfirmedAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(true);
@@ -425,23 +748,27 @@ public sealed class StepUpCommandHandlerTests
     }
 
     // Failures counted a minute ago, so a lockout they cause ends a minute before Now + LockoutDuration.
-    private void FailBeforehand(int times)
+    private void FailBeforehand(int times) => FailBeforehand(_user, times);
+
+    private static void FailBeforehand(User user, int times)
     {
         for (var attempt = 0; attempt < times; attempt++)
         {
-            _user.RecordFailedSignIn(Now.AddMinutes(-1), maxFailedAttempts: 5, LockoutDuration);
+            user.RecordFailedSignIn(Now.AddMinutes(-1), maxFailedAttempts: 5, LockoutDuration);
         }
 
-        _user.ClearDomainEvents();
+        user.ClearDomainEvents();
     }
 
-    private void AssertFailureAudit(string failureReason)
+    private void AssertFailureAudit(string failureReason) => AssertFailureAudit(_user, _session, failureReason);
+
+    private void AssertFailureAudit(User user, UserSession session, string failureReason)
     {
         var audit = _auditEntries[0];
         audit.EventType.ShouldBe(AuthAuditEvents.StepUpFailed);
         audit.Succeeded.ShouldBeFalse();
-        audit.UserId.ShouldBe(_user.Id);
-        audit.SessionId.ShouldBe(_session.Id);
+        audit.UserId.ShouldBe(user.Id);
+        audit.SessionId.ShouldBe(session.Id);
         audit.FailureReason.ShouldBe(failureReason);
     }
 }

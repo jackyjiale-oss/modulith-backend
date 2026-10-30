@@ -36,6 +36,19 @@ public sealed class StepUpPolicyTests
     }
 
     [Fact]
+    public void Fresh_federated_auth_satisfies_an_account_without_mfa_until_max_age_has_passed()
+    {
+        // A password-less account steps up with a provider's proof and the session then says "fed"; the policy reads only the age.
+        _currentUser.AuthMethods.Returns(["fed"]);
+
+        _time.SetUtcNow(AuthTime + MaxAge - TimeSpan.FromSeconds(1));
+        _sut.Check(hasConfirmedMfa: false).IsSuccess.ShouldBeTrue();
+
+        _time.SetUtcNow(AuthTime + MaxAge);
+        _sut.Check(hasConfirmedMfa: false).Error.ShouldBe(MfaErrors.StepUpRequired);
+    }
+
+    [Fact]
     public void Step_up_expires_exactly_after_max_age()
     {
         _time.SetUtcNow(AuthTime + MaxAge - TimeSpan.FromSeconds(1));
@@ -52,6 +65,8 @@ public sealed class StepUpPolicyTests
     [InlineData(new[] { "pwd", "otp", "mfa" }, true)]
     [InlineData(new[] { "pwd", "rcvr", "mfa" }, true)]
     [InlineData(new[] { "mfa" }, false)]
+    [InlineData(new[] { "fed" }, false)]
+    [InlineData(new[] { "fed", "mfa" }, false)]
     [InlineData(new string[0], false)]
     public void Mfa_account_needs_otp_or_rcvr_in_amr(string[] authMethods, bool satisfied)
     {
