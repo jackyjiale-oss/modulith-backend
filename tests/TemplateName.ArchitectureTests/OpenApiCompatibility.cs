@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace TemplateName.IntegrationTests.Documentation;
+namespace TemplateName.ArchitectureTests;
 
 /// <summary>One difference between two OpenAPI documents: the operation (<c>GET /api/v1/users/{id}</c>) and what changed in it.</summary>
 public sealed record OpenApiChange(string Operation, string Description);
@@ -13,7 +13,8 @@ public sealed record OpenApiCompatibilityReport(IReadOnlyList<OpenApiChange> Bre
 /// The breaking-change gate (docs/api-compatibility.md, ADR 0031): classifies the differences between the base branch's OpenAPI document
 /// and the current one. Request side means the parameters and the request body; response side means the bodies of the 2xx responses.
 /// <c>$ref</c> is resolved, <c>allOf</c> members are merged, and a <c>oneOf</c> or <c>anyOf</c> is compared as a whole, so any change to
-/// one is breaking even where a client would cope. A schema already being compared on the current path is not entered again.
+/// one is breaking even where a client would cope. A schema already being compared on the current path is not entered again. Tested here
+/// with no host and no Docker (<c>OpenApiCompatibilityTests</c>); the integration tests link this file for <c>OpenApiBaselineTests</c>.
 /// </summary>
 public static class OpenApiCompatibility
 {

@@ -1,3 +1,4 @@
+using TemplateName.ArchitectureTests;
 using TemplateName.IntegrationTests.Infrastructure;
 
 namespace TemplateName.IntegrationTests.Documentation;

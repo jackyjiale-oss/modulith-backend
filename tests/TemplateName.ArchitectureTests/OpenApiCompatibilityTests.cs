@@ -1,14 +1,15 @@
 using System.Text.Json.Nodes;
-using TemplateName.ArchitectureTests;
 
-namespace TemplateName.IntegrationTests.Documentation;
+namespace TemplateName.ArchitectureTests;
 
 /// <summary>
 /// The rules of the breaking-change gate (docs/api-compatibility.md), one test per rule, on minimal OpenAPI 3.1 documents shaped like the
-/// one the host emits. No host and no Docker.
+/// one the host emits. No host, no Docker: this project has no assembly fixture.
 /// </summary>
 public sealed class OpenApiCompatibilityTests : IDisposable
 {
+    private const string Snapshot = "tests/TemplateName.IntegrationTests/Documentation/OpenApiSnapshotTests.OpenApi_document_matches_snapshot.verified.json";
+
     private const string Items = "/api/v1/items";
 
     private const string Get = "GET /api/v1/items";
@@ -314,12 +315,7 @@ public sealed class OpenApiCompatibilityTests : IDisposable
     [Fact]
     public void Identical_documents_have_no_changes()
     {
-        var snapshot = File.ReadAllText(Path.Combine(
-            RepositoryPaths.Root,
-            "tests",
-            typeof(OpenApiSnapshotTests).Assembly.GetName().Name!,
-            "Documentation",
-            $"{nameof(OpenApiSnapshotTests)}.{nameof(OpenApiSnapshotTests.OpenApi_document_matches_snapshot)}.verified.json"));
+        var snapshot = File.ReadAllText(Path.Combine(RepositoryPaths.Root, Snapshot));
 
         var report = OpenApiCompatibility.Compare(snapshot, snapshot);
 
