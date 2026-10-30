@@ -177,19 +177,23 @@ internal sealed class FakeIdentityProvider : IDisposable
         _ => throw new ArgumentOutOfRangeException(nameof(signWith), signWith, "Unknown signing variant."),
     };
 
-    private string DiscoveryDocument(Uri request)
+    private string DiscoveryDocument(Uri request, bool includeKeySetAddress)
     {
         var path = request.AbsolutePath[..^DiscoverySuffix.Length];
-        var jwksUri = $"{request.Scheme}://{request.Authority}{path}{JwksPath}";
-        return JsonSerializer.Serialize(new Dictionary<string, object>
+        var document = new Dictionary<string, object>
         {
             ["issuer"] = Issuer,
-            ["jwks_uri"] = jwksUri,
             ["authorization_endpoint"] = $"{request.Scheme}://{request.Authority}{path}/authorize",
             ["response_types_supported"] = new[] { "id_token" },
             ["subject_types_supported"] = new[] { "public" },
             ["id_token_signing_alg_values_supported"] = new[] { "RS256", "ES256" },
-        });
+        };
+        if (includeKeySetAddress)
+        {
+            document["jwks_uri"] = $"{request.Scheme}://{request.Authority}{path}{JwksPath}";
+        }
+
+        return JsonSerializer.Serialize(document);
     }
 
     private string KeySet()
@@ -267,6 +271,8 @@ internal sealed class FakeIdentityProvider : IDisposable
             Fail,
             FailKeySet,
             Hang,
+            NoKeySetAddress,
+            EmptyKeySet,
         }
 
         /// <summary>Every address requested, in order.</summary>
@@ -292,6 +298,12 @@ internal sealed class FakeIdentityProvider : IDisposable
 
         /// <summary>Never answers until <see cref="Recover"/>; a request ends only when it is cancelled.</summary>
         public void Hang() => _mode = Mode.Hang;
+
+        /// <summary>Serves a discovery document without <c>jwks_uri</c> until <see cref="Recover"/>.</summary>
+        public void OmitKeySetAddress() => _mode = Mode.NoKeySetAddress;
+
+        /// <summary>Serves a key set with no key until <see cref="Recover"/>.</summary>
+        public void ServeEmptyKeySet() => _mode = Mode.EmptyKeySet;
 
         public void Recover() => _mode = Mode.Serve;
 
@@ -320,12 +332,18 @@ internal sealed class FakeIdentityProvider : IDisposable
                     return new HttpResponseMessage(HttpStatusCode.OK);
             }
 
+            var mode = _mode;
             if (isDiscovery)
             {
-                return Json(provider.DiscoveryDocument(uri));
+                return Json(provider.DiscoveryDocument(uri, includeKeySetAddress: mode != Mode.NoKeySetAddress));
             }
 
-            return isKeySet ? Json(provider.KeySet()) : new HttpResponseMessage(HttpStatusCode.NotFound);
+            if (isKeySet)
+            {
+                return Json(mode == Mode.EmptyKeySet ? """{"keys":[]}""" : provider.KeySet());
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
         }
 
         private static HttpResponseMessage Json(string body) =>

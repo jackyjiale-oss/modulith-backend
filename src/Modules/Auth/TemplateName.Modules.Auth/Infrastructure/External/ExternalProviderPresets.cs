@@ -26,6 +26,15 @@ internal static class ExternalProviderPresets
     /// <summary>Microsoft's tenant when none is configured: work, school and personal accounts alike.</summary>
     internal const string DefaultMicrosoftTenant = "common";
 
+    /// <summary>Microsoft's tenant setting for work and school accounts of any tenant, never personal accounts.</summary>
+    internal const string OrganizationsTenant = "organizations";
+
+    /// <summary>Microsoft's tenant setting for personal accounts only.</summary>
+    internal const string ConsumersTenant = "consumers";
+
+    /// <summary>The <c>tid</c> of every Microsoft personal account.</summary>
+    internal const string ConsumersTenantId = "9188040d-6c67-4c5b-b112-36a304b66dad";
+
     private const string MicrosoftBase = "https://login.microsoftonline.com/";
     private const string MicrosoftSuffix = "/v2.0";
 
@@ -85,7 +94,7 @@ internal static class ExternalProviderPresets
         }
 
         var lower = trimmed.ToLowerInvariant();
-        if (lower is DefaultMicrosoftTenant or "organizations" or "consumers")
+        if (lower is DefaultMicrosoftTenant or OrganizationsTenant or ConsumersTenant)
         {
             tenantId = lower;
             return true;

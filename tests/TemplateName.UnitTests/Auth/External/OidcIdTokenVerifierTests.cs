@@ -81,6 +81,10 @@ public sealed class OidcIdTokenVerifierTests
     [InlineData("issuer-in-other-case")]
     [InlineData("no-issuer")]
     [InlineData("wrong-audience")]
+    [InlineData("audience-with-a-trailing-slash")]
+    [InlineData("audience-in-other-case")]
+    [InlineData("audience-array-without-ours")]
+    [InlineData("audience-array-with-ours-plus-a-slash")]
     [InlineData("no-audience")]
     [InlineData("expired-beyond-skew")]
     [InlineData("no-expiry")]
@@ -89,6 +93,10 @@ public sealed class OidcIdTokenVerifierTests
     [InlineData("issued-in-the-future-beyond-skew")]
     [InlineData("no-issued-at")]
     [InlineData("issued-at-as-a-string")]
+    [InlineData("issued-at-negative")]
+    [InlineData("issued-at-fractional")]
+    [InlineData("issued-at-beyond-the-maximum-unix-seconds")]
+    [InlineData("issued-at-a-huge-double")]
     [InlineData("no-nonce")]
     [InlineData("different-nonce")]
     [InlineData("empty-nonce")]
@@ -193,6 +201,12 @@ public sealed class OidcIdTokenVerifierTests
         var result = await host.VerifyAsync(token, nonce);
 
         Failed(result, ExternalLoginErrors.InvalidToken);
+        if (!string.IsNullOrEmpty(nonce))
+        {
+            await host.AssertNotSpentAsync(nonce);
+        }
+
+        await host.AssertNonceUnspentAsync();
     }
 
     [Fact]
@@ -204,6 +218,17 @@ public sealed class OidcIdTokenVerifierTests
         var result = await host.VerifyAsync(host.Idp.IdToken(claims => claims["nonce"] = nonce), nonce);
 
         Failed(result, ExternalLoginErrors.InvalidToken);
+        await host.AssertNotSpentAsync(nonce);
+        await host.AssertNonceUnspentAsync();
+    }
+
+    [Fact]
+    public async Task An_audience_array_holding_ours_and_another_is_accepted()
+    {
+        using var host = new Host();
+        var token = host.Idp.IdToken(claims => claims["aud"] = new[] { "another-client.apps.example", FakeIdentityProvider.DefaultClientId });
+
+        Succeeded(await host.VerifyAsync(token));
     }
 
     [Fact]
@@ -257,7 +282,8 @@ public sealed class OidcIdTokenVerifierTests
     [Theory]
     [InlineData("apple", true, true)]
     [InlineData("apple", "true", true)]
-    [InlineData("apple", "TRUE", true)]
+    [InlineData("apple", "TRUE", false)]
+    [InlineData("apple", "True", false)]
     [InlineData("apple", "false", false)]
     [InlineData("apple", false, false)]
     [InlineData("apple", null, false)]
@@ -525,26 +551,93 @@ public sealed class OidcIdTokenVerifierTests
     }
 
     [Fact]
-    public async Task An_unknown_kid_triggers_one_key_refresh_and_is_InvalidToken()
+    public async Task A_token_under_a_freshly_rotated_key_is_accepted_in_the_same_request_after_one_refresh()
     {
         using var host = new Host();
         Succeeded(await host.VerifyAsync(Token(host, 1, _ => { }), Nonce(1)));
         host.Idp.Handler.KeySetRequests.ShouldBe(1);
 
-        // The provider rotates: the first token under the new kid is refused and makes the keys be read again (in the background).
         host.Idp.RotateKey();
-        var rotated = Token(host, 2, _ => { });
-        Failed(await host.VerifyAsync(rotated, Nonce(2)), ExternalLoginErrors.InvalidToken);
+        var identity = Succeeded(await host.VerifyAsync(Token(host, 2, _ => { }), Nonce(2)));
 
-        // The refreshed keys know the new kid once the background read has finished; the refused attempts spent nothing meanwhile.
-        await WaitForAsync(async () => (await host.VerifyAsync(rotated, Nonce(2))).IsSuccess);
+        identity.Subject.ShouldBe(FakeIdentityProvider.DefaultSubject);
+        host.Idp.Handler.KeySetRequests.ShouldBe(2);
+        Succeeded(await host.VerifyAsync(Token(host, 3, _ => { }), Nonce(3)));
+        host.Idp.Handler.KeySetRequests.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task A_kid_still_unknown_after_the_refresh_is_InvalidToken_and_refreshes_at_most_once_per_interval()
+    {
+        using var host = new Host();
+        Succeeded(await host.VerifyAsync(Token(host, 1, _ => { }), Nonce(1)));
+
+        // One refresh, one retry, still unknown: refused.
+        Failed(await host.VerifyAsync(Token(host, 2, _ => { }, FakeIdentityProvider.Signing.UnknownKey), Nonce(2)), ExternalLoginErrors.InvalidToken);
         host.Idp.Handler.KeySetRequests.ShouldBe(2);
 
-        // A kid nobody published refreshes no more within the refresh interval, so random kids cannot make us hammer the provider.
+        // Within the refresh interval random kids cannot make us read the provider again.
+        host.Time.Advance(TimeSpan.FromMinutes(5) - TimeSpan.FromSeconds(1));
         Failed(await host.VerifyAsync(Token(host, 3, _ => { }, FakeIdentityProvider.Signing.UnknownKey), Nonce(3)), ExternalLoginErrors.InvalidToken);
-        Failed(await host.VerifyAsync(Token(host, 4, _ => { }, FakeIdentityProvider.Signing.UnknownKey), Nonce(4)), ExternalLoginErrors.InvalidToken);
-        await Task.Delay(200, TestContext.Current.CancellationToken);
         host.Idp.Handler.KeySetRequests.ShouldBe(2);
+
+        // Once it has passed, the next unknown kid refreshes once more.
+        host.Time.Advance(TimeSpan.FromSeconds(1));
+        Failed(await host.VerifyAsync(Token(host, 4, _ => { }, FakeIdentityProvider.Signing.UnknownKey), Nonce(4)), ExternalLoginErrors.InvalidToken);
+        host.Idp.Handler.KeySetRequests.ShouldBe(3);
+        await host.AssertNonceUnspentAsync();
+    }
+
+    [Fact]
+    public async Task Concurrent_tokens_under_a_rotated_key_share_one_refresh()
+    {
+        using var host = new Host();
+        Succeeded(await host.VerifyAsync(Token(host, 1, _ => { }), Nonce(1)));
+        host.Idp.RotateKey();
+
+        var results = await Task.WhenAll(Enumerable.Range(2, 8).Select(index => host.VerifyAsync(Token(host, index, _ => { }), Nonce(index))));
+
+        results.ShouldAllBe(result => result.IsSuccess);
+        host.Idp.Handler.KeySetRequests.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task A_refresh_that_cannot_be_fetched_is_ProviderUnavailable()
+    {
+        using var host = new Host();
+        Succeeded(await host.VerifyAsync(Token(host, 1, _ => { }), Nonce(1)));
+        host.Idp.RotateKey();
+        host.Idp.Handler.FailWith(HttpStatusCode.InternalServerError);
+
+        var result = await host.RunAsync(host.VerifyAsync(Token(host, 2, _ => { }), Nonce(2)));
+
+        Failed(result, ExternalLoginErrors.ProviderUnavailable);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Discovery_without_usable_signing_keys_is_ProviderUnavailable(bool emptyKeySet)
+    {
+        using var host = new Host();
+        if (emptyKeySet)
+        {
+            host.Idp.Handler.ServeEmptyKeySet();
+        }
+        else
+        {
+            host.Idp.Handler.OmitKeySetAddress();
+        }
+
+        var result = await host.VerifyAsync(host.Idp.IdToken());
+
+        Failed(result, ExternalLoginErrors.ProviderUnavailable);
+        host.Idp.Handler.Recover();
+        Failed(await host.VerifyAsync(host.Idp.IdToken()), ExternalLoginErrors.ProviderUnavailable);
+
+        // Once the refresh interval has passed, the published keys are read again and the same nonce still passes.
+        host.Time.Advance(TimeSpan.FromMinutes(5));
+        await host.AssertNonceUnspentAsync();
     }
 
     [Fact]
@@ -654,6 +747,10 @@ public sealed class OidcIdTokenVerifierTests
             "issuer-in-other-case" => idp.IdToken(claims => claims["iss"] = "https://Accounts.Google.com"),
             "no-issuer" => idp.IdToken(claims => claims.Remove("iss")),
             "wrong-audience" => idp.IdToken(claims => claims["aud"] = "another-client.apps.example"),
+            "audience-with-a-trailing-slash" => idp.IdToken(claims => claims["aud"] = FakeIdentityProvider.DefaultClientId + "/"),
+            "audience-in-other-case" => idp.IdToken(claims => claims["aud"] = FakeIdentityProvider.DefaultClientId.ToUpperInvariant()),
+            "audience-array-without-ours" => idp.IdToken(claims => claims["aud"] = new[] { "another-client.apps.example", "third.apps.example" }),
+            "audience-array-with-ours-plus-a-slash" => idp.IdToken(claims => claims["aud"] = new[] { "another-client.apps.example", FakeIdentityProvider.DefaultClientId + "/" }),
             "no-audience" => idp.IdToken(claims => claims.Remove("aud")),
             "expired-beyond-skew" => idp.IdToken(claims => Times(claims, iat: now - 120, exp: now - 31)),
             "no-expiry" => idp.IdToken(claims => claims.Remove("exp")),
@@ -662,6 +759,10 @@ public sealed class OidcIdTokenVerifierTests
             "issued-in-the-future-beyond-skew" => idp.IdToken(claims => claims["iat"] = now + 31),
             "no-issued-at" => idp.IdToken(claims => claims.Remove("iat")),
             "issued-at-as-a-string" => idp.IdToken(claims => claims["iat"] = now.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            "issued-at-negative" => idp.IdToken(claims => claims["iat"] = -1L),
+            "issued-at-fractional" => idp.IdToken(claims => claims["iat"] = now - 0.5),
+            "issued-at-beyond-the-maximum-unix-seconds" => idp.IdToken(claims => claims["iat"] = 253_402_300_800L),
+            "issued-at-a-huge-double" => idp.IdToken(claims => claims["iat"] = 1e300),
             "no-nonce" => idp.IdToken(claims => claims.Remove("nonce")),
             "different-nonce" => idp.IdToken(claims => claims["nonce"] = "another-nonce-0123456789"),
             "empty-nonce" => idp.IdToken(claims => claims["nonce"] = string.Empty),
@@ -692,20 +793,6 @@ public sealed class OidcIdTokenVerifierTests
         payload["email_verified"] = true;
         payload["sub"] = "victim-subject";
         return $"{parts[0]}.{Base64UrlEncoder.Encode(payload.ToJsonString())}.{parts[2]}";
-    }
-
-    private static async Task WaitForAsync(Func<Task<bool>> condition)
-    {
-        var started = TimeProvider.System.GetTimestamp();
-        while (!await condition())
-        {
-            if (TimeProvider.System.GetElapsedTime(started) > TimeSpan.FromSeconds(20))
-            {
-                throw new TimeoutException("The condition did not become true.");
-            }
-
-            await Task.Delay(10);
-        }
     }
 
     /// <summary>The module's external-login services over the fake provider, on a fake clock starting at <see cref="Now"/>.</summary>
@@ -753,6 +840,13 @@ public sealed class OidcIdTokenVerifierTests
             Idp.Handler.Recover();
             var result = await VerifyAsync(validToken ?? Idp.IdToken(), provider: provider);
             result.IsSuccess.ShouldBeTrue($"the nonce was spent by a refused proof ({(result.IsFailure ? result.Error.Code : "")})");
+        }
+
+        /// <summary>Asks the replay guard itself: <paramref name="nonce"/> was never spent for the provider (claiming it now succeeds).</summary>
+        public async Task AssertNotSpentAsync(string nonce, string provider = "google")
+        {
+            var guard = _services.GetRequiredService<IExternalProofReplayGuard>();
+            (await guard.TryClaimAsync(provider, nonce, TestContext.Current.CancellationToken)).ShouldBeTrue("the refused proof spent its nonce");
         }
 
         /// <summary>Moves the fake clock while <paramref name="call"/> runs, so the pipeline's delays and timeouts elapse.</summary>
