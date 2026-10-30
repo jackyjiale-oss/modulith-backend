@@ -105,7 +105,7 @@ public static partial class ObservabilityExtensions
         var apiVersion = ApiVersionPattern().Match(httpContext.Request.Path.Value ?? string.Empty);
         if (apiVersion.Success)
         {
-            // One to four digits, so the parse cannot overflow.
+            // One to four ASCII digits, so the parse cannot overflow or throw.
             diagnosticContext.Set("ApiVersion", int.Parse(apiVersion.Groups[1].Value, CultureInfo.InvariantCulture));
         }
 
@@ -117,8 +117,9 @@ public static partial class ObservabilityExtensions
         }
     }
 
-    // \z, not $: in .NET, $ also matches before a trailing newline.
-    [GeneratedRegex(@"^/api/v(\d{1,4})(?:/|\z)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    // \z, not $: in .NET, $ also matches before a trailing newline. [0-9], not \d: \d matches any Unicode decimal digit, which
+    // int.Parse rejects (the path is percent-decoded, so a caller can send one).
+    [GeneratedRegex(@"^/api/v([0-9]{1,4})(?:/|\z)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ApiVersionPattern();
 
     [GeneratedRegex(@"^[A-Za-z0-9._+\-]{1,64}\z")]

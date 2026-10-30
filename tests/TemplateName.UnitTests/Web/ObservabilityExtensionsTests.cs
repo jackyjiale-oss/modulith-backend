@@ -88,6 +88,8 @@ public sealed class ObservabilityExtensionsTests
     [InlineData("/api/v1x/y")]
     [InlineData("/apiv1")]
     [InlineData("/api/v99999999999/x")]
+    [InlineData("/api/v١/x")]
+    [InlineData("/api/v1\n")]
     public void Request_enrichment_adds_no_api_version_off_the_versioned_api(string path)
     {
         var diagnosticContext = Substitute.For<IDiagnosticContext>();
