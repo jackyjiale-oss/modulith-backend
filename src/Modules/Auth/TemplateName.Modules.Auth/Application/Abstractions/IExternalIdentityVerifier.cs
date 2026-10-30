@@ -39,8 +39,10 @@ internal interface IExternalIdentityVerifier
     /// <summary>
     /// Verifies <paramref name="proof"/> for <paramref name="provider"/> and, when it holds, spends its nonce so the same proof is refused
     /// next time. Fails with <c>ExternalLoginErrors.InvalidToken</c> for any bad proof (malformed, oversized, forged, expired, too old, wrong
-    /// audience or issuer, nonce missing, different or already used) and <c>ExternalLoginErrors.ProviderUnavailable</c> when the provider's
-    /// metadata cannot be fetched. A failure never spends the nonce, and no input makes it throw (a cancelled caller still does).
+    /// audience or issuer, nonce missing, different or already used; an access token for a provider that is not Facebook, or one Facebook's
+    /// Graph API does not vouch for) and <c>ExternalLoginErrors.ProviderUnavailable</c> when the provider's metadata cannot be fetched or
+    /// Graph cannot be asked or does not answer as documented. A failure never spends the nonce, and no input makes it throw (a cancelled
+    /// caller still does).
     /// </summary>
     Task<Result<VerifiedExternalIdentity>> VerifyAsync(ExternalProvider provider, ExternalProof proof, CancellationToken cancellationToken);
 }

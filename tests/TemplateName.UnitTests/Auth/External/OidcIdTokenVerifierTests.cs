@@ -394,12 +394,14 @@ public sealed class OidcIdTokenVerifierTests
     public async Task A_facebook_limited_login_id_token_goes_through_the_oidc_path_and_never_has_a_usable_email()
     {
         using var host = new Host("https://www.facebook.com");
+        host.Idp.Handler.ServeDiscoveryWithTrailingSlashOnly();
 
         var identity = Succeeded(await host.VerifyAsync(host.Idp.IdToken(), provider: host.Idp.ToProvider("facebook")));
 
         identity.Provider.ShouldBe("facebook");
         identity.Subject.ShouldBe(FakeIdentityProvider.DefaultSubject);
         identity.HasUsableEmail.ShouldBeFalse();
+        host.Idp.Handler.Requests.First().ShouldBe(new Uri("https://www.facebook.com/.well-known/openid-configuration/"));
     }
 
     [Fact]

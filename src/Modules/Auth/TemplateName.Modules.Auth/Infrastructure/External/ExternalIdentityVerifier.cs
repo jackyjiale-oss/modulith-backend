@@ -7,9 +7,14 @@ namespace TemplateName.Modules.Auth.Infrastructure.External;
 /// <summary>
 /// The one entry point for verifying a provider's proof: exactly one of an ID token and an access token. An ID token goes to
 /// <see cref="OidcIdTokenVerifier"/> for every provider (Facebook's iOS Limited Login token included), and its nonce is spent through
-/// <see cref="IExternalProofReplayGuard"/> only after every check passed. An access token is Facebook's (Task 6 adds that verifier).
+/// <see cref="IExternalProofReplayGuard"/> only after every check passed. An access token is Facebook's and goes to
+/// <see cref="FacebookAccessTokenVerifier"/> (Graph's <c>debug_token</c> and <c>/me</c>), which refuses it for any other provider; it has no
+/// nonce, so there is nothing to spend (a documented limit).
 /// </summary>
-internal sealed class ExternalIdentityVerifier(OidcIdTokenVerifier idTokens, IExternalProofReplayGuard replayGuard) : IExternalIdentityVerifier
+internal sealed class ExternalIdentityVerifier(
+    OidcIdTokenVerifier idTokens,
+    FacebookAccessTokenVerifier accessTokens,
+    IExternalProofReplayGuard replayGuard) : IExternalIdentityVerifier
 {
     public async Task<Result<VerifiedExternalIdentity>> VerifyAsync(ExternalProvider provider, ExternalProof proof, CancellationToken cancellationToken)
     {
@@ -25,7 +30,7 @@ internal sealed class ExternalIdentityVerifier(OidcIdTokenVerifier idTokens, IEx
 
         if (hasAccessToken)
         {
-            return await VerifyAccessTokenAsync(provider, proof.AccessToken!, cancellationToken);
+            return await accessTokens.VerifyAsync(provider, proof.AccessToken!, cancellationToken);
         }
 
         var verified = await idTokens.VerifyAsync(provider, proof.IdToken!, proof.Nonce, cancellationToken);
@@ -39,15 +44,5 @@ internal sealed class ExternalIdentityVerifier(OidcIdTokenVerifier idTokens, IEx
         return await replayGuard.TryClaimAsync(provider.Name, verified.Value.Nonce, cancellationToken)
             ? verified.Value.Identity
             : ExternalLoginErrors.InvalidToken;
-    }
-
-    // SEAM (Task 6): a Facebook access token is verified by FacebookAccessTokenVerifier (debug_token and /me on the Graph API). Until then,
-    // and for every provider that is not Facebook, an access token is not a proof.
-    private static Task<Result<VerifiedExternalIdentity>> VerifyAccessTokenAsync(ExternalProvider provider, string accessToken, CancellationToken cancellationToken)
-    {
-        _ = provider;
-        _ = accessToken;
-        _ = cancellationToken;
-        return Task.FromResult<Result<VerifiedExternalIdentity>>(ExternalLoginErrors.InvalidToken);
     }
 }

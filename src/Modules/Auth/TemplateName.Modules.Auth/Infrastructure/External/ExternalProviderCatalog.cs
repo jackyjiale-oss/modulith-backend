@@ -107,7 +107,8 @@ internal sealed class ExternalProviderCatalog : IExternalProviderCatalog
                 trustEmail,
                 TenantId: null,
                 AppId: appId,
-                AppSecret: options.AppSecret!.Trim());
+                AppSecret: options.AppSecret!.Trim(),
+                MetadataAddress: ExternalProviderPresets.FacebookMetadataAddress);
         }
 
         if (name == ExternalProviderPresets.Microsoft)

@@ -17,7 +17,8 @@ namespace TemplateName.Modules.Auth.Infrastructure.External;
 
 /// <summary>
 /// Verifies an OpenID Connect ID token for a configured provider (spec 5.2). The provider's metadata and signing keys come from
-/// <c>{Authority}/.well-known/openid-configuration</c> through the <c>oidc-discovery</c> client, cached per provider by a
+/// <c>{Authority}/.well-known/openid-configuration</c> (or the provider's own <see cref="ExternalProvider.MetadataAddress"/>, exactly as
+/// written: Facebook's ends with a slash) through the <c>oidc-discovery</c> client, cached per provider by a
 /// <see cref="ConfigurationManager{T}"/> (which re-reads them every 12 hours). A token whose <c>kid</c> is unknown, or metadata without
 /// signing keys, makes the verifier read the metadata again inside the same request and validate once more (refresh, then retry), at most
 /// once per the manager's <see cref="BaseConfigurationManager.RefreshInterval"/> (5 minutes) per provider, so a token under a freshly rotated
@@ -247,9 +248,14 @@ internal sealed partial class OidcIdTokenVerifier(
 
     private ProviderMetadata MetadataFor(ExternalProvider provider)
     {
-        var authority = provider.Authority
-            ?? throw new InvalidOperationException($"The external provider '{provider.Name}' has no authority to read its metadata from.");
-        var address = authority.TrimEnd('/') + MetadataPath;
+        // An explicit address (Facebook's, which ends with a slash) is fetched exactly as written; every other provider's is derived.
+        var address = provider.MetadataAddress;
+        if (address is null)
+        {
+            var authority = provider.Authority
+                ?? throw new InvalidOperationException($"The external provider '{provider.Name}' has no authority to read its metadata from.");
+            address = authority.TrimEnd('/') + MetadataPath;
+        }
 
         return _metadata.GetOrAdd(address, static (metadataAddress, documents) => new ProviderMetadata(metadataAddress, documents), _documents);
     }

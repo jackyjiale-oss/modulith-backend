@@ -30,8 +30,9 @@ internal enum ExternalEmailRule
 /// the accepted <c>iss</c> values (Microsoft's holds the literal <c>{tenantid}</c> that stands for the token's own <c>tid</c>),
 /// <paramref name="ClientIds"/> the accepted <c>aud</c> values (Facebook: its <paramref name="AppId"/>), <paramref name="TenantId"/>
 /// Microsoft's tenant (<c>common</c>, <c>organizations</c>, <c>consumers</c> or a lower-case GUID; only a GUID restricts sign-in to that
-/// tenant) and null for the others. <paramref name="AppId"/> and <paramref name="AppSecret"/> are Facebook's. The record prints only its name
-/// (<see cref="ToString"/>), so the secret never reaches a log.
+/// tenant) and null for the others. <paramref name="AppId"/> and <paramref name="AppSecret"/> are Facebook's. <paramref name="MetadataAddress"/>
+/// is the exact address of the discovery document when it is not <c>{Authority}/.well-known/openid-configuration</c> (Facebook's ends with
+/// a slash and must be fetched as written), else null. The record prints only its name (<see cref="ToString"/>), so the secret never reaches a log.
 /// </summary>
 internal sealed record ExternalProvider(
     string Name,
@@ -44,7 +45,8 @@ internal sealed record ExternalProvider(
     bool TrustEmail,
     string? TenantId,
     string? AppId,
-    string? AppSecret)
+    string? AppSecret,
+    string? MetadataAddress = null)
 {
     /// <summary>The provider's name only: the generated <c>ToString</c> would print <see cref="AppSecret"/>.</summary>
     public override string ToString() => Name;

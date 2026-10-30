@@ -26,6 +26,7 @@ public sealed class ExternalProviderCatalogTests
         google.TenantId.ShouldBeNull();
         google.AppId.ShouldBeNull();
         google.AppSecret.ShouldBeNull();
+        google.MetadataAddress.ShouldBeNull();
     }
 
     [Fact]
@@ -90,6 +91,9 @@ public sealed class ExternalProviderCatalogTests
         facebook.TrustEmail.ShouldBeFalse();
         facebook.AppId.ShouldBe("1234567890");
         facebook.AppSecret.ShouldBe("the-facebook-secret");
+
+        // Facebook's discovery address ends with a slash and is fetched exactly as written (ruling R7).
+        facebook.MetadataAddress.ShouldBe("https://www.facebook.com/.well-known/openid-configuration/");
     }
 
     [Fact]

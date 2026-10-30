@@ -20,6 +20,12 @@ internal static class ExternalProviderPresets
     /// <summary>The <c>Type</c> of Facebook.</summary>
     internal const string FacebookType = "facebook";
 
+    /// <summary>
+    /// Facebook's discovery document, whose address ends with a slash: it is fetched exactly as written, because the address without the
+    /// slash is not the document (the other providers' addresses are <c>{Authority}/.well-known/openid-configuration</c>).
+    /// </summary>
+    internal const string FacebookMetadataAddress = "https://www.facebook.com/.well-known/openid-configuration/";
+
     /// <summary>Stands for the token's own <c>tid</c> in Microsoft's issuer, which differs per tenant.</summary>
     internal const string TenantPlaceholder = "{tenantid}";
 

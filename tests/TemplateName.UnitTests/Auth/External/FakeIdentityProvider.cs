@@ -25,6 +25,9 @@ internal sealed class FakeIdentityProvider : IDisposable
     public const string DefaultEmail = "alice@example.com";
     public const string DefaultName = "Alice Example";
 
+    /// <summary>The <c>AppSecret</c> <see cref="ToProvider"/> gives a Facebook provider.</summary>
+    public const string DefaultFacebookAppSecret = "fake-facebook-app-secret";
+
     /// <summary>The raw nonce <see cref="IdToken"/> binds unless told otherwise (sixteen characters or more, as the API requires).</summary>
     public const string DefaultNonce = "nonce-0123456789abcdef";
 
@@ -33,6 +36,7 @@ internal sealed class FakeIdentityProvider : IDisposable
 
     private const string JwksPath = "/fake-jwks";
     private const string DiscoverySuffix = "/.well-known/openid-configuration";
+    private const string DiscoverySlashSuffix = DiscoverySuffix + "/";
 
     private readonly List<(string KeyId, RSA Key)> _rsaKeys = [];
     private readonly ECDsa _ecKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -79,7 +83,7 @@ internal sealed class FakeIdentityProvider : IDisposable
         if (string.Equals(name, "facebook", StringComparison.OrdinalIgnoreCase))
         {
             settings[$"{prefix}:AppId"] = clientId ?? DefaultClientId;
-            settings[$"{prefix}:AppSecret"] = "fake-facebook-app-secret";
+            settings[$"{prefix}:AppSecret"] = DefaultFacebookAppSecret;
         }
         else
         {
@@ -179,7 +183,10 @@ internal sealed class FakeIdentityProvider : IDisposable
 
     private string DiscoveryDocument(Uri request, bool includeKeySetAddress)
     {
-        var path = request.AbsolutePath[..^DiscoverySuffix.Length];
+        var suffixLength = request.AbsolutePath.EndsWith(DiscoverySlashSuffix, StringComparison.Ordinal)
+            ? DiscoverySlashSuffix.Length
+            : DiscoverySuffix.Length;
+        var path = request.AbsolutePath[..^suffixLength];
         var document = new Dictionary<string, object>
         {
             ["issuer"] = Issuer,
@@ -263,6 +270,7 @@ internal sealed class FakeIdentityProvider : IDisposable
         private int _discoveryRequests;
         private int _keySetRequests;
         private volatile Mode _mode = Mode.Serve;
+        private volatile bool _slashedDiscovery;
         private HttpStatusCode _failure = HttpStatusCode.InternalServerError;
 
         private enum Mode
@@ -307,15 +315,27 @@ internal sealed class FakeIdentityProvider : IDisposable
 
         public void Recover() => _mode = Mode.Serve;
 
+        /// <summary>
+        /// Answers discovery only at <c>/.well-known/openid-configuration/</c>, with the trailing slash (as Facebook's address has it), and
+        /// answers the form without the slash with 404. By default it is the reverse: only the form without the slash is answered, so a
+        /// verifier that adds or drops a slash is caught either way.
+        /// </summary>
+        public void ServeDiscoveryWithTrailingSlashOnly() => _slashedDiscovery = true;
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var uri = request.RequestUri ?? throw new InvalidOperationException("A request without an address.");
             _requests.Enqueue(uri);
-            var isDiscovery = uri.AbsolutePath.EndsWith(DiscoverySuffix, StringComparison.Ordinal);
+            var isSlashedDiscovery = uri.AbsolutePath.EndsWith(DiscoverySlashSuffix, StringComparison.Ordinal);
+            var isDiscovery = isSlashedDiscovery || uri.AbsolutePath.EndsWith(DiscoverySuffix, StringComparison.Ordinal);
             var isKeySet = uri.AbsolutePath.EndsWith(JwksPath, StringComparison.Ordinal);
             if (isDiscovery)
             {
                 Interlocked.Increment(ref _discoveryRequests);
+                if (isSlashedDiscovery != _slashedDiscovery)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.NotFound);
+                }
             }
             else if (isKeySet)
             {
