@@ -18,7 +18,7 @@ Code: `src/BuildingBlocks/TemplateName.SharedKernel/`.
 | `Result`, `Result<T>` | The outcome of an operation that can fail in an expected way: `IsSuccess`, `IsFailure`, `Error`, and `Value` (throws on a failure). `Result.Success()`, `Result.Failure(error)`, `Result.Success<T>(value)`, `Result.Failure<T>(error)`; a `T` or an `Error` converts implicitly to `Result<T>`. |
 | `Error` | An unsealed record `(Code, Message, Type)` with `Parameters`. Factories `Validation`, `NotFound`, `Conflict`, `Unauthorized`, `Forbidden`, `Failure`; `Error.None` for success. `Code` is `module.snake_case`; `Message` is the English default that the HTTP boundary replaces with the localized text (ADR 0009). |
 | `ValidationError` | `sealed record ValidationError(Errors) : Error("validation.failed", …, Validation)`: field messages keyed by property name. |
-| `ErrorType` | `Validation`, `NotFound`, `Conflict`, `Unauthorized`, `Forbidden`, `Failure`; Web.Common maps them to 400, 404, 409, 401, 403 and 500. |
+| `ErrorType` | `Validation`, `NotFound`, `Conflict`, `Unauthorized`, `Forbidden`, `Failure`, `Unavailable` (a dependency cannot be reached); Web.Common maps them to 400, 404, 409, 401, 403, 500 and 503. |
 | `IAuditable` | `CreatedAt`, `CreatedBy`, `UpdatedAt`, `UpdatedBy` (UTC), stamped by an EF interceptor. |
 | `ISoftDeletable` | `IsDeleted`, `DeletedAt`, `DeletedBy`, set by an EF interceptor instead of deleting the row. |
 | `SequentialGuid` | `Create(DateTimeOffset timestamp)`: a GUID whose bytes 10 to 15 hold the Unix milliseconds, which SQL Server sorts first, so clustered-index inserts stay sequential. `Guid.CreateVersion7()` does not do this on SQL Server. |

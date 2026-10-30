@@ -135,4 +135,37 @@
   <data name="auth.trusted_device_not_found" xml:space="preserve">
     <value>未找到受信任的设备“{id}”。</value>
   </data>
+  <data name="auth.external_provider_not_found" xml:space="preserve">
+    <value>此登录提供方不可用。</value>
+  </data>
+  <data name="auth.invalid_external_token" xml:space="preserve">
+    <value>无法验证通过提供方的登录，请重试。</value>
+  </data>
+  <data name="auth.external_provider_unavailable" xml:space="preserve">
+    <value>目前无法连接登录提供方。请稍后再试，或使用其他方式登录。</value>
+  </data>
+  <data name="auth.external_email_unverified" xml:space="preserve">
+    <value>提供方没有提供已验证的电子邮件地址，因此无法创建或关联账户。</value>
+  </data>
+  <data name="auth.external_link_required" xml:space="preserve">
+    <value>使用此电子邮件地址的账户已存在。请按常规方式登录，并在设置中关联该提供方。</value>
+  </data>
+  <data name="auth.external_sign_up_disabled" xml:space="preserve">
+    <value>此登录没有对应的账户，且不能用它创建新账户。</value>
+  </data>
+  <data name="auth.external_identity_taken" xml:space="preserve">
+    <value>此提供方账户已关联到其他用户。</value>
+  </data>
+  <data name="auth.external_provider_already_linked" xml:space="preserve">
+    <value>您已关联了此提供方的账户。请先取消关联，再关联其他账户。</value>
+  </data>
+  <data name="auth.external_login_not_found" xml:space="preserve">
+    <value>未找到已关联的登录方式。</value>
+  </data>
+  <data name="auth.last_login_method" xml:space="preserve">
+    <value>您不能移除唯一的登录方式。请先设置密码或关联其他提供方。</value>
+  </data>
+  <data name="auth.step_up_identity_mismatch" xml:space="preserve">
+    <value>此提供方账户未关联到您的用户。</value>
+  </data>
 </root>

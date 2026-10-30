@@ -22,6 +22,20 @@ public sealed class ResultExtensionsTests
     }
 
     [Fact]
+    public void ToProblem_maps_Unavailable_to_503()
+    {
+        var error = Error.Unavailable("x.down", "msg");
+
+        error.Type.ShouldBe(ErrorType.Unavailable);
+
+        var problem = Result.Failure(error).ToProblem().ShouldBeOfType<ProblemHttpResult>();
+
+        problem.StatusCode.ShouldBe(503);
+        problem.ProblemDetails.Detail.ShouldBe("msg");
+        problem.ProblemDetails.Extensions["code"].ShouldBe("x.down");
+    }
+
+    [Fact]
     public void Parameters_map_to_params_extension()
     {
         var id = Guid.NewGuid();

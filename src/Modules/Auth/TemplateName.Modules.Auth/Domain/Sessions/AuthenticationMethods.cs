@@ -18,6 +18,9 @@ internal static class AuthenticationMethods
     /// <summary>More than one factor was used.</summary>
     public const string MultiFactor = "mfa";
 
+    /// <summary>A federated sign-in: an identity provider (Google, Apple, Microsoft or Facebook) proved who the user is.</summary>
+    public const string Federated = "fed";
+
     /// <summary>Joins <paramref name="methods"/> with single spaces, the <see cref="UserSession.AuthMethods"/> format.</summary>
     /// <exception cref="ArgumentException">No method is given, or a method is empty or contains a space.</exception>
     public static string Join(params string[] methods)

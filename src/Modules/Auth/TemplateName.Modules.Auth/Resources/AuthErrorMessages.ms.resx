@@ -135,4 +135,37 @@
   <data name="auth.trusted_device_not_found" xml:space="preserve">
     <value>Peranti dipercayai '{id}' tidak dijumpai.</value>
   </data>
+  <data name="auth.external_provider_not_found" xml:space="preserve">
+    <value>Penyedia log masuk ini tidak tersedia.</value>
+  </data>
+  <data name="auth.invalid_external_token" xml:space="preserve">
+    <value>Log masuk dengan penyedia tidak dapat disahkan. Cuba lagi.</value>
+  </data>
+  <data name="auth.external_provider_unavailable" xml:space="preserve">
+    <value>Penyedia log masuk tidak dapat dihubungi buat masa ini. Cuba lagi nanti atau log masuk dengan cara lain.</value>
+  </data>
+  <data name="auth.external_email_unverified" xml:space="preserve">
+    <value>Penyedia tidak memberikan alamat e-mel yang telah disahkan, jadi akaun tidak dapat dibuat atau dipautkan.</value>
+  </data>
+  <data name="auth.external_link_required" xml:space="preserve">
+    <value>Akaun dengan alamat e-mel ini sudah wujud. Log masuk seperti biasa dan pautkan penyedia daripada tetapan anda.</value>
+  </data>
+  <data name="auth.external_sign_up_disabled" xml:space="preserve">
+    <value>Tiada akaun untuk log masuk ini dan akaun baharu tidak boleh dibuat dengannya.</value>
+  </data>
+  <data name="auth.external_identity_taken" xml:space="preserve">
+    <value>Akaun penyedia ini sudah dipautkan kepada pengguna lain.</value>
+  </data>
+  <data name="auth.external_provider_already_linked" xml:space="preserve">
+    <value>Anda sudah memautkan akaun daripada penyedia ini. Nyahpautkannya dahulu untuk memautkan akaun lain.</value>
+  </data>
+  <data name="auth.external_login_not_found" xml:space="preserve">
+    <value>Log masuk yang dipautkan tidak dijumpai.</value>
+  </data>
+  <data name="auth.last_login_method" xml:space="preserve">
+    <value>Anda tidak boleh membuang satu-satunya cara anda untuk log masuk. Tetapkan kata laluan atau pautkan penyedia lain dahulu.</value>
+  </data>
+  <data name="auth.step_up_identity_mismatch" xml:space="preserve">
+    <value>Akaun penyedia ini tidak dipautkan kepada pengguna anda.</value>
+  </data>
 </root>

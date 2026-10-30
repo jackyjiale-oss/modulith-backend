@@ -134,7 +134,12 @@ public sealed class AuthAuditLogTests
             .Select(f => (string)f.GetRawConstantValue()!)
             .ToList();
 
-        values.Count.ShouldBe(42);
+        values.Count.ShouldBe(47);
+        values.ShouldContain("auth.external_login_succeeded");
+        values.ShouldContain("auth.external_login_failed");
+        values.ShouldContain("auth.external_linked");
+        values.ShouldContain("auth.external_unlinked");
+        values.ShouldContain("auth.external_registered");
         values.ShouldContain("auth.step_up_succeeded");
         values.ShouldContain("auth.step_up_failed");
         values.ShouldContain("auth.mfa_setup_started");

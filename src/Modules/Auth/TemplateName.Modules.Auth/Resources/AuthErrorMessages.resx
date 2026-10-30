@@ -135,4 +135,37 @@
   <data name="auth.trusted_device_not_found" xml:space="preserve">
     <value>Trusted device '{id}' was not found.</value>
   </data>
+  <data name="auth.external_provider_not_found" xml:space="preserve">
+    <value>This sign-in provider is not available.</value>
+  </data>
+  <data name="auth.invalid_external_token" xml:space="preserve">
+    <value>The sign-in with the provider could not be verified. Try again.</value>
+  </data>
+  <data name="auth.external_provider_unavailable" xml:space="preserve">
+    <value>The sign-in provider cannot be reached right now. Try again later or sign in another way.</value>
+  </data>
+  <data name="auth.external_email_unverified" xml:space="preserve">
+    <value>The provider did not give a verified email address, so an account cannot be created or linked.</value>
+  </data>
+  <data name="auth.external_link_required" xml:space="preserve">
+    <value>An account with this email address already exists. Sign in the usual way and link the provider from your settings.</value>
+  </data>
+  <data name="auth.external_sign_up_disabled" xml:space="preserve">
+    <value>There is no account for this sign-in and new accounts cannot be created with it.</value>
+  </data>
+  <data name="auth.external_identity_taken" xml:space="preserve">
+    <value>This provider account is already linked to another user.</value>
+  </data>
+  <data name="auth.external_provider_already_linked" xml:space="preserve">
+    <value>You have already linked an account from this provider. Unlink it first to link another.</value>
+  </data>
+  <data name="auth.external_login_not_found" xml:space="preserve">
+    <value>The linked sign-in was not found.</value>
+  </data>
+  <data name="auth.last_login_method" xml:space="preserve">
+    <value>You cannot remove your only way to sign in. Set a password or link another provider first.</value>
+  </data>
+  <data name="auth.step_up_identity_mismatch" xml:space="preserve">
+    <value>This provider account is not linked to your user.</value>
+  </data>
 </root>

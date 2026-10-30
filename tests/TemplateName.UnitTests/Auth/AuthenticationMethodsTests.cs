@@ -19,6 +19,13 @@ public sealed class AuthenticationMethodsTests
     }
 
     [Fact]
+    public void Federated_is_fed()
+    {
+        AuthenticationMethods.Federated.ShouldBe("fed");
+        AuthenticationMethods.Join(AuthenticationMethods.Federated).ShouldBe("fed");
+    }
+
+    [Fact]
     public void Constants_are_the_rfc_8176_values_the_token_carries()
     {
         AuthenticationMethods.Password.ShouldBe("pwd");
