@@ -158,7 +158,7 @@ Every type plays one of these roles. Its name follows the role's pattern, and it
 | GitHub workflows | kebab-case `.yml`; reusable workflows prefixed `_` | `ci.yml`, `_reusable-dotnet-build.yml` |
 | App settings | `appsettings.json`, `appsettings.{Environment}.json`; Development settings are local and git-ignored (`appsettings.Development.json` is never committed) | `appsettings.Production.json` |
 | Resources | `{Marker}.resx`, `{Marker}.{culture}.resx` | `SampleErrorMessages.zh-Hans.resx` |
-| EF migrations | PascalCase `{Verb}{What}`; the first one in a module is `Initial{Module}` | `InitialSample`, `AddApproverIdToLeaveRequests` |
+| EF migrations | PascalCase `{Verb}{What}`; the first one in a module is `Initial{Module}`; a migration that drops or renames a column or table carries `[ContractMigration]` | `InitialSample`, `AddApproverIdToLeaveRequests` |
 | Load tests | kebab-case `.js` | `tests/load/submit-leave-request.js` |
 | Docker | `Dockerfile`, `docker-compose.yml`, `.env.example` | — |
 
