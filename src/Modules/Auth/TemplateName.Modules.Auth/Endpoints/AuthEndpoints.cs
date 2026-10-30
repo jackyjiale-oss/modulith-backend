@@ -164,6 +164,9 @@ internal static class AuthEndpoints
         group.MapMfaEndpoints();
         group.MapTrustedDeviceEndpoints();
 
+        // Social login: auth/external/..., in the same group and tag.
+        group.MapExternalLoginEndpoints();
+
         return app;
     }
 

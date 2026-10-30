@@ -35,7 +35,10 @@ internal sealed class ExternalProviderCatalog : IExternalProviderCatalog
         }
 
         Enabled = [.. _enabledByName.Values.OrderBy(provider => provider.Name, StringComparer.Ordinal)];
+        AllowSignUp = options.Value.AllowSignUp;
     }
+
+    public bool AllowSignUp { get; }
 
     public IReadOnlyList<ExternalProvider> Enabled { get; }
 

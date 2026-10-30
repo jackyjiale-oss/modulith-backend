@@ -24,6 +24,15 @@ public sealed class ExternalLoginOptionsTests
         options.MaxTokenAge.ShouldBe(TimeSpan.FromMinutes(5));
         options.Providers.ShouldBeEmpty();
         services.GetRequiredService<IExternalProviderCatalog>().Enabled.ShouldBeEmpty();
+        services.GetRequiredService<IExternalProviderCatalog>().AllowSignUp.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void The_catalog_reports_sign_up_switched_off()
+    {
+        using var services = BuildServices(new Dictionary<string, string?> { [$"{Section}:AllowSignUp"] = "false" });
+
+        services.GetRequiredService<IExternalProviderCatalog>().AllowSignUp.ShouldBeFalse();
     }
 
     [Fact]

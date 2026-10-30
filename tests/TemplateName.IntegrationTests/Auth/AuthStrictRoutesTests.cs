@@ -19,6 +19,7 @@ public sealed class AuthStrictRoutesTests(IntegrationTestWebAppFactory factory)
     [
         "POST /api/v1/auth/email/confirm",
         "POST /api/v1/auth/email/resend-confirmation",
+        "POST /api/v1/auth/external/{provider}/login",
         "POST /api/v1/auth/login",
         "POST /api/v1/auth/mfa/verify",
         "POST /api/v1/auth/password/change",
@@ -30,7 +31,7 @@ public sealed class AuthStrictRoutesTests(IntegrationTestWebAppFactory factory)
     ];
 
     [Fact]
-    public void Exactly_ten_routes_carry_auth_strict_among_them_mfa_verify_and_step_up()
+    public void Exactly_eleven_routes_carry_auth_strict_among_them_mfa_verify_step_up_and_external_login()
     {
         var endpoints = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>();
 

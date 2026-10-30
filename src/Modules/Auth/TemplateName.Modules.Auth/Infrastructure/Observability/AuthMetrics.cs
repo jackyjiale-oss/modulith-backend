@@ -14,12 +14,15 @@ internal sealed class AuthMetrics : IAuthMetrics
 
     private const string ResultTag = "result";
     private const string FactorTag = "factor";
+    private const string ProviderTag = "provider";
+    private const string OutcomeTag = "outcome";
 
     private readonly Counter<long> _logins;
     private readonly Counter<long> _registrations;
     private readonly Counter<long> _tokenReuses;
     private readonly Counter<long> _stepUps;
     private readonly Counter<long> _mfaVerifications;
+    private readonly Counter<long> _externalLogins;
 
     public AuthMetrics(IMeterFactory meterFactory)
     {
@@ -32,6 +35,10 @@ internal sealed class AuthMetrics : IAuthMetrics
             "auth.mfa_verifications",
             unit: "{attempt}",
             description: "Verifications of a sign-in challenge that reached a decision, by result and factor.");
+        _externalLogins = meter.CreateCounter<long>(
+            "auth.external_logins",
+            unit: "{attempt}",
+            description: "External sign-in attempts that reached the handler, by configured provider and outcome.");
     }
 
     public void RecordLogin(LoginOutcome outcome) => _logins.Add(1, new KeyValuePair<string, object?>(ResultTag, ResultOf(outcome)));
@@ -48,6 +55,19 @@ internal sealed class AuthMetrics : IAuthMetrics
             1,
             new KeyValuePair<string, object?>(ResultTag, ResultOf(outcome)),
             new KeyValuePair<string, object?>(FactorTag, FactorOf(factor)));
+
+    // The provider tag comes only from a configured provider (the catalog's name), never from the route, so its values are bounded.
+    public void RecordExternalLogin(ExternalProvider? provider, ExternalLoginOutcome outcome)
+    {
+        var outcomeTag = new KeyValuePair<string, object?>(OutcomeTag, OutcomeOf(outcome));
+        if (provider is null)
+        {
+            _externalLogins.Add(1, outcomeTag);
+            return;
+        }
+
+        _externalLogins.Add(1, new KeyValuePair<string, object?>(ProviderTag, provider.Name), outcomeTag);
+    }
 
     private static string ResultOf(LoginOutcome outcome) => outcome switch
     {
@@ -66,6 +86,22 @@ internal sealed class AuthMetrics : IAuthMetrics
         MfaVerificationOutcome.InvalidCode => "invalid_code",
         MfaVerificationOutcome.InvalidChallenge => "invalid_challenge",
         _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, "Unknown verification outcome."),
+    };
+
+    private static string OutcomeOf(ExternalLoginOutcome outcome) => outcome switch
+    {
+        ExternalLoginOutcome.Succeeded => "succeeded",
+        ExternalLoginOutcome.MfaRequired => "mfa_required",
+        ExternalLoginOutcome.ProviderNotFound => "provider_not_found",
+        ExternalLoginOutcome.InvalidToken => "invalid_token",
+        ExternalLoginOutcome.ProviderUnavailable => "provider_unavailable",
+        ExternalLoginOutcome.EmailUnverified => "email_unverified",
+        ExternalLoginOutcome.LinkRequired => "link_required",
+        ExternalLoginOutcome.SignUpDisabled => "sign_up_disabled",
+        ExternalLoginOutcome.Inactive => "inactive",
+        ExternalLoginOutcome.Locked => "locked",
+        ExternalLoginOutcome.InvalidCredentials => "invalid_credentials",
+        _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, "Unknown external login outcome."),
     };
 
     private static string FactorOf(MfaFactor? factor) => factor switch

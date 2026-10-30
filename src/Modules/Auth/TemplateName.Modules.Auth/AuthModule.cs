@@ -156,8 +156,9 @@ public static class AuthModule
     /// <c>GET auth/sessions</c>, <c>DELETE auth/sessions/{id}</c>, <c>POST auth/logout</c>, <c>POST auth/logout-all</c>,
     /// <c>POST auth/password/forgot</c>, <c>POST auth/password/reset</c> and <c>POST auth/password/change</c>; its <c>auth/mfa</c> group:
     /// <c>POST auth/mfa/verify</c>, <c>POST auth/mfa/totp/setup</c>, <c>POST auth/mfa/totp/confirm</c>, <c>GET auth/mfa/methods</c>,
-    /// <c>DELETE auth/mfa/methods/{id}</c> and <c>POST auth/mfa/recovery-codes/regenerate</c>; and the trusted devices,
-    /// <c>GET auth/trusted-devices</c> and <c>DELETE auth/trusted-devices/{id}</c>. The user administration
+    /// <c>DELETE auth/mfa/methods/{id}</c> and <c>POST auth/mfa/recovery-codes/regenerate</c>; the trusted devices,
+    /// <c>GET auth/trusted-devices</c> and <c>DELETE auth/trusted-devices/{id}</c>; and its <c>auth/external</c> group (social login):
+    /// <c>GET auth/external/providers</c> and <c>POST auth/external/{provider}/login</c>. The user administration
     /// routes live in its <c>admin/auth/users</c> group, each behind its permission: <c>GET</c> (list) and <c>POST</c> (create) on the
     /// group, <c>GET admin/auth/users/{id}</c>, <c>POST .../{id}/lock</c>, <c>/unlock</c>, <c>/force-password-reset</c>,
     /// <c>/revoke-sessions</c>, <c>/reset-mfa</c> and <c>PUT .../{id}/roles</c>. The role administration lives in <c>admin/auth/roles</c> (<c>GET</c> list and

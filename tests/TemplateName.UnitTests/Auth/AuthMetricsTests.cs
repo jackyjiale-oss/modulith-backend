@@ -83,6 +83,41 @@ public sealed class AuthMetricsTests : IDisposable
         measurement.Tags.ShouldBe([new KeyValuePair<string, object?>("result", result), new KeyValuePair<string, object?>("factor", factorTag)]);
     }
 
+    [Theory]
+    [InlineData(nameof(ExternalLoginOutcome.Succeeded), "succeeded")]
+    [InlineData(nameof(ExternalLoginOutcome.MfaRequired), "mfa_required")]
+    [InlineData(nameof(ExternalLoginOutcome.ProviderNotFound), "provider_not_found")]
+    [InlineData(nameof(ExternalLoginOutcome.InvalidToken), "invalid_token")]
+    [InlineData(nameof(ExternalLoginOutcome.ProviderUnavailable), "provider_unavailable")]
+    [InlineData(nameof(ExternalLoginOutcome.EmailUnverified), "email_unverified")]
+    [InlineData(nameof(ExternalLoginOutcome.LinkRequired), "link_required")]
+    [InlineData(nameof(ExternalLoginOutcome.SignUpDisabled), "sign_up_disabled")]
+    [InlineData(nameof(ExternalLoginOutcome.Inactive), "inactive")]
+    [InlineData(nameof(ExternalLoginOutcome.Locked), "locked")]
+    [InlineData(nameof(ExternalLoginOutcome.InvalidCredentials), "invalid_credentials")]
+    public void External_login_counts_one_with_the_provider_and_outcome_tags(string outcome, string tag)
+    {
+        var provider = new ExternalProvider(
+            "google", "Google", ExternalProviderKind.Oidc, null, [], ["client"], ExternalEmailRule.EmailVerifiedClaim, true, null, null, "secret");
+
+        _sut.RecordExternalLogin(provider, Enum.Parse<ExternalLoginOutcome>(outcome));
+
+        var measurement = _measurements.ShouldHaveSingleItem();
+        measurement.Instrument.ShouldBe("auth.external_logins");
+        measurement.Value.ShouldBe(1);
+        measurement.Tags.ShouldBe([new KeyValuePair<string, object?>("provider", "google"), new KeyValuePair<string, object?>("outcome", tag)]);
+    }
+
+    [Fact]
+    public void External_login_without_a_configured_provider_has_only_the_outcome_tag()
+    {
+        _sut.RecordExternalLogin(provider: null, ExternalLoginOutcome.ProviderNotFound);
+
+        var measurement = _measurements.ShouldHaveSingleItem();
+        measurement.Instrument.ShouldBe("auth.external_logins");
+        measurement.Tags.ShouldBe([new KeyValuePair<string, object?>("outcome", "provider_not_found")]);
+    }
+
     public void Dispose()
     {
         _listener.Dispose();
