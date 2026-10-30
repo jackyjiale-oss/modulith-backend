@@ -1,6 +1,6 @@
 # Social login — design
 
-- Status: Draft for review 2026-10-30; the design was approved section by section in the design session (flow, linking rule, MFA, sign-up, verification approach, configuration, security rules and scope)
+- Status: Approved 2026-10-30. The design was approved section by section in the design session (flow, linking rule, MFA, sign-up, verification approach, configuration, security rules and scope); the user then asked for the open points to be settled by research and the plan to proceed. Section 12 records what the research found and the three amendments it caused (4, 5.2, 11).
 - Date: 2026-10-30
 - Roadmap row: new, after 5c. In `docs/blueprint-review.md` Section 6 it is part of the row "Social login and phone-number OTP login"; adding its own row and leaving phone OTP behind SMS is part of this plan.
 - Builds on: Plans 1–5c, all merged (main `8f442ec`); ADR 0014 (own identity model), ADR 0015 (ES256 tokens), ADR 0023 (step-up), ADR 0025 (trusted devices), ADR 0029 (HTTP resilience), ADR 0031 (compatibility policy)
@@ -62,7 +62,7 @@ All routes are new, under `/api/v1/auth/external`, tag `Auth`.
 | `GET` | `/logins` | signed in | `{ hasPassword, logins: [{ id, provider, email, linkedAt, lastUsedAt }] }`, at most one login per provider, so not paged. 200. |
 | `DELETE` | `/logins/{id:guid}` | signed in, fresh step-up | Unlinks (section 5.5). 204. |
 
-**Body rules (validators).** Exactly one of `idToken` and `accessToken`; `idToken` only for an `oidc` provider and `accessToken` only for `facebook`; `nonce` required with `idToken` (16 to 256 characters); `idToken` and `accessToken` at most 8192 characters; `displayName` at most 200; `locale` a predefined culture name (default: the request's language, as in register); `deviceName` at most 200 (`Unknown` when absent). The step-up route (`POST /api/v1/auth/step-up`) gains the same optional proof members plus `provider`, still "exactly one proof" (D8).
+**Body rules (validators).** Exactly one of `idToken` and `accessToken`; `accessToken` only for `facebook` (which also accepts an iOS Limited Login `idToken`); `nonce` required with `idToken` (16 to 256 characters); `idToken` and `accessToken` at most 8192 characters; `displayName` at most 200; `locale` a predefined culture name (default: the request's language, as in register); `deviceName` at most 200 (`Unknown` when absent). The step-up route (`POST /api/v1/auth/step-up`) gains the same optional proof members plus `provider`, still "exactly one proof" (D8).
 
 **Errors** (all in `en`, `ms` and `zh-Hans`):
 
@@ -102,9 +102,9 @@ Existing codes keep their meaning: `auth.account_inactive` 403 (suspended, after
 
 **Usable email.** `Email` is the token's `email`; `HasUsableEmail` is true only when the provider's rule holds **and** its `TrustEmail` is on: Google and Apple, `email_verified` true (a boolean or the string `"true"`); Microsoft, `xms_edov` true; generic OIDC, `email_verified` true; Facebook never. `TrustEmail` defaults to on for Google, Apple and Microsoft, off for Facebook and generic OIDC. Microsoft's claim exists only when the project adds the optional claim `xms_edov` to its app registration; the setup guide says so, and without it Microsoft sign-up refuses (`auth.external_email_unverified`).
 
-**Facebook (`FacebookAccessTokenVerifier`).** `GET debug_token` with the app access token (`AppId|AppSecret`): `is_valid`, `app_id` equals `AppId`, not expired; then `GET /me?fields=id,name,email` with `appsecret_proof`, through the `facebook-graph` pipeline. Subject is the Facebook user id. An iOS Limited Login ID token goes through the OIDC verifier under a `Type: "oidc"` entry. A Facebook access token is a bearer with no nonce; replay beyond the checks above is a documented limit.
+**Facebook (`FacebookAccessTokenVerifier`).** `GET debug_token` with the app access token (`AppId|AppSecret`): `is_valid`, `app_id` equals `AppId`, not expired; then `GET /me?fields=id,name,email` with `appsecret_proof`, through the `facebook-graph` pipeline. Subject is the Facebook user id. The `facebook` provider also accepts an iOS Limited Login `idToken`, which goes through the OIDC verifier with the Facebook preset (issuer `https://www.facebook.com`, audience `AppId`, nonce required, no secret needed); Meta's token debugger cannot inspect such a token, so the Graph path is never used for it, and its subject is the token's `sub`. A Facebook access token is a bearer with no nonce; replay beyond the checks above is a documented limit.
 
-**Presets.** Issuer and discovery address of Google (`https://accounts.google.com`), Apple (`https://appleid.apple.com`) and Microsoft are built in; the plan verifies each against the provider's published discovery document before the preset is committed. A generic entry sets `Authority`.
+**Presets** (each read from the provider's live discovery document on 2026-10-30, section 12): Google, issuer `https://accounts.google.com` (the bare `accounts.google.com` is also accepted, as Google documents), keys at `https://www.googleapis.com/oauth2/v3/certs`; Apple, `https://appleid.apple.com`, keys at `https://appleid.apple.com/auth/keys`; Microsoft, `https://login.microsoftonline.com/{tenantid}/v2.0`, keys at `https://login.microsoftonline.com/common/discovery/v2.0/keys`; Facebook, `https://www.facebook.com`, keys at `https://www.facebook.com/.well-known/oauth/openid/jwks/`. All four sign with `RS256`; the allow-list stays `RS256` and `ES256` for generic providers. Microsoft's `oid` is issued only with the `profile` scope, so the client requests `openid profile email`; a token without `oid` or `tid` is refused. A generic entry sets `Authority`.
 
 ### 5.3 Linking (strict)
 
@@ -195,4 +195,13 @@ Order, not dates: each plan starts when the one before is merged.
 
 ## 11. Open questions
 
-None blocking. Flagged for your review: the `amr` value `fed` (not an RFC 8176 value, like `rcvr`; clients that read `amr` must accept it), Facebook's `TrustEmail` default (off), and D8's step-up by provider proof. Each is a small change.
+None. The three points flagged for review are settled: `fed` stays as the `amr` value (RFC 8176 registers no federated value, so a custom one is unavoidable, like `rcvr`; clients that read `amr` must accept it); Facebook's `TrustEmail` stays off (the user's choice); D8's step-up by provider proof stays.
+
+## 12. Research notes (2026-10-30)
+
+- **Presets.** Issuer, key address and signing algorithm of Google, Apple, Microsoft and Facebook were read from their discovery documents: `https://accounts.google.com/.well-known/openid-configuration`, `https://appleid.apple.com/.well-known/openid-configuration`, `https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration` and `https://www.facebook.com/.well-known/openid-configuration/`. All four use `RS256`. Microsoft's issuer carries a `{tenantid}` placeholder, which is why D10 and 5.2 check it against the token's `tid`.
+- **Microsoft.** [Optional claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference): `email` "isn't guaranteed to be correct, and is mutable"; `xms_edov` is the domain-verified signal and needs the `email` claim. [ID token claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/id-token-claims-reference): `sub` is pairwise per application; `oid` is the same across applications and needs the `profile` scope; "`oid` and `tid` is best" when data is shared across services; personal accounts have `tid` `9188040d-6c67-4c5b-b112-36a304b66dad`. This confirms D10's subject `{tid}:{oid}`.
+- **Apple.** [`id_token` reference](https://developer.apple.com/documentation/signinwithapplejs/authorizationi/id_token.md): `email_verified` may be a string or a boolean, and `is_private_email` may be absent, so neither is relied on beyond `email_verified`; when `nonce_supported` is true the nonce is mandatory, which the required nonce satisfies; the native flow commonly sends the nonce hashed, which 5.2 accepts alongside the raw value.
+- **Facebook.** [Validating a Limited Login token](https://developers.facebook.com/documentation/facebook-login/ios/limited-login/token/validating): signature through the JWKS, `exp`, `iss`, `aud` equal to the app ID and `nonce`. Hence the Facebook preset in 5.2.
+- **`amr`.** RFC 8176 registers 20 values (`pwd`, `otp`, `mfa`, `sms`, `wia` and others) and none for a federated login.
+- **Still manual.** A real personal and a real work or school Microsoft account, an Apple Services ID and bundle ID, and Facebook app review cannot be checked from here; the setup guide carries them as a checklist (section 8).
