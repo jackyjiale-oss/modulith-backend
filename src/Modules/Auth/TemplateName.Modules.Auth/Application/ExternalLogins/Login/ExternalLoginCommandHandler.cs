@@ -5,6 +5,7 @@ using TemplateName.Application.Common.Messaging;
 using TemplateName.Application.Common.Security;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Application.Authentication;
+using TemplateName.Modules.Auth.Application.Authentication.Login;
 using TemplateName.Modules.Auth.Application.Mfa;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Mfa;
@@ -40,9 +41,11 @@ namespace TemplateName.Modules.Auth.Application.ExternalLogins.Login;
 /// password login's: a concurrency conflict is the generic 401.
 /// </para>
 /// <para>
-/// Every outcome is audited (a failure as <c>auth.external_login_failed</c> with its error code as the reason) and counted
-/// (<c>auth.external_logins</c>, tagged with the catalog's provider name only). The proof, the nonce and the subject never reach an
-/// audit row, a log or a tag.
+/// Every outcome is counted (<c>auth.external_logins</c>, tagged with the catalog's provider name only), and every success and every
+/// refusal the handler itself decides is audited (a failure as <c>auth.external_login_failed</c> with its error code as the reason, or
+/// <c>locked</c> for a locked account, as the password login writes). The exception is a session save or a challenge save that loses a
+/// concurrency race: it answers the generic 401 and writes no failed-audit row, as the password login does. The proof, the nonce and the
+/// subject never reach an audit row, a log or a tag.
 /// </para>
 /// </summary>
 internal sealed class ExternalLoginCommandHandler(
@@ -80,7 +83,9 @@ internal sealed class ExternalLoginCommandHandler(
             return await RejectAsync(provider: null, user: null, ExternalLoginErrors.ProviderNotFound, ExternalLoginOutcome.ProviderNotFound, now, cancellationToken);
         }
 
-        var verification = await verifier.VerifyAsync(provider, new ExternalProof(command.IdToken, command.AccessToken, command.Nonce), cancellationToken);
+        // The validator counts a blank value as absent, so the verifier (which tests for null or empty) must see it as absent too.
+        var proof = new ExternalProof(NullIfBlank(command.IdToken), NullIfBlank(command.AccessToken), NullIfBlank(command.Nonce));
+        var verification = await verifier.VerifyAsync(provider, proof, cancellationToken);
         if (verification.IsFailure)
         {
             var outcome = verification.Error == ExternalLoginErrors.ProviderUnavailable
@@ -334,7 +339,15 @@ internal sealed class ExternalLoginCommandHandler(
 
         if (user.IsLockedOut(attempt.Now))
         {
-            return await RejectAsync(attempt.Provider, user, UserErrors.InvalidCredentials, ExternalLoginOutcome.Locked, attempt.Now, cancellationToken);
+            // The answer is the generic 401, the audit reason is the password login's (Ruling R12).
+            return await RejectAsync(
+                attempt.Provider,
+                user,
+                UserErrors.InvalidCredentials,
+                ExternalLoginOutcome.Locked,
+                attempt.Now,
+                cancellationToken,
+                failureReason: LoginCommandHandler.LockedFailureReason);
         }
 
         return null;
@@ -342,7 +355,8 @@ internal sealed class ExternalLoginCommandHandler(
 
     /// <summary>
     /// Audits and counts a failure and answers <paramref name="error"/>. Only the audit row is saved: every caller reaches this before it
-    /// changes anything, or after a refused save emptied the change tracker.
+    /// changes anything, or after a refused save emptied the change tracker. The audit reason is the error's code unless a caller names
+    /// a more exact one (<paramref name="failureReason"/>).
     /// </summary>
     private async Task<Result<LoginResult>> RejectAsync(
         ExternalProvider? provider,
@@ -350,14 +364,15 @@ internal sealed class ExternalLoginCommandHandler(
         Error error,
         ExternalLoginOutcome outcome,
         DateTimeOffset now,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? failureReason = null)
     {
         auditWriter.Record(AuthAuditLog.Create(
             AuthAuditEvents.ExternalLoginFailed,
             succeeded: false,
             now,
             userId: user?.Id,
-            failureReason: error.Code,
+            failureReason: failureReason ?? error.Code,
             details: provider is null ? null : ProviderDetails(provider)));
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -365,6 +380,8 @@ internal sealed class ExternalLoginCommandHandler(
 
         return Result.Failure<LoginResult>(error);
     }
+
+    private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
     private static string ProviderDetails(ExternalProvider provider) => JsonSerializer.Serialize(new { provider = provider.Name });
 

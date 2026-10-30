@@ -418,8 +418,36 @@ public sealed class ExternalLoginCommandHandlerTests
         user.LastLoginAt.ShouldBeNull();
         await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
         _addedSessions.ShouldBeEmpty();
-        _auditEntries.ShouldHaveSingleItem().FailureReason.ShouldBe("auth.invalid_credentials");
+
+        // The HTTP answer is the generic 401, but the audit row says why, as the password login's does (Ruling R12).
+        var audit = _auditEntries.ShouldHaveSingleItem();
+        audit.FailureReason.ShouldBe("locked");
+        audit.UserId.ShouldBe(user.Id);
         _metrics.Received(1).RecordExternalLogin(Google, ExternalLoginOutcome.Locked);
+    }
+
+    [Theory]
+    [InlineData(" ", "facebook-access-token-value", "   ", null, "facebook-access-token-value", null)]
+    [InlineData("", "facebook-access-token-value", "", null, "facebook-access-token-value", null)]
+    [InlineData(IdToken, " ", Nonce, IdToken, null, Nonce)]
+    [InlineData(IdToken, "\t", "  ", IdToken, null, null)]
+    [InlineData(null, "facebook-access-token-value", null, null, "facebook-access-token-value", null)]
+    public async Task A_blank_proof_value_reaches_the_verifier_as_absent(
+        string? idToken,
+        string? accessToken,
+        string? nonce,
+        string? expectedIdToken,
+        string? expectedAccessToken,
+        string? expectedNonce)
+    {
+        GivenLinkedUser();
+
+        await _sut.HandleAsync(Command() with { IdToken = idToken, AccessToken = accessToken, Nonce = nonce }, Ct);
+
+        var proof = _proofs.ShouldHaveSingleItem();
+        proof.IdToken.ShouldBe(expectedIdToken);
+        proof.AccessToken.ShouldBe(expectedAccessToken);
+        proof.Nonce.ShouldBe(expectedNonce);
     }
 
     [Fact]
@@ -592,6 +620,10 @@ public sealed class ExternalLoginCommandHandlerTests
         var result = await _sut.HandleAsync(Command(), Ct);
 
         result.Error.ShouldBe(UserErrors.InvalidCredentials);
+
+        // As for a password login, a save that loses a concurrency race is the generic 401 and writes no failed-audit row.
+        _auditEntries.ShouldNotContain(entry => entry.EventType == AuthAuditEvents.ExternalLoginFailed);
+        await _unitOfWork.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
         _metrics.Received(1).RecordExternalLogin(Google, ExternalLoginOutcome.InvalidCredentials);
     }
 

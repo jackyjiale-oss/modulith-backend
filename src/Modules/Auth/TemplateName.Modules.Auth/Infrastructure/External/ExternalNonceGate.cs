@@ -2,19 +2,6 @@ using System.Collections.Concurrent;
 
 namespace TemplateName.Modules.Auth.Infrastructure.External;
 
-/// <summary>What <see cref="ExternalNonceGate.TryEnter"/> decided.</summary>
-internal enum NonceGateResult
-{
-    /// <summary>The key was not held: it is now, until its window ends. The caller is the only one to get this for the key in the window.</summary>
-    Entered,
-
-    /// <summary>The key is held by an earlier claim whose window has not ended: a replay.</summary>
-    Spent,
-
-    /// <summary>The gate holds <see cref="ExternalNonceGate.Capacity"/> live keys and none could be pruned, so the claim is refused (fail closed).</summary>
-    Full,
-}
-
 /// <summary>
 /// The in-process half of the replay guard: an atomic add-if-absent of a (hashed) nonce key with its expiry, so exactly one of any number of
 /// concurrent claims of a key wins within this process, whatever the cache does. An expired key is taken over atomically (compare and swap).
