@@ -19,3 +19,4 @@ We chose option 2. Every module endpoint is mapped under the literal `/api/v1` g
 - Positive: no versioning package or configuration to maintain; routes read the same before and after versioning is adopted.
 - Negative / trade-offs accepted: when `v2` arrives, we must add the library, register version sets, and add a second OpenAPI document; until then there is no built-in deprecation or sunset signalling.
 - Follow-up actions: when the first breaking endpoint change is proposed, write a new ADR that adopts `Asp.Versioning` and supersedes this one.
+- Compatibility policy, the gate and the register: [ADR 0031](0031-api-and-database-compatibility-policy.md).
