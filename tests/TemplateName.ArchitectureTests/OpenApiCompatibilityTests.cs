@@ -178,6 +178,34 @@ public sealed class OpenApiCompatibilityTests : IDisposable
     }
 
     [Fact]
+    public void Root_level_security_is_inherited_by_operations()
+    {
+        const string Open = """{"responses":{"204":{"description":"No Content"}}}""";
+        var baseline = Document(Paths(Open));
+        var inherited = Document(Paths(Open), rootSecurity: """[{"Bearer":[]}]""");
+        var overridden = Document(Paths("""{"responses":{"204":{"description":"No Content"}},"security":[]}"""), rootSecurity: """[{"Bearer":[]}]""");
+
+        var secured = OpenApiCompatibility.Compare(baseline, inherited);
+        var stillOpen = OpenApiCompatibility.Compare(baseline, overridden);
+
+        secured.Breaking.ShouldHaveSingleItem().ShouldBe(new OpenApiChange(Get, "security requirement added"));
+        stillOpen.Breaking.ShouldBeEmpty();
+        stillOpen.Compatible.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void New_required_request_body_on_an_existing_operation_is_breaking()
+    {
+        var baseline = Document(Paths(Fill("""{"responses":@noContent}""", ("@noContent", NoContent))));
+        var current = Document(Paths(Accepting(ObjectOf("""{"name":{"type":"string"}}""", """["name"]"""), required: true)));
+
+        var report = OpenApiCompatibility.Compare(baseline, current);
+
+        report.Breaking.ShouldHaveSingleItem().ShouldBe(new OpenApiChange(Get, "request body made required"));
+        report.Compatible.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Removed_property_inside_a_referenced_array_item_is_breaking()
     {
         var baseline = Document(
@@ -384,9 +412,22 @@ public sealed class OpenApiCompatibilityTests : IDisposable
     public void ReadBaseline_returns_the_text_of_a_json_object()
     {
         var path = Path.Combine(_directory, "baseline.json");
-        File.WriteAllText(path, """{"openapi":"3.1.1"}""");
+        File.WriteAllText(path, """{"openapi":"3.1.1","paths":{}}""");
 
-        OpenApiCompatibility.ReadBaseline(path).ShouldBe("""{"openapi":"3.1.1"}""");
+        OpenApiCompatibility.ReadBaseline(path).ShouldBe("""{"openapi":"3.1.1","paths":{}}""");
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("""{"openapi":"3.1.1","paths":[]}""")]
+    public void Baseline_without_a_paths_object_names_the_file(string text)
+    {
+        var path = Path.Combine(_directory, "baseline.json");
+        File.WriteAllText(path, text);
+
+        var exception = Should.Throw<InvalidOperationException>(() => OpenApiCompatibility.ReadBaseline(path));
+
+        exception.Message.ShouldContain(path);
     }
 
     [Theory]
@@ -404,8 +445,15 @@ public sealed class OpenApiCompatibilityTests : IDisposable
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
-    private static string Document(string paths, string schemas = "{}")
-        => Fill("""{"openapi":"3.1.1","paths":@paths,"components":{"schemas":@schemas}}""", ("@paths", paths), ("@schemas", schemas));
+    /// <summary>A document with <paramref name="paths"/> and <paramref name="schemas"/>, and a root-level <c>security</c> when one is given.</summary>
+    private static string Document(string paths, string schemas = "{}", string? rootSecurity = null)
+        => rootSecurity is null
+            ? Fill("""{"openapi":"3.1.1","paths":@paths,"components":{"schemas":@schemas}}""", ("@paths", paths), ("@schemas", schemas))
+            : Fill(
+                """{"openapi":"3.1.1","paths":@paths,"components":{"schemas":@schemas},"security":@security}""",
+                ("@paths", paths),
+                ("@schemas", schemas),
+                ("@security", rootSecurity));
 
     /// <summary>One path, <c>/api/v1/items</c>, with one GET operation.</summary>
     private static string Paths(string operation) => PathsOf((Items, "get", operation));

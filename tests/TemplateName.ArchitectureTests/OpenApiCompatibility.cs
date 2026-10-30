@@ -34,15 +34,17 @@ public static class OpenApiCompatibility
         return comparison.Report();
     }
 
-    /// <summary>Returns the text of the baseline file, after checking that it holds a JSON object.</summary>
-    /// <exception cref="InvalidOperationException">The file is not a JSON object; the message names it.</exception>
+    /// <summary>Returns the text of the baseline file, after checking that it holds a JSON object with a <c>paths</c> object.</summary>
+    /// <exception cref="InvalidOperationException">The file is not a JSON object with a <c>paths</c> object; the message names it.</exception>
     public static string ReadBaseline(string path)
     {
         var text = File.ReadAllText(path);
-        var problem = $"The OpenAPI baseline {path} is not a JSON object; set {BaselineVariable} to a verified OpenAPI snapshot.";
+        var problem = $"The OpenAPI baseline {path} is not a JSON object with a paths object; set {BaselineVariable} to a verified snapshot.";
         try
         {
-            return JsonNode.Parse(text) is JsonObject ? text : throw new InvalidOperationException(problem);
+            return JsonNode.Parse(text) is JsonObject document && document["paths"] is JsonObject
+                ? text
+                : throw new InvalidOperationException(problem);
         }
         catch (JsonException exception)
         {

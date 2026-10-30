@@ -47,6 +47,16 @@ public sealed class ApiVersionRegisterTests
     }
 
     [Fact]
+    public void Path_versions_count_a_bare_version_and_not_a_longer_segment()
+    {
+        const string OpenApi = """
+            { "paths": { "/api/v2": {}, "/api/v3x/a": {}, "/api/v4.1/a": {}, "/api/v5/b": {} } }
+            """;
+
+        ApiVersionRegister.PathVersions(OpenApi).ShouldBe(["v2", "v5"], ignoreOrder: true);
+    }
+
+    [Fact]
     public void Violations_flag_a_served_version_without_a_row()
     {
         var violations = ApiVersionRegister.Violations([("v1", "Active")], new HashSet<string> { "v1", "v2" });

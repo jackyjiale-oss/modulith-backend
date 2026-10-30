@@ -47,6 +47,16 @@ public sealed class MigrationTests
         violation.ShouldContain("boom");
     }
 
+    [Fact]
+    public void Guard_names_the_cause_when_a_migration_cannot_be_created()
+    {
+        var violations = MigrationGuard.Violations([typeof(ThrowsInConstructor)]);
+
+        var violation = violations.ShouldHaveSingleItem();
+        violation.ShouldContain(typeof(ThrowsInConstructor).FullName!);
+        violation.ShouldContain("ctor boom");
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -102,5 +112,13 @@ public sealed class MigrationTests
     internal sealed class Throws : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder) => throw new InvalidOperationException("boom");
+    }
+
+    internal sealed class ThrowsInConstructor : Migration
+    {
+        public ThrowsInConstructor() => throw new InvalidOperationException("ctor boom");
+
+        protected override void Up(MigrationBuilder migrationBuilder) =>
+            migrationBuilder.AddColumn<string>("Nickname", "Things", nullable: true);
     }
 }

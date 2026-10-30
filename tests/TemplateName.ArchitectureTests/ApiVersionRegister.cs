@@ -60,7 +60,10 @@ internal static partial class ApiVersionRegister
         return rows;
     }
 
-    /// <summary>The distinct versions (<c>v1</c>) of the paths of an OpenAPI document that start with <c>/api/v{N}/</c>.</summary>
+    /// <summary>
+    /// The distinct versions (<c>v1</c>) of the paths of an OpenAPI document that start with <c>/api/v{N}</c> followed by <c>/</c> or the
+    /// end of the path, as the request log reads <c>ApiVersion</c>.
+    /// </summary>
     public static IReadOnlySet<string> PathVersions(string openApiJson)
     {
         ArgumentNullException.ThrowIfNull(openApiJson);
@@ -116,6 +119,6 @@ internal static partial class ApiVersionRegister
 
     private static bool IsSeparatorCell(string cell) => cell.Length > 0 && cell.All(character => character is '-' or ':');
 
-    [GeneratedRegex("^/api/v([0-9]+)/", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^/api/v([0-9]+)(?:/|\z)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ApiPath();
 }

@@ -65,11 +65,12 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           baseline="$RUNNER_TEMP/openapi-baseline.json"
+          # Must match the snapshot path of OpenApiSnapshotTests and ApiVersionRegisterTests (and OpenApiCompatibilityTests).
           snapshot="tests/TemplateName.IntegrationTests/Documentation/OpenApiSnapshotTests.OpenApi_document_matches_snapshot.verified.json"
           if git show "origin/$BASE_REF:$snapshot" > "$baseline"; then
             echo "OPENAPI_BASELINE=$baseline" >> "$GITHUB_ENV"
           else
-            echo "::notice title=OpenAPI baseline::The base branch has no OpenAPI snapshot, so the breaking-change gate is skipped."
+            echo "::warning title=OpenAPI baseline::The base branch has no OpenAPI snapshot, so the breaking-change gate is skipped."
           fi
           if printf '%s' "$PR_TITLE" | grep -Eq '^[a-z]+(\([^)]*\))?!:'; then
             echo "API_BREAKING_ACCEPTED=true" >> "$GITHUB_ENV"

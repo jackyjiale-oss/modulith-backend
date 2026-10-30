@@ -25,7 +25,9 @@ internal static class MigrationGuard
             }
             catch (Exception exception)
             {
-                violations.Add($"{type.FullName} could not be read: {exception.Message}");
+                // A constructor that throws reaches here wrapped in a TargetInvocationException; report the real cause.
+                var cause = exception is TargetInvocationException ? exception.InnerException ?? exception : exception;
+                violations.Add($"{type.FullName} could not be read: {cause.Message}");
                 continue;
             }
 
