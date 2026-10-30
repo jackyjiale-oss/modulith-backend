@@ -17,6 +17,8 @@ public sealed class OpenApiCompatibilityTests : IDisposable
 
     private const string NoContent = """{"204":{"description":"No Content"}}""";
 
+    private const string OneOfAOrB = """{"oneOf":[{"$ref":"#/components/schemas/A"},{"$ref":"#/components/schemas/B"}]}""";
+
     private readonly string _directory = Directory.CreateTempSubdirectory("openapi-baseline-").FullName;
 
     [Fact]
@@ -71,6 +73,17 @@ public sealed class OpenApiCompatibilityTests : IDisposable
             Document(Paths(Accepting(ObjectOf("""{"name":{"type":"string"},"note":{"type":"string"}}""", """["name","note"]""")))));
 
         report.Breaking.ShouldHaveSingleItem().ShouldBe(new OpenApiChange(Get, "request body: required property 'note' added"));
+        report.Compatible.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Optional_body_property_made_required_is_breaking()
+    {
+        var report = OpenApiCompatibility.Compare(
+            Document(Paths(Accepting(ObjectOf("""{"name":{"type":"string"},"note":{"type":"string"}}""", """["name"]""")))),
+            Document(Paths(Accepting(ObjectOf("""{"name":{"type":"string"},"note":{"type":"string"}}""", """["name","note"]""")))));
+
+        report.Breaking.ShouldHaveSingleItem().ShouldBe(new OpenApiChange(Get, "request body: property 'note' made required"));
         report.Compatible.ShouldBeEmpty();
     }
 
@@ -210,6 +223,28 @@ public sealed class OpenApiCompatibilityTests : IDisposable
             Document(Paths(Accepting("""{"oneOf":[{"type":"null"},{"type":"integer"}]}"""))));
 
         report.Breaking.ShouldHaveSingleItem().ShouldBe(new OpenApiChange(Get, "request body: oneOf changed"));
+    }
+
+    [Fact]
+    public void Oneof_members_are_compared_through_their_refs()
+    {
+        var report = OpenApiCompatibility.Compare(
+            Document(Paths(Responding(OneOfAOrB)), SchemasAAndB("""{"id":{"type":"string"},"name":{"type":"string"}}""")),
+            Document(Paths(Responding(OneOfAOrB)), SchemasAAndB("""{"id":{"type":"string"}}""")));
+
+        report.Breaking.ShouldHaveSingleItem().ShouldBe(new OpenApiChange(Get, "response 200: property 'name' removed"));
+        report.Compatible.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Oneof_member_added_property_is_compatible()
+    {
+        var report = OpenApiCompatibility.Compare(
+            Document(Paths(Responding(OneOfAOrB)), SchemasAAndB("""{"id":{"type":"string"}}""")),
+            Document(Paths(Responding(OneOfAOrB)), SchemasAAndB("""{"id":{"type":"string"},"name":{"type":"string"}}""")));
+
+        report.Breaking.ShouldBeEmpty();
+        report.Compatible.ShouldHaveSingleItem().ShouldBe(new OpenApiChange(Get, "response 200: property 'name' added"));
     }
 
     [Fact]
@@ -411,6 +446,12 @@ public sealed class OpenApiCompatibilityTests : IDisposable
 
     private static string ObjectOf(string properties, string required = "[]")
         => Fill("""{"type":"object","required":@required,"properties":@properties}""", ("@required", required), ("@properties", properties));
+
+    /// <summary>Schema <c>A</c> with <paramref name="propertiesOfA"/>, and an unchanging schema <c>B</c>.</summary>
+    private static string SchemasAAndB(string propertiesOfA)
+        => Fill(
+            """{"A":{"type":"object","properties":@a},"B":{"type":"object","properties":{"code":{"type":"integer"}}}}""",
+            ("@a", propertiesOfA));
 
     private static string Ref(string schema) => Fill("""{"$ref":"#/components/schemas/@name"}""", ("@name", schema));
 
