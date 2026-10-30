@@ -54,7 +54,8 @@ public static class AuthModule
     /// access tokens with the JWT bearer handler as the default authentication scheme, the permission checker with its cache, the
     /// permission source and the seeder, two-step verification (<c>Auth:Mfa</c>, the TOTP secret protector, the MFA repositories,
     /// the factor verifier, the recovery-code issuer and the MFA change effects), step-up (<c>Auth:StepUp</c> and its policy),
-    /// social login's configuration (<c>Auth:External</c>, the provider catalog and the <c>oidc-discovery</c> and <c>facebook-graph</c> HTTP clients),
+    /// social login's configuration (<c>Auth:External</c>, the provider catalog and the <c>oidc-discovery</c> and <c>facebook-graph</c> HTTP clients)
+    /// and proof verification (the ID token verifier, the nonce replay guard and <c>IExternalIdentityVerifier</c>),
     /// the retention of time-bound rows (<c>Auth:Retention</c>) with the six recurring cleanup jobs that enforce it, and the Data Protection
     /// key ring stored in <c>auth.DataProtectionKeys</c>. Call it after
     /// <c>AddInfrastructureCommon</c> and before <c>AddApplicationDecorators</c>.
@@ -237,8 +238,10 @@ public static class AuthModule
     /// <summary>
     /// Registers social login's configuration: <c>Auth:External</c> (<c>AllowSignUp</c>, <c>MaxTokenAge</c> and the providers), validated on
     /// start by data annotations and by <see cref="ExternalLoginOptionsValidator"/> (only enabled providers are checked; a message names the key,
-    /// never a value), the <see cref="IExternalProviderCatalog"/> built from it, and the two named HTTP clients, <c>oidc-discovery</c> and
-    /// <c>facebook-graph</c>, each behind a resilience pipeline of the same name.
+    /// never a value), the <see cref="IExternalProviderCatalog"/> built from it, the two named HTTP clients, <c>oidc-discovery</c> and
+    /// <c>facebook-graph</c>, each behind a resilience pipeline of the same name, and the proof verification: <see cref="OidcIdTokenVerifier"/>,
+    /// the <see cref="IExternalProofReplayGuard"/> on <see cref="HybridCache"/> (registered by <see cref="AddPermissions"/>) and the
+    /// <see cref="IExternalIdentityVerifier"/> in front of both.
     /// </summary>
     internal static void AddExternalLogin(IServiceCollection services, IConfiguration configuration)
     {
@@ -252,6 +255,11 @@ public static class AuthModule
         // A pipeline name that is not built in starts from the external-default values and needs no other code (ADR 0029).
         services.AddExternalHttpClient(ExternalHttpClients.OidcDiscovery, ExternalHttpClients.OidcDiscovery);
         services.AddExternalHttpClient(ExternalHttpClients.FacebookGraph, ExternalHttpClients.FacebookGraph);
+
+        // Singletons: the OIDC verifier keeps one metadata and key cache per provider for the life of the process.
+        services.AddSingleton<OidcIdTokenVerifier>();
+        services.AddSingleton<IExternalProofReplayGuard, HybridCacheExternalProofReplayGuard>();
+        services.AddSingleton<IExternalIdentityVerifier, ExternalIdentityVerifier>();
     }
 
     /// <summary>

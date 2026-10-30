@@ -38,4 +38,9 @@
     <Compile Include="..\TemplateName.ArchitectureTests\OpenApiCompatibility.cs" Link="Documentation\OpenApiCompatibility.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- One fake OpenID Connect provider (keys, discovery and key set, no network) for the unit tests of the verifier and the routes. -->
+    <Compile Include="..\TemplateName.UnitTests\Auth\External\FakeIdentityProvider.cs" Link="Auth\External\FakeIdentityProvider.cs" />
+  </ItemGroup>
+
 </Project>

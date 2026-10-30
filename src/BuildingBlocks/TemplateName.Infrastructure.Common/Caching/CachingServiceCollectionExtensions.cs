@@ -14,7 +14,8 @@ internal static class CachingServiceCollectionExtensions
     /// Binds <see cref="CachingOptions"/> (validated on start) and applies the provider to <see cref="HybridCacheOptions"/>: with
     /// <see cref="CachingProvider.None"/> the default entry options disable both cache layers, so every entry, also one whose caller passes
     /// its own expirations, is read from its source each time. (HybridCache uses the default flags for any entry options without flags of
-    /// their own, which is every entry options in this solution.) With <see cref="CachingProvider.Redis"/> the host must have registered
+    /// their own, which is every cache entry in this solution; the Auth module's replay guard, a security record rather than a cache, sets
+    /// its own so that it keeps working.) With <see cref="CachingProvider.Redis"/> the host must have registered
     /// the distributed cache (<c>AddPlatformRedis</c>); a host without it fails on start instead of silently caching in memory only.
     /// </summary>
     internal static IServiceCollection AddCaching(this IServiceCollection services, IConfiguration configuration)
