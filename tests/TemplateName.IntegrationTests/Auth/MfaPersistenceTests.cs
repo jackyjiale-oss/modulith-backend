@@ -51,7 +51,7 @@ public sealed class MfaPersistenceTests(IntegrationTestWebAppFactory factory) : 
         var pending = UserMfaMethod.StartTotp(other.Id, "Tablet", "other-protected-secret", Now);
         var unused = RecoveryCode.Create(user.Id, Hash(1), Now);
         var used = RecoveryCode.Create(user.Id, Hash(2), Now);
-        var challenge = MfaChallenge.Issue(user.Id, Hash(3), user.SecurityStamp, "Firefox on Windows", ChallengeLifetime, Now);
+        var challenge = MfaChallenge.Issue(user.Id, Hash(3), user.SecurityStamp, "Firefox on Windows", AuthenticationMethods.Password, ChallengeLifetime, Now);
         var device = TrustedDevice.Trust(user.Id, Hash(4), "Firefox on Windows", "Mozilla/5.0", user.SecurityStamp, TrustedDeviceLifetime, Now);
         var (session, _) = UserSession.Start(
             user.Id, "pwd", "Firefox on Windows", null, null, user.SecurityStamp, Hash(5), SlidingLifetime, AbsoluteLifetime, Now);
@@ -628,7 +628,7 @@ public sealed class MfaPersistenceTests(IntegrationTestWebAppFactory factory) : 
     }
 
     private MfaChallenge NewChallenge(User user, byte[] tokenHash)
-        => MfaChallenge.Issue(user.Id, tokenHash, user.SecurityStamp, "Device", ChallengeLifetime, Now);
+        => MfaChallenge.Issue(user.Id, tokenHash, user.SecurityStamp, "Device", AuthenticationMethods.Password, ChallengeLifetime, Now);
 
     private User NewUser(string email) => User.Register(email, "Test user", "en", "hash-1", Now).Value;
 

@@ -14,7 +14,7 @@ public sealed class MfaChallengeTests
     private static byte[] Hash(byte seed) => [.. Enumerable.Repeat(seed, 32)];
 
     private static MfaChallenge Issue(string deviceName = "Pixel 9") =>
-        MfaChallenge.Issue(Guid.NewGuid(), Hash(1), Stamp, deviceName, Lifetime, Now);
+        MfaChallenge.Issue(Guid.NewGuid(), Hash(1), Stamp, deviceName, AuthenticationMethods.Password, Lifetime, Now);
 
     // The database counts failed attempts and consumes the challenge through conditional UPDATEs; the aggregate only reads the
     // state the repository materialized, so a test sets it the way EF Core does.
@@ -26,7 +26,7 @@ public sealed class MfaChallengeTests
     {
         var userId = Guid.NewGuid();
 
-        var challenge = MfaChallenge.Issue(userId, Hash(3), Stamp, "Pixel 9", Lifetime, Now);
+        var challenge = MfaChallenge.Issue(userId, Hash(3), Stamp, "Pixel 9", AuthenticationMethods.Password, Lifetime, Now);
 
         challenge.Id.ShouldNotBe(Guid.Empty);
         challenge.UserId.ShouldBe(userId);
@@ -34,6 +34,7 @@ public sealed class MfaChallengeTests
         challenge.SecurityStamp.ShouldBe(Stamp);
         challenge.DeviceName.ShouldBe("Pixel 9");
         challenge.CreatedAt.ShouldBe(Now);
+        challenge.FirstFactor.ShouldBe(AuthenticationMethods.Password);
         challenge.ExpiresAt.ShouldBe(Now + Lifetime);
         challenge.ConsumedAt.ShouldBeNull();
         challenge.FailedAttempts.ShouldBe(0);
@@ -88,13 +89,35 @@ public sealed class MfaChallengeTests
     [InlineData(33)]
     public void Issue_refuses_a_token_hash_that_is_not_32_bytes(int length)
     {
-        Should.Throw<ArgumentException>(() => MfaChallenge.Issue(Guid.NewGuid(), new byte[length], Stamp, "Pixel 9", Lifetime, Now));
+        Should.Throw<ArgumentException>(() => MfaChallenge.Issue(Guid.NewGuid(), new byte[length], Stamp, "Pixel 9", AuthenticationMethods.Password, Lifetime, Now));
     }
 
     [Fact]
     public void Issue_refuses_a_blank_stamp_and_a_lifetime_that_is_not_positive()
     {
-        Should.Throw<ArgumentException>(() => MfaChallenge.Issue(Guid.NewGuid(), Hash(1), " ", "Pixel 9", Lifetime, Now));
-        Should.Throw<ArgumentOutOfRangeException>(() => MfaChallenge.Issue(Guid.NewGuid(), Hash(1), Stamp, "Pixel 9", TimeSpan.Zero, Now));
+        Should.Throw<ArgumentException>(() => MfaChallenge.Issue(Guid.NewGuid(), Hash(1), " ", "Pixel 9", AuthenticationMethods.Password, Lifetime, Now));
+        Should.Throw<ArgumentOutOfRangeException>(() => MfaChallenge.Issue(Guid.NewGuid(), Hash(1), Stamp, "Pixel 9", AuthenticationMethods.Password, TimeSpan.Zero, Now));
+    }
+
+    [Theory]
+    [InlineData(AuthenticationMethods.Password)]
+    [InlineData(AuthenticationMethods.Federated)]
+    public void MfaChallenge_Issue_stores_the_first_factor(string firstFactor)
+    {
+        var challenge = MfaChallenge.Issue(Guid.NewGuid(), Hash(1), Stamp, "Pixel 9", firstFactor, Lifetime, Now);
+
+        challenge.FirstFactor.ShouldBe(firstFactor);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("otp")]
+    [InlineData("PWD")]
+    [InlineData("pwd fed")]
+    public void MfaChallenge_Issue_rejects_an_unknown_first_factor(string firstFactor)
+    {
+        Should.Throw<ArgumentException>(() => MfaChallenge.Issue(Guid.NewGuid(), Hash(1), Stamp, "Pixel 9", firstFactor, Lifetime, Now));
+        Should.Throw<ArgumentException>(() => MfaChallenge.Issue(Guid.NewGuid(), Hash(1), Stamp, "Pixel 9", null!, Lifetime, Now));
     }
 }

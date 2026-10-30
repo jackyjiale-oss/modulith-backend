@@ -75,7 +75,7 @@ public sealed class VerifyMfaCommandHandlerTests
                 return new FailedSignIn(_user.AccessFailedCount, _user.LockoutEnd);
             });
 
-        _challenge = MfaChallenge.Issue(_user.Id, ChallengeHash, _user.SecurityStamp, DeviceName, TimeSpan.FromMinutes(5), IssuedAt);
+        _challenge = MfaChallenge.Issue(_user.Id, ChallengeHash, _user.SecurityStamp, DeviceName, AuthenticationMethods.Password, TimeSpan.FromMinutes(5), IssuedAt);
         _tokenService.Hash(ChallengeTokenValue).Returns(ChallengeHash);
         _tokenService.Generate().Returns(new GeneratedToken(RefreshTokenValue, RefreshTokenHash));
         _challenges.GetByTokenHashAsync(ChallengeHash, Arg.Any<CancellationToken>()).Returns(_challenge);

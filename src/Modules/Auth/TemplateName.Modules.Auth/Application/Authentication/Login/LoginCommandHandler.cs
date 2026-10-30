@@ -254,7 +254,14 @@ internal sealed class LoginCommandHandler(
         CancellationToken cancellationToken)
     {
         var token = tokenService.Generate();
-        var challenge = MfaChallenge.Issue(user.Id, token.Hash, user.SecurityStamp, deviceName, mfaOptions.Value.ChallengeLifetime, now);
+        var challenge = MfaChallenge.Issue(
+            user.Id,
+            token.Hash,
+            user.SecurityStamp,
+            deviceName,
+            AuthenticationMethods.Password,
+            mfaOptions.Value.ChallengeLifetime,
+            now);
         challenges.Add(challenge);
 
         auditWriter.Record(AuthAuditLog.Create(
