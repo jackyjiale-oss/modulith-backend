@@ -52,7 +52,7 @@ public sealed class AuditingTests
     };
 
     [Fact]
-    public void The_audited_entities_are_the_five_of_the_first_set()
+    public void The_audited_entities_are_the_five_of_the_first_set_and_the_external_login()
     {
         AuditedTypes().Select(type => type.FullName).ShouldBe(
             [
@@ -61,6 +61,7 @@ public sealed class AuditingTests
                 "TemplateName.Modules.Auth.Domain.Roles.Role",
                 "TemplateName.Modules.Auth.Domain.Roles.RolePermission",
                 "TemplateName.Modules.Auth.Domain.Users.UserRole",
+                "TemplateName.Modules.Auth.Domain.Users.UserExternalLogin",
             ],
             ignoreOrder: true);
     }
@@ -75,6 +76,7 @@ public sealed class AuditingTests
         ignored["LeaveRequest"].ShouldBeEmpty();
         ignored["RolePermission"].ShouldBeEmpty();
         ignored["UserRole"].ShouldBeEmpty();
+        ignored["UserExternalLogin"].ShouldBeEmpty();
         AuditedTypes().SelectMany(type => MarkedPropertyNames(type, typeof(AuditMaskAttribute))).ShouldBeEmpty();
     }
 

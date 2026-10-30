@@ -1,11 +1,17 @@
 namespace TemplateName.Modules.Auth.Application.Abstractions;
 
 /// <summary>
-/// The names of the unique indexes whose refusal a handler turns into its own answer (<see cref="IUnitOfWork.SaveChangesUnlessDuplicateAsync(string, CancellationToken)"/>).
-/// The persistence configuration gives the index exactly this name, so the two cannot drift apart.
+/// The names of the unique indexes whose refusal a handler turns into its own answer (<see cref="IUnitOfWork.SaveChangesUnlessDuplicateAsync(string, CancellationToken)"/>
+/// and its overload for several names). The persistence configuration gives the index exactly this name, so the two cannot drift apart.
 /// </summary>
 internal static class UniqueIndexNames
 {
+    /// <summary>The unique index on <c>auth.UserExternalLogins (Provider, Subject)</c>: an identity at a provider belongs to one user.</summary>
+    public const string ExternalLoginIdentity = "IX_UserExternalLogins_Provider_Subject";
+
+    /// <summary>The unique index on <c>auth.UserExternalLogins (UserId, Provider)</c>: a user has at most one login for each provider.</summary>
+    public const string ExternalLoginProviderPerUser = "IX_UserExternalLogins_UserId_Provider";
+
     /// <summary>The unique index on <c>auth.UserMfaMethods (UserId, Type)</c>: one method of each type per user (plan decision D18).</summary>
     public const string MfaMethodPerUserAndType = "IX_UserMfaMethods_UserId_Type";
 

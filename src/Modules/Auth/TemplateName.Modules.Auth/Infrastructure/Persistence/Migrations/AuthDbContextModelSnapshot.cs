@@ -18,7 +18,7 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("auth")
-                .HasAnnotation("ProductVersion", "10.0.12")
+                .HasAnnotation("ProductVersion", "10.0.14")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -195,6 +195,13 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("FailedAttempts")
                         .HasColumnType("int");
+
+                    b.Property<string>("FirstFactor")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)")
+                        .HasDefaultValue("pwd");
 
                     b.Property<string>("SecurityStamp")
                         .IsRequired()
@@ -711,6 +718,49 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                     b.ToTable("Users", "auth");
                 });
 
+            modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Users.UserExternalLogin", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime>("LinkedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Provider", "Subject")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserExternalLogins_Provider_Subject");
+
+                    b.HasIndex("UserId", "Provider")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserExternalLogins_UserId_Provider");
+
+                    b.ToTable("UserExternalLogins", "auth");
+                });
+
             modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Users.UserRole", b =>
                 {
                     b.Property<Guid>("UserId")
@@ -864,6 +914,15 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Users.UserExternalLogin", b =>
+                {
+                    b.HasOne("TemplateName.Modules.Auth.Domain.Users.User", null)
+                        .WithMany("ExternalLogins")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Users.UserRole", b =>
                 {
                     b.HasOne("TemplateName.Modules.Auth.Domain.Roles.Role", null)
@@ -900,6 +959,8 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Users.User", b =>
                 {
+                    b.Navigation("ExternalLogins");
+
                     b.Navigation("PasswordHistory");
 
                     b.Navigation("Roles");

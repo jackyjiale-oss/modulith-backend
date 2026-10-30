@@ -1,6 +1,7 @@
 using System.Globalization;
 using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.SharedKernel;
+using TemplateName.SharedKernel.Auditing;
 
 namespace TemplateName.Modules.Auth.Domain.Users;
 
@@ -9,6 +10,7 @@ namespace TemplateName.Modules.Auth.Domain.Users;
 /// (<see cref="Provider"/>, <see cref="Subject"/>); the email the provider gave is kept for display only and is never used to find a user.
 /// A user has at most one login for each provider.
 /// </summary>
+[Audited]
 internal sealed class UserExternalLogin
 {
     /// <summary>The column limit of <see cref="Provider"/>.</summary>

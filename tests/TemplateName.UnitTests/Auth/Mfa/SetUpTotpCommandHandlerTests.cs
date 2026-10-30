@@ -135,7 +135,7 @@ public sealed class SetUpTotpCommandHandlerTests
         await _methods.DidNotReceiveWithAnyArgs().GetTotpAsync(default, Ct);
         _methods.DidNotReceiveWithAnyArgs().Add(default!);
         _auditEntries.ShouldBeEmpty();
-        await _unitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(default!, Ct);
+        await _unitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(default(string)!, Ct);
     }
 
     [Fact]
@@ -152,7 +152,7 @@ public sealed class SetUpTotpCommandHandlerTests
         confirmed.SecretEncrypted.ShouldBe(stored);
         _methods.DidNotReceiveWithAnyArgs().Add(default!);
         _auditEntries.ShouldBeEmpty();
-        await _unitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(default!, Ct);
+        await _unitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(default(string)!, Ct);
         await _unitOfWork.DidNotReceiveWithAnyArgs().SaveChangesAsync(Ct);
     }
 

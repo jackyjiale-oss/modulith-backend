@@ -43,6 +43,9 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.HasMany(user => user.Roles).WithOne().HasForeignKey(assignment => assignment.UserId).OnDelete(DeleteBehavior.Cascade);
         builder.Navigation(user => user.Roles).HasField("_roles").UsePropertyAccessMode(PropertyAccessMode.Field);
 
+        builder.HasMany(user => user.ExternalLogins).WithOne().HasForeignKey(login => login.UserId).OnDelete(DeleteBehavior.Cascade);
+        builder.Navigation(user => user.ExternalLogins).HasField("_externalLogins").UsePropertyAccessMode(PropertyAccessMode.Field);
+
         builder.Ignore(user => user.DomainEvents);
     }
 }

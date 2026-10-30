@@ -55,7 +55,7 @@ public sealed class UpdateRoleCommandHandlerTests : AdminRoleHandlerTestBase
         result.Error.Code.ShouldBe("auth.system_role_protected");
         role.Name.ShouldBe(name);
         AuditEntries.ShouldBeEmpty();
-        await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(default!, Ct);
+        await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(default(string)!, Ct);
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public sealed class UpdateRoleCommandHandlerTests : AdminRoleHandlerTestBase
         result.Error.Code.ShouldBe("auth.role_name_taken");
         result.Error.Parameters!["name"].ShouldBe("Helpdesk");
         AuditEntries.ShouldBeEmpty();
-        await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(default!, Ct);
+        await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(default(string)!, Ct);
     }
 
     [Fact]
