@@ -129,7 +129,7 @@ They also check that the header is at most 72 characters. Locally the hook lets 
 
 - **PR title = the squash-merge commit header**, so it must follow Section 2. CI checks it.
 - One concern per PR. Big features land as a stack of small PRs.
-- Fill in `.github/pull_request_template.md`: tests added, migration reviewed (a dropped or renamed column or table carries `[ContractMigration]`), ADR updated, no secrets, breaking API change noted, conventions followed. What counts as breaking, and how the checks work, is in [`docs/api-compatibility.md`](docs/api-compatibility.md): CI fails a pull request that breaks the OpenAPI document unless its title carries `!`.
+- Fill in `.github/pull_request_template.md`: tests added, migration reviewed (a dropped or renamed column or table carries `[ContractMigration]`), ADR updated, no secrets, breaking API change noted, conventions followed. What counts as breaking, and how the checks work, is in [`docs/api-compatibility.md`](docs/api-compatibility.md): CI fails a pull request that breaks the OpenAPI document unless its title carries `!`; editing the title does not re-run CI, so a `!` added to it takes effect on the next push.
 - Merge requires CI green (plus one approval once there are two or more maintainers). Merge with **squash**: the PR title becomes the commit header. The branch is deleted automatically.
 
 ## 4. Documentation is part of the change

@@ -1,6 +1,6 @@
 # Plan 5c: API and database versioning policy — design
 
-- Status: Draft 2026-10-29, awaiting review (approach B was approved in the design session; the decisions below follow from it)
+- Status: Approved 2026-10-29 (approach B and this design were approved in the design session); the final review amended 5.1, 5.3 and 5.4 to match the code
 - Date: 2026-10-29
 - Roadmap row: new, between 5b (Audit) and the social-login plan. It is not in `docs/blueprint-review.md` Section 6 yet; adding the row is part of this plan.
 - Builds on: Plans 1–5b, all merged (main `5d12796`); ADR 0008 (literal `/api/v1` routes), ADR 0011 (OpenAPI snapshot), ADR 0006 (EF Core migrations)
@@ -61,14 +61,15 @@ ADR 0031 records the decisions of section 3 and the trigger of ADR 0008; the pag
 
 ## 5. Enforcement
 
-### 5.1 Breaking-change gate (`OpenApiCompatibility`, in the integration test project)
+### 5.1 Breaking-change gate (`OpenApiCompatibility`, in the architecture test project, linked into the integration test project for the baseline test)
 
 - `OpenApiCompatibility.Compare(baselineJson, currentJson)` is a pure function returning `Breaking` and `Compatible` change lists, each entry naming the operation (`GET /api/v1/users/{id}`) and the change. It resolves `$ref` through `components.schemas`.
-- **Breaking:** an operation or path removed; a required request parameter or request-body property added; a request body that became required; a type or format changed on a request or response property; a response property removed; a response property that stopped being required; a success status code removed; a request enum value removed; a security requirement added to an operation that had none.
+- **Breaking:** an operation or path removed; a required request parameter or request-body property added; an existing request parameter or request-body property that became required; a request body that became required; a type or format changed on a request or response property; a response property removed; a response property that stopped being required; a success status code removed; a request enum value removed; a security requirement added to an operation that had none.
 - **Compatible, reported but not failing:** an operation added; an optional request parameter or property added; a response property added; a response enum value added. The page says a strict client may still reject the last two (the source document's section 3).
 - A test, `OpenApi_changes_are_compatible_with_the_baseline`, in `Documentation/`, reads the current document the way `OpenApiSnapshotTests` does and the baseline from the file named by `OPENAPI_BASELINE`. With no baseline set it skips itself, saying why, so a developer's `dotnet test` is unaffected. With `API_BREAKING_ACCEPTED=true` it prints the breaking changes and passes.
 - `ci.yml`, pull requests only: the checkout fetches the base branch, the base's `OpenApiSnapshotTests...verified.json` is written to a temp file, and the two variables are set (`API_BREAKING_ACCEPTED` from the title's `!:`). A push to `main` sets neither.
-- The classifier has its own unit-style tests, written first, one per rule above plus the `$ref`, `allOf` and nullable cases; its tests live beside it and need no Docker.
+- `oneOf` and `anyOf`: identical raw JSON has its members compared one by one; differing raw JSON is breaking as a whole.
+- The classifier has its own unit-style tests, written first, one per rule above plus the `$ref`, `allOf` and nullable cases; its tests live beside it in the architecture tests and need no Docker.
 
 ### 5.2 Migration guard (`MigrationTests`, architecture tests)
 
@@ -79,13 +80,13 @@ ADR 0031 records the decisions of section 3 and the trigger of ADR 0008; the pag
 
 ### 5.3 Usage data (`Web.Common`)
 
-- `EnrichRequest` in `ObservabilityExtensions` adds `ApiVersion` (an integer, from `^/api/v(\d+)(/|$)` on the path; absent off `/api`) and `ClientVersion` (the first `X-Client-Version` value when it is 1 to 64 characters of `A-Z a-z 0-9 . _ + -`; anything else is dropped, not logged, so a caller cannot forge log content or grow it).
+- `EnrichRequest` in `ObservabilityExtensions` adds `ApiVersion` (an integer, from `^/api/v([0-9]{1,4})(?:/|\z)` on the path, ASCII digits, at most four; absent off `/api`) and `ClientVersion` (the first `X-Client-Version` value when it matches `^[A-Za-z0-9._+\-]{1,64}\z`; anything else is dropped, not logged, so a caller cannot forge log content or grow it).
 - Nothing else reads the header. It is optional; a missing one is not an error. CORS already allows any header (`HttpSecurityExtensions`), so a browser client needs no configuration.
 - The `Serilog` request event is the only place these appear. `docs/services/api.md` lists both properties and the metric path (`http.route`).
 
 ### 5.4 Version register test (`ApiVersionRegisterTests`, architecture tests)
 
-Reads the committed OpenAPI snapshot, collects the distinct `/api/vN` prefixes of its paths, and reads the register table of the compatibility page. A prefix without a row fails; a row `Active` or `Deprecated` without a prefix fails. It needs no Docker, like the other documentation tests.
+Reads the committed OpenAPI snapshot, collects the distinct `/api/vN` prefixes of its paths, and reads the register table of the compatibility page. A prefix without a row fails; a row `Active` or `Deprecated` without a prefix fails; a row `Retired` whose prefix is still served fails. It needs no Docker, like the other documentation tests.
 
 ## 6. Where it lands
 
@@ -103,8 +104,8 @@ Reads the committed OpenAPI snapshot, collects the distinct `/api/vN` prefixes o
 | `docs/blueprint-review.md` Section 6 | Row 5c; the API-versioning row of Section 4 points to ADR 0031. |
 | `Infrastructure.Common` | `ContractMigrationAttribute`. |
 | `Web.Common` | `EnrichRequest` change and its tests. |
-| Integration tests | `OpenApiCompatibility`, its tests, the baseline test. |
-| Architecture tests | `MigrationTests`, `ApiVersionRegisterTests`. |
+| Integration tests | The baseline test (it links `OpenApiCompatibility`). |
+| Architecture tests | `OpenApiCompatibility` and its tests, `MigrationTests`, `ApiVersionRegisterTests`. |
 | `.github/workflows/ci.yml` | Baseline step for pull requests. |
 
 The template-smoke script must still pass: every new file is either under `docs/` (shipped as is) or code, and nothing mentions a concrete project name.
