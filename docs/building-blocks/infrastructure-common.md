@@ -219,6 +219,8 @@ services.AddExternalHttpClient("email-api", ResiliencePipelines.Critical);
 }
 ```
 
+The Auth module's social login does exactly this with two custom names, `AddExternalHttpClient("oidc-discovery", "oidc-discovery")` (a provider's discovery document and signing keys) and `AddExternalHttpClient("facebook-graph", "facebook-graph")` (Facebook's Graph API); both use the `external-default` values until `Resilience:Pipelines:oidc-discovery` or `Resilience:Pipelines:facebook-graph` says otherwise.
+
 A name that is not built in needs no further code: it starts from the `external-default` values and reads only the keys you set. Two clients on one pipeline name share its settings but each has its own breaker, so a provider that is down does not open the circuit of another. Then:
 
 - Catch `ExecutionRejectedException` where a failure must degrade the feature instead of failing the request.

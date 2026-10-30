@@ -30,6 +30,7 @@ using TemplateName.Modules.Auth.Contracts.Users;
 using TemplateName.Modules.Auth.Endpoints;
 using TemplateName.Modules.Auth.Infrastructure.Authorization;
 using TemplateName.Modules.Auth.Infrastructure.Contracts;
+using TemplateName.Modules.Auth.Infrastructure.External;
 using TemplateName.Modules.Auth.Infrastructure.Observability;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
 using TemplateName.Modules.Auth.Infrastructure.Retention;
@@ -53,6 +54,7 @@ public static class AuthModule
     /// access tokens with the JWT bearer handler as the default authentication scheme, the permission checker with its cache, the
     /// permission source and the seeder, two-step verification (<c>Auth:Mfa</c>, the TOTP secret protector, the MFA repositories,
     /// the factor verifier, the recovery-code issuer and the MFA change effects), step-up (<c>Auth:StepUp</c> and its policy),
+    /// social login's configuration (<c>Auth:External</c>, the provider catalog and the <c>oidc-discovery</c> and <c>facebook-graph</c> HTTP clients),
     /// the retention of time-bound rows (<c>Auth:Retention</c>) with the six recurring cleanup jobs that enforce it, and the Data Protection
     /// key ring stored in <c>auth.DataProtectionKeys</c>. Call it after
     /// <c>AddInfrastructureCommon</c> and before <c>AddApplicationDecorators</c>.
@@ -116,6 +118,7 @@ public static class AuthModule
         AddAccessTokens(services, configuration);
         AddPermissions(services, configuration);
         AddMfa(services, configuration);
+        AddExternalLogin(services, configuration);
         AddRetention(services, configuration);
 
         // One key ring for every instance, so an outbox event protected by one instance can be read by another (ADR 0017).
@@ -229,6 +232,26 @@ public static class AuthModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddScoped<StepUpPolicy>();
+    }
+
+    /// <summary>
+    /// Registers social login's configuration: <c>Auth:External</c> (<c>AllowSignUp</c>, <c>MaxTokenAge</c> and the providers), validated on
+    /// start by data annotations and by <see cref="ExternalLoginOptionsValidator"/> (only enabled providers are checked; a message names the key,
+    /// never a value), the <see cref="IExternalProviderCatalog"/> built from it, and the two named HTTP clients, <c>oidc-discovery</c> and
+    /// <c>facebook-graph</c>, each behind a resilience pipeline of the same name.
+    /// </summary>
+    internal static void AddExternalLogin(IServiceCollection services, IConfiguration configuration)
+    {
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<ExternalLoginOptions>, ExternalLoginOptionsValidator>());
+        services.AddOptions<ExternalLoginOptions>()
+            .Bind(configuration.GetSection(ExternalLoginOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddSingleton<IExternalProviderCatalog, ExternalProviderCatalog>();
+
+        // A pipeline name that is not built in starts from the external-default values and needs no other code (ADR 0029).
+        services.AddExternalHttpClient(ExternalHttpClients.OidcDiscovery, ExternalHttpClients.OidcDiscovery);
+        services.AddExternalHttpClient(ExternalHttpClients.FacebookGraph, ExternalHttpClients.FacebookGraph);
     }
 
     /// <summary>
