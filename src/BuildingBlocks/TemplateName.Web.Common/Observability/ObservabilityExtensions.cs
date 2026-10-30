@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
@@ -17,9 +19,10 @@ using TemplateName.Application.Common.Identity;
 
 namespace TemplateName.Web.Common.Observability;
 
-public static class ObservabilityExtensions
+public static partial class ObservabilityExtensions
 {
     internal const string OtlpEndpointKey = "OTEL_EXPORTER_OTLP_ENDPOINT";
+    internal const string ClientVersionHeader = "X-Client-Version";
 
     private const string OtlpProtocolKey = "OTEL_EXPORTER_OTLP_PROTOCOL";
     private const string HttpProtobufProtocol = "http/protobuf";
@@ -64,7 +67,8 @@ public static class ObservabilityExtensions
     }
 
     /// <summary>
-    /// Logs one structured event per request (health checks at <c>Verbose</c>) with the current <c>UserId</c> attached. Its
+    /// Logs one structured event per request (health checks at <c>Verbose</c>) with the current <c>UserId</c>, the <c>ApiVersion</c> of
+    /// a <c>/api/v{n}</c> route and a well-formed <c>X-Client-Version</c> header value (as <c>ClientVersion</c>) attached. Its
     /// <c>RequestPath</c> is the path alone: the query string, where a SignalR hub ticket travels as <c>access_token</c>, is never part
     /// of it (Serilog's <c>IncludeQueryInRequestPath</c> stays off).
     /// </summary>
@@ -97,7 +101,28 @@ public static class ObservabilityExtensions
         {
             diagnosticContext.Set("UserId", userId);
         }
+
+        var apiVersion = ApiVersionPattern().Match(httpContext.Request.Path.Value ?? string.Empty);
+        if (apiVersion.Success)
+        {
+            // One to four digits, so the parse cannot overflow.
+            diagnosticContext.Set("ApiVersion", int.Parse(apiVersion.Groups[1].Value, CultureInfo.InvariantCulture));
+        }
+
+        // The header is client-controlled: only a short token of safe characters reaches the log, never raw text.
+        var clientVersion = httpContext.Request.Headers[ClientVersionHeader].FirstOrDefault();
+        if (clientVersion is not null && ClientVersionPattern().IsMatch(clientVersion))
+        {
+            diagnosticContext.Set("ClientVersion", clientVersion);
+        }
     }
+
+    // \z, not $: in .NET, $ also matches before a trailing newline.
+    [GeneratedRegex(@"^/api/v(\d{1,4})(?:/|\z)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ApiVersionPattern();
+
+    [GeneratedRegex(@"^[A-Za-z0-9._+\-]{1,64}\z")]
+    private static partial Regex ClientVersionPattern();
 
     private static void ConfigureSerilog(
         LoggerConfiguration loggerConfiguration,

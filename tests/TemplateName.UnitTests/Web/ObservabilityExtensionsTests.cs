@@ -66,6 +66,77 @@ public sealed class ObservabilityExtensionsTests
         diagnosticContext.DidNotReceiveWithAnyArgs().Set(default!, default(object), default);
     }
 
+    [Theory]
+    [InlineData("/api/v1/auth/login", 1)]
+    [InlineData("/api/v1", 1)]
+    [InlineData("/api/v2/x/", 2)]
+    [InlineData("/api/v12/x", 12)]
+    [InlineData("/API/V1/x", 1)]
+    public void Request_enrichment_adds_the_api_version_of_an_api_route(string path, int expected)
+    {
+        var diagnosticContext = Substitute.For<IDiagnosticContext>();
+
+        ObservabilityExtensions.EnrichRequest(diagnosticContext, ContextFor(path));
+
+        diagnosticContext.Received(1).Set("ApiVersion", expected, destructureObjects: false);
+    }
+
+    [Theory]
+    [InlineData("/health/live")]
+    [InlineData("/openapi/v1.json")]
+    [InlineData("/api/version")]
+    [InlineData("/api/v1x/y")]
+    [InlineData("/apiv1")]
+    [InlineData("/api/v99999999999/x")]
+    public void Request_enrichment_adds_no_api_version_off_the_versioned_api(string path)
+    {
+        var diagnosticContext = Substitute.For<IDiagnosticContext>();
+
+        ObservabilityExtensions.EnrichRequest(diagnosticContext, ContextFor(path));
+
+        diagnosticContext.DidNotReceive().Set("ApiVersion", Arg.Any<object?>(), Arg.Any<bool>());
+    }
+
+    [Theory]
+    [InlineData("1.4.2")]
+    [InlineData("2.0.0+build.5")]
+    [InlineData("abc_DEF-1")]
+    [InlineData("0123456789012345678901234567890123456789012345678901234567890123")]
+    public void Request_enrichment_adds_a_valid_client_version(string value)
+    {
+        var diagnosticContext = Substitute.For<IDiagnosticContext>();
+
+        ObservabilityExtensions.EnrichRequest(diagnosticContext, ContextFor("/api/v1/x", value));
+
+        diagnosticContext.Received(1).Set("ClientVersion", value, destructureObjects: false);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("01234567890123456789012345678901234567890123456789012345678901234")]
+    [InlineData("1.0 beta")]
+    [InlineData("1.0\r\nX: y")]
+    [InlineData("1.0\n")]
+    [InlineData("é1")]
+    public void Request_enrichment_drops_an_invalid_client_version(string value)
+    {
+        var diagnosticContext = Substitute.For<IDiagnosticContext>();
+
+        ObservabilityExtensions.EnrichRequest(diagnosticContext, ContextFor("/api/v1/x", value));
+
+        diagnosticContext.DidNotReceive().Set("ClientVersion", Arg.Any<object?>(), Arg.Any<bool>());
+    }
+
+    [Fact]
+    public void Request_enrichment_uses_the_first_client_version_header_value()
+    {
+        var diagnosticContext = Substitute.For<IDiagnosticContext>();
+
+        ObservabilityExtensions.EnrichRequest(diagnosticContext, ContextFor("/api/v1/x", "1.0", "2.0"));
+
+        diagnosticContext.Received(1).Set("ClientVersion", "1.0", destructureObjects: false);
+    }
+
     [Fact]
     public async Task Telemetry_providers_are_registered_only_when_an_otlp_endpoint_is_configured()
     {
@@ -83,6 +154,18 @@ public sealed class ObservabilityExtensionsTests
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(userId);
         return new DefaultHttpContext { RequestServices = new ServiceCollection().AddSingleton(currentUser).BuildServiceProvider() };
+    }
+
+    private static DefaultHttpContext ContextFor(string path, params string[] clientVersions)
+    {
+        var context = ContextWithUser(null);
+        context.Request.Path = path;
+        if (clientVersions.Length > 0)
+        {
+            context.Request.Headers[ObservabilityExtensions.ClientVersionHeader] = clientVersions;
+        }
+
+        return context;
     }
 
     private static WebApplication BuildApp(string endpoint)
