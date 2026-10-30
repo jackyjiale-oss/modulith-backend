@@ -42,6 +42,8 @@ internal sealed class UserExternalLogin
 
     public DateTimeOffset LinkedAt { get; private set; }
 
+    /// <summary>The last sign-in with this login. Not audited: it changes at every sign-in (like <c>User.LastLoginAt</c>); the security log has them.</summary>
+    [AuditIgnore]
     public DateTimeOffset? LastUsedAt { get; private set; }
 
     /// <summary>The form a provider name is stored and compared in: lower-case, invariant.</summary>

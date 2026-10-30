@@ -76,7 +76,7 @@ public sealed class AuditingTests
         ignored["LeaveRequest"].ShouldBeEmpty();
         ignored["RolePermission"].ShouldBeEmpty();
         ignored["UserRole"].ShouldBeEmpty();
-        ignored["UserExternalLogin"].ShouldBeEmpty();
+        ignored["UserExternalLogin"].ShouldBe(["LastUsedAt"]);
         AuditedTypes().SelectMany(type => MarkedPropertyNames(type, typeof(AuditMaskAttribute))).ShouldBeEmpty();
     }
 
