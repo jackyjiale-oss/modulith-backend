@@ -350,6 +350,20 @@ public sealed class LoginCommandHandlerTests
     }
 
     [Fact]
+    public async Task Password_login_issues_a_pwd_challenge()
+    {
+        var user = GivenUser();
+        GivenMfa(user);
+        _passwordHasher.Verify(StoredHash, Password).Returns(PasswordVerification.Success);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        // The password is the first factor the verify step builds its amr on (pwd otp mfa).
+        result.Value.MfaRequired.ShouldBeTrue();
+        _addedChallenges.ShouldHaveSingleItem().FirstFactor.ShouldBe(AuthenticationMethods.Password);
+    }
+
+    [Fact]
     public async Task Password_step_does_not_reset_the_failure_count_of_an_mfa_account()
     {
         var user = GivenUser();

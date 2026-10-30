@@ -158,6 +158,67 @@ public sealed class VerifyMfaCommandHandlerTests
     }
 
     [Fact]
+    public async Task Verify_of_a_pwd_challenge_still_gives_pwd_otp_mfa()
+    {
+        _challenge.FirstFactor.ShouldBe(AuthenticationMethods.Password);
+
+        var result = await _sut.HandleAsync(Command(code: CurrentCode), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        _addedSessions.ShouldHaveSingleItem().AuthMethods.ShouldBe("pwd otp mfa");
+        _tokenRequests.ShouldHaveSingleItem().AuthMethods.ShouldBe("pwd otp mfa");
+    }
+
+    [Fact]
+    public async Task Verify_of_a_fed_challenge_gives_fed_otp_mfa()
+    {
+        var challenge = GivenFederatedChallenge();
+
+        var result = await _sut.HandleAsync(Command(code: CurrentCode), Ct);
+
+        // The first factor was an identity provider's proof, so the session says so: the code is the second factor on top of it.
+        result.IsSuccess.ShouldBeTrue();
+        _addedSessions.ShouldHaveSingleItem().AuthMethods.ShouldBe("fed otp mfa");
+        _tokenRequests.ShouldHaveSingleItem().AuthMethods.ShouldBe("fed otp mfa");
+        await _challenges.Received(1).TryConsumeAsync(challenge.Id, Now, 5, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Verify_of_a_fed_challenge_with_a_recovery_code_gives_fed_rcvr_mfa()
+    {
+        GivenFederatedChallenge();
+        var code = RecoveryCode.Create(_user.Id, RecoveryCodeFormat.Hash("ABCDEFGHJKMNPQRS"), IssuedAt);
+        _recoveryCodes.FindUnusedAsync(_user.Id, Arg.Is<byte[]>(hash => hash.SequenceEqual(code.CodeHash)), Arg.Any<CancellationToken>()).Returns(code);
+        _recoveryCodes.TryUseAsync(code.Id, Now, CancellationToken.None).Returns(true);
+
+        var result = await _sut.HandleAsync(Command(recoveryCode: "abcd efgh jkmn pqrs"), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        _addedSessions.ShouldHaveSingleItem().AuthMethods.ShouldBe("fed rcvr mfa");
+        _tokenRequests.ShouldHaveSingleItem().AuthMethods.ShouldBe("fed rcvr mfa");
+        _user.DomainEvents.ShouldHaveSingleItem().ShouldBe(new MfaChangedDomainEvent(_user.Id, MfaChange.RecoveryCodeUsed));
+    }
+
+    [Fact]
+    public async Task Remember_device_is_ignored_for_a_fed_challenge()
+    {
+        GivenFederatedChallenge();
+
+        var result = await _sut.HandleAsync(Command(code: CurrentCode) with { RememberDevice = true }, Ct);
+
+        // A trusted device replaces the code only, never the first factor, so remembering one after a federated sign-in would mean
+        // nothing: the sign-in completes as without rememberDevice, and no token is generated, stored, audited or answered.
+        result.IsSuccess.ShouldBeTrue();
+        result.Value.TrustedDeviceToken.ShouldBeNull();
+        result.Value.TrustedDeviceExpiresAt.ShouldBeNull();
+        _trustedDevices.DidNotReceiveWithAnyArgs().Add(default!);
+        _addedDevices.ShouldBeEmpty();
+        _tokenService.Received(1).Generate();
+        _auditEntries.ShouldAllBe(entry => entry.EventType != AuthAuditEvents.TrustedDeviceAdded);
+        _addedSessions.ShouldHaveSingleItem().AuthMethods.ShouldBe("fed otp mfa");
+    }
+
+    [Fact]
     public async Task Wrong_code_counts_on_the_challenge_and_the_user()
     {
         var wrongCode = Totp.ComputeCode(_secret, Totp.TimeStepAt(Now) + 2);
@@ -441,6 +502,16 @@ public sealed class VerifyMfaCommandHandlerTests
         _addedDevices[0].UserId.ShouldBe(_user.Id);
         _addedDevices[1].UserId.ShouldBe(reread.Id);
         _addedDevices[1].SecurityStamp.ShouldBe(_challenge.SecurityStamp);
+    }
+
+    // Replaces the password challenge the constructor set up with one issued after a federated first step (same token and stamp).
+    private MfaChallenge GivenFederatedChallenge()
+    {
+        var challenge = MfaChallenge.Issue(
+            _user.Id, ChallengeHash, _user.SecurityStamp, DeviceName, AuthenticationMethods.Federated, TimeSpan.FromMinutes(5), IssuedAt);
+        _challenges.GetByTokenHashAsync(ChallengeHash, Arg.Any<CancellationToken>()).Returns(challenge);
+        _challenges.TryConsumeAsync(challenge.Id, Now, 5, Arg.Any<CancellationToken>()).Returns(true);
+        return challenge;
     }
 
     private VerifyMfaCommandHandler CreateHandler(MfaOptions mfaOptions)
