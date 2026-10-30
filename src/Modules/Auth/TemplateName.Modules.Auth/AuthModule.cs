@@ -241,7 +241,7 @@ public static class AuthModule
     /// start by data annotations and by <see cref="ExternalLoginOptionsValidator"/> (only enabled providers are checked; a message names the key,
     /// never a value), the <see cref="IExternalProviderCatalog"/> built from it, the two named HTTP clients, <c>oidc-discovery</c> and
     /// <c>facebook-graph</c>, each behind a resilience pipeline of the same name, and the proof verification: <see cref="OidcIdTokenVerifier"/>,
-    /// <see cref="FacebookAccessTokenVerifier"/> (Facebook's access tokens, through Graph), the <see cref="IExternalProofReplayGuard"/> on <see cref="HybridCache"/> (registered by <see cref="AddPermissions"/>) and the
+    /// <see cref="FacebookAccessTokenVerifier"/> (Facebook's access tokens, through Graph), the <see cref="IExternalProofReplayGuard"/> (the bounded in-process <see cref="ExternalNonceGate"/>, then <see cref="HybridCache"/>, registered by <see cref="AddPermissions"/>) and the
     /// <see cref="IExternalIdentityVerifier"/> in front of both.
     /// </summary>
     internal static void AddExternalLogin(IServiceCollection services, IConfiguration configuration)
@@ -260,6 +260,7 @@ public static class AuthModule
         // Singletons: the OIDC verifier keeps one metadata and key cache per provider for the life of the process.
         services.AddSingleton<OidcIdTokenVerifier>();
         services.AddSingleton<FacebookAccessTokenVerifier>();
+        services.AddSingleton(serviceProvider => new ExternalNonceGate(serviceProvider.GetRequiredService<TimeProvider>()));
         services.AddSingleton<IExternalProofReplayGuard, HybridCacheExternalProofReplayGuard>();
         services.AddSingleton<IExternalIdentityVerifier, ExternalIdentityVerifier>();
     }

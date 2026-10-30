@@ -1,7 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using TemplateName.Infrastructure.Common.Caching;
 using TemplateName.Modules.Auth;
@@ -85,6 +88,56 @@ public sealed class ExternalProofReplayGuardTests
         claims.Count(claimed => claimed).ShouldBe(1);
     }
 
+    [Theory]
+    [InlineData("memory")]
+    [InlineData("none")]
+    public async Task Claims_released_together_let_exactly_one_through_in_every_round(string cachingProvider)
+    {
+        // Strictly single use within a process: 64 claimers of one nonce are held on one gate and released together, 200 rounds with a new
+        // nonce each. HybridCache's stampede protection alone lets a claim that arrives just after the factory finished run it again.
+        const int Claimers = 64;
+        const int Rounds = 200;
+        using var host = new Host(cachingProvider: cachingProvider);
+        var winnersPerRound = new int[Rounds];
+
+        for (var round = 0; round < Rounds; round++)
+        {
+            var nonce = $"{Nonce}-round-{round:D3}";
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var claims = Enumerable.Range(0, Claimers)
+                .Select(_ => Task.Run(async () =>
+                {
+                    await release.Task;
+                    return await host.ClaimAsync("google", nonce);
+                }))
+                .ToArray();
+
+            release.SetResult();
+            winnersPerRound[round] = (await Task.WhenAll(claims)).Count(claimed => claimed);
+        }
+
+        winnersPerRound.Select((winners, round) => (winners, round)).Where(entry => entry.winners != 1)
+            .ShouldBeEmpty("every round must have exactly one winning claim");
+    }
+
+    [Fact]
+    public async Task A_full_gate_refuses_new_claims_keeps_recent_ones_spent_and_frees_up_after_the_window()
+    {
+        using var host = new Host();
+        var guard = host.GuardWithCapacity(2);
+
+        (await guard.TryClaimAsync("google", Nonce + "-1", TestContext.Current.CancellationToken)).ShouldBeTrue();
+        (await guard.TryClaimAsync("apple", Nonce + "-1", TestContext.Current.CancellationToken)).ShouldBeTrue();
+
+        // Fail closed: a third live claim is refused rather than evicting one of the two, which would reopen it to replay.
+        (await guard.TryClaimAsync("google", Nonce + "-2", TestContext.Current.CancellationToken)).ShouldBeFalse();
+        (await guard.TryClaimAsync("google", Nonce + "-1", TestContext.Current.CancellationToken)).ShouldBeFalse();
+        (await guard.TryClaimAsync("apple", Nonce + "-1", TestContext.Current.CancellationToken)).ShouldBeFalse();
+
+        host.Time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(30));
+        (await guard.TryClaimAsync("google", Nonce + "-2", TestContext.Current.CancellationToken)).ShouldBeTrue();
+    }
+
     [Fact]
     public void The_key_is_the_hex_sha256_of_provider_and_nonce_under_auth_ext_nonce()
     {
@@ -125,6 +178,14 @@ public sealed class ExternalProofReplayGuardTests
         public IExternalProofReplayGuard Guard { get; }
 
         public Task<bool> ClaimAsync(string provider, string nonce) => Guard.TryClaimAsync(provider, nonce, TestContext.Current.CancellationToken);
+
+        /// <summary>A guard over this host's cache and options with its own in-process gate of <paramref name="capacity"/> keys.</summary>
+        public HybridCacheExternalProofReplayGuard GuardWithCapacity(int capacity) => new(
+            _services.GetRequiredService<HybridCache>(),
+            new ExternalNonceGate(Time, capacity),
+            _services.GetRequiredService<IOptions<ExternalLoginOptions>>(),
+            _services.GetRequiredService<IOptions<JwtOptions>>(),
+            NullLogger<HybridCacheExternalProofReplayGuard>.Instance);
 
         public void Dispose() => _services.Dispose();
     }
