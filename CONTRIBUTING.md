@@ -129,7 +129,7 @@ They also check that the header is at most 72 characters. Locally the hook lets 
 
 - **PR title = the squash-merge commit header**, so it must follow Section 2. CI checks it.
 - One concern per PR. Big features land as a stack of small PRs.
-- Fill in `.github/pull_request_template.md`: tests added, migration reviewed, ADR updated, no secrets, breaking API change noted, conventions followed.
+- Fill in `.github/pull_request_template.md`: tests added, migration reviewed (a dropped or renamed column or table carries `[ContractMigration]`), ADR updated, no secrets, breaking API change noted, conventions followed. What counts as breaking, and how the checks work, is in [`docs/api-compatibility.md`](docs/api-compatibility.md): CI fails a pull request that breaks the OpenAPI document unless its title carries `!`; editing the title does not re-run CI, so a `!` added to it takes effect on the next push.
 - Merge requires CI green (plus one approval once there are two or more maintainers). Merge with **squash**: the PR title becomes the commit header. The branch is deleted automatically.
 
 ## 4. Documentation is part of the change
@@ -143,6 +143,7 @@ Update the matching document **in the same PR** when you change any of these:
 | host pipeline, configuration sections, health checks, hosting | `docs/services/api.md` |
 | module boundaries or cross-module flows | `docs/architecture/overview.md` |
 | a significant or hard-to-reverse decision | a new `docs/adr/NNNN-*.md` |
+| an API version, or the compatibility rules for a contract or schema change | `docs/api-compatibility.md` (including its version register) |
 | how agents should work in this repo | `CLAUDE.md` |
 
 A new module gets `docs/modules/{module}.md` copied from `docs/modules/_template.md`. Tests fail when a module or building block has no document, a module document misses a required section, or an error code or endpoint isn't documented.

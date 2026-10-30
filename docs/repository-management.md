@@ -51,6 +51,8 @@ Required status checks must already exist (have run at least once), or GitHub bl
 
 The check names are job names: `build-test`, `template-smoke` and `licenses` run in `.github/workflows/ci.yml`; `commit-lint` (the PR-title check) runs in `.github/workflows/pr-title.yml`, so that editing a PR title re-runs only it.
 
+On a pull request the `build-test` job also compares the OpenAPI document with the base branch's (`OpenApiBaselineTests`, [`api-compatibility.md`](api-compatibility.md)) and fails on a breaking change unless the PR title carries `!` (`feat(api)!: …`); the title is read when the job runs, so push again after adding the `!`.
+
 `enforce_admins` stays **off** so the owner can repair a broken `main` in an emergency. Use it only for that.
 
 ## 4. Day-to-day workflow

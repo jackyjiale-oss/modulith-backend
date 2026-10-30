@@ -42,10 +42,12 @@ dotnet ef migrations add {Verb}{What} \
 - No new package without Central Package Management (`Directory.Packages.props`) and an allowed licence (`build/licenses/`); also read its terms for usage fees.
 - Never use `--no-verify`.
 - Never edit a migration that has been applied; add a new one.
+- Never remove or rename a column or table in the same change that stops using it; contract in a later release with `[ContractMigration]` ([`docs/api-compatibility.md`](docs/api-compatibility.md)).
 
 ## Read before editing
 
 - [`docs/coding-conventions.md`](docs/coding-conventions.md)
+- [`docs/api-compatibility.md`](docs/api-compatibility.md) (before changing a request or response shape, an endpoint, a column or a table)
 - [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - [`docs/README.md`](docs/README.md) (index of every document)
 - [`docs/architecture/overview.md`](docs/architecture/overview.md)

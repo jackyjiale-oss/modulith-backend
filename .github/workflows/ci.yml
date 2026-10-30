@@ -34,8 +34,10 @@ jobs:
       pull-requests: write
       checks: write
     steps:
+      # Full history, so the base branch's OpenAPI snapshot is there for the breaking-change gate (the token is not kept to fetch it later).
       - uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-dotnet@v6
@@ -52,6 +54,27 @@ jobs:
 
       - name: Build
         run: dotnet build --no-restore -c Release
+
+      # Breaking-change gate (OpenApiBaselineTests, docs/api-compatibility.md), pull requests only: the base branch's OpenAPI snapshot
+      # is the baseline, and a `!` in the title (feat(api)!: ...) accepts an intended break. Editing the title does not re-run this
+      # workflow, so push again after adding the `!`. The title reaches the script only through env, never interpolated into it.
+      - name: OpenAPI baseline
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          baseline="$RUNNER_TEMP/openapi-baseline.json"
+          # Must match the snapshot path of OpenApiSnapshotTests and ApiVersionRegisterTests (and OpenApiCompatibilityTests).
+          snapshot="tests/TemplateName.IntegrationTests/Documentation/OpenApiSnapshotTests.OpenApi_document_matches_snapshot.verified.json"
+          if git show "origin/$BASE_REF:$snapshot" > "$baseline"; then
+            echo "OPENAPI_BASELINE=$baseline" >> "$GITHUB_ENV"
+          else
+            echo "::warning title=OpenAPI baseline::The base branch has no OpenAPI snapshot, so the breaking-change gate is skipped."
+          fi
+          if printf '%s' "$PR_TITLE" | grep -Eq '^[a-z]+(\([^)]*\))?!:'; then
+            echo "API_BREAKING_ACCEPTED=true" >> "$GITHUB_ENV"
+          fi
 
       # Unit, architecture and integration tests (Testcontainers uses the runner's Docker).
       # Coverage scope lives in coverage.testconfig.json; TRX reports feed the test reporter.

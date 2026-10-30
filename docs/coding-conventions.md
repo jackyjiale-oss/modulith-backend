@@ -158,7 +158,7 @@ Every type plays one of these roles. Its name follows the role's pattern, and it
 | GitHub workflows | kebab-case `.yml`; reusable workflows prefixed `_` | `ci.yml`, `_reusable-dotnet-build.yml` |
 | App settings | `appsettings.json`, `appsettings.{Environment}.json`; Development settings are local and git-ignored (`appsettings.Development.json` is never committed) | `appsettings.Production.json` |
 | Resources | `{Marker}.resx`, `{Marker}.{culture}.resx` | `SampleErrorMessages.zh-Hans.resx` |
-| EF migrations | PascalCase `{Verb}{What}`; the first one in a module is `Initial{Module}` | `InitialSample`, `AddApproverIdToLeaveRequests` |
+| EF migrations | PascalCase `{Verb}{What}`; the first one in a module is `Initial{Module}`; a migration that drops or renames a column or table carries `[ContractMigration]` | `InitialSample`, `AddApproverIdToLeaveRequests` |
 | Load tests | kebab-case `.js` | `tests/load/submit-leave-request.js` |
 | Docker | `Dockerfile`, `docker-compose.yml`, `.env.example` | — |
 
@@ -166,7 +166,7 @@ Every type plays one of these roles. Its name follows the role's pattern, and it
 
 ## 7. Names that leave the process
 
-These are part of public contracts or operations. Changing one is a breaking change.
+These are part of public contracts or operations. Changing one is a breaking change. For one that a client sees (a route, a JSON property, an enum value, a header, an error code), that means a new API version when old and new clients must coexist, and otherwise a pull request marked `!`; see [`api-compatibility.md`](api-compatibility.md). A database name is not a client contract, but dropping or renaming a column or table follows the contraction rule on that page.
 
 | Item | Convention | Example |
 |---|---|---|

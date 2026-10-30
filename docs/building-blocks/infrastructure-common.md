@@ -65,6 +65,7 @@ A value other than the three (any case) fails on start. `HybridCache` itself is 
 - **Dapper reads `datetime2` as `DateTimeKind.Unspecified`;** the columns hold UTC, so query handlers mark them `DateTimeKind.Utc` before returning them. `DateOnly` works through the registered type handler.
 - **Concurrency:** a `DbUpdateConcurrencyException` (for example a stale `RowVersion`) becomes 409 `concurrency.conflict`.
 - **Retries:** contexts use SQL Server's retrying execution strategy; a handler that opens its own transaction must run it through `Database.CreateExecutionStrategy()`.
+- **Contracting migrations are marked.** A migration whose `Up` drops or renames a column or table (the contract step of expand and contract) carries `[ContractMigration("reason")]` (`TemplateName.Infrastructure.Common.Persistence`; the reason names the release that stopped using it and is required). The architecture test `Every_migration_in_the_repository_is_additive_or_marked` reads the `Up` operations of every migration in the solution and fails for a contracting migration without the marker, for a marker on a migration that contracts nothing, and for a migration it cannot read (its constructor or its `Up` throws). `Down` is not read and altering a column is not checked.
 
 ## Outbox
 
