@@ -17,8 +17,17 @@ internal sealed record ExternalProof(string? IdToken, string? AccessToken, strin
     /// <summary>The longest <see cref="Nonce"/> accepted.</summary>
     public const int MaxNonceLength = 256;
 
+    /// <summary>
+    /// The proof of a request: a blank value (empty or white space) is absent, as the validators count it, so the verifier, which tests
+    /// for null or empty, never sees a white-space proof that passed validation as the missing one.
+    /// </summary>
+    public static ExternalProof Create(string? idToken, string? accessToken, string? nonce)
+        => new(NullIfBlank(idToken), NullIfBlank(accessToken), NullIfBlank(nonce));
+
     /// <summary>The type name only: the generated <c>ToString</c> would print the token and the nonce.</summary>
     public override string ToString() => nameof(ExternalProof);
+
+    private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 }
 
 /// <summary>

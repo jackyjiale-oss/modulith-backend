@@ -84,7 +84,7 @@ internal sealed class ExternalLoginCommandHandler(
         }
 
         // The validator counts a blank value as absent, so the verifier (which tests for null or empty) must see it as absent too.
-        var proof = new ExternalProof(NullIfBlank(command.IdToken), NullIfBlank(command.AccessToken), NullIfBlank(command.Nonce));
+        var proof = ExternalProof.Create(command.IdToken, command.AccessToken, command.Nonce);
         var verification = await verifier.VerifyAsync(provider, proof, cancellationToken);
         if (verification.IsFailure)
         {
@@ -344,35 +344,45 @@ internal sealed class ExternalLoginCommandHandler(
                 attempt.Provider,
                 user,
                 UserErrors.InvalidCredentials,
+                LoginCommandHandler.LockedFailureReason,
                 ExternalLoginOutcome.Locked,
                 attempt.Now,
-                cancellationToken,
-                failureReason: LoginCommandHandler.LockedFailureReason);
+                cancellationToken);
         }
 
         return null;
     }
 
-    /// <summary>
-    /// Audits and counts a failure and answers <paramref name="error"/>. Only the audit row is saved: every caller reaches this before it
-    /// changes anything, or after a refused save emptied the change tracker. The audit reason is the error's code unless a caller names
-    /// a more exact one (<paramref name="failureReason"/>).
-    /// </summary>
-    private async Task<Result<LoginResult>> RejectAsync(
+    /// <summary>Audits and counts a failure and answers <paramref name="error"/>, whose code is the audit reason.</summary>
+    private Task<Result<LoginResult>> RejectAsync(
         ExternalProvider? provider,
         User? user,
         Error error,
         ExternalLoginOutcome outcome,
         DateTimeOffset now,
-        CancellationToken cancellationToken,
-        string? failureReason = null)
+        CancellationToken cancellationToken)
+        => RejectAsync(provider, user, error, error.Code, outcome, now, cancellationToken);
+
+    /// <summary>
+    /// Audits and counts a failure and answers <paramref name="error"/>, with <paramref name="failureReason"/> as the audit reason (a
+    /// locked account answers the generic error but audits <c>locked</c>). Only the audit row is saved: every caller reaches this before
+    /// it changes anything, or after a refused save emptied the change tracker.
+    /// </summary>
+    private async Task<Result<LoginResult>> RejectAsync(
+        ExternalProvider? provider,
+        User? user,
+        Error error,
+        string failureReason,
+        ExternalLoginOutcome outcome,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
     {
         auditWriter.Record(AuthAuditLog.Create(
             AuthAuditEvents.ExternalLoginFailed,
             succeeded: false,
             now,
             userId: user?.Id,
-            failureReason: failureReason ?? error.Code,
+            failureReason: failureReason,
             details: provider is null ? null : ProviderDetails(provider)));
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -380,8 +390,6 @@ internal sealed class ExternalLoginCommandHandler(
 
         return Result.Failure<LoginResult>(error);
     }
-
-    private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
     private static string ProviderDetails(ExternalProvider provider) => JsonSerializer.Serialize(new { provider = provider.Name });
 

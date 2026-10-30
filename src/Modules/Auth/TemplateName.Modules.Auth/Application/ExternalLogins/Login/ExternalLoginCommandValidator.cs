@@ -15,35 +15,18 @@ namespace TemplateName.Modules.Auth.Application.ExternalLogins.Login;
 internal sealed class ExternalLoginCommandValidator : AbstractValidator<ExternalLoginCommand>
 {
     /// <summary>The key of the "exactly one proof" error in the validation problem's <c>errors</c>.</summary>
-    internal const string ProofPropertyName = "proof";
+    internal const string ProofPropertyName = ExternalProofRules.ProofPropertyName;
 
     public ExternalLoginCommandValidator(IExternalProviderCatalog catalog)
     {
         ArgumentNullException.ThrowIfNull(catalog);
 
-        RuleFor(command => command)
-            .Must(command => string.IsNullOrWhiteSpace(command.IdToken) != string.IsNullOrWhiteSpace(command.AccessToken))
-            .OverridePropertyName(ProofPropertyName)
-            .WithMessage("Exactly one of 'idToken' and 'accessToken' is required.");
-
-        RuleFor(command => command.IdToken)
-            .MaximumLength(ExternalProof.MaxTokenLength);
-
-        RuleFor(command => command.AccessToken)
-            .Cascade(CascadeMode.Stop)
-            .MaximumLength(ExternalProof.MaxTokenLength)
-            .Must((command, _) => catalog.Find(command.Provider) is not { Kind: not ExternalProviderKind.Facebook })
-            .When(command => !string.IsNullOrWhiteSpace(command.AccessToken))
-            .WithMessage("'accessToken' is accepted only by the Facebook provider; send an 'idToken' and its 'nonce'.");
-
-        RuleFor(command => command.Nonce)
-            .NotEmpty()
-            .When(command => !string.IsNullOrWhiteSpace(command.IdToken))
-            .WithMessage("'nonce' is required with an 'idToken'.");
-
-        RuleFor(command => command.Nonce)
-            .Length(ExternalProof.MinNonceLength, ExternalProof.MaxNonceLength)
-            .When(command => !string.IsNullOrWhiteSpace(command.Nonce));
+        this.AddProofRules(
+            catalog,
+            command => command.Provider,
+            command => command.IdToken,
+            command => command.AccessToken,
+            command => command.Nonce);
 
         RuleFor(command => command.DisplayName)
             .MaximumLength(User.MaxDisplayNameLength);
