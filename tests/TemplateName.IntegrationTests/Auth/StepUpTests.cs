@@ -264,7 +264,12 @@ public sealed class StepUpTests(IntegrationTestWebAppFactory factory) : Integrat
         Factory.Time.Advance(TimeSpan.FromMinutes(20));
         var now = Factory.Time.GetUtcNow();
 
-        using var response = await StepUpWithProofAsync(social.AccessToken);
+        // The sign-up's access token has expired by now; a refresh of the same session carries the old auth_time.
+        var renewed = await RefreshAsync(social);
+        new JsonWebToken(renewed).GetClaim("auth_time").Value
+            .ShouldBe(now.AddMinutes(-20).ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture));
+
+        using var response = await StepUpWithProofAsync(renewed);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         AssertNoStore(response);
@@ -413,7 +418,21 @@ public sealed class StepUpTests(IntegrationTestWebAppFactory factory) : Integrat
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
         var accessToken = body.GetProperty("accessToken").GetString()!;
-        return new SocialSession(Guid.Parse(new JsonWebToken(accessToken).GetClaim("sub").Value), body.GetProperty("sessionId").GetGuid(), accessToken);
+        return new SocialSession(
+            Guid.Parse(new JsonWebToken(accessToken).GetClaim("sub").Value),
+            body.GetProperty("sessionId").GetGuid(),
+            accessToken,
+            body.GetProperty("refreshToken").GetString()!);
+    }
+
+    /// <summary>Refreshes the social session and returns its new access token, of the same session.</summary>
+    private async Task<string> RefreshAsync(SocialSession social)
+    {
+        using var response = await Client.PostAsJsonAsync(RefreshRoute, new { refreshToken = social.RefreshToken }, Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        body.GetProperty("sessionId").GetGuid().ShouldBe(social.SessionId);
+        return body.GetProperty("accessToken").GetString()!;
     }
 
     private async Task<Tokens> LoginAsync()
@@ -435,5 +454,5 @@ public sealed class StepUpTests(IntegrationTestWebAppFactory factory) : Integrat
 
     private sealed record Tokens(string AccessToken, string RefreshToken, Guid SessionId);
 
-    private sealed record SocialSession(Guid UserId, Guid SessionId, string AccessToken);
+    private sealed record SocialSession(Guid UserId, Guid SessionId, string AccessToken, string RefreshToken);
 }

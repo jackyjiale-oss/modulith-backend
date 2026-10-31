@@ -220,20 +220,24 @@ public sealed class ExternalLoginManagementTests(IntegrationTestWebAppFactory fa
         body.GetProperty("hasPassword").GetBoolean().ShouldBeFalse();
         var login = body.GetProperty("logins").EnumerateArray().ShouldHaveSingleItem();
         login.GetProperty("provider").GetString().ShouldBe("google");
-        login.GetProperty("lastUsedAt").ValueKind.ShouldBe(JsonValueKind.Null);
+
+        // The sign-up started a session with this login directly (no challenge), so it set the login's LastUsedAt (spec 5.4).
+        login.GetProperty("lastUsedAt").GetDateTimeOffset().ShouldBe(Factory.Time.GetUtcNow());
     }
 
     [Fact]
-    public async Task List_of_a_suspended_caller_is_the_bare_401_of_a_request_without_a_valid_token()
+    public async Task List_of_a_suspended_caller_is_the_401_of_a_request_without_a_valid_token()
     {
         var user = await CreateUserAsync(Email);
         var tokens = await LoginAsync(Email);
         await SuspendAsync(user.Id);
 
         using var response = await SendAsync(HttpMethod.Get, LoginsRoute, tokens.AccessToken);
+        using var anonymous = await Client.GetAsync(LoginsRoute, Ct);
 
-        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
-        response.Content.Headers.ContentType?.MediaType.ShouldNotBe("application/problem+json");
+        // The token still validates, but its user is suspended: the same http.401 problem as a request without a token.
+        await AssertProblemAsync(response, HttpStatusCode.Unauthorized, "http.401");
+        await AssertProblemAsync(anonymous, HttpStatusCode.Unauthorized, "http.401");
     }
 
     [Fact]
