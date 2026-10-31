@@ -5,7 +5,7 @@
 - Deciders: Lee Jia Le
 
 ## Context
-The roadmap of 2026-10-20 asks for social login: a person signs in or signs up with an account they already have at Google, Apple, Microsoft, Facebook or another OpenID Connect provider, from a web SPA or a Flutter app, and ends up in the same session as a password login. Blueprint 9.7 sketched redirect-based `challenge` and `callback` routes; the review wins (`docs/blueprint-review.md`), and the design of this feature ([`docs/superpowers/specs/2026-10-30-social-login-design.md`](../superpowers/specs/2026-10-30-social-login-design.md)) replaces them.
+The roadmap of 2026-10-20 asks for social login: a person signs in or signs up with an account they already have at Google, Apple, Microsoft, Facebook or another OpenID Connect provider, from a web SPA or a Flutter app, and ends up in the same session as a password login. Blueprint 9.7 sketched redirect-based `challenge` and `callback` routes; the review wins (`docs/blueprint-review.md`), and the design of this feature (the social login design, `docs/superpowers/specs/2026-10-30-social-login-design.md` in the template repository, which a generated project does not carry) replaces them.
 
 The template is a JSON API with bearer tokens and no cookies (ADR 0015, ADR 0025). Its clients are a web SPA and a native app, and both can obtain a provider's ID token themselves, with the provider's own SDK or its web flow. Four questions follow: who runs the provider step and what the client sends, how a proof is verified, when an identity may be attached to an existing account, and what the second factor and step-up mean for a session the provider vouched for.
 
