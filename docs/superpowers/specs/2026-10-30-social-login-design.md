@@ -190,7 +190,7 @@ Order, not dates: each plan starts when the one before is merged.
 - **A preset drifts from the provider's published metadata.** The plan verifies each preset against the live discovery document once; a generic entry is the escape hatch.
 - **Microsoft's identifiers differ for a personal and a work account.** The checklist tests both; a token without `tid` or `oid` is refused rather than guessed.
 - **Replay inside `MaxTokenAge` on another instance without Redis.** Documented known limit, like the permission cache's 30 seconds; the single-use nonce and the age bound make it narrow.
-- **A project turns `TrustEmail` on for Facebook or a generic provider that does not verify email.** The page states the takeover this opens; the default is off.
+- **A project turns `TrustEmail` on for Facebook or a generic provider that does not verify email.** The page states the takeover this opens; the default is off. Implemented: `TrustEmail` has no effect for Facebook (the catalog forces it off because its email rule is `Never`); it matters only for a generic provider.
 - **Provider outages.** Discovery and Graph run on resilience pipelines; an outage is 503, not a login failure, and password login is unaffected.
 
 ## 11. Open questions

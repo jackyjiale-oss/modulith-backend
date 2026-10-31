@@ -26,7 +26,7 @@ Modulith is a `dotnet new` template for production-ready backends: an ASP.NET Co
 
 ## Status
 
-Pre-release: Plan 1 (foundation and core baseline), Plan 2 (the Auth module), Plan 3 (notifications), Plan 4 (two-step verification) and Plan 5 (platform services: cleanup jobs, optional Redis, HTTP resilience) and Plan 5b (the Audit module) are implemented; social login with phone-number OTP login, push and SMS channels, delivery and packaging follow. Expect breaking changes until the first release. The Malay and Simplified Chinese messages are drafts awaiting native review (release checklist in [`CONTRIBUTING.md`](CONTRIBUTING.md), Section 5).
+Pre-release: Plan 1 (foundation and core baseline), Plan 2 (the Auth module), Plan 3 (notifications), Plan 4 (two-step verification) and Plan 5 (platform services: cleanup jobs, optional Redis, HTTP resilience), Plan 5b (the Audit module), Plan 5c (the API and database versioning policy) and social login (Google, Apple, Microsoft, Facebook and a generic OpenID Connect provider) are implemented; phone-number OTP login, push and SMS channels, delivery and packaging follow. Expect breaking changes until the first release. The Malay and Simplified Chinese messages are drafts awaiting native review (release checklist in [`CONTRIBUTING.md`](CONTRIBUTING.md), Section 5).
 
 ## Prerequisites
 
