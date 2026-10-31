@@ -13,8 +13,15 @@ internal enum ExternalProviderKind
 /// <summary>Which claim of a verified token makes its email usable for finding or linking an account (before the provider's <c>TrustEmail</c> is applied).</summary>
 internal enum ExternalEmailRule
 {
-    /// <summary>The token's <c>email_verified</c> is true (a boolean or the string <c>"true"</c>): Google, Apple and a generic OIDC provider.</summary>
+    /// <summary>The token's <c>email_verified</c> is true (a boolean or the string <c>"true"</c>): Apple and a generic OIDC provider.</summary>
     EmailVerifiedClaim,
+
+    /// <summary>
+    /// Google's: <c>email_verified</c> is true (as for <see cref="EmailVerifiedClaim"/>) <b>and</b> the address ends in <c>@gmail.com</c>
+    /// (without regard to case) or the token carries a non-blank string <c>hd</c> (a Workspace account). Google documents
+    /// <c>email_verified</c> as authoritative only for those; for any other address the verification may be stale (Ruling R15).
+    /// </summary>
+    GoogleVerifiedGmailOrWorkspace,
 
     /// <summary>The token's <c>xms_edov</c> is true, the only Microsoft claim that says the email's domain was verified; its <c>email</c> never is.</summary>
     MicrosoftDomainVerified,

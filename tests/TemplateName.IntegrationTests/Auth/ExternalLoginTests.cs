@@ -109,6 +109,31 @@ public sealed class ExternalLoginTests(IntegrationTestWebAppFactory factory) : I
     }
 
     [Fact]
+    public async Task A_google_address_that_is_neither_gmail_nor_workspace_cannot_link_by_email_but_signs_in_once_linked_by_hand()
+    {
+        // Ruling R15: without hd, Google's email_verified for a non-Gmail address may be stale, so it neither links nor signs up.
+        await CreateUserAsync(Email);
+        static void NotWorkspace(IDictionary<string, object> claims) => claims.Remove("hd");
+
+        using var refused = await LoginAsync("google", customize: NotWorkspace);
+
+        await AssertProblemAsync(refused, HttpStatusCode.Forbidden, "auth.external_email_unverified");
+        (await QueryAsync(context => context.Set<UserExternalLogin>().CountAsync(Ct))).ShouldBe(0);
+        (await QueryAsync(context => context.Set<User>().CountAsync(Ct))).ShouldBe(1);
+
+        // Linked from settings (the link route needs no usable email), the same identity signs in.
+        using var passwordLogin = await PostAsync(PasswordLoginRoute, new { email = Email, password = AuthTestHarness.Password });
+        var sessionToken = (await passwordLogin.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("accessToken").GetString().ShouldNotBeNull();
+        using var link = await LinkAsync(sessionToken, NotWorkspace);
+        link.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        using var signedIn = await LoginAsync("google", customize: NotWorkspace);
+
+        signedIn.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await signedIn.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("mfaRequired").GetBoolean().ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task Two_simultaneous_first_sign_ins_create_one_account()
     {
         var responses = await Task.WhenAll(LoginAsync("google"), LoginAsync("google"));
@@ -164,20 +189,31 @@ public sealed class ExternalLoginTests(IntegrationTestWebAppFactory factory) : I
     }
 
     /// <summary>Posts a fresh ID token of the fake provider, bound to a nonce no request used before, to <c>/google/link</c> as the bearer's user.</summary>
-    private async Task<HttpResponseMessage> LinkAsync(string accessToken)
+    private async Task<HttpResponseMessage> LinkAsync(string accessToken, Action<IDictionary<string, object>>? customize = null)
     {
         var nonce = $"nonce-{Guid.NewGuid():N}";
-        var idToken = Factory.IdentityProvider.IdToken(claims => claims["nonce"] = nonce);
+        var idToken = Factory.IdentityProvider.IdToken(claims =>
+        {
+            claims["nonce"] = nonce;
+            customize?.Invoke(claims);
+        });
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/external/google/link") { Content = JsonContent.Create(new { idToken, nonce }) };
         request.WithBearer(accessToken);
         return await Client.SendAsync(request, Ct);
     }
 
-    /// <summary>Posts a fresh ID token of the fake provider, bound to a nonce no request used before, to <c>/{provider}/login</c>.</summary>
-    private Task<HttpResponseMessage> LoginAsync(string provider, string? displayName = null)
+    /// <summary>
+    /// Posts a fresh ID token of the fake provider, bound to a nonce no request used before, to <c>/{provider}/login</c>;
+    /// <paramref name="customize"/> changes the token's claims.
+    /// </summary>
+    private Task<HttpResponseMessage> LoginAsync(string provider, string? displayName = null, Action<IDictionary<string, object>>? customize = null)
     {
         var nonce = $"nonce-{Guid.NewGuid():N}";
-        var idToken = Factory.IdentityProvider.IdToken(claims => claims["nonce"] = nonce);
+        var idToken = Factory.IdentityProvider.IdToken(claims =>
+        {
+            claims["nonce"] = nonce;
+            customize?.Invoke(claims);
+        });
         return PostAsync($"/api/v1/auth/external/{provider}/login", new { idToken, nonce, displayName });
     }
 

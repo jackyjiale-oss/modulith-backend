@@ -51,7 +51,7 @@ internal static class ExternalProviderPresets
             ExternalProviderKind.Oidc,
             "https://accounts.google.com",
             ["https://accounts.google.com", "accounts.google.com"],
-            ExternalEmailRule.EmailVerifiedClaim,
+            ExternalEmailRule.GoogleVerifiedGmailOrWorkspace,
             TrustEmail: true),
         [Apple] = new Preset(
             "Apple",

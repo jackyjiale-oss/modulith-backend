@@ -310,6 +310,85 @@ public sealed class OidcIdTokenVerifierTests
         identity.HasUsableEmail.ShouldBe(usable);
     }
 
+    [Theory]
+    [InlineData("alice@gmail.com", null, true, true)]
+    [InlineData("Alice@GMAIL.COM", null, true, true)]
+    [InlineData(" alice@gmail.com ", null, true, true)]
+    [InlineData("alice@gmail.com", null, "true", true)]
+    [InlineData("alice@gmail.com", null, false, false)]
+    [InlineData("alice@gmail.com", null, null, false)]
+    [InlineData("alice@example.com", null, true, false)]
+    [InlineData("alice@example.com", "example.com", true, true)]
+    [InlineData("alice@example.com", "other.example", true, true)]
+    [InlineData("alice@example.com", "example.com", false, false)]
+    [InlineData("alice@example.com", "", true, false)]
+    [InlineData("alice@example.com", "   ", true, false)]
+    [InlineData("alice@example.com", 1, true, false)]
+    [InlineData("alice@example.com", true, true, false)]
+    [InlineData("alice@googlemail.com", null, true, false)]
+    [InlineData("alice@notgmail.com", null, true, false)]
+    [InlineData("alice@gmail.com.attacker.example", null, true, false)]
+    public async Task Google_email_is_usable_only_when_verified_and_gmail_or_a_workspace_token(
+        string email,
+        object? hostedDomain,
+        object? emailVerified,
+        bool usable)
+    {
+        // Ruling R15: Google documents email_verified as authoritative only for a Gmail address or a token with hd (Workspace); for any
+        // other address the verification may be stale. googlemail.com is not special-cased.
+        using var host = new Host();
+        var token = host.Idp.IdToken(claims =>
+        {
+            claims["email"] = email;
+            claims.Remove("hd");
+            claims.Remove("email_verified");
+            if (hostedDomain is not null)
+            {
+                claims["hd"] = hostedDomain;
+            }
+
+            if (emailVerified is not null)
+            {
+                claims["email_verified"] = emailVerified;
+            }
+        });
+
+        var identity = Succeeded(await host.VerifyAsync(token));
+
+        identity.Email.ShouldBe(email.Trim());
+        identity.HasUsableEmail.ShouldBe(usable);
+    }
+
+    [Fact]
+    public async Task Google_trust_email_off_wins_over_a_verified_gmail_address()
+    {
+        using var host = new Host();
+        var token = host.Idp.IdToken(claims =>
+        {
+            claims["email"] = "alice@gmail.com";
+            claims.Remove("hd");
+        });
+
+        var identity = Succeeded(await host.VerifyAsync(token, provider: host.Idp.ToProvider("google", trustEmail: false)));
+
+        identity.HasUsableEmail.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("apple", "https://appleid.apple.com")]
+    [InlineData("okta", "https://idp.example.test/oauth2/default")]
+    public async Task The_gmail_or_workspace_rule_is_Googles_alone(string provider, string issuer)
+    {
+        // A verified non-Gmail address without hd stays usable for Apple and for a generic provider whose TrustEmail is on.
+        using var host = new Host(issuer);
+        var token = host.Idp.IdToken(claims => claims.Remove("hd"));
+
+        var identity = Succeeded(await host.VerifyAsync(token, provider: host.Idp.ToProvider(provider, trustEmail: true)));
+
+        identity.Email.ShouldBe(FakeIdentityProvider.DefaultEmail);
+        identity.HasUsableEmail.ShouldBeTrue();
+    }
+
     [Fact]
     public async Task Trust_email_off_never_gives_a_usable_email()
     {

@@ -25,6 +25,13 @@ internal sealed class FakeIdentityProvider : IDisposable
     public const string DefaultEmail = "alice@example.com";
     public const string DefaultName = "Alice Example";
 
+    /// <summary>
+    /// The <c>hd</c> claim of every token unless a customization removes it: the default identity is a Google Workspace account of
+    /// <see cref="DefaultEmail"/>'s domain, so its verified email is usable under Google's rule (Gmail or <c>hd</c>, Ruling R15). Other
+    /// providers ignore the claim.
+    /// </summary>
+    public const string DefaultHostedDomain = "example.com";
+
     /// <summary>The <c>AppSecret</c> <see cref="ToProvider"/> gives a Facebook provider.</summary>
     public const string DefaultFacebookAppSecret = "fake-facebook-app-secret";
 
@@ -118,7 +125,7 @@ internal sealed class FakeIdentityProvider : IDisposable
 
     /// <summary>
     /// A signed ID token: <c>iss</c> <see cref="Issuer"/>, <c>aud</c> <see cref="DefaultClientId"/>, <c>sub</c>, <c>iat</c> and <c>nbf</c> now,
-    /// <c>exp</c> in an hour, <c>nonce</c> <see cref="DefaultNonce"/>, a verified <c>email</c> and a <c>name</c>. <paramref name="customize"/>
+    /// <c>exp</c> in an hour, <c>nonce</c> <see cref="DefaultNonce"/>, a verified <c>email</c>, <c>hd</c> <see cref="DefaultHostedDomain"/> and a <c>name</c>. <paramref name="customize"/>
     /// changes or removes claims; <paramref name="signWith"/> picks a <see cref="Signing"/> variant (RS256 with <see cref="Key"/> when null).
     /// </summary>
     public string IdToken(Action<IDictionary<string, object>>? customize = null, string? signWith = null)
@@ -135,6 +142,7 @@ internal sealed class FakeIdentityProvider : IDisposable
             ["nonce"] = DefaultNonce,
             ["email"] = DefaultEmail,
             ["email_verified"] = true,
+            ["hd"] = DefaultHostedDomain,
             ["name"] = DefaultName,
         };
         customize?.Invoke(claims);

@@ -10,7 +10,7 @@ How to switch on sign-in with Google, Apple, Microsoft, Facebook or another Open
 
 | Provider | The client posts | `ClientIds` (the accepted `aud`) | Email usable for sign-up and linking when |
 |---|---|---|---|
-| Google | `idToken` and `nonce` | one OAuth client ID per platform that sends tokens (web, iOS, Android) | `email_verified` is true |
+| Google | `idToken` and `nonce` | one OAuth client ID per platform that sends tokens (web, iOS, Android) | `email_verified` is true **and** the address is `@gmail.com` or the token has `hd` (Workspace) |
 | Apple | `idToken` and `nonce` | the Services ID (web) and the bundle ID (native app) | `email_verified` is true |
 | Microsoft | `idToken` and `nonce` | the Application (client) ID of the app registration | the optional claim `xms_edov` is true |
 | Facebook | `accessToken` (web, Android), or `idToken` and `nonce` (iOS Limited Login) | not used; `AppId` and `AppSecret` instead | never |
@@ -80,6 +80,7 @@ In a deployment set `Auth__External__Providers__Facebook__AppSecret` from the pl
 2. Put **every client ID whose tokens your clients can send** into `ClientIds`. The `aud` of a Google ID token is the client ID the token was requested for: on Android that is usually the web client ID the app passes as its server client ID; on iOS it is the iOS client ID unless you set a server client ID. A token for a client ID that is not listed is refused.
 3. Issuer: the backend accepts `https://accounts.google.com` and the bare `accounts.google.com` (Google documents both). Keys: `https://www.googleapis.com/oauth2/v3/certs`. Signing algorithm `RS256`.
 4. Email: `email_verified` (a boolean, or the string `"true"`) must be true; `TrustEmail` defaults on.
+5. **Warning: only a Gmail or Workspace address is trusted.** Google documents `email_verified` as authoritative only for an address ending in `@gmail.com` or a token with the `hd` claim (a Google Workspace account). A Google account can be created with any address (a personal domain, a work address outside Workspace); for those Google verified the address once, and the mailbox may have changed hands since. The backend therefore treats such an email as **not usable**: an unlinked identity is refused with 403 `auth.external_email_unverified`, so it neither links to the password account with that address nor creates an account. `googlemail.com` is not special-cased (it needs `hd` like any other domain). Such a user signs in the usual way (or registers with a password), then links Google from settings (`POST /api/v1/auth/external/google/link`, after a step-up); from then on Google signs them in. Tell support to expect this for users of custom-domain Google accounts.
 
 ## Apple
 
@@ -127,7 +128,7 @@ Run this against a deployed or local host with each provider you enable, before 
   - A person whose password account has two-step verification and the provider's email is not linked by a first social sign-in (409 `auth.external_link_required`); after they link the provider from settings, signed in with a code, a social sign-in gets the challenge, and `POST /api/v1/auth/mfa/verify` finishes it; the access token's `amr` reads `fed otp mfa`.
   - Link and unlink from settings, after a step-up, with a second account at the same provider refused (409 `auth.external_provider_already_linked`).
   - Switch the provider off and restart: it disappears from the list and `login` answers 404.
-- **Google.** A sign-in from each platform you ship (web, iOS, Android); each client ID is in `ClientIds`.
+- **Google.** A sign-in from each platform you ship (web, iOS, Android); each client ID is in `ClientIds`. A Gmail account and, if you have one, a Workspace account sign up; a Google account registered with another address is refused with 403 `auth.external_email_unverified` and signs in after linking from settings.
 - **Apple.** A round trip with the **Services ID** on the web and with the **bundle ID** in the native app. On native, confirm the nonce posted is the raw value while the token carries its hash. Sign in once with *Hide My Email* and once with the real address; check the display name arrives through `displayName`.
 - **Microsoft.** One **personal** account and one **work or school** account, each signing up on a fresh database: check the token has `tid` and `oid` (the `profile` scope is requested), whether it carries `xms_edov` (a personal account may not, in which case sign-up is refused with 403 `auth.external_email_unverified` by design), the issuer, and that your `TenantId` accepts and refuses the accounts you expect (a personal account under `organizations`, a work account under `consumers`).
 - **Facebook.** Link Facebook to an existing account and sign in with it (a first sign-in of an unlinked Facebook identity is refused by design); with an access token (web or Android) and, on iOS, with a Limited Login token; the app is in live mode and has passed app review for the permissions you need.

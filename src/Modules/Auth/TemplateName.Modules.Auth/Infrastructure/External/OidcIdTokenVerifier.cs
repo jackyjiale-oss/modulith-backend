@@ -26,7 +26,9 @@ namespace TemplateName.Modules.Auth.Infrastructure.External;
 /// nonce's length, Microsoft's <c>tid</c> against the configured tenant, then <c>RS256</c> or <c>ES256</c> only, the signature by the key
 /// the <c>kid</c> names, <c>iss</c> exactly one of the provider's issuers (Microsoft's for the token's own <c>tid</c>), <c>aud</c> exactly one
 /// of its client IDs, <c>exp</c> and <c>nbf</c> with <c>Auth:Jwt:ClockSkew</c>, <c>iat</c> no older than <c>Auth:External:MaxTokenAge</c>
-/// and not in the future beyond the skew, the <c>nonce</c> equal to the posted nonce or its lower-case hex SHA-256, and the subject. Any bad
+/// and not in the future beyond the skew, the <c>nonce</c> equal to the posted nonce or its lower-case hex SHA-256, and the subject. The
+/// email is usable only under the provider's <see cref="ExternalEmailRule"/> and its <c>TrustEmail</c> (Google's needs a Gmail address or
+/// an <c>hd</c> claim besides <c>email_verified</c>, Ruling R15). Any bad
 /// proof is <see cref="ExternalLoginErrors.InvalidToken"/>; metadata or keys that cannot be had are
 /// <see cref="ExternalLoginErrors.ProviderUnavailable"/>. It never throws for an input (a cancelled caller still throws) and spends no nonce:
 /// the caller claims the returned one.
@@ -39,6 +41,9 @@ internal sealed partial class OidcIdTokenVerifier(
     ILogger<OidcIdTokenVerifier> logger)
 {
     private const string MetadataPath = "/.well-known/openid-configuration";
+
+    // Google's own consumer domain; googlemail.com is not special-cased (an address there needs hd like any other).
+    private const string GmailSuffix = "@gmail.com";
 
     // The latest representable instant, in seconds since the epoch; a larger iat cannot be a time.
     private const long MaxUnixSeconds = 253_402_300_799;
@@ -176,7 +181,7 @@ internal sealed partial class OidcIdTokenVerifier(
         }
 
         var email = EmailOf(claims);
-        var hasUsableEmail = email is not null && provider.TrustEmail && EmailRuleHolds(provider.EmailRule, claims);
+        var hasUsableEmail = email is not null && provider.TrustEmail && EmailRuleHolds(provider.EmailRule, claims, email);
         var name = TryGetString(claims, "name", out var rawName) && !string.IsNullOrWhiteSpace(rawName) ? rawName.Trim() : null;
 
         return new VerifiedIdToken(new VerifiedExternalIdentity(provider.Name, subject, email, hasUsableEmail, name), tokenNonce);
@@ -390,12 +395,21 @@ internal sealed partial class OidcIdTokenVerifier(
         return email.Length is > 0 and <= UserExternalLogin.EmailMaxLength ? email : null;
     }
 
-    private static bool EmailRuleHolds(ExternalEmailRule rule, JsonElement claims) => rule switch
+    /// <summary>Whether <paramref name="email"/> (the trimmed <c>email</c> claim) is usable under the provider's rule, before <c>TrustEmail</c>.</summary>
+    private static bool EmailRuleHolds(ExternalEmailRule rule, JsonElement claims, string email) => rule switch
     {
         ExternalEmailRule.EmailVerifiedClaim => IsTrue(claims, "email_verified"),
+        ExternalEmailRule.GoogleVerifiedGmailOrWorkspace => IsTrue(claims, "email_verified")
+            && (email.EndsWith(GmailSuffix, StringComparison.OrdinalIgnoreCase) || HasHostedDomain(claims)),
         ExternalEmailRule.MicrosoftDomainVerified => IsTrue(claims, "xms_edov"),
         _ => false,
     };
+
+    /// <summary>Google's <c>hd</c> (the Workspace domain of the account) is a string that is not blank.</summary>
+    private static bool HasHostedDomain(JsonElement claims) =>
+        claims.TryGetProperty("hd", out var value)
+        && value.ValueKind == JsonValueKind.String
+        && !string.IsNullOrWhiteSpace(value.GetString());
 
     /// <summary>The claim is the boolean <c>true</c> or exactly the string <c>"true"</c> (Apple sends either).</summary>
     private static bool IsTrue(JsonElement claims, string name) =>

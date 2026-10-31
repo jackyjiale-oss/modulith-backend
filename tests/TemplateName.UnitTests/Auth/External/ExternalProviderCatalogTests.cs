@@ -10,8 +10,9 @@ public sealed class ExternalProviderCatalogTests
     private const string Providers = "Auth:External:Providers";
 
     [Fact]
-    public void Google_preset_accepts_both_issuer_spellings_and_trusts_a_verified_email_claim()
+    public void Google_preset_accepts_both_issuer_spellings_and_trusts_a_verified_gmail_or_workspace_email()
     {
+        // Ruling R15: Google's email_verified is authoritative only for a Gmail address or a Workspace (hd) token.
         var google = Enabled(("Google:Enabled", "true"), ("Google:ClientIds:0", "web.apps.example"), ("Google:ClientIds:1", "ios.apps.example"))
             .Find("google").ShouldNotBeNull();
 
@@ -21,7 +22,7 @@ public sealed class ExternalProviderCatalogTests
         google.Authority.ShouldBe("https://accounts.google.com");
         google.Issuers.ShouldBe(["https://accounts.google.com", "accounts.google.com"]);
         google.ClientIds.ShouldBe(["web.apps.example", "ios.apps.example"]);
-        google.EmailRule.ShouldBe(ExternalEmailRule.EmailVerifiedClaim);
+        google.EmailRule.ShouldBe(ExternalEmailRule.GoogleVerifiedGmailOrWorkspace);
         google.TrustEmail.ShouldBeTrue();
         google.TenantId.ShouldBeNull();
         google.AppId.ShouldBeNull();
