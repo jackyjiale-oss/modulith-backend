@@ -24,6 +24,7 @@ public sealed class ExternalLoginTests(IntegrationTestWebAppFactory factory) : I
     private const string ProvidersRoute = "/api/v1/auth/external/providers";
     private const string VerifyRoute = "/api/v1/auth/mfa/verify";
     private const string MeRoute = "/api/v1/auth/me";
+    private const string PasswordLoginRoute = "/api/v1/auth/login";
     private const string Email = FakeIdentityProvider.DefaultEmail;
 
     private int _addressCount;
@@ -62,19 +63,42 @@ public sealed class ExternalLoginTests(IntegrationTestWebAppFactory factory) : I
     }
 
     [Fact]
-    public async Task Account_with_mfa_gets_a_fed_challenge_and_verify_records_fed_otp_mfa()
+    public async Task Account_with_mfa_is_not_linked_automatically_and_once_linked_by_hand_gets_a_fed_challenge()
     {
-        // A confirmed password account with the provider's email: strict linking links it, then its two-step verification applies.
+        // A confirmed password account with the provider's email and two-step verification: an automatic link would attach the
+        // identity before the second factor is answered, so it is refused (Ruling R14), and nothing is saved but the audit row.
         var user = await CreateUserAsync(Email);
         var enrollment = await EnrollTotpAsync(user.Id);
 
+        using var refused = await LoginAsync("google");
+
+        await AssertProblemAsync(refused, HttpStatusCode.Conflict, "auth.external_link_required");
+        (await QueryAsync(context => context.Set<UserExternalLogin>().CountAsync(Ct))).ShouldBe(0);
+        (await QueryAsync(context => context.Set<MfaChallenge>().CountAsync(Ct))).ShouldBe(0);
+        var failure = await QueryAsync(context => context.Set<AuthAuditLog>().AsNoTracking()
+            .SingleAsync(entry => entry.EventType == AuthAuditEvents.ExternalLoginFailed, Ct));
+        failure.FailureReason.ShouldBe("auth.external_link_required");
+        failure.UserId.ShouldBe(user.Id);
+
+        // The user signs in with the password and a code, then links the provider from that code-proven session.
+        using var passwordLogin = await PostAsync(PasswordLoginRoute, new { email = Email, password = AuthTestHarness.Password });
+        var passwordChallenge = (await passwordLogin.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("challengeToken").GetString();
+        Factory.Time.Advance(TimeSpan.FromSeconds(30));
+        using var codeProven = await PostAsync(VerifyRoute, new { challengeToken = passwordChallenge, code = enrollment.CodeAt(Factory.Time.GetUtcNow()) });
+        codeProven.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var sessionToken = (await codeProven.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("accessToken").GetString().ShouldNotBeNull();
+
+        using var link = await LinkAsync(sessionToken);
+        link.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        // A later federated sign-in finds the linked identity and asks for the second factor.
         using var login = await LoginAsync("google");
 
         login.StatusCode.ShouldBe(HttpStatusCode.OK);
         var challengeBody = await login.Content.ReadFromJsonAsync<JsonElement>(Ct);
         challengeBody.GetProperty("mfaRequired").GetBoolean().ShouldBeTrue();
         var challengeToken = challengeBody.GetProperty("challengeToken").GetString().ShouldNotBeNull();
-        (await QueryAsync(context => context.Set<MfaChallenge>().AsNoTracking().SingleAsync(Ct))).FirstFactor.ShouldBe("fed");
+        (await QueryAsync(context => context.Set<MfaChallenge>().AsNoTracking().CountAsync(challenge => challenge.FirstFactor == "fed", Ct))).ShouldBe(1);
 
         Factory.Time.Advance(TimeSpan.FromSeconds(30));
         using var verify = await PostAsync(VerifyRoute, new { challengeToken, code = enrollment.CodeAt(Factory.Time.GetUtcNow()) });
@@ -131,6 +155,23 @@ public sealed class ExternalLoginTests(IntegrationTestWebAppFactory factory) : I
     }
 
     private static List<string> Amr(JsonWebToken token) => [.. token.Claims.Where(claim => claim.Type == "amr").Select(claim => claim.Value)];
+
+    private static async Task AssertProblemAsync(HttpResponseMessage response, HttpStatusCode status, string code)
+    {
+        response.StatusCode.ShouldBe(status);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+        (await response.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("code").GetString().ShouldBe(code);
+    }
+
+    /// <summary>Posts a fresh ID token of the fake provider, bound to a nonce no request used before, to <c>/google/link</c> as the bearer's user.</summary>
+    private async Task<HttpResponseMessage> LinkAsync(string accessToken)
+    {
+        var nonce = $"nonce-{Guid.NewGuid():N}";
+        var idToken = Factory.IdentityProvider.IdToken(claims => claims["nonce"] = nonce);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/external/google/link") { Content = JsonContent.Create(new { idToken, nonce }) };
+        request.WithBearer(accessToken);
+        return await Client.SendAsync(request, Ct);
+    }
 
     /// <summary>Posts a fresh ID token of the fake provider, bound to a nonce no request used before, to <c>/{provider}/login</c>.</summary>
     private Task<HttpResponseMessage> LoginAsync(string provider, string? displayName = null)

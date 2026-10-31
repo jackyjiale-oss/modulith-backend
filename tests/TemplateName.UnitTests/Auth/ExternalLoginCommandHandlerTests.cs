@@ -244,6 +244,7 @@ public sealed class ExternalLoginCommandHandlerTests
         _auditEntries.Select(entry => entry.EventType).ShouldBe([AuthAuditEvents.ExternalLinked, AuthAuditEvents.ExternalLoginSucceeded]);
         _auditEntries[0].UserId.ShouldBe(user.Id);
         _auditEntries[0].Details.ShouldBe("""{"provider":"google"}""");
+        await _mfaMethods.Received().HasConfirmedAsync(user.Id, Arg.Any<CancellationToken>());
 
         // The link is saved on its own first (a lost race is refused by an index), then the session as at every sign-in.
         await _unitOfWork.Received(1).SaveChangesUnlessDuplicateAsync(
@@ -303,6 +304,47 @@ public sealed class ExternalLoginCommandHandlerTests
         await _unitOfWork.DidNotReceive().SaveChangesUnlessDuplicateAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>());
         await _unitOfWork.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
         _metrics.Received(1).RecordExternalLogin(Google, ExternalLoginOutcome.LinkRequired);
+    }
+
+    [Fact]
+    public async Task Email_of_a_confirmed_account_with_a_confirmed_mfa_method_is_LinkRequired_and_links_nothing()
+    {
+        // Ruling R14: an automatic link would attach the identity before the second factor is answered, so it is refused; the user
+        // links it from settings with a session that proved a code.
+        var user = GivenPasswordUser();
+        _mfaMethods.HasConfirmedAsync(user.Id, Arg.Any<CancellationToken>()).Returns(true);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        result.Error.ShouldBe(ExternalLoginErrors.LinkRequired);
+        user.ExternalLogins.ShouldBeEmpty();
+        user.DomainEvents.ShouldBeEmpty();
+        _addedSessions.ShouldBeEmpty();
+        _addedChallenges.ShouldBeEmpty();
+        var audit = _auditEntries.ShouldHaveSingleItem();
+        audit.EventType.ShouldBe(AuthAuditEvents.ExternalLoginFailed);
+        audit.FailureReason.ShouldBe("auth.external_link_required");
+        audit.UserId.ShouldBe(user.Id);
+        audit.Details.ShouldBe("""{"provider":"google"}""");
+        await _unitOfWork.DidNotReceive().SaveChangesUnlessDuplicateAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>());
+        await _unitOfWork.DidNotReceive().TrySaveChangesAsync(Arg.Any<CancellationToken>());
+        await _unitOfWork.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+        _metrics.Received(1).RecordExternalLogin(Google, ExternalLoginOutcome.LinkRequired);
+    }
+
+    [Fact]
+    public async Task Suspended_account_with_mfa_found_by_email_is_still_account_inactive()
+    {
+        // The suspended and locked refusals keep their place ahead of the MFA refusal (Ruling R14).
+        var user = GivenPasswordUser();
+        user.Suspend(Now.AddDays(-1));
+        _mfaMethods.HasConfirmedAsync(user.Id, Arg.Any<CancellationToken>()).Returns(true);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        result.Error.ShouldBe(UserErrors.AccountInactive);
+        user.ExternalLogins.ShouldBeEmpty();
+        _auditEntries.ShouldHaveSingleItem().FailureReason.ShouldBe("auth.account_inactive");
     }
 
     [Fact]

@@ -25,8 +25,8 @@ namespace TemplateName.Modules.Auth.Application.ExternalLogins.Login;
 /// <item>A linked identity is found by <c>(Provider, Subject)</c> only, never by email, and goes to the session.</item>
 /// <item>An identity that is not linked needs a usable email (the provider's rule and its <c>TrustEmail</c>), else
 /// <see cref="ExternalLoginErrors.EmailUnverified"/>; no account is looked up before that, so no other answer can tell whether one exists.
-/// With one, the account with that (normalized) email is linked when its email is confirmed (strict linking, 5.3), else
-/// <see cref="ExternalLoginErrors.LinkRequired"/>; without an account, one is registered when <c>AllowSignUp</c> is on, else
+/// With one, the account with that (normalized) email is linked when its email is confirmed and it has no confirmed MFA method (strict
+/// linking, 5.3, and Ruling R14), else <see cref="ExternalLoginErrors.LinkRequired"/>; without an account, one is registered when <c>AllowSignUp</c> is on, else
 /// <see cref="ExternalLoginErrors.SignUpDisabled"/>. An email a soft-deleted account still holds stays reserved (Ruling R6).</item>
 /// <item>The session (5.4): a suspended account is <see cref="UserErrors.AccountInactive"/> and a locked one
 /// <see cref="UserErrors.InvalidCredentials"/>, neither counted as a failure; an account with a confirmed MFA method gets a challenge whose
@@ -133,7 +133,8 @@ internal sealed class ExternalLoginCommandHandler(
 
     /// <summary>
     /// The automatic link of strict linking (5.3): only to an account whose email is confirmed and that has no other identity at this
-    /// provider, and only when the account may sign in at all, so a suspended or locked account never gains a way in.
+    /// provider, and only when the account may sign in at all, so a suspended or locked account never gains a way in. An account with a
+    /// confirmed MFA method is never linked here (Ruling R14): the link would be saved before its second factor is answered.
     /// </summary>
     private async Task<Result<LoginResult>> LinkAsync(
         User user,
@@ -150,6 +151,13 @@ internal sealed class ExternalLoginCommandHandler(
         if (await RejectIfBlockedAsync(user, attempt, cancellationToken) is { } blocked)
         {
             return blocked;
+        }
+
+        // Ruling R14: a link saved here would attach the identity before the second factor is answered (the challenge comes after the
+        // save), so an account with two-step verification is linked only by hand, from a session that proved a code.
+        if (await mfaMethods.HasConfirmedAsync(user.Id, cancellationToken))
+        {
+            return await RejectAsync(attempt.Provider, user, ExternalLoginErrors.LinkRequired, ExternalLoginOutcome.LinkRequired, attempt.Now, cancellationToken);
         }
 
         var linked = user.LinkExternalLogin(attempt.Provider.Name, attempt.Subject, email, attempt.Now);

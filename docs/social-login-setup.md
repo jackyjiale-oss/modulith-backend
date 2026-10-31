@@ -30,6 +30,8 @@ Every provider ships `Enabled: false`. A project turns one on in configuration (
 
 `Auth:External:AllowSignUp` (default `true`) decides whether a first social sign-in with no matching account creates one; an invite-only project sets it `false` and users link a provider from their settings instead (403 `auth.external_sign_up_disabled` otherwise).
 
+A first social sign-in whose usable email matches an existing account links to it automatically only when that account's email is confirmed, it has no other login at the provider, and it has **no two-step verification**. An account with a confirmed MFA method answers 409 `auth.external_link_required`, because a link made by a sign-in would be saved before the second factor is asked for: the user signs in with the password and a code, links the provider from settings, and from then on every social sign-in of that account gets the MFA challenge ([Auth: External login](modules/auth.md#external-login)).
+
 ## Configuration example
 
 No secret appears in a file. The values below are placeholders.
@@ -122,7 +124,7 @@ Run this against a deployed or local host with each provider you enable, before 
   - `GET /api/v1/auth/external/providers` lists exactly the enabled providers and nothing else.
   - A sign-in with a new person creates an account (200, tokens) and `GET /api/v1/auth/me` shows the provider's email and the right display name; a second sign-in signs in the same account.
   - Posting the same ID token again is 401 `auth.invalid_external_token` (single-use nonce); posting one older than `MaxTokenAge` is 401.
-  - A person whose account has two-step verification gets the challenge, and `POST /api/v1/auth/mfa/verify` finishes it; the access token's `amr` reads `fed otp mfa`.
+  - A person whose password account has two-step verification and the provider's email is not linked by a first social sign-in (409 `auth.external_link_required`); after they link the provider from settings, signed in with a code, a social sign-in gets the challenge, and `POST /api/v1/auth/mfa/verify` finishes it; the access token's `amr` reads `fed otp mfa`.
   - Link and unlink from settings, after a step-up, with a second account at the same provider refused (409 `auth.external_provider_already_linked`).
   - Switch the provider off and restart: it disappears from the list and `login` answers 404.
 - **Google.** A sign-in from each platform you ship (web, iOS, Android); each client ID is in `ClientIds`.
