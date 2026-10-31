@@ -1,10 +1,13 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.JsonWebTokens;
 using TemplateName.IntegrationTests.Infrastructure;
+using TemplateName.Modules.Auth.Contracts.IntegrationEvents;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Mfa;
 using TemplateName.Modules.Auth.Domain.Users;
@@ -15,8 +18,10 @@ namespace TemplateName.IntegrationTests.Auth;
 
 /// <summary>
 /// Social login through the running host against the factory's fake OpenID Connect provider (<c>Google</c> enabled, <c>Apple</c>
-/// disabled): sign-up and sign-in, the route's case-insensitive provider, the MFA challenge with first factor <c>fed</c>, a race of two
-/// first sign-ins, the provider list and a disabled provider. Every request comes from its own client address and carries its own nonce
+/// disabled): sign-up and sign-in, the route's case-insensitive provider, the automatic link and its refusals (an unconfirmed account,
+/// an account with MFA, an identity without a usable email, Google's Gmail-or-Workspace rule), sign-up switched off, a soft-deleted
+/// account's email, a replayed proof, the MFA challenge with first factor <c>fed</c>, a race of two first sign-ins, the provider list and
+/// a disabled provider. Every request comes from its own client address and carries its own nonce
 /// (the replay guard outlives a test), so neither the strict limit nor a replay decides an outcome by accident.
 /// </summary>
 public sealed class ExternalLoginTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)
@@ -134,6 +139,100 @@ public sealed class ExternalLoginTests(IntegrationTestWebAppFactory factory) : I
     }
 
     [Fact]
+    public async Task A_confirmed_account_without_mfa_is_linked_automatically_and_signed_in()
+    {
+        var user = await CreateUserAsync(Email);
+
+        using var response = await LoginAsync("google");
+        await DispatchNotificationsAsync();
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        body.GetProperty("mfaRequired").GetBoolean().ShouldBeFalse();
+        Amr(new JsonWebToken(body.GetProperty("accessToken").GetString())).ShouldBe(["fed"]);
+        var login = await QueryAsync(context => context.Set<UserExternalLogin>().AsNoTracking().SingleAsync(Ct));
+        login.UserId.ShouldBe(user.Id);
+        login.Provider.ShouldBe("google");
+        login.Subject.ShouldBe(FakeIdentityProvider.DefaultSubject);
+        (await QueryAsync(context => context.Set<User>().CountAsync(Ct))).ShouldBe(1);
+        var linked = Factory.IntegrationEvents.Events.OfType<ExternalLoginLinkedIntegrationEvent>().ShouldHaveSingleItem();
+        linked.UserId.ShouldBe(user.Id);
+        linked.Provider.ShouldBe("google");
+        (await AuditEventsAsync()).ShouldBe([AuthAuditEvents.ExternalLinked, AuthAuditEvents.ExternalLoginSucceeded]);
+    }
+
+    [Fact]
+    public async Task An_unconfirmed_account_with_the_email_is_409_link_required_and_nothing_is_linked()
+    {
+        var user = await CreateUserAsync(Email, confirmed: false);
+
+        using var response = await LoginAsync("google");
+
+        await AssertProblemAsync(response, HttpStatusCode.Conflict, "auth.external_link_required");
+        (await QueryAsync(context => context.Set<UserExternalLogin>().CountAsync(Ct))).ShouldBe(0);
+        var failure = await QueryAsync(context => context.Set<AuthAuditLog>().AsNoTracking()
+            .SingleAsync(entry => entry.EventType == AuthAuditEvents.ExternalLoginFailed, Ct));
+        failure.FailureReason.ShouldBe("auth.external_link_required");
+        failure.UserId.ShouldBe(user.Id);
+    }
+
+    [Fact]
+    public async Task An_identity_without_a_usable_email_is_403_email_unverified_and_creates_nothing()
+    {
+        using var response = await LoginAsync("google", customize: claims => claims["email_verified"] = false);
+
+        await AssertProblemAsync(response, HttpStatusCode.Forbidden, "auth.external_email_unverified");
+        (await QueryAsync(context => context.Set<User>().CountAsync(Ct))).ShouldBe(0);
+        (await QueryAsync(context => context.Set<UserExternalLogin>().CountAsync(Ct))).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Sign_up_switched_off_is_403_sign_up_disabled()
+    {
+        await using var host = Factory.WithWebHostBuilder(builder => builder.ConfigureAppConfiguration((_, configuration) =>
+            configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Auth:External:AllowSignUp"] = "false" })));
+        using var client = host.CreateClient();
+
+        using var response = await LoginAsync(client, "google");
+
+        await AssertProblemAsync(response, HttpStatusCode.Forbidden, "auth.external_sign_up_disabled");
+        (await QueryAsync(context => context.Set<User>().CountAsync(Ct))).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task The_email_of_a_soft_deleted_account_is_401_invalid_credentials_and_creates_nothing()
+    {
+        // Ruling R6: the address stays reserved while the deleted account exists, answered like a locked account.
+        var deleted = await CreateUserAsync(Email);
+        await using (var scope = Factory.Services.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            context.Remove(await context.Set<User>().SingleAsync(user => user.Id == deleted.Id, Ct));
+            await context.SaveChangesAsync(Ct);
+        }
+
+        using var response = await LoginAsync("google");
+
+        await AssertProblemAsync(response, HttpStatusCode.Unauthorized, "auth.invalid_credentials");
+        (await QueryAsync(context => context.Set<User>().IgnoreQueryFilters().CountAsync(Ct))).ShouldBe(1);
+        (await QueryAsync(context => context.Set<UserExternalLogin>().IgnoreQueryFilters().CountAsync(Ct))).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task The_same_proof_posted_twice_is_200_then_401_invalid_external_token()
+    {
+        var nonce = $"nonce-{Guid.NewGuid():N}";
+        var idToken = Factory.IdentityProvider.IdToken(claims => claims["nonce"] = nonce);
+
+        using var first = await PostAsync("/api/v1/auth/external/google/login", new { idToken, nonce });
+        using var replay = await PostAsync("/api/v1/auth/external/google/login", new { idToken, nonce });
+
+        first.StatusCode.ShouldBe(HttpStatusCode.OK);
+        await AssertProblemAsync(replay, HttpStatusCode.Unauthorized, "auth.invalid_external_token");
+        (await QueryAsync(context => context.Set<User>().CountAsync(Ct))).ShouldBe(1);
+    }
+
+    [Fact]
     public async Task Two_simultaneous_first_sign_ins_create_one_account()
     {
         var responses = await Task.WhenAll(LoginAsync("google"), LoginAsync("google"));
@@ -207,6 +306,14 @@ public sealed class ExternalLoginTests(IntegrationTestWebAppFactory factory) : I
     /// <paramref name="customize"/> changes the token's claims.
     /// </summary>
     private Task<HttpResponseMessage> LoginAsync(string provider, string? displayName = null, Action<IDictionary<string, object>>? customize = null)
+        => LoginAsync(Client, provider, displayName, customize);
+
+    /// <summary><see cref="LoginAsync(string, string?, Action{IDictionary{string, object}}?)"/> through <paramref name="client"/>.</summary>
+    private Task<HttpResponseMessage> LoginAsync(
+        HttpClient client,
+        string provider,
+        string? displayName = null,
+        Action<IDictionary<string, object>>? customize = null)
     {
         var nonce = $"nonce-{Guid.NewGuid():N}";
         var idToken = Factory.IdentityProvider.IdToken(claims =>
@@ -214,15 +321,17 @@ public sealed class ExternalLoginTests(IntegrationTestWebAppFactory factory) : I
             claims["nonce"] = nonce;
             customize?.Invoke(claims);
         });
-        return PostAsync($"/api/v1/auth/external/{provider}/login", new { idToken, nonce, displayName });
+        return PostAsync(client, $"/api/v1/auth/external/{provider}/login", new { idToken, nonce, displayName });
     }
 
     /// <summary>Posts <paramref name="body"/> anonymously from an address no request used before.</summary>
-    private async Task<HttpResponseMessage> PostAsync(string route, object body)
+    private Task<HttpResponseMessage> PostAsync(string route, object body) => PostAsync(Client, route, body);
+
+    private async Task<HttpResponseMessage> PostAsync(HttpClient client, string route, object body)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, route) { Content = JsonContent.Create(body) };
         request.Headers.Add(TestClientAddressStartupFilter.HeaderName, $"198.51.100.{Interlocked.Increment(ref _addressCount)}");
-        return await Client.SendAsync(request, Ct);
+        return await client.SendAsync(request, Ct);
     }
 
     private Task<List<string>> AuditEventsAsync()
