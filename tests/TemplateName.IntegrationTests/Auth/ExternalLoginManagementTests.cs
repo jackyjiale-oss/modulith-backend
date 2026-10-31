@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using TemplateName.IntegrationTests.Infrastructure;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Contracts.IntegrationEvents;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Users;
@@ -287,6 +288,42 @@ public sealed class ExternalLoginManagementTests(IntegrationTestWebAppFactory fa
 
         response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
         (await QueryAsync(context => context.Set<UserExternalLogin>().CountAsync(Ct))).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Link_publishes_one_event_and_a_repeated_link_publishes_none()
+    {
+        var user = await CreateUserAsync(Email);
+        var tokens = await LoginAsync(Email);
+
+        using var first = await LinkAsync(tokens.AccessToken);
+        using var again = await LinkAsync(tokens.AccessToken);
+        await DispatchNotificationsAsync();
+
+        first.StatusCode.ShouldBe(HttpStatusCode.OK);
+        again.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var published = Factory.IntegrationEvents.Events.OfType<ExternalLoginLinkedIntegrationEvent>().ShouldHaveSingleItem();
+        published.UserId.ShouldBe(user.Id);
+        published.Provider.ShouldBe("google");
+        published.ProviderDisplayName.ShouldBe("Google");
+        Factory.IntegrationEvents.Events.OfType<ExternalLoginUnlinkedIntegrationEvent>().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Unlink_publishes_one_event_naming_a_switched_off_provider_by_its_display_name()
+    {
+        var user = await CreateUserAsync(Email);
+        var tokens = await LoginAsync(Email);
+        var id = await AddLoginAsync(user.Id, "apple", "apple-subject-0001", null);
+
+        using var response = await SendAsync(HttpMethod.Delete, $"{LoginsRoute}/{id}", tokens.AccessToken);
+        await DispatchNotificationsAsync();
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        var published = Factory.IntegrationEvents.Events.OfType<ExternalLoginUnlinkedIntegrationEvent>().ShouldHaveSingleItem();
+        published.UserId.ShouldBe(user.Id);
+        published.Provider.ShouldBe("apple");
+        published.ProviderDisplayName.ShouldBe("Apple");
     }
 
     [Fact]

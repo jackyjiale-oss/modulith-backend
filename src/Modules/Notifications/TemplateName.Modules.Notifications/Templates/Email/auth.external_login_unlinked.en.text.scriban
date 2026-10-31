@@ -1,0 +1,5 @@
+Hello {{ display_name }},
+
+{{ provider }} was removed as a way to sign in to your account on {{ occurred_at }} ({{ time_zone }}).
+
+If this was not you, reset your password now and contact your administrator.

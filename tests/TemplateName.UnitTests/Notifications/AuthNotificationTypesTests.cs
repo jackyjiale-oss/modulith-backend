@@ -21,6 +21,8 @@ public sealed class AuthNotificationTypesTests
         AuthNotificationTypes.TokenReuseDetected,
         AuthNotificationTypes.MfaChanged,
         AuthNotificationTypes.NewDeviceLogin,
+        AuthNotificationTypes.ExternalLoginLinked,
+        AuthNotificationTypes.ExternalLoginUnlinked,
     ];
 
     private static readonly AuthNotificationTypeSource Source = new();
@@ -28,7 +30,7 @@ public sealed class AuthNotificationTypesTests
     public static TheoryData<string> Codes => new(AllCodes);
 
     [Fact]
-    public void Source_declares_exactly_the_ten_auth_types()
+    public void Source_declares_exactly_the_twelve_auth_types()
     {
         Source.Types.Select(type => type.Code).ShouldBe(
             [
@@ -42,6 +44,8 @@ public sealed class AuthNotificationTypesTests
                 "auth.token_reuse_detected",
                 "auth.mfa_changed",
                 "auth.new_device_login",
+                "auth.external_login_linked",
+                "auth.external_login_unlinked",
             ],
             ignoreOrder: true);
     }
@@ -76,14 +80,37 @@ public sealed class AuthNotificationTypesTests
         type.SecretVariables.ShouldBeEmpty();
     }
 
-    [Fact]
-    public void Only_password_changed_and_token_reuse_have_an_optional_in_app_channel()
+    [Theory]
+    [InlineData(AuthNotificationTypes.ExternalLoginLinked, "auth.external_login_linked")]
+    [InlineData(AuthNotificationTypes.ExternalLoginUnlinked, "auth.external_login_unlinked")]
+    public void External_login_types_are_security_critical_with_mandatory_email_and_optional_in_app(string code, string expectedCode)
     {
+        code.ShouldBe(expectedCode);
+        var type = Source.Types.Single(candidate => candidate.Code == code);
+
+        type.Category.ShouldBe(NotificationCategory.Security);
+        type.Priority.ShouldBe(NotificationPriority.Critical);
+        type.DefaultChannels.ShouldBe([NotificationChannel.Email, NotificationChannel.InApp]);
+        type.MandatoryChannels.ShouldBe([NotificationChannel.Email]);
+        type.IsConfigurable.ShouldBeTrue();
+        type.SecretVariables.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Only_four_types_have_an_optional_in_app_channel()
+    {
+        string[] expected =
+        [
+            AuthNotificationTypes.PasswordChanged,
+            AuthNotificationTypes.TokenReuseDetected,
+            AuthNotificationTypes.ExternalLoginLinked,
+            AuthNotificationTypes.ExternalLoginUnlinked,
+        ];
         var withInApp = Source.Types.Where(type => type.DefaultChannels.Contains(NotificationChannel.InApp)).Select(type => type.Code).ToList();
         var optional = Source.Types.Where(type => type.IsConfigurable).Select(type => type.Code).ToList();
 
-        withInApp.ShouldBe([AuthNotificationTypes.PasswordChanged, AuthNotificationTypes.TokenReuseDetected], ignoreOrder: true);
-        optional.ShouldBe([AuthNotificationTypes.PasswordChanged, AuthNotificationTypes.TokenReuseDetected], ignoreOrder: true);
+        withInApp.ShouldBe(expected, ignoreOrder: true);
+        optional.ShouldBe(expected, ignoreOrder: true);
 
         foreach (var code in withInApp)
         {
@@ -109,6 +136,8 @@ public sealed class AuthNotificationTypesTests
     [InlineData(AuthNotificationTypes.TokenReuseDetected, "display_name,occurred_at,time_zone", "")]
     [InlineData(AuthNotificationTypes.MfaChanged, "display_name,change,occurred_at,time_zone", "")]
     [InlineData(AuthNotificationTypes.NewDeviceLogin, "display_name,occurred_at,time_zone,ip_address", "")]
+    [InlineData(AuthNotificationTypes.ExternalLoginLinked, "display_name,provider,occurred_at,time_zone", "")]
+    [InlineData(AuthNotificationTypes.ExternalLoginUnlinked, "display_name,provider,occurred_at,time_zone", "")]
     public void Types_declare_their_variables_and_secrets(string code, string variables, string secrets)
     {
         var type = Source.Types.Single(candidate => candidate.Code == code);

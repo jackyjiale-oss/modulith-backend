@@ -212,6 +212,8 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             AddRecordingIntegrationEventHandler<RefreshTokenReuseDetectedIntegrationEvent>(services);
             AddRecordingIntegrationEventHandler<MfaChangedIntegrationEvent>(services);
             AddRecordingIntegrationEventHandler<NewDeviceSignedInIntegrationEvent>(services);
+            AddRecordingIntegrationEventHandler<ExternalLoginLinkedIntegrationEvent>(services);
+            AddRecordingIntegrationEventHandler<ExternalLoginUnlinkedIntegrationEvent>(services);
 
             // And one for the change sets every module's outbox publishes.
             AddRecordingIntegrationEventHandler<EntityChangesRecordedIntegrationEvent>(services);

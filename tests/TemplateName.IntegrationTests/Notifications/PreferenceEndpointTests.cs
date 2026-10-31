@@ -66,6 +66,8 @@ public sealed class PreferenceEndpointTests(IntegrationTestWebAppFactory factory
         // The real content of the API: a security notice's email cannot be switched off, its in-app copy can.
         Channels(body, PasswordChanged).ShouldBe([("Email", true, true), ("InApp", true, false)]);
         Channels(body, "auth.token_reuse_detected").ShouldBe([("Email", true, true), ("InApp", true, false)]);
+        Channels(body, "auth.external_login_linked").ShouldBe([("Email", true, true), ("InApp", true, false)]);
+        Channels(body, "auth.external_login_unlinked").ShouldBe([("Email", true, true), ("InApp", true, false)]);
         Channels(body, "auth.account_locked").ShouldBe([("Email", true, true)]);
         Channels(body, "auth.password_reset").ShouldBe([("Email", true, true)]);
         types.Single(type => type.GetProperty("typeCode").GetString() == PasswordChanged).GetProperty("category").GetString().ShouldBe("Security");

@@ -139,6 +139,68 @@ public sealed class AuthEventConsumptionTests(IntegrationTestWebAppFactory facto
     }
 
     [Fact]
+    public async Task External_login_link_and_unlink_create_an_email_and_an_in_app_notice_each_in_the_user_culture()
+    {
+        var user = await CreateUserAsync(Email, locale: "ms");
+        var linked = new ExternalLoginLinkedIntegrationEvent(Guid.NewGuid(), Now.AddMinutes(-1), user.Id, "google", "Google");
+        var unlinked = new ExternalLoginUnlinkedIntegrationEvent(Guid.NewGuid(), Now.AddMinutes(-2), user.Id, "facebook", "Facebook");
+
+        await PublishAsync(linked);
+        await PublishAsync(unlinked);
+
+        var notifications = (await NotificationsAsync()).OrderBy(notification => notification.TypeCode, StringComparer.Ordinal).ToList();
+        notifications.Select(notification => notification.TypeCode)
+            .ShouldBe([AuthNotificationTypes.ExternalLoginLinked, AuthNotificationTypes.ExternalLoginUnlinked]);
+        notifications.ShouldAllBe(notification => notification.Culture == "ms"
+            && notification.RecipientUserId == user.Id
+            && notification.Priority == NotificationPriority.Critical
+            && notification.ProtectedData == null);
+        foreach (var notification in notifications)
+        {
+            notification.Deliveries.OrderBy(delivery => delivery.Channel).Select(delivery => (delivery.Channel, delivery.Destination, delivery.Status))
+                .ShouldBe(
+                [
+                    (NotificationChannel.Email, (string?)Email, DeliveryStatus.Pending),
+                    (NotificationChannel.InApp, null, DeliveryStatus.Pending),
+                ]);
+        }
+
+        JsonSerializer.Deserialize<Dictionary<string, string>>(notifications[0].Data).ShouldBe(new Dictionary<string, string>
+        {
+            ["display_name"] = "Test user",
+            ["occurred_at"] = "2025-12-31 23:59",
+            ["provider"] = "Google",
+            ["time_zone"] = "UTC",
+        });
+        JsonSerializer.Deserialize<Dictionary<string, string>>(notifications[1].Data).ShouldBe(new Dictionary<string, string>
+        {
+            ["display_name"] = "Test user",
+            ["occurred_at"] = "2025-12-31 23:58",
+            ["provider"] = "Facebook",
+            ["time_zone"] = "UTC",
+        });
+        (await InboxAsync(linked.Id)).ShouldBe([typeof(ExternalLoginLinkedIntegrationEventHandler).FullName!]);
+        (await InboxAsync(unlinked.Id)).ShouldBe([typeof(ExternalLoginUnlinkedIntegrationEventHandler).FullName!]);
+    }
+
+    [Fact]
+    public async Task Same_external_login_events_twice_create_one_notification_each()
+    {
+        var user = await CreateUserAsync(Email);
+        var linked = new ExternalLoginLinkedIntegrationEvent(Guid.NewGuid(), Now, user.Id, "google", "Google");
+        var unlinked = new ExternalLoginUnlinkedIntegrationEvent(Guid.NewGuid(), Now, user.Id, "google", "Google");
+
+        await PublishAsync(linked);
+        await PublishAsync(linked);
+        await PublishAsync(unlinked);
+        await PublishAsync(unlinked);
+
+        var notifications = await NotificationsAsync();
+        notifications.Count.ShouldBe(2);
+        notifications.Select(notification => notification.SourceMessageId).ShouldBe([linked.Id, unlinked.Id], ignoreOrder: true);
+    }
+
+    [Fact]
     public async Task Concurrent_duplicate_consumption_creates_one_notification()
     {
         var user = await CreateUserAsync(Email);
