@@ -1,6 +1,6 @@
 # Social login — design
 
-- Status: Approved 2026-10-30. The design was approved section by section in the design session (flow, linking rule, MFA, sign-up, verification approach, configuration, security rules and scope); the user then asked for the open points to be settled by research and the plan to proceed. Section 12 records what the research found and the three amendments it caused (4, 5.2, 11).
+- Status: Implemented (2026-10-31, on `feature/social-login`; see [ADR 0032](../../adr/0032-external-login-by-client-posted-proof.md) and the setup guide `docs/social-login-setup.md`); approved 2026-10-30. The design was approved section by section in the design session (flow, linking rule, MFA, sign-up, verification approach, configuration, security rules and scope); the user then asked for the open points to be settled by research and the plan to proceed. Section 12 records what the research found and the three amendments it caused (4, 5.2, 11).
 - Date: 2026-10-30
 - Roadmap row: new, after 5c. In `docs/blueprint-review.md` Section 6 it is part of the row "Social login and phone-number OTP login"; adding its own row and leaving phone OTP behind SMS is part of this plan.
 - Builds on: Plans 1–5c, all merged (main `8f442ec`); ADR 0014 (own identity model), ADR 0015 (ES256 tokens), ADR 0023 (step-up), ADR 0025 (trusted devices), ADR 0029 (HTTP resilience), ADR 0031 (compatibility policy)
