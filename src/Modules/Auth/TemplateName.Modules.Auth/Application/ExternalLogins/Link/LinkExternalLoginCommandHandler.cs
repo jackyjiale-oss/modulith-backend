@@ -16,8 +16,9 @@ namespace TemplateName.Modules.Auth.Application.ExternalLogins.Link;
 /// <item>The caller's user and session, as at step-up; otherwise <see cref="UserErrors.NotFound"/> (answered like a request without a
 /// valid token).</item>
 /// <item>A fresh step-up (<see cref="StepUpPolicy.Check"/>): an account with two-step verification needs a session that proved a code
-/// (<c>otp</c> or <c>rcvr</c>), any other account a recent sign-in or step-up, with a password or, for an account without one, with a login.
-/// Checked <b>before</b> anything is verified, so a refused request spends no proof.</item>
+/// (<c>otp</c> or <c>rcvr</c>), any other account only a recent <c>auth_time</c>: a sign-in or step-up of any kind, because the policy does
+/// not look at how it was proved (a fresh social sign-in of a password account without MFA passes too). Checked <b>before</b> anything is
+/// verified, so a refused request spends no proof.</item>
 /// <item>The provider comes from the catalog, enabled ones only: an unknown and a disabled one are the same
 /// <see cref="ExternalLoginErrors.ProviderNotFound"/>. From here on the provider's name is the catalog's, never the route value.</item>
 /// <item>The proof is verified (<see cref="IExternalIdentityVerifier"/>, which also spends its nonce).</item>
@@ -35,7 +36,8 @@ namespace TemplateName.Modules.Auth.Application.ExternalLogins.Link;
 /// filtered) the answer is <see cref="ExternalLoginErrors.IdentityTaken"/>, the safe one; never a 500.
 /// </para>
 /// A failed link writes no audit row: nothing changed, and the failed proof of a signed-in caller is not a sign-in failure. The proof, the
-/// nonce and the subject never reach an audit row or a log.
+/// nonce and the subject never reach an audit row, and this handler logs none of them; a save that a unique index refuses is logged by
+/// EF Core at Error with SQL Server's message, which quotes the duplicate provider and subject (a Known limit of the Auth page).
 /// </summary>
 internal sealed class LinkExternalLoginCommandHandler(
     IExternalProviderCatalog catalog,

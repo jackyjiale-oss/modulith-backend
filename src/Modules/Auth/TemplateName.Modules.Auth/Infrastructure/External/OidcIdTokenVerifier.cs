@@ -141,8 +141,9 @@ internal sealed partial class OidcIdTokenVerifier(
     }
 
     /// <summary>
-    /// The checks the library does not make (<c>aud</c> exactly, <c>iat</c>, the nonce, the subject), the exact <c>iss</c> again, then the
-    /// email and the name.
+    /// The checks the library does not make (<c>iat</c>, the nonce, the subject), the exact <c>iss</c> and <c>aud</c> again (defence in
+    /// depth: the library checks both, <c>aud</c> exactly since <c>IgnoreTrailingSlashWhenValidatingAudience</c> is off), then the email
+    /// and the name.
     /// </summary>
     private Result<VerifiedIdToken> Accept(ExternalProvider provider, JsonElement claims, string[] issuers, Guid? tenant, string postedNonce)
     {
@@ -153,7 +154,8 @@ internal sealed partial class OidcIdTokenVerifier(
             return ExternalLoginErrors.InvalidToken;
         }
 
-        // Exact and case-sensitive: one aud value must equal a configured client ID (the library would also forgive a trailing slash).
+        // Defence in depth, like the iss check: one aud value must equal a configured client ID, exactly and case-sensitively. The library
+        // checks the same (its trailing-slash forgiveness is turned off in Parameters); this check keeps holding if that setting changes.
         if (!AudienceMatches(claims, provider.ClientIds))
         {
             return ExternalLoginErrors.InvalidToken;

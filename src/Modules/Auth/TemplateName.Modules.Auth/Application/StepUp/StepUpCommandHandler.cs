@@ -22,8 +22,11 @@ namespace TemplateName.Modules.Auth.Application.StepUp;
 /// of that user holding the user's current security stamp, is <see cref="UserErrors.NotFound"/>, which the endpoint answers like a
 /// request without a valid token (the <c>PUT me</c> pattern).</item>
 /// <item>The factor must be the strongest the account has: a password for an account without two-step verification, a TOTP or recovery
-/// code for one with it, a provider's proof (social login decision D8) for one with neither a password nor two-step verification;
-/// anything else is <see cref="MfaErrors.StepUpMethodNotAllowed"/> and is not counted.</item>
+/// code for one with it, a provider's proof (social login decision D8) for one with neither a password nor two-step verification.
+/// A provider's proof sent by any other account, a password sent by an account with two-step verification, and a code sent by one
+/// without it are <see cref="MfaErrors.StepUpMethodNotAllowed"/> and are not counted. A password sent by an account that has neither a
+/// password nor two-step verification is not refused here: it costs what a verification costs (there is no hash to check it against) and
+/// is a counted wrong password (<see cref="UserErrors.CurrentPasswordIncorrect"/>).</item>
 /// <item>A locked account gets the method's failure answer without any verification and without counting; for a provider's proof that
 /// is <see cref="ExternalLoginErrors.InvalidToken"/>, and the proof is not verified, so no nonce is spent.</item>
 /// <item>A provider's proof comes from the catalog's enabled providers (otherwise <see cref="ExternalLoginErrors.ProviderNotFound"/>) and

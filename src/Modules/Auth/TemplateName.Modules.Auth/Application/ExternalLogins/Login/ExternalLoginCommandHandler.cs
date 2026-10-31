@@ -45,7 +45,9 @@ namespace TemplateName.Modules.Auth.Application.ExternalLogins.Login;
 /// refusal the handler itself decides is audited (a failure as <c>auth.external_login_failed</c> with its error code as the reason, or
 /// <c>locked</c> for a locked account, as the password login writes). The exception is a session save or a challenge save that loses a
 /// concurrency race: it answers the generic 401 and writes no failed-audit row, as the password login does. The proof, the nonce and the
-/// subject never reach an audit row, a log or a tag.
+/// subject never reach an audit row or a tag, and this handler logs none of them. But a save that a unique index refuses (a lost race, and
+/// every attempt that reaches a save for an identity a soft-deleted user still holds) is logged by EF Core at Error with SQL Server's message, which
+/// quotes the duplicate key: the provider and subject, or the normalized email (a Known limit of the Auth page).
 /// </para>
 /// </summary>
 internal sealed class ExternalLoginCommandHandler(
