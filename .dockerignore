@@ -1,0 +1,11 @@
+# Keeps the build context small and the restore cache stable. Everything the image needs is under src/ plus
+# the root build files (Directory.*, global.json, Version.props).
+.git
+**/bin
+**/obj
+tests
+docs
+.env*
+**/appsettings.Development.json
+TestResults
+.superpowers
