@@ -1,0 +1,34 @@
+# gitleaks configuration (.github/workflows/gitleaks.yml): the default rules plus the allowlist below.
+# An entry is added only for a demonstrated false positive: a dummy value in a test fixture, never a real secret.
+# Each pairs the file with the exact value (condition = "AND"), so any other secret in the same file is still reported.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "OidcIdTokenVerifierTests: a JWT-shaped dummy that proves a token is not printed"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^tests/TemplateName\.UnitTests/Auth/External/OidcIdTokenVerifierTests\.cs$''']
+regexes = ['''^eyJhbGciOiJSUzI1NiJ9\.eyJzdWIiOiJ4In0\.c2ln$''']
+
+[[allowlists]]
+description = "TotpUriTests: the base32 secret of the expected otpauth URI"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^tests/TemplateName\.UnitTests/Auth/Mfa/TotpUriTests\.cs$''']
+regexes = ['''^GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ$''']
+
+[[allowlists]]
+description = "UserMfaMethodTests: a placeholder for a protected MFA secret"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^tests/TemplateName\.UnitTests/Auth/Mfa/UserMfaMethodTests\.cs$''']
+regexes = ['''^CfDJ8-protected-secret$''']
+
+[[allowlists]]
+description = "AccessTokenRedactionTests: a dummy that the log redaction must remove"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^tests/TemplateName\.UnitTests/Web/AccessTokenRedactionTests\.cs$''']
+regexes = ['''^q1w2e3r4t5y6u7i8o9p0a1s2d3f4g5h6j7k8l9z0x1c$''']
