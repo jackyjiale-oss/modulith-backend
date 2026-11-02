@@ -86,7 +86,11 @@ jobs:
 
   # Publishes the release image (x.y.z and latest) and rolls it out: staging, then production (cd.yml). A reusable-workflow call, so it
   # does not depend on a tag pushed with GITHUB_TOKEN (which would not start another workflow). A called workflow cannot raise its
-  # own permissions, so the ones cd.yml's jobs ask for are granted here.
+  # own permissions, so the ones cd.yml's jobs ask for are granted here. No `secrets: inherit`: cd.yml reads only GITHUB_TOKEN and
+  # the environment secret MIGRATION_CONNECTION_STRING, which its deploy jobs get from their environment, so no repository secret
+  # is handed to it.
+  # This workflow's concurrency group (no cancel) spans the call, so a release waiting for the production approval holds it, and
+  # release-please runs for later pushes to main queue behind it.
   cd:
     name: cd
     needs: release-please
@@ -100,4 +104,3 @@ jobs:
     with:
       release: true
       version: ${{ needs.release-please.outputs.version }}
-    secrets: inherit

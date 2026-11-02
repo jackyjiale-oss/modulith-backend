@@ -1,6 +1,6 @@
 name: CD
 
-# Continuous delivery (docs/superpowers/specs/2026-11-02-delivery-pipeline-design.md, section 7).
+# Continuous delivery (runbook: docs/deployment/README.md; decision: docs/adr/0033-delivery-pipeline.md).
 # A green push to main goes to staging; a release (release.yml calls this workflow with `release: true`) goes to staging, then production.
 # Everything below `ci` needs it, so what is published and deployed has passed the same jobs as a pull request (design D4).
 # The deploy jobs are real but dormant: they run only when the repository variable DEPLOY_ENABLED is `true` (IIS_ENABLED for IIS),
@@ -104,6 +104,9 @@ jobs:
       # A release (x.y.z and latest tags, production) comes only from main (release.yml's call has the caller's ref, refs/heads/main)
       # or from a v* tag, never from another branch, so nothing unreviewed is published as a release. The ref and the version are
       # workflow data (a dispatch input is untrusted), so they reach the script through env, never interpolated into it.
+      # This guards against mistakes, not against a writer: a dispatch reads this file from the selected ref, which a writer can
+      # edit. The server-side controls (environment deployment branches and tags, required reviewers, a v* tag ruleset) are in
+      # docs/deployment/README.md, "Environments".
       - name: Check the release ref
         if: inputs.release
         env:
@@ -117,25 +120,33 @@ jobs:
               ;;
           esac
 
-      # The version is x.y.z (no leading v); from a v* tag it must equal the tag without the v.
-      - name: Check the release version
-        if: inputs.release
+      # Runs for every release and for any run given a version, release or not. The WHOLE value must be x.y.z (no leading v, no
+      # pre-release): bash's [[ =~ ]] matches the entire string, newlines included, where grep would match line by line and let a
+      # multi-line input add its own rules (latest, edge) to metadata-action's newline-separated tags. From a v* tag the version must
+      # equal the tag without the v. The tags step reads only this step's output, which is set for a release alone.
+      - name: Check the version
+        id: version
+        if: inputs.release || inputs.version != ''
         env:
           REF: ${{ github.ref }}
           VERSION: ${{ inputs.version }}
+          RELEASE: ${{ inputs.release }}
         run: |
-          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
-            echo "::error title=Release version::A release needs the version x.y.z (no leading v) in the version input."
+          if [[ ! $VERSION =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error title=Version::The version input must be x.y.z (numbers without leading zeros, no leading v, no pre-release); a release needs one."
             exit 1
           fi
-          case "$REF" in
-            refs/tags/v*)
-              if [ "$VERSION" != "${REF#refs/tags/v}" ]; then
-                echo "::error title=Release version::The version input ($VERSION) must equal the tag ($REF) without the leading v."
-                exit 1
-              fi
-              ;;
-          esac
+          if [ "$RELEASE" = true ]; then
+            case "$REF" in
+              refs/tags/v*)
+                if [ "$VERSION" != "${REF#refs/tags/v}" ]; then
+                  echo "::error title=Version::The version input ($VERSION) must equal the tag ($REF) without the leading v."
+                  exit 1
+                fi
+                ;;
+            esac
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          fi
 
       # github.repository can hold upper-case letters (an owner or repository name), which GHCR refuses in an image name,
       # so the name is lower-cased here once (bash ${var,,}) and every later job takes it from this job's output.
@@ -155,7 +166,9 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # sha-<short> on every run; edge only for a non-release run on main (a dispatch from another branch or tag never moves it);
-      # x.y.z and latest on a release (the ref was checked above).
+      # x.y.z and latest on a release (the ref and the version were checked above). The version comes only from the check step's
+      # output, never from the raw input. That check refuses pre-releases, so `latest` can never point at one; the `-` test on
+      # `latest` is a second guard should the check ever be widened.
       - name: Tags and labels
         id: meta
         uses: docker/metadata-action@v6
@@ -164,8 +177,8 @@ jobs:
           tags: |
             type=sha,prefix=sha-,format=short
             type=raw,value=edge,enable=${{ inputs.release != true && github.ref == 'refs/heads/main' }}
-            type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.release == true }}
-            type=raw,value=latest,enable=${{ inputs.release == true }}
+            type=semver,pattern={{version}},value=${{ steps.version.outputs.version }},enable=${{ inputs.release == true && steps.version.outputs.version != '' }}
+            type=raw,value=latest,enable=${{ inputs.release == true && steps.version.outputs.version != '' && !contains(steps.version.outputs.version, '-') }}
 
       # BuildKit attestations: sbom writes the SBOM, provenance mode=max the SLSA provenance, both pushed beside the image,
       # so the job needs no id-token or attestations permission.
@@ -252,10 +265,16 @@ jobs:
           IMAGE: ${{ needs.image.outputs.image }}@${{ needs.image.outputs.digest }}
         run: bash build/deploy/roll-out.sh staging "$IMAGE"
 
+      # Each try is bounded (5 s to connect, 15 s in all), so ten retries take a few minutes at most; a trailing slash is dropped.
       - name: Smoke test
         env:
           STAGING_URL: ${{ vars.STAGING_URL }}
-        run: curl --fail --retry 10 --retry-delay 6 --retry-connrefused "$STAGING_URL/health/ready"
+        run: |
+          if [ -z "$STAGING_URL" ]; then
+            echo "::error title=Smoke test::STAGING_URL is empty: set it as a repository variable or on the staging environment."
+            exit 1
+          fi
+          curl -sS --fail --connect-timeout 5 --max-time 15 --retry 10 --retry-delay 6 --retry-connrefused "${STAGING_URL%/}/health/ready"
 
   # A release only, after staging. The environment `production` should have required reviewers: the approval hangs on this run.
   deploy-production:
@@ -295,7 +314,12 @@ jobs:
       - name: Smoke test
         env:
           PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
-        run: curl --fail --retry 10 --retry-delay 6 --retry-connrefused "$PRODUCTION_URL/health/ready"
+        run: |
+          if [ -z "$PRODUCTION_URL" ]; then
+            echo "::error title=Smoke test::PRODUCTION_URL is empty: set it as a repository variable or on the production environment."
+            exit 1
+          fi
+          curl -sS --fail --connect-timeout 5 --max-time 15 --retry 10 --retry-delay 6 --retry-connrefused "${PRODUCTION_URL%/}/health/ready"
 
   # A release only, on a self-hosted Windows runner (labels self-hosted, windows, iis) with IIS and the .NET SDK: publish, then
   # build/scripts/deploy-iis.ps1 migrates, swaps the files and checks the health URL (design D8). Independent of the Docker path.
