@@ -26,6 +26,7 @@ internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
 
     private readonly List<PasswordHistoryEntry> _passwordHistory = [];
     private readonly List<UserRole> _roles = [];
+    private readonly List<UserExternalLogin> _externalLogins = [];
 
     // EF Core materializes the aggregate through this constructor; callers use Register.
     private User()
@@ -68,6 +69,12 @@ internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
     public IReadOnlyCollection<PasswordHistoryEntry> PasswordHistory => _passwordHistory.AsReadOnly();
 
     public IReadOnlyCollection<UserRole> Roles => _roles.AsReadOnly();
+
+    /// <summary>The external provider identities linked to this user, at most one for each provider.</summary>
+    public IReadOnlyCollection<UserExternalLogin> ExternalLogins => _externalLogins.AsReadOnly();
+
+    /// <summary>True when the user can sign in with a password (one is set).</summary>
+    public bool HasPassword => PasswordHash is not null;
 
     public byte[] RowVersion { get; private set; } = [];
 
@@ -112,6 +119,89 @@ internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
         user.Raise(new UserRegisteredDomainEvent(user.Id, user.Email, locale));
 
         return user;
+    }
+
+    /// <summary>
+    /// Creates the user of a first sign-in with an external provider: active, without a password, with a confirmed email (the caller
+    /// has proved the address is usable) and the login. It raises the events of a confirmed registration
+    /// (<see cref="UserRegisteredDomainEvent"/> and <see cref="EmailConfirmedDomainEvent"/>) and no <see cref="ExternalLoginLinkedDomainEvent"/>:
+    /// the login is part of the registration, not a later link.
+    /// </summary>
+    /// <exception cref="ArgumentException">The provider or the subject is blank or longer than its column.</exception>
+    public static Result<User> RegisterExternal(
+        string email,
+        string displayName,
+        string locale,
+        string provider,
+        string subject,
+        string? providerEmail,
+        DateTimeOffset now)
+    {
+        var registered = Register(email, displayName, locale, passwordHash: null, now);
+        if (registered.IsFailure)
+        {
+            return registered;
+        }
+
+        var user = registered.Value;
+        user._externalLogins.Add(UserExternalLogin.Create(user.Id, provider, subject, providerEmail, now));
+
+        var confirmed = user.ConfirmEmail(now);
+        if (confirmed.IsFailure)
+        {
+            return Result.Failure<User>(confirmed.Error);
+        }
+
+        return user;
+    }
+
+    /// <summary>
+    /// Links an identity at an external provider. The same identity again is a success that changes nothing and raises nothing (the
+    /// existing login is returned); another subject for a provider the user already has is <see cref="ExternalLoginErrors.ProviderAlreadyLinked"/>.
+    /// The security stamp stays: linking adds a way in without ending a session.
+    /// </summary>
+    /// <exception cref="ArgumentException">The provider or the subject is blank or longer than its column.</exception>
+    public Result<UserExternalLogin> LinkExternalLogin(string provider, string subject, string? email, DateTimeOffset now)
+    {
+        var login = UserExternalLogin.Create(Id, provider, subject, email, now);
+
+        var existing = _externalLogins.Find(candidate => candidate.Provider == login.Provider);
+        if (existing is not null)
+        {
+            return string.Equals(existing.Subject, login.Subject, StringComparison.Ordinal)
+                ? existing
+                : Result.Failure<UserExternalLogin>(ExternalLoginErrors.ProviderAlreadyLinked);
+        }
+
+        _externalLogins.Add(login);
+        Raise(new ExternalLoginLinkedDomainEvent(Id, login.Provider));
+
+        return login;
+    }
+
+    /// <summary>
+    /// Removes a linked login. An unknown id is <see cref="ExternalLoginErrors.LoginNotFound"/>; removing the last way to sign in
+    /// (no password and no other login) is <see cref="ExternalLoginErrors.LastLoginMethod"/>. The security stamp changes, so the other
+    /// sessions that this login opened stop matching, and <see cref="ExternalLoginUnlinkedDomainEvent"/> is raised.
+    /// </summary>
+    public Result UnlinkExternalLogin(Guid loginId, DateTimeOffset now)
+    {
+        var login = _externalLogins.Find(candidate => candidate.Id == loginId);
+        if (login is null)
+        {
+            return Result.Failure(ExternalLoginErrors.LoginNotFound);
+        }
+
+        if (!HasPassword && _externalLogins.Count == 1)
+        {
+            return Result.Failure(ExternalLoginErrors.LastLoginMethod);
+        }
+
+        _externalLogins.Remove(login);
+        SecurityStamp = NewSecurityStamp();
+        Raise(new ExternalLoginUnlinkedDomainEvent(Id, login.Provider));
+
+        return Result.Success();
     }
 
     public Result ConfirmEmail(DateTimeOffset now)

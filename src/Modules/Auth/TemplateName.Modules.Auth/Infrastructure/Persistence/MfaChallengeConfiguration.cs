@@ -8,6 +8,8 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence;
 
 internal sealed class MfaChallengeConfiguration : IEntityTypeConfiguration<MfaChallenge>
 {
+    internal const int FirstFactorMaxLength = 16;
+
     public void Configure(EntityTypeBuilder<MfaChallenge> builder)
     {
         builder.ToTable("MfaChallenges");
@@ -17,6 +19,10 @@ internal sealed class MfaChallengeConfiguration : IEntityTypeConfiguration<MfaCh
         builder.Property(challenge => challenge.TokenHash).HasMaxLength(MfaChallenge.HashLength);
         builder.Property(challenge => challenge.SecurityStamp).HasMaxLength(UserConfiguration.SecurityStampMaxLength);
         builder.Property(challenge => challenge.DeviceName).HasMaxLength(UserSession.MaxDeviceNameLength);
+
+        // How the first step was passed (pwd or fed). The default is what the rows of challenges issued before this column read as: they
+        // were all passed with a password. The column is not audited, so the default needs no [AuditIgnore].
+        builder.Property(challenge => challenge.FirstFactor).HasMaxLength(FirstFactorMaxLength).HasDefaultValue(AuthenticationMethods.Password);
 
         builder.HasOne<User>().WithMany().HasForeignKey(challenge => challenge.UserId).OnDelete(DeleteBehavior.Restrict);
 

@@ -19,14 +19,14 @@ Modulith is a `dotnet new` template for production-ready backends: an ASP.NET Co
 - Serilog with sensitive-data masking, OpenTelemetry traces and metrics, Aspire dashboard locally
 - Security headers, CORS, rate limiting, forwarded headers, request size limits and health checks
 - OpenAPI with Scalar and literal `/api/v1` routes
-- Auth module: registration with email confirmation, login with lockout, ES256 access tokens with a JWKS, rotating refresh tokens with reuse detection, sessions, password reset and change, two-step verification with an authenticator app (TOTP) and recovery codes, step-up before sensitive actions, trusted devices, role-based permissions, administration endpoints and an audit log (Mailpit catches the emails locally)
+- Auth module: registration with email confirmation, login with lockout, social login (Google, Apple, Microsoft, Facebook and a generic OpenID Connect provider, off by default), ES256 access tokens with a JWKS, rotating refresh tokens with reuse detection, sessions, password reset and change, two-step verification with an authenticator app (TOTP) and recovery codes, step-up before sensitive actions, trusted devices, role-based permissions, administration endpoints and an audit log (Mailpit catches the emails locally)
 - Audit module: an entity marked `[Audited]` has its field changes (who, when, old and new values, secrets ignored or masked) written in the same save through its module's outbox and recorded by the Audit module, which serves them to administrators at `GET /api/v1/admin/audit/trails`; the Auth security log stays separate
 - Architecture tests (NetArchTest), unit tests and Testcontainers integration tests; CI with an 80 % coverage gate and a template smoke test
 - Conventional Commits enforced by a git hook and CI
 
 ## Status
 
-Pre-release: Plan 1 (foundation and core baseline), Plan 2 (the Auth module), Plan 3 (notifications), Plan 4 (two-step verification) and Plan 5 (platform services: cleanup jobs, optional Redis, HTTP resilience) and Plan 5b (the Audit module) are implemented; social login with phone-number OTP login, push and SMS channels, delivery and packaging follow. Expect breaking changes until the first release. The Malay and Simplified Chinese messages are drafts awaiting native review (release checklist in [`CONTRIBUTING.md`](CONTRIBUTING.md), Section 5).
+Pre-release: Plan 1 (foundation and core baseline), Plan 2 (the Auth module), Plan 3 (notifications), Plan 4 (two-step verification) and Plan 5 (platform services: cleanup jobs, optional Redis, HTTP resilience), Plan 5b (the Audit module), Plan 5c (the API and database versioning policy) and social login (Google, Apple, Microsoft, Facebook and a generic OpenID Connect provider) are implemented; phone-number OTP login, push and SMS channels, delivery and packaging follow. Expect breaking changes until the first release. The Malay and Simplified Chinese messages are drafts awaiting native review (release checklist in [`CONTRIBUTING.md`](CONTRIBUTING.md), Section 5).
 
 ## Prerequisites
 

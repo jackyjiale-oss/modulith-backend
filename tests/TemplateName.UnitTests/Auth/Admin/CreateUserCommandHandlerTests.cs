@@ -39,7 +39,7 @@ public sealed class CreateUserCommandHandlerTests : AdminHandlerTestBase
         result.Error.Type.ShouldBe(ErrorType.Conflict);
         _added.ShouldBeEmpty();
         IssuedCodes.ShouldBeEmpty();
-        await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(default!, Ct);
+        await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(default(string)!, Ct);
     }
 
     [Fact]
@@ -122,7 +122,7 @@ public sealed class CreateUserCommandHandlerTests : AdminHandlerTestBase
         _added.ShouldBeEmpty();
         IssuedCodes.ShouldBeEmpty();
         AuditEntries.ShouldBeEmpty();
-        await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(default!, Ct);
+        await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(default(string)!, Ct);
     }
 
     [Fact]

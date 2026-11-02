@@ -2,13 +2,20 @@ using TemplateName.Modules.Auth.Domain.Users;
 
 namespace TemplateName.Modules.Auth.Application.Abstractions;
 
-/// <summary>Loads and adds <see cref="User"/> aggregates, each with its password history and role assignments. Soft-deleted users are not found.</summary>
+/// <summary>Loads and adds <see cref="User"/> aggregates, each with its password history, role assignments and external logins. Soft-deleted users are not found.</summary>
 internal interface IUserRepository
 {
     Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
 
     /// <summary>Finds a user by <see cref="User.NormalizedEmail"/> (see <see cref="User.NormalizeEmail"/>).</summary>
     Task<User?> GetByNormalizedEmailAsync(string normalizedEmail, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Finds the user that holds the login (<paramref name="provider"/>, <paramref name="subject"/>), with every login it has. The
+    /// provider is lower-cased first (<see cref="UserExternalLogin.NormalizeProvider"/>), as it is stored; the subject is matched as given.
+    /// A soft-deleted user is not found.
+    /// </summary>
+    Task<User?> GetByExternalLoginAsync(string provider, string subject, CancellationToken cancellationToken);
 
     /// <summary>
     /// Whether any user, soft-deleted ones included, has <paramref name="normalizedEmail"/>. For the seeder, which must never re-create

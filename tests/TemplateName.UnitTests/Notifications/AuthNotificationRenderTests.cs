@@ -21,6 +21,7 @@ public sealed class AuthNotificationRenderTests
     private const string LockedUntil = "2026-10-09 15:45";
     private const string TimeZone = "Asia/Kuala_Lumpur";
     private const string IpAddress = "203.0.113.7";
+    private const string Provider = "Google";
     private const string ExpiresInMinutes = "60";
 
     private static readonly NotificationCatalog Catalog = BuildCatalog();
@@ -46,9 +47,9 @@ public sealed class AuthNotificationRenderTests
     }
 
     [Fact]
-    public void Catalog_holds_all_ten_auth_types()
+    public void Catalog_holds_all_twelve_auth_types()
     {
-        Catalog.All.Count.ShouldBe(10);
+        Catalog.All.Count.ShouldBe(12);
     }
 
     [Theory]
@@ -128,6 +129,8 @@ public sealed class AuthNotificationRenderTests
     [Theory]
     [InlineData(AuthNotificationTypes.PasswordChanged)]
     [InlineData(AuthNotificationTypes.TokenReuseDetected)]
+    [InlineData(AuthNotificationTypes.ExternalLoginLinked)]
+    [InlineData(AuthNotificationTypes.ExternalLoginUnlinked)]
     public void In_app_messages_show_no_secret_and_no_link(string typeCode)
     {
         var type = Catalog.Find(typeCode).ShouldNotBeNull();
@@ -156,6 +159,7 @@ public sealed class AuthNotificationRenderTests
             ["action_url"] = ActionUrl,
             ["change"] = "enabled",
             ["ip_address"] = IpAddress,
+            ["provider"] = Provider,
         };
 
         return type.Variables.Concat(type.SecretVariables).ToDictionary(name => name, name => values[name], StringComparer.Ordinal);

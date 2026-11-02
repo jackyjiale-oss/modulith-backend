@@ -15,6 +15,7 @@ using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Domain.Users.Events;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+using TemplateName.UnitTests.Auth.External;
 
 namespace TemplateName.IntegrationTests.Auth;
 
@@ -256,6 +257,115 @@ public sealed class StepUpTests(IntegrationTestWebAppFactory factory) : Integrat
         }
     }
 
+    [Fact]
+    public async Task Step_up_by_provider_proof_gives_amr_fed_and_a_fresh_auth_time_to_a_password_less_account()
+    {
+        var social = await SignUpWithGoogleAsync();
+        Factory.Time.Advance(TimeSpan.FromMinutes(20));
+        var now = Factory.Time.GetUtcNow();
+
+        // The sign-up's access token has expired by now; a refresh of the same session carries the old auth_time.
+        var renewed = await RefreshAsync(social);
+        new JsonWebToken(renewed).GetClaim("auth_time").Value
+            .ShouldBe(now.AddMinutes(-20).ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture));
+
+        using var response = await StepUpWithProofAsync(renewed);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        AssertNoStore(response);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        body.EnumerateObject().Select(property => property.Name).ShouldBe(["accessToken", "accessTokenExpiresAt", "stepUpExpiresAt"]);
+        body.GetProperty("stepUpExpiresAt").GetDateTimeOffset().ShouldBe(now + MaxAge);
+        var token = new JsonWebToken(body.GetProperty("accessToken").GetString());
+        token.GetClaim("sub").Value.ShouldBe(social.UserId.ToString());
+        token.GetClaim("sid").Value.ShouldBe(social.SessionId.ToString());
+        Amr(token).ShouldBe(["fed"]);
+        token.GetClaim("auth_time").Value.ShouldBe(now.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture));
+
+        var session = await QueryAsync(context => context.Set<UserSession>().SingleAsync(candidate => candidate.Id == social.SessionId, Ct));
+        session.AuthenticatedAt.ShouldBe(now);
+        session.AuthMethods.ShouldBe("fed");
+        var audit = await QueryAsync(context => context.Set<AuthAuditLog>().SingleAsync(entry => entry.EventType == AuthAuditEvents.StepUpSucceeded, Ct));
+        audit.UserId.ShouldBe(social.UserId);
+        audit.Details.ShouldBe("""{"factor":"external","provider":"google"}""");
+        (await FindUserAsync(social.UserId)).AccessFailedCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_proof_of_an_identity_that_is_not_the_callers_is_400_and_not_counted()
+    {
+        var social = await SignUpWithGoogleAsync();
+
+        using var response = await StepUpWithProofAsync(social.AccessToken, subject: "fake-subject-of-somebody-else");
+
+        await AssertProblemAsync(response, HttpStatusCode.BadRequest, "auth.step_up_identity_mismatch");
+        (await FindUserAsync(social.UserId)).AccessFailedCount.ShouldBe(0);
+        (await QueryAsync(context => context.Set<UserSession>().SingleAsync(Ct))).AuthMethods.ShouldBe("fed");
+        var audit = await QueryAsync(context => context.Set<AuthAuditLog>().SingleAsync(entry => entry.EventType == AuthAuditEvents.StepUpFailed, Ct));
+        audit.FailureReason.ShouldBe("auth.step_up_identity_mismatch");
+        audit.Details.ShouldBe("""{"factor":"external","provider":"google"}""");
+    }
+
+    [Fact]
+    public async Task A_wrong_proof_is_401_and_not_counted_toward_the_lockout()
+    {
+        var social = await SignUpWithGoogleAsync();
+
+        // The ID token binds one nonce and the request posts another.
+        using var response = await StepUpWithProofAsync(social.AccessToken, postedNonce: $"nonce-{Guid.NewGuid():N}");
+
+        await AssertProblemAsync(response, HttpStatusCode.Unauthorized, "auth.invalid_external_token");
+        (await FindUserAsync(social.UserId)).AccessFailedCount.ShouldBe(0);
+        (await QueryAsync(context => context.Set<AuthAuditLog>().CountAsync(entry => entry.EventType == AuthAuditEvents.StepUpSucceeded, Ct))).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_password_account_cannot_step_up_with_a_proof()
+    {
+        var signedIn = await SignInAsync();
+
+        using var response = await StepUpWithProofAsync(signedIn.AccessToken);
+
+        await AssertProblemAsync(response, HttpStatusCode.BadRequest, "auth.step_up_method_not_allowed");
+        (await FindUserAsync(signedIn.UserId)).AccessFailedCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task An_account_with_two_step_verification_cannot_step_up_with_a_proof()
+    {
+        var social = await SignUpWithGoogleAsync();
+        await EnrollTotpAsync(social.UserId);
+
+        using var response = await StepUpWithProofAsync(social.AccessToken);
+
+        await AssertProblemAsync(response, HttpStatusCode.BadRequest, "auth.step_up_method_not_allowed");
+        (await FindUserAsync(social.UserId)).AccessFailedCount.ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData("apple")]
+    [InlineData("myspace")]
+    public async Task A_disabled_or_unknown_provider_is_404(string provider)
+    {
+        var social = await SignUpWithGoogleAsync();
+
+        using var response = await StepUpWithProofAsync(social.AccessToken, provider: provider);
+
+        await AssertProblemAsync(response, HttpStatusCode.NotFound, "auth.external_provider_not_found");
+    }
+
+    [Fact]
+    public async Task A_proof_together_with_a_password_is_a_validation_problem()
+    {
+        var social = await SignUpWithGoogleAsync();
+        var nonce = $"nonce-{Guid.NewGuid():N}";
+        var idToken = Factory.IdentityProvider.IdToken(claims => claims["nonce"] = nonce);
+
+        using var response = await StepUpAsync(new { password = AuthTestHarness.Password, provider = "google", idToken, nonce }, social.AccessToken);
+
+        await AssertProblemAsync(response, HttpStatusCode.BadRequest, "validation.failed");
+    }
+
     private static List<string> Amr(JsonWebToken token) => [.. token.Claims.Where(claim => claim.Type == "amr").Select(claim => claim.Value)];
 
     private static void AssertNoStore(HttpResponseMessage response)
@@ -283,6 +393,48 @@ public sealed class StepUpTests(IntegrationTestWebAppFactory factory) : Integrat
         return await Client.SendAsync(request, Ct);
     }
 
+    /// <summary>Posts a fresh ID token of the fake provider, bound to a nonce no request used before, to the step-up route.</summary>
+    private Task<HttpResponseMessage> StepUpWithProofAsync(
+        string accessToken,
+        string provider = "google",
+        string subject = FakeIdentityProvider.DefaultSubject,
+        string? postedNonce = null)
+    {
+        var nonce = $"nonce-{Guid.NewGuid():N}";
+        var idToken = Factory.IdentityProvider.IdToken(claims =>
+        {
+            claims["nonce"] = nonce;
+            claims["sub"] = subject;
+        });
+        return StepUpAsync(new { provider, idToken, nonce = postedNonce ?? nonce }, accessToken);
+    }
+
+    /// <summary>Signs a new user up with the fake provider's default identity: no password, a confirmed email, a session that proved <c>fed</c>.</summary>
+    private async Task<SocialSession> SignUpWithGoogleAsync()
+    {
+        var nonce = $"nonce-{Guid.NewGuid():N}";
+        var idToken = Factory.IdentityProvider.IdToken(claims => claims["nonce"] = nonce);
+        using var response = await Client.PostAsJsonAsync("/api/v1/auth/external/google/login", new { idToken, nonce }, Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        var accessToken = body.GetProperty("accessToken").GetString()!;
+        return new SocialSession(
+            Guid.Parse(new JsonWebToken(accessToken).GetClaim("sub").Value),
+            body.GetProperty("sessionId").GetGuid(),
+            accessToken,
+            body.GetProperty("refreshToken").GetString()!);
+    }
+
+    /// <summary>Refreshes the social session and returns its new access token, of the same session.</summary>
+    private async Task<string> RefreshAsync(SocialSession social)
+    {
+        using var response = await Client.PostAsJsonAsync(RefreshRoute, new { refreshToken = social.RefreshToken }, Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        body.GetProperty("sessionId").GetGuid().ShouldBe(social.SessionId);
+        return body.GetProperty("accessToken").GetString()!;
+    }
+
     private async Task<Tokens> LoginAsync()
     {
         using var response = await Client.PostAsJsonAsync(LoginRoute, new { email = Email, password = AuthTestHarness.Password }, Ct);
@@ -301,4 +453,6 @@ public sealed class StepUpTests(IntegrationTestWebAppFactory factory) : Integrat
     }
 
     private sealed record Tokens(string AccessToken, string RefreshToken, Guid SessionId);
+
+    private sealed record SocialSession(Guid UserId, Guid SessionId, string AccessToken, string RefreshToken);
 }

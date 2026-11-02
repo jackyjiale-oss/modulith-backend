@@ -12,4 +12,7 @@ internal enum SessionRevokedReason
 
     /// <summary>The user changed their two-step verification in another session, so every other session ended.</summary>
     MfaChanged = 6,
+
+    /// <summary>The user unlinked a social login in another session, so every other session ended (linking one ends no session).</summary>
+    ExternalLoginChanged = 7,
 }

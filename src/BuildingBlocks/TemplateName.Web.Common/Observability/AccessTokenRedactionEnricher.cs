@@ -4,10 +4,12 @@ using Serilog.Events;
 namespace TemplateName.Web.Common.Observability;
 
 /// <summary>
-/// Replaces the <c>access_token</c> values (<see cref="AccessTokenRedaction"/>) in every string property of a log event before any
-/// sink sees it. Serilog renders a message from its properties, so this also covers the message text: ASP.NET Core's own
+/// Replaces the <c>access_token</c> and <c>input_token</c> values (<see cref="AccessTokenRedaction"/>) in every string property of a log
+/// event before any sink sees it. Serilog renders a message from its properties, so this also covers the message text: ASP.NET Core's own
 /// <c>Request starting</c> and <c>Request finished</c> lines, for example, carry the query string as the <c>QueryString</c> property.
-/// Those lines are off by default (<c>Microsoft.AspNetCore</c> at <c>Warning</c>); this makes turning them on safe.
+/// Those lines are off by default (<c>Microsoft.AspNetCore</c> at <c>Warning</c>); this makes turning them on safe. The URI of an
+/// outgoing call that <c>IHttpClientFactory</c> logs has its query redacted by .NET itself unless <c>System.Net.Http.DisableUriRedaction</c>
+/// is set; this is the second line of defence for the Graph API calls of social login.
 /// </summary>
 public sealed class AccessTokenRedactionEnricher : ILogEventEnricher
 {

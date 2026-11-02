@@ -30,6 +30,7 @@ using TemplateName.Modules.Auth.Contracts.Users;
 using TemplateName.Modules.Auth.Endpoints;
 using TemplateName.Modules.Auth.Infrastructure.Authorization;
 using TemplateName.Modules.Auth.Infrastructure.Contracts;
+using TemplateName.Modules.Auth.Infrastructure.External;
 using TemplateName.Modules.Auth.Infrastructure.Observability;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
 using TemplateName.Modules.Auth.Infrastructure.Retention;
@@ -53,6 +54,8 @@ public static class AuthModule
     /// access tokens with the JWT bearer handler as the default authentication scheme, the permission checker with its cache, the
     /// permission source and the seeder, two-step verification (<c>Auth:Mfa</c>, the TOTP secret protector, the MFA repositories,
     /// the factor verifier, the recovery-code issuer and the MFA change effects), step-up (<c>Auth:StepUp</c> and its policy),
+    /// social login's configuration (<c>Auth:External</c>, the provider catalog and the <c>oidc-discovery</c> and <c>facebook-graph</c> HTTP clients)
+    /// and proof verification (the ID token verifier, the nonce replay guard and <c>IExternalIdentityVerifier</c>),
     /// the retention of time-bound rows (<c>Auth:Retention</c>) with the six recurring cleanup jobs that enforce it, and the Data Protection
     /// key ring stored in <c>auth.DataProtectionKeys</c>. Call it after
     /// <c>AddInfrastructureCommon</c> and before <c>AddApplicationDecorators</c>.
@@ -116,6 +119,7 @@ public static class AuthModule
         AddAccessTokens(services, configuration);
         AddPermissions(services, configuration);
         AddMfa(services, configuration);
+        AddExternalLogin(services, configuration);
         AddRetention(services, configuration);
 
         // One key ring for every instance, so an outbox event protected by one instance can be read by another (ADR 0017).
@@ -152,8 +156,9 @@ public static class AuthModule
     /// <c>GET auth/sessions</c>, <c>DELETE auth/sessions/{id}</c>, <c>POST auth/logout</c>, <c>POST auth/logout-all</c>,
     /// <c>POST auth/password/forgot</c>, <c>POST auth/password/reset</c> and <c>POST auth/password/change</c>; its <c>auth/mfa</c> group:
     /// <c>POST auth/mfa/verify</c>, <c>POST auth/mfa/totp/setup</c>, <c>POST auth/mfa/totp/confirm</c>, <c>GET auth/mfa/methods</c>,
-    /// <c>DELETE auth/mfa/methods/{id}</c> and <c>POST auth/mfa/recovery-codes/regenerate</c>; and the trusted devices,
-    /// <c>GET auth/trusted-devices</c> and <c>DELETE auth/trusted-devices/{id}</c>. The user administration
+    /// <c>DELETE auth/mfa/methods/{id}</c> and <c>POST auth/mfa/recovery-codes/regenerate</c>; the trusted devices,
+    /// <c>GET auth/trusted-devices</c> and <c>DELETE auth/trusted-devices/{id}</c>; and its <c>auth/external</c> group (social login):
+    /// <c>GET auth/external/providers</c> and <c>POST auth/external/{provider}/login</c>. The user administration
     /// routes live in its <c>admin/auth/users</c> group, each behind its permission: <c>GET</c> (list) and <c>POST</c> (create) on the
     /// group, <c>GET admin/auth/users/{id}</c>, <c>POST .../{id}/lock</c>, <c>/unlock</c>, <c>/force-password-reset</c>,
     /// <c>/revoke-sessions</c>, <c>/reset-mfa</c> and <c>PUT .../{id}/roles</c>. The role administration lives in <c>admin/auth/roles</c> (<c>GET</c> list and
@@ -229,6 +234,35 @@ public static class AuthModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddScoped<StepUpPolicy>();
+    }
+
+    /// <summary>
+    /// Registers social login's configuration: <c>Auth:External</c> (<c>AllowSignUp</c>, <c>MaxTokenAge</c> and the providers), validated on
+    /// start by data annotations and by <see cref="ExternalLoginOptionsValidator"/> (only enabled providers are checked; a message names the key,
+    /// never a value), the <see cref="IExternalProviderCatalog"/> built from it, the two named HTTP clients, <c>oidc-discovery</c> and
+    /// <c>facebook-graph</c>, each behind a resilience pipeline of the same name, and the proof verification: <see cref="OidcIdTokenVerifier"/>,
+    /// <see cref="FacebookAccessTokenVerifier"/> (Facebook's access tokens, through Graph), the <see cref="IExternalProofReplayGuard"/> (the bounded in-process <see cref="ExternalNonceGate"/>, then <see cref="HybridCache"/>, registered by <see cref="AddPermissions"/>) and the
+    /// <see cref="IExternalIdentityVerifier"/> in front of both.
+    /// </summary>
+    internal static void AddExternalLogin(IServiceCollection services, IConfiguration configuration)
+    {
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<ExternalLoginOptions>, ExternalLoginOptionsValidator>());
+        services.AddOptions<ExternalLoginOptions>()
+            .Bind(configuration.GetSection(ExternalLoginOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddSingleton<IExternalProviderCatalog, ExternalProviderCatalog>();
+
+        // A pipeline name that is not built in starts from the external-default values and needs no other code (ADR 0029).
+        services.AddExternalHttpClient(ExternalHttpClients.OidcDiscovery, ExternalHttpClients.OidcDiscovery);
+        services.AddExternalHttpClient(ExternalHttpClients.FacebookGraph, ExternalHttpClients.FacebookGraph);
+
+        // Singletons: the OIDC verifier keeps one metadata and key cache per provider for the life of the process.
+        services.AddSingleton<OidcIdTokenVerifier>();
+        services.AddSingleton<FacebookAccessTokenVerifier>();
+        services.AddSingleton(serviceProvider => new ExternalNonceGate(serviceProvider.GetRequiredService<TimeProvider>()));
+        services.AddSingleton<IExternalProofReplayGuard, HybridCacheExternalProofReplayGuard>();
+        services.AddSingleton<IExternalIdentityVerifier, ExternalIdentityVerifier>();
     }
 
     /// <summary>

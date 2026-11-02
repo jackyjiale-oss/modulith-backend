@@ -35,6 +35,15 @@ internal sealed class UserRepository(AuthDbContext context) : IUserRepository
     public Task<User?> GetByNormalizedEmailAsync(string normalizedEmail, CancellationToken cancellationToken)
         => Users().SingleOrDefaultAsync(user => user.NormalizedEmail == normalizedEmail, cancellationToken);
 
+    public Task<User?> GetByExternalLoginAsync(string provider, string subject, CancellationToken cancellationToken)
+    {
+        var normalizedProvider = UserExternalLogin.NormalizeProvider(provider);
+
+        return Users().SingleOrDefaultAsync(
+            user => user.ExternalLogins.Any(login => login.Provider == normalizedProvider && login.Subject == subject),
+            cancellationToken);
+    }
+
     public Task<bool> ExistsByNormalizedEmailIncludingDeletedAsync(string normalizedEmail, CancellationToken cancellationToken)
         => context.Set<User>()
             .IgnoreQueryFilters([ModelConventions.SoftDeleteFilterName])
@@ -81,6 +90,7 @@ internal sealed class UserRepository(AuthDbContext context) : IUserRepository
     private IQueryable<User> Users() => context.Set<User>()
         .Include(user => user.PasswordHistory.OrderBy(entry => entry.CreatedAt).ThenBy(entry => entry.Id))
         .Include(user => user.Roles)
+        .Include(user => user.ExternalLogins)
         .AsSingleQuery();
 
     /// <summary>The <c>OUTPUT</c> row of <see cref="RecordFailedSignInSql"/>; <c>LockoutEnd</c> is UTC.</summary>

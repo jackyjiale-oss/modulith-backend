@@ -56,7 +56,7 @@ public sealed class CreateRoleCommandHandlerTests : AdminRoleHandlerTestBase
         result.Error.Parameters!["name"].ShouldBe("support");
         Roles.DidNotReceiveWithAnyArgs().Add(default!);
         AuditEntries.ShouldBeEmpty();
-        await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(default!, Ct);
+        await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(default(string)!, Ct);
     }
 
     [Fact]

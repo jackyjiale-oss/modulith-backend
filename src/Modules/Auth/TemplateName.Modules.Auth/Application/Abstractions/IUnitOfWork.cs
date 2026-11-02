@@ -20,4 +20,13 @@ internal interface IUnitOfWork
     /// be mistaken for the caller's meaning (for example "this address is taken").
     /// </summary>
     Task<bool> SaveChangesUnlessDuplicateAsync(string uniqueIndexName, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// <see cref="SaveChangesUnlessDuplicateAsync(string, CancellationToken)"/> for a save that more than one unique index can refuse
+    /// (see <see cref="UniqueIndexNames"/>): answers false when the refusing index is any of <paramref name="uniqueIndexNames"/>. A
+    /// violation of an index that is not in the list is still thrown. For a link or a first sign-in, which a simultaneous request can
+    /// beat on the identity or on the user's one login per provider, both of which the caller answers alike.
+    /// </summary>
+    /// <exception cref="ArgumentException">The list is empty or holds a blank name.</exception>
+    Task<bool> SaveChangesUnlessDuplicateAsync(IReadOnlyCollection<string> uniqueIndexNames, CancellationToken cancellationToken);
 }

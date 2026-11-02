@@ -25,9 +25,11 @@ namespace TemplateName.Modules.Auth.Application.Mfa.Verify;
 /// The answer is <see cref="MfaErrors.InvalidCode"/>.</item>
 /// <item>The challenge is consumed by one conditional update; losing it (a simultaneous verify, or the cap or the expiry reached
 /// meanwhile) is <see cref="MfaErrors.InvalidChallenge"/>, and the code stays spent: the user signs in again with the next code.</item>
-/// <item>The session, through <see cref="SessionStarter"/>: <c>amr</c> <c>pwd otp mfa</c> or <c>pwd rcvr mfa</c>, <c>auth_time</c> now, the
-/// failure count reset; a recovery code also raises <see cref="MfaChange.RecoveryCodeUsed"/>.</item>
-/// <item>With <see cref="VerifyMfaCommand.RememberDevice"/> and <c>Auth:Mfa:TrustedDevicesEnabled</c> on, a trusted device (plan
+/// <item>The session, through <see cref="SessionStarter"/>: <c>amr</c> is the challenge's <see cref="MfaChallenge.FirstFactor"/> (<c>pwd</c>,
+/// or <c>fed</c> after a federated sign-in), then <c>otp</c> or <c>rcvr</c>, then <c>mfa</c> (<c>pwd otp mfa</c>, <c>fed rcvr mfa</c>);
+/// <c>auth_time</c> now, the failure count reset; a recovery code also raises <see cref="MfaChange.RecoveryCodeUsed"/>.</item>
+/// <item>With <see cref="VerifyMfaCommand.RememberDevice"/> and <c>Auth:Mfa:TrustedDevicesEnabled</c> on, and a <c>pwd</c> challenge (a
+/// trusted device replaces the code only, never the first factor, so for a <c>fed</c> challenge <c>rememberDevice</c> is ignored), a trusted device (plan
 /// decision D14, ADR 0025): a fresh secure token, only its hash stored, bound to the user and to the security stamp the session started
 /// under (taken after <see cref="SessionStarter"/>, which does not rotate it), valid <c>Auth:Mfa:TrustedDeviceLifetime</c>; the token and
 /// its expiry are in this answer only, and the device is audited as <c>auth.trusted_device_added</c> with its id. Same save as the session.</item>
@@ -89,8 +91,9 @@ internal sealed class VerifyMfaCommandHandler(
             return await RejectChallengeAsync(user.Id, tried, now, CancellationToken.None);
         }
 
+        // The challenge says how the first step was passed (a password, or a federated sign-in), and the session says so too.
         var methods = AuthenticationMethods.Join(
-            AuthenticationMethods.Password,
+            challenge.FirstFactor,
             factor == MfaFactor.Totp ? AuthenticationMethods.OneTimePassword : AuthenticationMethods.RecoveryCode,
             AuthenticationMethods.MultiFactor);
 
@@ -116,7 +119,11 @@ internal sealed class VerifyMfaCommandHandler(
                 userId: user.Id,
                 sessionId: started.Session.Id));
 
-            var remembered = command.RememberDevice && mfaOptions.Value.TrustedDevicesEnabled
+            // A trusted device replaces the code only, never the first factor, so after a federated first step it would mean nothing:
+            // rememberDevice is ignored there, as it is with the switch off.
+            var remembered = command.RememberDevice
+                && mfaOptions.Value.TrustedDevicesEnabled
+                && challenge.FirstFactor == AuthenticationMethods.Password
                 ? RememberDevice(user, challenge.DeviceName, started.Session.Id, now)
                 : null;
 

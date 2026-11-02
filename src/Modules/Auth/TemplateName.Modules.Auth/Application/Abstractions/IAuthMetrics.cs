@@ -33,4 +33,11 @@ internal interface IAuthMetrics
     /// counted. A 400 of the validator and a 429 are not counted.
     /// </summary>
     void RecordMfaVerification(MfaVerificationOutcome outcome, MfaFactor? factor);
+
+    /// <summary>
+    /// Counts one external sign-in that reached the handler (<c>auth.external_logins</c>, tag <c>outcome</c> and, only when
+    /// <paramref name="provider"/> is a configured provider, <c>provider</c> = its name). The route value is never a tag, so a caller
+    /// cannot create tag values. A 400 of the validator and a 429 are not counted.
+    /// </summary>
+    void RecordExternalLogin(ExternalProvider? provider, ExternalLoginOutcome outcome);
 }

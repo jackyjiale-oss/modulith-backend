@@ -29,6 +29,12 @@ internal sealed class MfaChallenge : AggregateRoot<Guid>
     /// <summary>The device name of the sign-in attempt, for the session or trusted device the verification creates.</summary>
     public string DeviceName { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// How the user passed the first step: <see cref="AuthenticationMethods.Password"/> or <see cref="AuthenticationMethods.Federated"/>.
+    /// The verification adds it to the <c>amr</c> of the session next to the second factor.
+    /// </summary>
+    public string FirstFactor { get; private set; } = AuthenticationMethods.Password;
+
     public DateTimeOffset CreatedAt { get; private set; }
 
     public DateTimeOffset ExpiresAt { get; private set; }
@@ -39,17 +45,27 @@ internal sealed class MfaChallenge : AggregateRoot<Guid>
     public int FailedAttempts { get; private set; }
 
     /// <summary>Issues a challenge that expires <paramref name="lifetime"/> after <paramref name="now"/>. A device name longer than its column is cut to it.</summary>
-    /// <exception cref="ArgumentException"><paramref name="tokenHash"/> is not <see cref="HashLength"/> bytes, or the stamp is blank.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="tokenHash"/> is not <see cref="HashLength"/> bytes, the stamp is blank, or <paramref name="firstFactor"/> is
+    /// neither <see cref="AuthenticationMethods.Password"/> nor <see cref="AuthenticationMethods.Federated"/> (ordinal comparison).
+    /// </exception>
     public static MfaChallenge Issue(
         Guid userId,
         byte[] tokenHash,
         string securityStamp,
         string deviceName,
+        string firstFactor,
         TimeSpan lifetime,
         DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(tokenHash);
         ArgumentException.ThrowIfNullOrWhiteSpace(securityStamp);
+        ArgumentException.ThrowIfNullOrWhiteSpace(firstFactor);
+        if (firstFactor is not (AuthenticationMethods.Password or AuthenticationMethods.Federated))
+        {
+            throw new ArgumentException("The first factor is a password or a federated sign-in.", nameof(firstFactor));
+        }
+
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(lifetime, TimeSpan.Zero);
         if (tokenHash.Length != HashLength)
         {
@@ -63,6 +79,7 @@ internal sealed class MfaChallenge : AggregateRoot<Guid>
             TokenHash = tokenHash,
             SecurityStamp = securityStamp,
             DeviceName = UserSession.Cut(deviceName, UserSession.MaxDeviceNameLength),
+            FirstFactor = firstFactor,
             CreatedAt = now,
             ExpiresAt = now + lifetime,
         };

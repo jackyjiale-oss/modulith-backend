@@ -35,4 +35,10 @@ internal static class AuthNotificationTypes
 
     /// <summary>The account was signed in to from a device none of its earlier sessions used (<c>NewDeviceSignedIn</c>); email only, no client-supplied text.</summary>
     public const string NewDeviceLogin = "auth.new_device_login";
+
+    /// <summary>A social-login provider was linked to the account (<c>ExternalLoginLinked</c>); email and an optional in-app message.</summary>
+    public const string ExternalLoginLinked = "auth.external_login_linked";
+
+    /// <summary>A social-login provider was removed from the account (<c>ExternalLoginUnlinked</c>); email and an optional in-app message.</summary>
+    public const string ExternalLoginUnlinked = "auth.external_login_unlinked";
 }

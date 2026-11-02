@@ -1,0 +1,5 @@
+Helo {{ display_name }},
+
+{{ provider }} telah dibuang sebagai cara untuk log masuk ke akaun anda pada {{ occurred_at }} ({{ time_zone }}).
+
+Jika ini bukan anda, tetapkan semula kata laluan anda sekarang dan hubungi pentadbir anda.

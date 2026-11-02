@@ -38,6 +38,8 @@ public sealed class TemplateCompletenessTests
             AuthNotificationTypes.AccountLocked,
             AuthNotificationTypes.MfaChanged,
             AuthNotificationTypes.NewDeviceLogin,
+            AuthNotificationTypes.ExternalLoginLinked,
+            AuthNotificationTypes.ExternalLoginUnlinked,
         ];
 
     public static TheoryData<string> SecurityNoticeTypeCodes => new(SecurityNotices);

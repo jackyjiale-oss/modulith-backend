@@ -74,6 +74,7 @@ public sealed class MfaLoginTests(IntegrationTestWebAppFactory factory) : Integr
         challenge.UserId.ShouldBe(user.Id);
         challenge.SecurityStamp.ShouldBe(user.SecurityStamp);
         challenge.DeviceName.ShouldBe("Alice's laptop");
+        challenge.FirstFactor.ShouldBe("pwd");
         (await QueryAsync(context => context.Set<UserSession>().CountAsync(Ct))).ShouldBe(0);
         (await FindUserAsync(user.Id)).LastLoginAt.ShouldBeNull();
 

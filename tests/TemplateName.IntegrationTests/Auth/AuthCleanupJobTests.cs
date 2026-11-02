@@ -634,7 +634,7 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
         var userId = await UserIdAsync();
         await using var scope = Factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-        var challenge = MfaChallenge.Issue(userId, NewHash(), "stamp", "Seed device", TimeSpan.FromMinutes(5), Now);
+        var challenge = MfaChallenge.Issue(userId, NewHash(), "stamp", "Seed device", AuthenticationMethods.Password, TimeSpan.FromMinutes(5), Now);
         context.Add(challenge);
         await context.SaveChangesAsync(Ct);
 

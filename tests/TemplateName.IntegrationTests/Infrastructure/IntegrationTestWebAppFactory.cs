@@ -23,11 +23,13 @@ using TemplateName.IntegrationTests.Outbox;
 using TemplateName.IntegrationTests.Persistence;
 using TemplateName.Modules.Auth;
 using TemplateName.Modules.Auth.Contracts.IntegrationEvents;
+using TemplateName.Modules.Auth.Infrastructure.External;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
 using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
 using TemplateName.Modules.Notifications.Infrastructure.Hubs;
 using TemplateName.SharedKernel;
+using TemplateName.UnitTests.Auth.External;
 using Testcontainers.MsSql;
 
 namespace TemplateName.IntegrationTests.Infrastructure;
@@ -48,6 +50,11 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     private readonly MsSqlContainer _sqlServer = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
     private ResettableDatabase? _testsDatabase;
     private ResettableDatabase? _persistenceTestsDatabase;
+
+    public IntegrationTestWebAppFactory()
+    {
+        IdentityProvider = new FakeIdentityProvider(Time);
+    }
 
     /// <summary>The clock every host built by this factory uses; it starts at 2026-01-01T00:00:00Z and moves only when a test moves it.</summary>
     public FakeTimeProvider Time { get; } = new(StartTime);
@@ -72,6 +79,14 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     /// to the host's real SignalR pusher, so a hub client connected to that host receives it.
     /// </summary>
     internal RecordingInAppNotificationPusher InAppPusher { get; } = new();
+
+    /// <summary>
+    /// The OpenID Connect provider behind the <c>oidc-discovery</c> client of every host built by this factory: it answers discovery and the
+    /// key set at any address and signs ID tokens on <see cref="Time"/>. <c>Google</c> is the one enabled provider (client ID
+    /// <see cref="FakeIdentityProvider.DefaultClientId"/>); <c>Apple</c> is configured but disabled. The <c>facebook-graph</c> client
+    /// answers 404 to everything. No test reaches a real provider.
+    /// </summary>
+    internal FakeIdentityProvider IdentityProvider { get; }
 
     /// <summary>The events the outbox test handlers have received.</summary>
     public EventRecorder EventRecorder { get; } = new();
@@ -132,6 +147,7 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     {
         await base.DisposeAsync();
         await _sqlServer.DisposeAsync();
+        IdentityProvider.Dispose();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -160,6 +176,12 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
 
                 // Keep test output to problems: no per-request or host-lifetime lines.
                 ["Serilog:MinimumLevel:Default"] = "Warning",
+
+                // Social login against IdentityProvider: Google enabled, Apple configured but disabled (it must answer like an unknown name).
+                ["Auth:External:Providers:Google:Enabled"] = "true",
+                ["Auth:External:Providers:Google:ClientIds:0"] = FakeIdentityProvider.DefaultClientId,
+                ["Auth:External:Providers:Apple:Enabled"] = "false",
+                ["Auth:External:Providers:Apple:ClientIds:0"] = "com.example.disabled",
             }));
 
         builder.ConfigureTestServices(services =>
@@ -190,6 +212,8 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             AddRecordingIntegrationEventHandler<RefreshTokenReuseDetectedIntegrationEvent>(services);
             AddRecordingIntegrationEventHandler<MfaChangedIntegrationEvent>(services);
             AddRecordingIntegrationEventHandler<NewDeviceSignedInIntegrationEvent>(services);
+            AddRecordingIntegrationEventHandler<ExternalLoginLinkedIntegrationEvent>(services);
+            AddRecordingIntegrationEventHandler<ExternalLoginUnlinkedIntegrationEvent>(services);
 
             // And one for the change sets every module's outbox publishes.
             AddRecordingIntegrationEventHandler<EntityChangesRecordedIntegrationEvent>(services);
@@ -207,7 +231,18 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.AddRecurringJob<ThrowingJob>();
             services.AddSingleton<IStartupFilter, ProtectedTestEndpointStartupFilter>();
             services.AddSingleton<IStartupFilter, TestClientAddressStartupFilter>();
+
+            // The provider side of social login, without a network: discovery and keys from the fake, and a Graph API that knows nothing.
+            services.AddHttpClient(ExternalHttpClients.OidcDiscovery).ConfigurePrimaryHttpMessageHandler(() => IdentityProvider.Handler);
+            services.AddHttpClient(ExternalHttpClients.FacebookGraph).ConfigurePrimaryHttpMessageHandler(() => new NotFoundHandler());
         });
+    }
+
+    /// <summary>Answers every request with 404, so a Graph call made by mistake fails fast instead of leaving the machine.</summary>
+    private sealed class NotFoundHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.NotFound));
     }
 
     /// <summary>Registers the recording consumer of <typeparamref name="TEvent"/> as <c>AddApplicationHandlers</c> registers a scanned one.</summary>

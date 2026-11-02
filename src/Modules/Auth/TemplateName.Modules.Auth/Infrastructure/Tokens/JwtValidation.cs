@@ -43,9 +43,9 @@ internal static class JwtValidation
 
     /// <summary>
     /// A token is valid from <c>nbf - skew</c> up to and including <c>exp + skew</c>; <c>exp</c> is required. Throws the exception the library
-    /// would throw, so the bearer handler reports the same reason.
+    /// would throw, so the bearer handler reports the same reason. The provider ID token verifier uses it too.
     /// </summary>
-    private static bool ValidateLifetime(DateTime? notBefore, DateTime? expires, TimeSpan clockSkew, TimeProvider clock)
+    internal static bool ValidateLifetime(DateTime? notBefore, DateTime? expires, TimeSpan clockSkew, TimeProvider clock)
     {
         if (expires is null)
         {

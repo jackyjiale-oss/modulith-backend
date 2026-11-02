@@ -53,7 +53,7 @@ Error codes (messages in `Resources/InfrastructureErrorMessages.resx`, `.ms.resx
 
 - **`memory`** (the default): `HybridCache` in memory per instance; nothing else is needed.
 - **`redis`**: Redis as the shared second level. The host must call `AddPlatformRedis` from [`TemplateName.Platform.Redis`](platform-redis.md), which registers the distributed cache; a host that does not fails on start (`Caching:Provider is redis, but no distributed cache is registered`) rather than caching in memory only without saying so.
-- **`none`**: no cache, for diagnosing. A `PostConfigure` of `HybridCacheOptions` adds `DisableLocalCache | DisableDistributedCache` to `DefaultEntryOptions.Flags`. HybridCache uses the default flags for every entry whose own options set no `Flags`, so an entry whose caller passes its own expirations (the Auth permission set does) is still read from its source every time (`Caching/CachingProviderTests.Provider_none_makes_every_permission_read_hit_the_database`). An entry that sets its own `Flags` would not be covered; none does.
+- **`none`**: no cache, for diagnosing. A `PostConfigure` of `HybridCacheOptions` adds `DisableLocalCache | DisableDistributedCache` to `DefaultEntryOptions.Flags`. HybridCache uses the default flags for every entry whose own options set no `Flags`, so an entry whose caller passes its own expirations (the Auth permission set does) is still read from its source every time (`Caching/CachingProviderTests.Provider_none_makes_every_permission_read_hit_the_database`). An entry that sets its own `Flags` is not covered; only the Auth module's spent provider nonces (`auth:ext-nonce:*`) do, on purpose: they are a security record, not a cache, so `none` must not switch their cross-instance layer off. (Single use within one instance does not rest on `HybridCache` at all: the Auth module's own atomic in-process gate guarantees it whatever `Caching:Provider` says; [Auth module](../modules/auth.md#configuration).)
 
 A value other than the three (any case) fails on start. `HybridCache` itself is registered by the module that uses it (`AddHybridCache`, Auth today).
 
@@ -218,6 +218,8 @@ services.AddExternalHttpClient("email-api", ResiliencePipelines.Critical);
   }
 }
 ```
+
+The Auth module's social login does exactly this with two custom names, `AddExternalHttpClient("oidc-discovery", "oidc-discovery")` (a provider's discovery document and signing keys) and `AddExternalHttpClient("facebook-graph", "facebook-graph")` (Facebook's Graph API); both use the `external-default` values until `Resilience:Pipelines:oidc-discovery` or `Resilience:Pipelines:facebook-graph` says otherwise.
 
 A name that is not built in needs no further code: it starts from the `external-default` values and reads only the keys you set. Two clients on one pipeline name share its settings but each has its own breaker, so a provider that is down does not open the circuit of another. Then:
 

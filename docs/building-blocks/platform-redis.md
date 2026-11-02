@@ -43,7 +43,7 @@ The instance has one `IConnectionMultiplexer`, created and owned by the containe
 
 ## Keys
 
-`{InstanceName}{module}:{entity}:{id}`, with no tenant (the template has none). The module writes `{module}:{entity}:{id}`; `InstanceName` is added by the Redis cache. Today there is one cache entry: the Auth module's permission set, `auth:perm:{userId}` in the module, `TemplateName:auth:perm:{userId}` in Redis ([Auth module](../modules/auth.md#permission-checks)). A module adding a cached entry follows the same shape, so two modules never collide and `redis-cli --scan --pattern 'TemplateName:auth:*'` finds one module's keys.
+`{InstanceName}{module}:{entity}:{id}`, with no tenant (the template has none). The module writes `{module}:{entity}:{id}`; `InstanceName` is added by the Redis cache. Today there are two entries, both the Auth module's: the permission set, `auth:perm:{userId}` in the module, `TemplateName:auth:perm:{userId}` in Redis ([Auth module](../modules/auth.md#permission-checks)), and the spent social-login nonces, `auth:ext-nonce:{hex SHA-256}` (the nonce itself never appears in a key). A module adding a cached entry follows the same shape, so two modules never collide and `redis-cli --scan --pattern 'TemplateName:auth:*'` finds one module's keys.
 
 The rate limiters write `{InstanceName}rl:{policy}:{partitionKey}`: `TemplateName:rl:global:ip:203.0.113.7`, `TemplateName:rl:global:user:{sub}`, `TemplateName:rl:auth-strict:ip:::1` (an IPv6 address keeps its colons), `TemplateName:rl:notifications-hub-tickets:user:{sub}`. The value is the count of the current window and the key expires with the window, so `redis-cli --scan --pattern 'TemplateName:rl:*'` lists the windows in use and nothing is left behind.
 

@@ -5,8 +5,9 @@ namespace TemplateName.Modules.Notifications.Application.Catalog;
 /// <summary>
 /// Declares the notification types of Auth's integration events (Decisions D6, D7, D10). Every one is a security notice: category
 /// <see cref="NotificationCategory.Security"/>, priority <see cref="NotificationPriority.Critical"/> (so it ignores quiet hours) and a
-/// mandatory email channel. Only <see cref="AuthNotificationTypes.PasswordChanged"/> and
-/// <see cref="AuthNotificationTypes.TokenReuseDetected"/> also have an in-app channel, which the user can switch off. The four types that
+/// mandatory email channel. Only <see cref="AuthNotificationTypes.PasswordChanged"/>, <see cref="AuthNotificationTypes.TokenReuseDetected"/>,
+/// <see cref="AuthNotificationTypes.ExternalLoginLinked"/> and <see cref="AuthNotificationTypes.ExternalLoginUnlinked"/> also have an
+/// in-app channel, which the user can switch off. The four types that
 /// carry a single-use link declare <c>action_url</c> as a secret variable, which only their email text and HTML may show. The templates
 /// are in <c>Templates/</c> of this project.
 /// </summary>
@@ -20,6 +21,7 @@ internal sealed class AuthNotificationTypeSource : INotificationTypeSource
     private const string ActionUrl = "action_url";
     private const string Change = "change";
     private const string IpAddress = "ip_address";
+    private const string Provider = "provider";
 
     private static readonly NotificationChannel[] EmailOnly = [NotificationChannel.Email];
     private static readonly NotificationChannel[] EmailAndInApp = [NotificationChannel.Email, NotificationChannel.InApp];
@@ -36,6 +38,8 @@ internal sealed class AuthNotificationTypeSource : INotificationTypeSource
         Notice(AuthNotificationTypes.TokenReuseDetected, EmailAndInApp, DisplayName, OccurredAt, TimeZone),
         Notice(AuthNotificationTypes.MfaChanged, EmailOnly, DisplayName, Change, OccurredAt, TimeZone),
         Notice(AuthNotificationTypes.NewDeviceLogin, EmailOnly, DisplayName, OccurredAt, TimeZone, IpAddress),
+        Notice(AuthNotificationTypes.ExternalLoginLinked, EmailAndInApp, DisplayName, Provider, OccurredAt, TimeZone),
+        Notice(AuthNotificationTypes.ExternalLoginUnlinked, EmailAndInApp, DisplayName, Provider, OccurredAt, TimeZone),
     ];
 
     private static NotificationTypeDefinition Link(string code) =>

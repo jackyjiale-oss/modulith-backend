@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using OpenTelemetry;
 using OpenTelemetry.Instrumentation.AspNetCore;
+using OpenTelemetry.Instrumentation.Http;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -28,6 +29,7 @@ public static partial class ObservabilityExtensions
     private const string HttpProtobufProtocol = "http/protobuf";
     private const string LogsPath = "/v1/logs";
     private const string UrlQueryTag = "url.query";
+    private const string UrlFullTag = "url.full";
     // The building blocks' own meter (the recurring-job scheduler in Infrastructure.Common, which this project does not reference) and
     // Polly's, through which the HTTP resilience pipelines report.
     private const string PlatformMeterName = "TemplateName.Platform";
@@ -182,12 +184,28 @@ public static partial class ObservabilityExtensions
         };
     }
 
+    /// <summary>
+    /// The HttpClient trace options: the <c>url.full</c> tag of an outgoing call gets any <c>access_token</c> and <c>input_token</c> value
+    /// masked (<see cref="AccessTokenRedaction"/>; the Graph API calls of social login carry the user's Facebook token and the app's secret
+    /// there). The instrumentation (1.20.1) already masks every query value by default (<c>?input_token=Redacted</c>); working on its tag
+    /// keeps that, and keeps the tokens out even when the default is switched off
+    /// (<c>OTEL_DOTNET_EXPERIMENTAL_HTTPCLIENT_DISABLE_URL_QUERY_REDACTION</c>).
+    /// </summary>
+    internal static void ConfigureHttpClientTracing(HttpClientTraceInstrumentationOptions options)
+        => options.EnrichWithHttpRequestMessage = (activity, _) =>
+        {
+            if (activity.GetTagItem(UrlFullTag) is string url && AccessTokenRedaction.ContainsAccessToken(url))
+            {
+                activity.SetTag(UrlFullTag, AccessTokenRedaction.Redact(url));
+            }
+        };
+
     private static void AddOpenTelemetry(IServiceCollection services, string applicationName)
         => services.AddOpenTelemetry()
             .ConfigureResource(resource => resource.AddService(applicationName))
             .WithTracing(tracing => tracing
                 .AddAspNetCoreInstrumentation(ConfigureAspNetCoreTracing)
-                .AddHttpClientInstrumentation()
+                .AddHttpClientInstrumentation(ConfigureHttpClientTracing)
                 .AddSqlClientInstrumentation()
                 .AddEntityFrameworkCoreInstrumentation())
             .WithMetrics(metrics => metrics

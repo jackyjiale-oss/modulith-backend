@@ -9,4 +9,7 @@ public enum ErrorType
     Unauthorized,
     Forbidden,
     Failure,
+
+    /// <summary>A dependency the request needs (an external service) cannot be reached right now; the caller may retry later.</summary>
+    Unavailable,
 }

@@ -47,6 +47,11 @@ internal static class AuthAuditEvents
     public const string RoleUpdated = "auth.role_updated";
     public const string RoleDeleted = "auth.role_deleted";
     public const string RolePermissionsChanged = "auth.role_permissions_changed";
+    public const string ExternalLoginSucceeded = "auth.external_login_succeeded";
+    public const string ExternalLoginFailed = "auth.external_login_failed";
+    public const string ExternalLinked = "auth.external_linked";
+    public const string ExternalUnlinked = "auth.external_unlinked";
+    public const string ExternalRegistered = "auth.external_registered";
 
     /// <summary>Every event type above, for the audit log's <c>eventType</c> filter.</summary>
     public static IReadOnlyCollection<string> All { get; } =
