@@ -30,13 +30,25 @@ The `container` job builds `build/docker/Dockerfile` and runs `build/scripts/con
 |---|---|---|
 | `detect` | always | Reads whether `.template.config/template.json` exists, which is true only in the template repository. |
 | `ci` | always | Calls `ci.yml`, so what is published passed the same jobs as a pull request. |
-| `image` | `ci` passed and this is not the template repository | Builds and pushes `ghcr.io/<repository>/api` (the name is lower-cased) with an SBOM and a provenance attestation. Tags: `sha-<short>` and `edge` from a push to `main`; `sha-<short>`, `x.y.z` and `latest` from a release. Outputs the digest. |
+| `image` | `ci` passed and this is not the template repository | Builds and pushes `ghcr.io/<repository>/api` (the name is lower-cased) with an SBOM and a provenance attestation. Tags: `sha-<short>` on every run, `edge` only on a non-release run from `main`, `x.y.z` and `latest` on a release. A release is refused unless the ref is `main` or a `v*` tag. Outputs the digest. |
 | `verify` | after `image` | Pulls the image by digest and runs `container-verify.sh` on it. |
-| `deploy-staging` | after `verify`, and `DEPLOY_ENABLED` is `true` | Environment `staging`: `migrate` from the image, `build/deploy/roll-out.sh staging <image@digest>`, then `GET $STAGING_URL/health/ready` for about a minute. |
+| `deploy-staging` | after `verify`, `DEPLOY_ENABLED` is `true`, and the run is on `main` or a release | Environment `staging`: `migrate` from the image, `build/deploy/roll-out.sh staging <image@digest>`, then `GET $STAGING_URL/health/ready` for about a minute. |
 | `deploy-production` | a release, after `deploy-staging`, and `DEPLOY_ENABLED` is `true` | Environment `production`: the same three steps. |
 | `deploy-iis` | a release, after `verify`, and `IIS_ENABLED` is `true` | Environment `production`, on a self-hosted Windows runner: `dotnet publish`, then `deploy-iis.ps1` ([`iis.md`](iis.md)). Independent of the Docker path; it does not wait for staging. |
 
-A green push to `main` goes to staging; a release (merging the release-please pull request) goes to staging and then, after approval, to production. The template repository itself publishes and deploys nothing: where `.template.config` exists the `image` job and everything after it are skipped. `cd.yml` can also be run by hand (`workflow_dispatch`), from a branch or to repeat a release, with the inputs `release` and `version` (`x.y.z`, no leading `v`). A manual run behaves like the real one: without `release` it pushes `sha-<short>` and `edge` (so `edge` then points at that branch's build) and, with `DEPLOY_ENABLED`, rolls it out to staging; with `release` it pushes `x.y.z` and `latest` and goes on to production. If a release run was cancelled or failed after the image, dispatch it again with `release` checked and the version.
+A green push to `main` goes to staging; a release (merging the release-please pull request) goes to staging and then, after approval, to production. The template repository itself publishes and deploys nothing: where `.template.config` exists the `image` job and everything after it are skipped. What each trigger does:
+
+| Trigger | Image tags | Deploys |
+|---|---|---|
+| Push to `main` | `sha-<short>`, `edge` | `deploy-staging` with `DEPLOY_ENABLED`; production and IIS are skipped |
+| Release call from `release.yml` (ref `main`, `release` true) | `sha-<short>`, `x.y.z`, `latest` | staging, then production (`DEPLOY_ENABLED`); IIS if `IIS_ENABLED` |
+| Dispatch, `release` unticked, from `main` | `sha-<short>`, `edge` | as a push to `main` |
+| Dispatch, `release` unticked, from another branch or a tag (a dry run) | `sha-<short>` only, never `edge` | none: `ci`, `image` and `verify` run, no deploy job |
+| Dispatch, `release` ticked, from a `v*` tag | `sha-<short>`, `x.y.z`, `latest` | as a release; `version` must equal the tag without the leading `v` |
+| Dispatch, `release` ticked, from `main` | `sha-<short>`, `x.y.z`, `latest` | as a release; `version` is `x.y.z` without a leading `v` |
+| Dispatch, `release` ticked, from any other ref | none: the `image` job fails early with "A release runs only from main or a v* tag" | none |
+
+`cd.yml` can be run by hand (Actions, Run workflow) for a dry run or to repeat a release. **To repeat or recover a release** (cancelled or failed after the image, or a missed deploy), run it **from the tag `vX.Y.Z`** (the "Use workflow from" selector), with `release` ticked and `version` set to `X.Y.Z`, never from a branch: `main` may be ahead of the release, and a release from `main` would publish and deploy whatever `main` holds now under that version. Two checks the workflow does not make: a release dispatched from an **old** `v*` tag publishes `latest` and deploys that old tag to production (there is no newest-tag check), and a release dispatched from `main` is not compared with the version in `Version.props`. Use the tag selector and the version you mean.
 
 **Concurrency.** One deploy per ref runs at a time and none is cancelled half-way. A push to `main` uses the group `deploy-<ref>`; GitHub keeps only the newest pending run of a group, which suits `edge`. A release uses its own group, `deploy-<ref>-release`, so a later push cannot replace it while it waits. The two groups can overlap: an `edge` and a release roll-out to staging can run at the same time, and the release commit is built twice (the push and the release call), so staging is rolled out twice for it and `sha-<short>` is re-pointed to the second digest. Your `roll-out.sh` must tolerate that.
 
