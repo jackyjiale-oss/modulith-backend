@@ -297,8 +297,10 @@ jobs:
 
       # The variables and the secret reach the script through env, never interpolated into it. The connection string is read
       # by the script from the environment; it has no parameter for it.
+      # Windows PowerShell 5.1 (`powershell`): a self-hosted Windows runner may lack PowerShell 7 (pwsh), and IISAdministration
+      # is native to 5.1. The script targets 5.1 and 7.
       - name: Deploy to IIS
-        shell: pwsh
+        shell: powershell
         env:
           IIS_SITE_PATH: ${{ vars.IIS_SITE_PATH }}
           IIS_APP_POOL: ${{ vars.IIS_APP_POOL }}
