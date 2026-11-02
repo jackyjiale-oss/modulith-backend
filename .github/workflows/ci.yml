@@ -11,6 +11,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # cd.yml calls this workflow, so what it deploys has passed the same jobs (design D4).
+  workflow_call:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -167,3 +169,48 @@ jobs:
           -override build/licenses/package-overrides.json
           -ignore build/licenses/ignored-packages.json
           -err
+
+  # The API image (build/docker/Dockerfile), checked by build/scripts/container-verify.sh: migrate twice against a throwaway SQL Server,
+  # start in Production, the image's HEALTHCHECK reports healthy, /health/ready answers 200, the user is not root. cd.yml runs the same
+  # script on the pushed digest. Runs in parallel with build-test.
+  container:
+    name: container
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@v4
+
+      # context: . builds the checked-out files (the action's default is its own Git checkout); load puts the image in the runner's
+      # Docker for the script. The layers are cached in the GitHub Actions cache between runs.
+      - name: Build the image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: build/docker/Dockerfile
+          tags: api:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify the image
+        run: bash build/scripts/container-verify.sh api:ci
+
+  # Every workflow file: syntax, expressions, the job graph and the shell of each `run` (shellcheck ships in the image).
+  # The image tag is pinned (rhysd/actionlint, MIT); Dependabot does not see a tag in a `run`, so raise it by hand.
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Lint the workflows
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
