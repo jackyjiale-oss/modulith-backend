@@ -35,6 +35,16 @@ Everything about how this service is built and run. Documents are part of the de
 | [`modules/sample.md`](modules/sample.md) | Sample: leave requests, the worked example of every pattern |
 | [`modules/_template.md`](modules/_template.md) | The required outline; copy it to `modules/{module}.md` when you add a module |
 
+## Deployment
+
+| Document | What it covers |
+|---|---|
+| [`deployment/README.md`](deployment/README.md) | The delivery pipeline (CI, CD, scanners), its repository variables, secret and environments, GHCR, CodeQL and what a project switches on |
+| [`deployment/docker.md`](deployment/docker.md) | Building and running the image, the port and the health check, forwarded headers behind a proxy, rolling back |
+| [`deployment/iis.md`](deployment/iis.md) | `deploy-iis.ps1`: its order and rollback, the server prerequisites, and the manual checklist for a real IIS server |
+| [`deployment/migrations.md`](deployment/migrations.md) | The `migrate` mode, the two database logins, expand-then-contract in a release, running it by hand |
+| [`deployment/production-checklist.md`](deployment/production-checklist.md) | The production checklist, each line tied to the code or setting behind it |
+
 ## Architecture decisions
 
 | ADR | Decision |
@@ -71,5 +81,6 @@ Everything about how this service is built and run. Documents are part of the de
 | [0030](adr/0030-audit-trail-through-the-owning-modules-outbox.md) | Audit trail through the owning module's outbox: `[Audited]` entities, one change set per save, consumed by the Audit module through its inbox; both logs kept, a delete window and no archive |
 | [0031](adr/0031-api-and-database-compatibility-policy.md) | API and database compatibility policy: literal `/api/v1` kept, an own OpenAPI breaking-change gate (the title's `!` accepts a break), `[ContractMigration]` for dropped or renamed columns and tables, `ApiVersion` and `ClientVersion` in the request log, a version register kept in step by a test |
 | [0032](adr/0032-external-login-by-client-posted-proof.md) | External login by a client-posted proof: the client runs the provider step and posts an ID token (or Facebook's access token), one OpenID Connect verifier with presets and a Facebook adapter and no client secret, strict linking by verified email, the MFA challenge still applies (`fed`, no trusted device), the backend issues every token, step-up by provider proof for password-less accounts |
+| [0033](adr/0033-delivery-pipeline.md) | Delivery pipeline: a chiseled-extra non-root image with a `healthcheck` mode, a `migrate` mode on the same connection-string key, reusable workflows (a green push to `main` goes to staging, a release to production behind reviewers), one verification script for CI and CD, dormant deploy jobs behind one roll-out hook, an IIS script that migrates first and rolls back its files, the gitleaks CLI instead of the Action (licence), CodeQL on by default, a guard that keeps the template repository from publishing |
 
 A new decision gets the next number: `adr/NNNN-kebab-title.md`, in the same format, listed here and in the architecture overview.

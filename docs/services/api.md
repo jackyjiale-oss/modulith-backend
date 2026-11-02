@@ -22,12 +22,23 @@ Order matters; `Program.cs` marks it with comments.
 | 11 | `AddOptions<KestrelServerOptions>()…Bind("Kestrel")` | Binds the whole `Kestrel` section lazily, so `Kestrel:Limits:*` apply and test overrides work |
 | 12 | `AddApplicationDecorators()` | Validation and logging decorators around every handler registered above; always last |
 
+## Command modes
+
+`Program.cs` recognises two one-shot modes by the **exact first argument** (case-sensitive); every other argument (`--urls`, `--environment`) falls through to the normal web host, so `dotnet run -- --urls ...` is unchanged. The recognition and both behaviours are in the internal class `HostCommand` (tested in `tests/TemplateName.IntegrationTests/Host/`: `HostCommandTests` for the recognition and `healthcheck`, `MigrateCommandTests` for `migrate` against SQL Server).
+
+| Mode | What it does | Exit code |
+|---|---|---|
+| `migrate` | Builds the host (so every module's context is registered) but never starts it: no Kestrel, outbox dispatcher, scheduler or delivery worker. Calls `MigrateModuleDatabasesAsync`, logs `The module databases are migrated` or the exception at Error, and returns. Reads `ConnectionStrings:Database`; ignores `Database:ApplyMigrationsOnStartup`; idempotent; seeds nothing. | 0 on success, 1 on any failure |
+| `healthcheck` | Builds no host. One GET to `http://127.0.0.1:{port}/health/live` with a 3 second timeout, where `{port}` is the first number in `ASPNETCORE_HTTP_PORTS` (8080 when there is none), and prints one line (`healthy (200)`, `unhealthy (503)`, `unhealthy (TaskCanceledException)`). It is the image's `HEALTHCHECK`. | 0 on a 2xx, else 1 |
+
+Both are for deployments: [`deployment/migrations.md`](../deployment/migrations.md) and [`deployment/docker.md`](../deployment/docker.md).
+
 ## Start-up
 
 Before the pipeline serves requests, the host runs two steps, in this order:
 
 1. **Migrations**, when `Database:ApplyMigrationsOnStartup` is on (off by default; set it locally for development: user secrets, an environment variable, or a git-ignored `appsettings.Development.json`; see [Migrations](#migrations)).
-2. **Auth seeding**, when `Auth:Seed:RunOnStartup` is on (the default in every environment): `SeedAuthModuleAsync` creates the system roles, syncs the permissions every module declares, keeps `SuperAdmin` on every permission and, when `Auth:Seed:AdminEmail` and `Auth:Seed:AdminPassword` are both set, creates the first administrator. It is idempotent and runs under a database lock, so several instances may start together. An invalid permission declaration or an invalid `Auth:Seed` value stops the host with a message naming it. The database must already be migrated: outside Development, run the `migrate` mode first (Plan 6) or turn the key off and seed from there. Details: [Auth module](../modules/auth.md#background-processing).
+2. **Auth seeding**, when `Auth:Seed:RunOnStartup` is on (the default in every environment): `SeedAuthModuleAsync` creates the system roles, syncs the permissions every module declares, keeps `SuperAdmin` on every permission and, when `Auth:Seed:AdminEmail` and `Auth:Seed:AdminPassword` are both set, creates the first administrator. It is idempotent and runs under a database lock, so several instances may start together. An invalid permission declaration or an invalid `Auth:Seed` value stops the host with a message naming it. The database must already be migrated: outside Development, run the `migrate` mode first ([Command modes](#command-modes)) or turn the key off and seed from there. Details: [Auth module](../modules/auth.md#background-processing).
 
 ## Pipeline
 
@@ -327,7 +338,7 @@ Outside Production (Development, Testing, and any other non-Production environme
 | | Development | Testing | Production |
 |---|---|---|---|
 | Used by | `dotnet run` (`launchSettings.json`) | the integration tests (`WebApplicationFactory`) | deployments |
-| Migrations on start | when `Database:ApplyMigrationsOnStartup` is set locally | no (the test harness migrates once) | no (`migrate` mode, Plan 6) |
+| Migrations on start | when `Database:ApplyMigrationsOnStartup` is set locally | no (the test harness migrates once) | no (the `migrate` mode, [Command modes](#command-modes)) |
 | Log output | readable console, `Information` (`Debug` when set locally) | compact JSON, `Warning` (set by the tests) | compact JSON, `Information` |
 | OTLP export | when `OTEL_EXPORTER_OTLP_ENDPOINT` is set locally (`http://localhost:4317`) | off | when `OTEL_EXPORTER_OTLP_ENDPOINT` is set |
 | HSTS + HTTPS redirection | no | yes | yes |
@@ -343,7 +354,7 @@ Local URLs: `https://localhost:5001` and `http://localhost:5000`.
 `MigrateModuleDatabasesAsync` applies the pending migrations of every context registered with `AddModuleDbContext` (`includeInMigrations: true`, the default), in registration order: `platform` first, then each module. It validates `ConnectionStrings:Database` first, so a missing connection string fails with the options error.
 
 - **Local development:** `Database:ApplyMigrationsOnStartup` is `false` in `appsettings.json`; set it to `true` locally (user secrets, an environment variable, or a git-ignored `appsettings.Development.json`) and the host migrates before it starts serving. Without it, a fresh database stops the host at Auth seeding (`Invalid object name`).
-- **Production:** never on start. The API's `migrate` command-line mode (`dotnet TemplateName.Api.dll migrate`, Plan 6) runs the same method, optionally with a DDL-privileged connection string. There are no EF migration bundles (ADR 0006).
+- **Production:** never on start. The API's `migrate` command-line mode (`dotnet TemplateName.Api.dll migrate`, [Command modes](#command-modes)) runs the same method, with the DDL-privileged connection string set for that one process ([`deployment/migrations.md`](../deployment/migrations.md)). There are no EF migration bundles (ADR 0006).
 - **Adding a migration:** `dotnet ef migrations add {Verb}{What} --project src/Modules/{Module}/TemplateName.Modules.{Module} --startup-project src/Host/TemplateName.Api --context {Module}DbContext --output-dir Infrastructure/Persistence/Migrations`. Never edit a migration that has been applied; add a new one.
 
 ## Known limitations

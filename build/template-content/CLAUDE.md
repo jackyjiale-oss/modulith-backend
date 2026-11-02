@@ -10,6 +10,8 @@
 dotnet build -c Release                 # warnings are errors in Release
 dotnet test                             # unit, architecture and integration tests (Docker needed for the latter)
 dotnet run --project src/Host/TemplateName.Api
+dotnet run --project src/Host/TemplateName.Api -- migrate   # apply every module's migrations and exit 0 or 1 (what the pipeline runs); reads ConnectionStrings:Database
+docker build -f build/docker/Dockerfile -t api:local .       # the API image; bash build/scripts/container-verify.sh api:local checks it
 dotnet format --verify-no-changes       # style check, same as CI
 dotnet ef migrations add {Verb}{What} \
   --project src/Modules/{Module}/TemplateName.Modules.{Module} \
@@ -24,6 +26,7 @@ dotnet ef migrations add {Verb}{What} \
 - Each command or query gets its own folder under `Application/{Aggregates}/{UseCase}/` holding the message, handler and validator.
 - Modules talk to each other only through `*.Contracts` (integration events and public interfaces). Never reference another module's project or read its tables. Messages to users go through the Notifications module (an integration event in, email and in-app out); a module never sends mail itself. Today only Auth's types exist; see `docs/modules/notifications.md` before adding one.
 - Audit a new entity with `[Audited]` (`TemplateName.SharedKernel.Auditing`) when an administrator may need to know who changed it; the Audit module records the field changes, in the same save, through the module's own outbox. Its key is `ValueGeneratedNever()`; a secret carries `[AuditIgnore]` or `[AuditMask]` (and a `byte[]` column `[AuditIgnore]`); a column with a default value is not audited, so it carries `[AuditIgnore]`. Holders of `audit.trails.view` (only `SuperAdmin` by default; grant it to another role deliberately) read every audited property of every module, whatever that module's own permissions, so marking an entity widens what they see. See `docs/modules/audit.md`.
+- A project added to the API's references also needs a `COPY` line (its `.csproj` and `packages.lock.json`) in `build/docker/Dockerfile`, or the image restore fails; the `container` CI job catches it. Pipeline, variables and runbooks: `docs/deployment/README.md`.
 - Tests mirror the source: `tests/{TestProject}/{Module or Area}/{Subject}Tests.cs`.
 
 ## Definition of done

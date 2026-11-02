@@ -50,7 +50,7 @@
 | D9 | **CodeQL runs unless `CODEQL_ENABLED` is `false`.** | CodeQL is free for public repositories but needs GitHub Advanced Security on private ones; turning scanning off must be a visible choice. | **Off by default:** security tooling nobody turns on. **Always on:** a red build on private repositories without a licence. |
 | D10 | **gitleaks runs as the pinned CLI, checksum-verified, not as the official Action.** | The Action asks for a paid licence key for organisation accounts, and the repository rules say to read the terms of anything we adopt for usage fees. The CLI is MIT. | **The Action:** a fee or a failure for organisation repositories. |
 | D11 | **The template repository does not publish or deploy.** The `image` and deploy jobs are skipped where `.template.config` exists; the `container` job and the checks on the files still run. | The template's own image would be named `TemplateName` and published for nobody. The same idiom `ci.yml` already uses for the smoke test, inverted. | **Publish from the template repo:** a pointless image and a `packages: write` token with no purpose. |
-| D12 | **Images carry provenance and SBOM attestations.** | Nearly free with `docker/build-push-action`, and the supply-chain check of a client's security review asks for it. | **None:** a gap to explain. |
+| D12 | **Images carry provenance and SBOM attestations, as BuildKit attestations** (`sbom: true`, `provenance: mode=max` on `docker/build-push-action`). | Nearly free, and the supply-chain check of a client's security review asks for it. BuildKit pushes the attestations beside the image, so the job needs only `contents: read` and `packages: write`, not `id-token` or `attestations` (amended in Task 7: the first draft listed those two permissions). | **None:** a gap to explain. **`actions/attest-build-provenance`:** two more permissions and a second step for the same result. |
 
 ## 4. Command modes
 
@@ -92,12 +92,12 @@ The `container` job in `ci.yml` runs on every pull request and every push to `ma
 
 ## 7. `cd.yml` and the release wiring
 
-`cd.yml` triggers on `push` to `main` and on `workflow_call` (inputs: `release` boolean, `version` string). Top-level permissions are `contents: read`; each job raises only what it needs. `concurrency` is per ref with `cancel-in-progress: false`, so a deploy is never cancelled half-way. Actions use their latest major tag, as the other workflows do.
+`cd.yml` triggers on `push` to `main`, on `workflow_call` and on `workflow_dispatch` (inputs, for both: `release` boolean, `version` string). The dispatch lets the workflow be run from a branch and a release be repeated with `release` and `version`. Top-level permissions are `contents: read`; each job raises only what it needs. `concurrency` has `cancel-in-progress: false`, so a deploy is never cancelled half-way; its groups are given below. Actions use their latest major tag, as the other workflows do. `.github/actionlint.yaml` declares the `iis` runner label that `deploy-iis` uses, which actionlint would otherwise reject.
 
 | Job | Runs when | What it does |
 |---|---|---|
 | `ci` | always | Calls `ci.yml`. The caller grants `pull-requests: write` and `checks: write`, because a called workflow cannot raise its own permissions. |
-| `image` | `ci` passed, not in the template repository (D11) | Builds and pushes `ghcr.io/<repo>/api` with provenance and SBOM. A main push gets `sha-…` and `edge`; a release gets `x.y.z` and `latest`. Permissions: `contents: read`, `packages: write`, `id-token: write`, `attestations: write`. Outputs the digest. |
+| `image` | `ci` passed, not in the template repository (D11) | Builds and pushes `ghcr.io/<repo>/api` (the repository name lower-cased) with provenance and SBOM as BuildKit attestations (`sbom: true`, `provenance: mode=max`; D12). Every run gets `sha-<short>`; a non-release run also `edge`; a release `x.y.z` and `latest`. Permissions: `contents: read`, `packages: write` only. Outputs the digest. |
 | `verify` | after `image` | Pulls the image by digest and runs `container-verify.sh` (D6). |
 | `deploy-staging` | after `verify`, `DEPLOY_ENABLED` is `true` | Environment `staging`. Runs `migrate` from the image with the environment's DDL secret, calls `build/deploy/roll-out.sh staging <image@digest>`, then polls `<STAGING_URL>/health/ready`. |
 | `deploy-production` | `release` is true, after `deploy-staging` | Environment `production` with required reviewers; the same three steps. |
@@ -105,13 +105,13 @@ The `container` job in `ci.yml` runs on every pull request and every push to `ma
 
 `build/deploy/roll-out.sh` ships as a documented stub: it explains what to replace and exits 1 with a clear message, so a project that sets `DEPLOY_ENABLED` without writing its roll-out fails loudly instead of "deploying" nothing.
 
-`release.yml` gains a job `cd` that `needs: release-please`, runs when `release_created` is `true`, and calls `./.github/workflows/cd.yml` with `release: true` and the tag, `secrets: inherit` and the permissions above. The release commit is therefore built by two runs (the push to `main` and the release call); both are queued by `concurrency`, so staging is rolled out twice for that commit (the second time with the release tags). The plan may remove the duplicate with a `release` input; it is accepted for 1.0.
+`release.yml` gains a job `cd` that `needs: release-please`, runs when `release_created` is `true`, and calls `./.github/workflows/cd.yml` with `release: true` and the tag, `secrets: inherit` and the permissions above. The release commit is therefore built by two runs (the push to `main` and the release call), so staging is rolled out twice for that commit (the second time with the release tags, and the second build re-points `sha-<short>` to a new digest). The duplicate is accepted for 1.0. The two runs do not share a concurrency group: GitHub keeps one pending run per group and a newer pending run replaces the older one even with `cancel-in-progress: false`, so a release in the push's group could be dropped by a later push before it started. A release call or dispatch (`inputs.release`) therefore uses the group `deploy-<ref>-release`, and every other run `deploy-<ref>`; neither name is the caller's or `ci.yml`'s own group (`CD-<ref>`, `Release-<ref>`), because a called workflow that shares its caller's group deadlocks. The cost is that an `edge` roll-out to staging and a release roll-out to staging can overlap, so `roll-out.sh` must tolerate two runs at once.
 
 Branch protection is unaffected: on pull requests `ci.yml` runs directly and its check names do not change; only the `cd.yml` run shows them prefixed (`ci / build-test`).
 
 ## 8. `deploy-iis.ps1`
 
-`build/scripts/deploy-iis.ps1 -PublishPath -SitePath -AppPool -HealthUrl [-KeepPrevious]`. The connection string comes from the environment (`ConnectionStrings__Database`), never from an argument.
+`build/scripts/deploy-iis.ps1 -PublishPath -SitePath -AppPool -HealthUrl`. There is no `-KeepPrevious` switch: the previous files are always kept for the rollback. The connection string comes from the environment (`ConnectionStrings__Database`), never from an argument. The script runs on Windows PowerShell 5.1 and PowerShell 7, and the `deploy-iis` step of `cd.yml` runs it in Windows PowerShell 5.1 (`shell: powershell`), because a self-hosted Windows runner may have no PowerShell 7 and `IISAdministration` is native to 5.1.
 
 1. **Preflight:** the IIS administration module is present, the ASP.NET Core Hosting Bundle is installed, the app pool exists with `No Managed Code`, the publish path holds `TemplateName.Api.dll`.
 2. **Migrate:** `dotnet TemplateName.Api.dll migrate` from the staged publish folder, while the old version still serves (D8). A non-zero exit stops the script with the site untouched.
@@ -138,7 +138,7 @@ The IIS calls sit in small functions so Pester can mock them. The runbook carrie
 
 - **Unit:** `HostCommand` parsing (exact first argument only, others fall through), the `healthcheck` probe against a local listener (2xx, 5xx, timeout, no listener, port from `ASPNETCORE_HTTP_PORTS`), exit codes.
 - **Integration (Testcontainers SQL Server):** `migrate` on an empty database creates every module schema and exits 0; run again, nothing changes; with a bad connection string it exits 1 and the log holds no password.
-- **Container (CI, every pull request):** `container-verify.sh` on the built image.
+- **Container (CI, every pull request):** `container-verify.sh` on the built image. This job is also the test that keeps the minimum Production configuration in step with the options classes (risk 2 of section 12): there is no separate unit test for the list, and the job fails the day a new required key appears.
 - **Workflow files:** `actionlint` on every workflow in CI.
 - **IIS script:** PSScriptAnalyzer and Pester with mocked IIS and file functions, run with PowerShell on the Ubuntu runner.
 - **Template smoke:** the generated project contains no leftover `TemplateName` in the Dockerfile, scripts or workflows, and its `cd.yml` jobs are not skipped by the template guard.
@@ -152,4 +152,4 @@ The IIS calls sit in small functions so Pester can mock them. The runbook carrie
 4. **GHCR.** A new package is private to the repository by default; the runbook says how to link it to the repository and set its visibility.
 5. **Real IIS and a real deploy** cannot run in CI. The manual checklist in `docs/deployment/iis.md` is the verification; it is a deferred item of this plan, like the social-login provider checks.
 6. **CodeQL on private repositories** (D9) and **runner access to the database** (D7) are documented prerequisites, not solved here.
-7. **Third-party action and tool versions** (gitleaks, actionlint, Pester, PSScriptAnalyzer) are pinned by the plan after checking their licences and the dates of their releases.
+7. **Third-party action and tool versions** (gitleaks, actionlint, Pester, PSScriptAnalyzer) are pinned by the plan after checking their licences and the dates of their releases. Pinned: gitleaks v8.30.1 (with a SHA-256), actionlint 1.7.12, Pester 5.9.1, PSScriptAnalyzer 1.25.0. Dependabot sees none of the four; they are raised by hand.
