@@ -201,6 +201,40 @@ jobs:
       - name: Verify the image
         run: bash build/scripts/container-verify.sh api:ci
 
+  # The IIS deploy script (build/scripts/deploy-iis.ps1, design section 8): its Pester tests, with the IIS and file calls mocked, and
+  # PSScriptAnalyzer. PowerShell 7 on the Ubuntu runner; the script itself also has to run on Windows PowerShell 5.1 (the IIS server).
+  # Pester and PSScriptAnalyzer are MIT licensed. The versions are pinned; Dependabot does not see them, so raise them by hand
+  # (a release at least two weeks old).
+  scripts:
+    name: scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Pester and PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module -Name Pester -RequiredVersion 5.9.1 -Scope CurrentUser -Force
+          Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+
+      # The runner image ships an older Pester, so import the pinned one explicitly.
+      - name: Pester
+        shell: pwsh
+        run: |
+          Import-Module Pester -RequiredVersion 5.9.1
+          Invoke-Pester -Path build/scripts/tests -CI
+
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Import-Module PSScriptAnalyzer -RequiredVersion 1.25.0
+          Invoke-ScriptAnalyzer -Path build/scripts -Recurse -Severity Warning,Error -EnableExit
+
   # Every workflow file: syntax, expressions, the job graph and the shell of each `run` (shellcheck ships in the image).
   # The image tag is pinned (rhysd/actionlint, MIT); Dependabot does not see a tag in a `run`, so raise it by hand.
   actionlint:
