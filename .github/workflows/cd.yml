@@ -39,9 +39,13 @@ permissions:
 
 # One deploy per ref at a time, and never cancelled half-way. The group deliberately has no workflow name: ci.yml's own group
 # expands, under this caller, to "CD-<ref>" (or "Release-<ref>" when release.yml is the caller), and a called workflow that shares
-# its caller's group deadlocks. "deploy-<ref>" differs from both.
+# its caller's group deadlocks. "deploy-<ref>" and "deploy-<ref>-release" differ from both.
+# GitHub keeps at most one pending run per group, and a newer pending run replaces the older one even with cancel-in-progress: false.
+# A release run therefore has its own group (the "-release" suffix): a later push to main must not be able to replace it while it
+# waits, or the x.y.z and latest tags and the production deploy would be lost. Main pushes keep "deploy-<ref>", where only the
+# newest pending run survives, which suits edge. The cost: an edge roll-out to staging and a release roll-out to staging can overlap.
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-${{ github.ref }}${{ inputs.release && '-release' || '' }}
   cancel-in-progress: false
 
 jobs:
