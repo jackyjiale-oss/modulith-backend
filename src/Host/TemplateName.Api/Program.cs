@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Options;
 using Scalar.AspNetCore;
+using TemplateName.Api;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Infrastructure.Common;
 using TemplateName.Infrastructure.Common.Idempotency;
@@ -16,6 +17,17 @@ using TemplateName.Web.Common;
 using TemplateName.Web.Common.Localization;
 using TemplateName.Web.Common.Observability;
 using TemplateName.Web.Common.Security;
+
+// The container HEALTHCHECK (ADR 0006): before CreateBuilder, so no host is built and nothing but the one line is written.
+if (HostCommand.Parse(args) == HostCommandKind.Healthcheck)
+{
+    return await HostCommand.RunHealthCheckAsync(
+        Environment.GetEnvironmentVariable("ASPNETCORE_HTTP_PORTS"),
+        Console.Out,
+        handler: null,
+        TimeSpan.FromSeconds(3),
+        CancellationToken.None);
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -53,7 +65,18 @@ builder.Services.AddApplicationDecorators();
 
 var app = builder.Build();
 
-// Migrate on start only when Database:ApplyMigrationsOnStartup is set (locally, for development); production uses the API's migrate mode (ADR 0006).
+// The migrate mode (ADR 0006): the built host knows every module's context, but it is never started, so no Kestrel, outbox dispatcher,
+// scheduler or delivery worker runs. Disposing the host flushes the logs before the process exits.
+if (HostCommand.Parse(args) == HostCommandKind.Migrate)
+{
+    await using (app)
+    {
+        return await HostCommand.RunMigrationsAsync(app.Services, app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Migrate"), CancellationToken.None);
+    }
+}
+
+// Migrate on start only when Database:ApplyMigrationsOnStartup is set (locally, for development); the migrate mode above is the way to
+// migrate a deployed database, and it ignores this flag (ADR 0006).
 if (app.Services.GetRequiredService<IOptions<DatabaseOptions>>().Value.ApplyMigrationsOnStartup)
 {
     await app.Services.MigrateModuleDatabasesAsync(app.Lifetime.ApplicationStopping);
@@ -126,6 +149,7 @@ api.MapSampleEndpoints();
 api.MapAuditEndpoints();
 
 app.Run();
+return 0;
 
 /// <summary>Makes the entry point visible to <c>WebApplicationFactory&lt;Program&gt;</c> in the integration tests.</summary>
 public partial class Program;
