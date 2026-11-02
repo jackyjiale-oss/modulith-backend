@@ -23,6 +23,7 @@ cleanup() {
 trap cleanup EXIT
 
 failures=0
+required_count=0
 fail() {
   echo "FAIL: $1" >&2
   failures=$((failures + 1))
@@ -67,9 +68,36 @@ for required in \
   build/licenses/allowed-licenses.json \
   docs/README.md \
   docs/architecture/overview.md \
-  docs/services/api.md; do
+  docs/services/api.md \
+  docs/deployment/README.md \
+  build/docker/Dockerfile \
+  .dockerignore \
+  build/scripts/container-verify.sh \
+  build/scripts/deploy-iis.ps1 \
+  build/deploy/roll-out.sh \
+  .github/workflows/cd.yml \
+  .github/workflows/codeql.yml \
+  .github/workflows/gitleaks.yml; do
+  required_count=$((required_count + 1))
   [[ -f "$out/$required" ]] || fail "$required is missing"
 done
+echo "Checked $required_count required files"
+# The image starts the generated API, so its entry point and health check name the renamed assembly.
+if [[ -f "$out/build/docker/Dockerfile" ]] && ! grep -qF "$project_name.Api.dll" "$out/build/docker/Dockerfile"; then
+  fail "build/docker/Dockerfile does not name $project_name.Api.dll"
+fi
+# A generated project must not look like the template repository: its delivery jobs are skipped where .template.config exists
+# (cd.yml, job detect). The only references allowed are that guard and the skip of the template smoke test in ci.yml.
+template_config_uses="$(cd "$out" && grep -rnF '.template.config' .github/workflows .github/actionlint.yaml build/docker build/deploy build/scripts .dockerignore \
+  | grep -vE '^\.github/workflows/cd\.yml:[0-9]+: +if \[ -f \.template\.config/template\.json \]; then$' \
+  | grep -vE '^\.github/workflows/ci\.yml:[0-9]+: +(# Projects generated from the template have no \.template\.config, so the step is skipped there\.|if: \$\{\{ hashFiles\(.\.template\.config/template\.json.\) != .. \}\})$' \
+  || true)"
+if [[ -n "$template_config_uses" ]]; then
+  fail "a generated workflow or script refers to .template.config beyond the guard in cd.yml:"$'\n'"$template_config_uses"
+fi
+if [[ -f "$out/.github/workflows/cd.yml" ]] && [[ "$(grep -cF '.template.config' "$out/.github/workflows/cd.yml")" != 1 ]]; then
+  fail ".github/workflows/cd.yml must refer to .template.config exactly once, in the template guard"
+fi
 if [[ -f "$out/.release-please-manifest.json" && "$(tr -d '[:space:]' < "$out/.release-please-manifest.json")" != '{".":"0.0.0"}' ]]; then
   fail ".release-please-manifest.json must be { \".\": \"0.0.0\" }, not the template's own version"
 fi
