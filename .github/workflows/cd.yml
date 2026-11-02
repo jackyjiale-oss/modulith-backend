@@ -22,7 +22,8 @@ on:
         description: The release version, x.y.z, without a leading v. Required when release is true.
         type: string
         default: ""
-  # Lets the workflow run from a branch (a dry run) or be repeated by hand.
+  # Lets the workflow run from a branch or tag. Without `release`, anything but main is a dry run: ci, image (only the sha-<short> tag,
+  # never edge) and verify run, nothing is deployed. With `release`, only main or a v* tag is accepted (the version must match the tag).
   workflow_dispatch:
     inputs:
       release:
@@ -100,16 +101,41 @@ jobs:
         with:
           persist-credentials: false
 
-      # The version reaches the script through env, never interpolated into it: it is a workflow input, so treat it as untrusted.
+      # A release (x.y.z and latest tags, production) comes only from main (release.yml's call has the caller's ref, refs/heads/main)
+      # or from a v* tag, never from another branch, so nothing unreviewed is published as a release. The ref and the version are
+      # workflow data (a dispatch input is untrusted), so they reach the script through env, never interpolated into it.
+      - name: Check the release ref
+        if: inputs.release
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          case "$REF" in
+            refs/heads/main | refs/tags/v*) ;;
+            *)
+              echo "::error title=Release ref::A release runs only from main or a v* tag, not from $REF."
+              exit 1
+              ;;
+          esac
+
+      # The version is x.y.z (no leading v); from a v* tag it must equal the tag without the v.
       - name: Check the release version
         if: inputs.release
         env:
+          REF: ${{ github.ref }}
           VERSION: ${{ inputs.version }}
         run: |
           if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
             echo "::error title=Release version::A release needs the version x.y.z (no leading v) in the version input."
             exit 1
           fi
+          case "$REF" in
+            refs/tags/v*)
+              if [ "$VERSION" != "${REF#refs/tags/v}" ]; then
+                echo "::error title=Release version::The version input ($VERSION) must equal the tag ($REF) without the leading v."
+                exit 1
+              fi
+              ;;
+          esac
 
       # github.repository can hold upper-case letters (an owner or repository name), which GHCR refuses in an image name,
       # so the name is lower-cased here once (bash ${var,,}) and every later job takes it from this job's output.
@@ -128,7 +154,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # sha-<short> on every run; edge on a push to main; x.y.z and latest on a release.
+      # sha-<short> on every run; edge only for a non-release run on main (a dispatch from another branch or tag never moves it);
+      # x.y.z and latest on a release (the ref was checked above).
       - name: Tags and labels
         id: meta
         uses: docker/metadata-action@v6
@@ -136,7 +163,7 @@ jobs:
           images: ${{ steps.name.outputs.image }}
           tags: |
             type=sha,prefix=sha-,format=short
-            type=raw,value=edge,enable=${{ inputs.release != true }}
+            type=raw,value=edge,enable=${{ inputs.release != true && github.ref == 'refs/heads/main' }}
             type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.release == true }}
             type=raw,value=latest,enable=${{ inputs.release == true }}
 
@@ -192,7 +219,8 @@ jobs:
   deploy-staging:
     name: deploy-staging
     needs: [image, verify]
-    if: vars.DEPLOY_ENABLED == 'true'
+    # A release run (its ref was checked in `image`) or a run on main; a dispatch from another branch or tag is a dry run that deploys nothing.
+    if: vars.DEPLOY_ENABLED == 'true' && (inputs.release || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
