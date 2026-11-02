@@ -1,0 +1,5 @@
+# actionlint configuration (the `actionlint` job in ci.yml reads it from the repository).
+self-hosted-runner:
+  # cd.yml, job deploy-iis: `runs-on: [self-hosted, windows, iis]`, a runner the project registers on its IIS server.
+  labels:
+    - iis

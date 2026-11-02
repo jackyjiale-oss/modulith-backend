@@ -1,0 +1,303 @@
+name: CD
+
+# Continuous delivery (docs/superpowers/specs/2026-11-02-delivery-pipeline-design.md, section 7).
+# A green push to main goes to staging; a release (release.yml calls this workflow with `release: true`) goes to staging, then production.
+# Everything below `ci` needs it, so what is published and deployed has passed the same jobs as a pull request (design D4).
+# The deploy jobs are real but dormant: they run only when the repository variable DEPLOY_ENABLED is `true` (IIS_ENABLED for IIS),
+# and the project replaces build/deploy/roll-out.sh with its own roll-out (design D7).
+# Actions use their latest major tag so Dependabot can update them.
+# Production forks should pin each action to a full commit SHA (with the tag in a comment).
+
+on:
+  push:
+    branches: [main]
+  # Called by release.yml for a release.
+  workflow_call:
+    inputs:
+      release:
+        description: Publish the release tags (x.y.z and latest) and deploy to production after staging.
+        type: boolean
+        default: false
+      version:
+        description: The release version, x.y.z, without a leading v. Required when release is true.
+        type: string
+        default: ""
+  # Lets the workflow run from a branch (a dry run) or be repeated by hand.
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Publish the release tags (x.y.z and latest) and deploy to production after staging.
+        type: boolean
+        default: false
+      version:
+        description: The release version, x.y.z, without a leading v. Required when release is true.
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+# One deploy per ref at a time, and never cancelled half-way. The group deliberately has no workflow name: ci.yml's own group
+# expands, under this caller, to "CD-<ref>" (or "Release-<ref>" when release.yml is the caller), and a called workflow that shares
+# its caller's group deadlocks. "deploy-<ref>" differs from both.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Whether this is the template repository itself, which builds and tests but neither publishes nor deploys (design D11).
+  detect:
+    name: detect
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      is_template: ${{ steps.detect.outputs.is_template }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Detect the template repository
+        id: detect
+        run: |
+          if [ -f .template.config/template.json ]; then
+            echo "is_template=true" >> "$GITHUB_OUTPUT"
+            echo "This is the template repository: no image is published and nothing is deployed."
+          else
+            echo "is_template=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # The same jobs as a pull request. A called workflow cannot raise its own permissions, so build-test's coverage comment and
+  # test report need these two here.
+  ci:
+    name: ci
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    uses: ./.github/workflows/ci.yml
+
+  # Builds the API image from the checked-out files and pushes it to GHCR with a provenance and an SBOM attestation (design D12).
+  # The digest it outputs is what verify and the deploy jobs use, so what is deployed is exactly what is pushed.
+  image:
+    name: image
+    needs: [detect, ci]
+    if: needs.detect.outputs.is_template != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.name.outputs.image }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # The version reaches the script through env, never interpolated into it: it is a workflow input, so treat it as untrusted.
+      - name: Check the release version
+        if: inputs.release
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error title=Release version::A release needs the version x.y.z (no leading v) in the version input."
+            exit 1
+          fi
+
+      # github.repository can hold upper-case letters (an owner or repository name), which GHCR refuses in an image name,
+      # so the name is lower-cased here once (bash ${var,,}) and every later job takes it from this job's output.
+      - name: Name the image
+        id: name
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: echo "image=ghcr.io/${REPOSITORY,,}/api" >> "$GITHUB_OUTPUT"
+
+      # Attestations and the GitHub Actions layer cache need the BuildKit driver.
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # sha-<short> on every run; edge on a push to main; x.y.z and latest on a release.
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.name.outputs.image }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=edge,enable=${{ inputs.release != true }}
+            type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.release == true }}
+            type=raw,value=latest,enable=${{ inputs.release == true }}
+
+      # BuildKit attestations: sbom writes the SBOM, provenance mode=max the SLSA provenance, both pushed beside the image,
+      # so the job needs no id-token or attestations permission.
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: build/docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # The same checks CI runs on the pull request (design D6), on the pushed digest.
+  verify:
+    name: verify
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull the image by digest
+        env:
+          IMAGE: ${{ needs.image.outputs.image }}@${{ needs.image.outputs.digest }}
+        run: docker pull "$IMAGE"
+
+      - name: Verify the image
+        env:
+          IMAGE: ${{ needs.image.outputs.image }}@${{ needs.image.outputs.digest }}
+        run: bash build/scripts/container-verify.sh "$IMAGE"
+
+  # Dormant until the repository variable DEPLOY_ENABLED is `true`. Needs the environment `staging`, whose secret
+  # MIGRATION_CONNECTION_STRING holds the DDL login and whose variable STAGING_URL (a repository variable also works) is the base URL.
+  # `image` is listed because a job sees the outputs of its direct needs only.
+  deploy-staging:
+    name: deploy-staging
+    needs: [image, verify]
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The secret reaches the container by name (-e), taken from this step's environment: it is on no command line.
+      - name: Migrate the database
+        env:
+          IMAGE: ${{ needs.image.outputs.image }}@${{ needs.image.outputs.digest }}
+          ConnectionStrings__Database: ${{ secrets.MIGRATION_CONNECTION_STRING }}
+        run: docker run --rm -e ConnectionStrings__Database "$IMAGE" migrate
+
+      - name: Roll out
+        env:
+          IMAGE: ${{ needs.image.outputs.image }}@${{ needs.image.outputs.digest }}
+        run: bash build/deploy/roll-out.sh staging "$IMAGE"
+
+      - name: Smoke test
+        env:
+          STAGING_URL: ${{ vars.STAGING_URL }}
+        run: curl --fail --retry 10 --retry-delay 6 --retry-connrefused "$STAGING_URL/health/ready"
+
+  # A release only, after staging. The environment `production` should have required reviewers: the approval hangs on this run.
+  deploy-production:
+    name: deploy-production
+    needs: [image, verify, deploy-staging]
+    if: inputs.release && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Migrate the database
+        env:
+          IMAGE: ${{ needs.image.outputs.image }}@${{ needs.image.outputs.digest }}
+          ConnectionStrings__Database: ${{ secrets.MIGRATION_CONNECTION_STRING }}
+        run: docker run --rm -e ConnectionStrings__Database "$IMAGE" migrate
+
+      - name: Roll out
+        env:
+          IMAGE: ${{ needs.image.outputs.image }}@${{ needs.image.outputs.digest }}
+        run: bash build/deploy/roll-out.sh production "$IMAGE"
+
+      - name: Smoke test
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: curl --fail --retry 10 --retry-delay 6 --retry-connrefused "$PRODUCTION_URL/health/ready"
+
+  # A release only, on a self-hosted Windows runner (labels self-hosted, windows, iis) with IIS and the .NET SDK: publish, then
+  # build/scripts/deploy-iis.ps1 migrates, swaps the files and checks the health URL (design D8). Independent of the Docker path.
+  deploy-iis:
+    name: deploy-iis
+    needs: verify
+    if: inputs.release && vars.IIS_ENABLED == 'true'
+    runs-on: [self-hosted, windows, iis]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore (locked mode)
+        run: dotnet restore --locked-mode
+
+      - name: Publish
+        run: dotnet publish src/Host/TemplateName.Api -c Release -o publish
+
+      # The variables and the secret reach the script through env, never interpolated into it. The connection string is read
+      # by the script from the environment; it has no parameter for it.
+      - name: Deploy to IIS
+        shell: pwsh
+        env:
+          IIS_SITE_PATH: ${{ vars.IIS_SITE_PATH }}
+          IIS_APP_POOL: ${{ vars.IIS_APP_POOL }}
+          IIS_HEALTH_URL: ${{ vars.IIS_HEALTH_URL }}
+          ConnectionStrings__Database: ${{ secrets.MIGRATION_CONNECTION_STRING }}
+        run: ./build/scripts/deploy-iis.ps1 -PublishPath publish -SitePath $env:IIS_SITE_PATH -AppPool $env:IIS_APP_POOL -HealthUrl $env:IIS_HEALTH_URL
