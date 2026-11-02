@@ -3,7 +3,7 @@
     Deploys the API to an IIS site: migrate, swap the files, check health, roll back on failure.
 
 .DESCRIPTION
-    Design: docs/superpowers/specs/2026-11-02-delivery-pipeline-design.md, section 8 and decision D8.
+    Runbook: docs/deployment/iis.md; decision: docs/adr/0033-delivery-pipeline.md.
 
       1. Preflight: IIS administration module, ASP.NET Core Hosting Bundle, app pool with No Managed Code,
          TemplateName.Api.dll in the publish folder.
@@ -18,6 +18,8 @@
 
     The connection string is read from the environment variable ConnectionStrings__Database and is never a
     parameter and never printed. {SitePath}.previous is always kept after a run, so a manual rollback stays possible.
+    Trailing separators are dropped from both paths first, so {SitePath}.previous is a sibling of the site, never inside it.
+    The script exits 0 on success and 1 on failure, whatever robocopy left in $LASTEXITCODE.
 
     Runs on Windows PowerShell 5.1 and PowerShell 7. Every parameter is optional here and checked in
     Invoke-Deployment, so dot-sourcing the file (the Pester tests do) neither prompts nor runs anything.
@@ -52,6 +54,32 @@ function Write-DeployLog {
     Write-Information -MessageData "deploy-iis: $Message" -InformationAction Continue
 }
 
+function Get-NormalizedPath {
+    # Drops trailing separators (C:\Sites\App\ becomes C:\Sites\App). A root keeps its separator: trimmed, C:\ would become the
+    # drive-relative C: and \ or / nothing at all.
+    param([string] $Path)
+    $trimmed = $Path.TrimEnd('\', '/')
+    if (-not $trimmed -or $trimmed.EndsWith(':')) { return $Path }
+    return $trimmed
+}
+
+function Get-PreviousPath {
+    # The backup folder, next to the site: C:\Sites\App.previous, never C:\Sites\App\.previous, which /MIR would delete.
+    param([string] $SitePath)
+    return "$(Get-NormalizedPath -Path $SitePath).previous"
+}
+
+function Enable-Tls12 {
+    # Windows PowerShell 5.1 runs on .NET Framework, whose default protocols may leave out TLS 1.2 (unless the machine opts in),
+    # so a request to an https health URL fails before any answer. This adds TLS 1.2 for this process. A value of 0
+    # (SystemDefault) already lets Windows choose, TLS 1.2 included, and is left alone; PowerShell 7 always uses the OS defaults.
+    param([string] $Edition = $PSVersionTable.PSEdition)
+    if ($Edition -ne 'Desktop') { return }
+    $current = [Net.ServicePointManager]::SecurityProtocol
+    if ([int]$current -eq 0) { return }
+    [Net.ServicePointManager]::SecurityProtocol = $current -bor [Net.SecurityProtocolType]::Tls12
+}
+
 # --- Thin wrappers around the machine: the tests mock these -------------------------------------------------------------
 
 function Invoke-Robocopy {
@@ -78,6 +106,7 @@ function Invoke-Dotnet {
 function Test-HealthEndpoint {
     param([string] $Url)
     try {
+        Enable-Tls12
         $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
         return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300)
     }
@@ -152,7 +181,8 @@ function Invoke-Migration {
 function Backup-Site {
     param([string] $SitePath)
 
-    $previous = "$SitePath.previous"
+    $SitePath = Get-NormalizedPath -Path $SitePath
+    $previous = Get-PreviousPath -SitePath $SitePath
     # Replace, never merge: a file removed since the last release must not linger in the backup.
     if (Test-Path -LiteralPath $previous) {
         Remove-Item -LiteralPath $previous -Recurse -Force -ErrorAction Stop
@@ -227,8 +257,10 @@ function Wait-Healthy {
 function Restore-Site {
     param([string] $SitePath)
 
-    $previous = "$SitePath.previous"
+    $SitePath = Get-NormalizedPath -Path $SitePath
+    $previous = Get-PreviousPath -SitePath $SitePath
     if (-not (Test-Path -LiteralPath $previous)) {
+        # A first deployment: nothing to restore, so the site stays as the failed step left it.
         throw "There is no previous version at '$previous' to restore."
     }
     Write-DeployLog "Restoring '$previous' over '$SitePath'."
@@ -257,6 +289,14 @@ function Invoke-Deployment {
         throw "Missing parameter(s): $($missing -join ', '). Usage: deploy-iis.ps1 -PublishPath <dir> -SitePath <dir> -AppPool <name> -HealthUrl <url>"
     }
 
+    # Once, before any step: with a trailing separator {SitePath}.previous would land inside the site (IIS_SITE_PATH=C:\inetpub\api\).
+    $PublishPath = Get-NormalizedPath -Path $PublishPath
+    $SitePath = Get-NormalizedPath -Path $SitePath
+    if ($SitePath -ne $SitePath.TrimEnd('\', '/') -or $SitePath.EndsWith(':')) {
+        # /MIR over a root would delete everything on it that the publish folder lacks.
+        throw "The site path '$SitePath' is a root; the site must be a folder of its own."
+    }
+
     Test-IisPreflight -PublishPath $PublishPath -AppPool $AppPool
     # While the old version still serves; a failure here ends the run with the site untouched (design D8).
     Invoke-Migration -PublishPath $PublishPath
@@ -272,14 +312,24 @@ function Invoke-Deployment {
     }
     catch {
         $reason = $_.Exception.Message
-        Write-DeployLog "The deployment failed: $reason Restoring the previous version."
-        Restore-Site -SitePath $SitePath
-        throw "The deployment failed and the previous version was restored: $reason"
+        Write-DeployLog "The deployment failed: $reason Restoring the previous files."
+        try {
+            Restore-Site -SitePath $SitePath
+        }
+        catch {
+            throw "The deployment failed ($reason) and the previous files could not be restored: $($_.Exception.Message)"
+        }
+        # The files only: the restored version is not health-checked here.
+        throw "The deployment failed and the previous files were restored: $reason"
     }
     Write-DeployLog 'The deployment succeeded.'
+    # robocopy leaves 1 or 3 in $LASTEXITCODE after a good copy; a caller that ends with `exit $LASTEXITCODE` (the Actions runner
+    # does for a powershell step) must see 0.
+    $global:LASTEXITCODE = 0
 }
 
-# Dot-sourcing (the tests) only defines the functions; running the file deploys.
+# Dot-sourcing (the tests) only defines the functions; running the file deploys. The explicit exit codes matter: the Actions
+# runner appends `if ((Test-Path -LiteralPath variable:\LASTEXITCODE)) { exit $LASTEXITCODE }` to a powershell step.
 if ($MyInvocation.InvocationName -ne '.') {
     try {
         Invoke-Deployment -PublishPath $PublishPath -SitePath $SitePath -AppPool $AppPool -HealthUrl $HealthUrl
@@ -288,4 +338,5 @@ if ($MyInvocation.InvocationName -ne '.') {
         [Console]::Error.WriteLine("deploy-iis: $($_.Exception.Message)")
         exit 1
     }
+    exit 0
 }

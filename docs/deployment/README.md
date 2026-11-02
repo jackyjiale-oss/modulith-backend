@@ -66,7 +66,7 @@ A green push to `main` goes to staging; a release (merging the release-please pu
 | `IIS_ENABLED` | `deploy-iis` | `true` turns the IIS job on. |
 | `IIS_SITE_PATH` | `deploy-iis` | The IIS site's physical path. |
 | `IIS_APP_POOL` | `deploy-iis` | The site's application pool. |
-| `IIS_HEALTH_URL` | `deploy-iis` | The readiness URL the script polls, normally `http://localhost:<port>/health/ready` ([`iis.md`](iis.md#health-url)). |
+| `IIS_HEALTH_URL` | `deploy-iis` | The readiness URL the script polls: the site's public https URL, `https://<public host>/health/ready`, with a certificate valid for that host. Not `http://localhost`: HTTPS redirection would send it to `https://localhost` ([`iis.md`](iis.md#health-url)). |
 | `CODEQL_ENABLED` | `codeql` | `false` skips the CodeQL job (see below). Anything else, or unset, runs it. |
 | `STAGING_URL` | `deploy-staging` | Base URL of staging, without a trailing slash; the smoke test calls `<url>/health/ready`. A repository variable, or one on the `staging` environment. |
 | `PRODUCTION_URL` | `deploy-production` | The same for production. |

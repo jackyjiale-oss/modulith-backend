@@ -1,4 +1,4 @@
-# Pester 5 tests for build/scripts/deploy-iis.ps1 (design: docs/superpowers/specs/2026-11-02-delivery-pipeline-design.md, section 8).
+# Pester 5 tests for build/scripts/deploy-iis.ps1 (docs/deployment/iis.md; decision: docs/adr/0033-delivery-pipeline.md).
 # They run under Windows PowerShell 5.1 and PowerShell 7 on any OS: every IIS, process and robocopy call sits in a small function
 # of the script that is mocked here, the Windows-only cmdlet is stubbed, and the one test that runs a real robocopy is skipped
 # off Windows.
@@ -61,6 +61,47 @@ Describe 'deploy-iis.ps1 as a script' {
         $output | Should -Match 'PublishPath'
         $output | Should -Match 'HealthUrl'
     }
+
+    # The Actions runner writes a `shell: powershell` (or pwsh) step to a file, prepends $ErrorActionPreference = 'stop', appends
+    # the line below and runs `powershell -command ". '<file>'"`. robocopy leaves 1 or 3 in $LASTEXITCODE after a good /MIR, so a
+    # script that returns without resetting it turns a successful deployment into a red step. The machine is stubbed in the child
+    # process (an IISAdministration module, the Hosting Bundle's file, and global dotnet, robocopy and Invoke-WebRequest functions,
+    # which a script finds before the real commands), so the real script runs end to end on any OS.
+    It 'ends the step with exit code <Expected> when the publish robocopy returns <PublishExit>, as the Actions runner runs it' -ForEach @(
+        @{ PublishExit = 3; Expected = 0 }
+        @{ PublishExit = 16; Expected = 1 }
+    ) {
+        $root = Initialize-WorkFolder
+        $modules = Join-Path $root 'modules'
+        Add-ContentFile -Path (Join-Path $modules 'IISAdministration/IISAdministration.psm1') -Value @'
+function Get-IISAppPool { [CmdletBinding()] param([string] $Name) [pscustomobject]@{ Name = $Name; ManagedRuntimeVersion = '' } }
+'@
+        $programFiles = Join-Path $root 'Program Files'
+        Add-ContentFile -Path (Join-Path $programFiles 'IIS/Asp.Net Core Module/V2/aspnetcorev2.dll')
+        $publish = Join-Path $root 'publish'
+        Add-ContentFile -Path (Join-Path $publish 'TemplateName.Api.dll')
+        $site = Join-Path $root 'My Site'
+        Add-ContentFile -Path (Join-Path $site 'TemplateName.Api.dll')
+
+        $step = Join-Path $root 'step.ps1'
+        Set-Content -LiteralPath $step -Value @"
+`$ErrorActionPreference = 'stop'
+`$env:PSModulePath = '$modules' + [IO.Path]::PathSeparator + `$env:PSModulePath
+`$env:ProgramFiles = '$programFiles'
+`$env:ConnectionStrings__Database = 'Server=stub'
+function global:dotnet { `$global:LASTEXITCODE = 0 }
+function global:robocopy { if (`$args -contains '/MIR') { `$global:LASTEXITCODE = $PublishExit } else { `$global:LASTEXITCODE = 1 } }
+function global:Invoke-WebRequest { [pscustomobject]@{ StatusCode = 200 } }
+& '$($script:ScriptPath)' -PublishPath '$publish' -SitePath '$site' -AppPool 'Api' -HealthUrl 'http://localhost/health/ready'
+if ((Test-Path -LiteralPath variable:\LASTEXITCODE)) { exit `$LASTEXITCODE }
+"@
+
+        $shell = (Get-Process -Id $PID).Path
+        $output = & $shell -NoProfile -NonInteractive -Command ". '$step'" 2>&1 | Out-String
+
+        $LASTEXITCODE | Should -Be $Expected -Because $output
+        if ($Expected -eq 0) { Test-Path -LiteralPath (Join-Path $site 'app_offline.htm') | Should -BeFalse }
+    }
 }
 
 Describe 'Invoke-Deployment' {
@@ -121,12 +162,49 @@ Describe 'Invoke-Deployment' {
         $script:Calls -join ',' | Should -Be 'preflight'
     }
 
+    It 'leaves $LASTEXITCODE at 0 after a successful deployment, whatever robocopy left there' {
+        Mock Publish-Site { $script:Calls.Add('publish'); $global:LASTEXITCODE = 3 }
+
+        Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready'
+
+        $global:LASTEXITCODE | Should -Be 0
+    }
+
+    It 'hands every step the paths without a trailing separator: <Site>' -ForEach @(
+        @{ Site = 'C:\Sites\App\'; Publish = 'C:\Build\publish\'; ExpectedSite = 'C:\Sites\App'; ExpectedPublish = 'C:\Build\publish' }
+        @{ Site = 'C:\Sites\My App\\'; Publish = 'C:\Build Output\My Publish/'; ExpectedSite = 'C:\Sites\My App'; ExpectedPublish = 'C:\Build Output\My Publish' }
+        @{ Site = '/srv/my app/'; Publish = '/tmp/publish/'; ExpectedSite = '/srv/my app'; ExpectedPublish = '/tmp/publish' }
+    ) {
+        Invoke-Deployment -PublishPath $Publish -SitePath $Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready'
+
+        Should -Invoke Test-IisPreflight -Times 1 -Exactly -ParameterFilter { $PublishPath -ceq $ExpectedPublish }
+        Should -Invoke Invoke-Migration -Times 1 -Exactly -ParameterFilter { $PublishPath -ceq $ExpectedPublish }
+        Should -Invoke Backup-Site -Times 1 -Exactly -ParameterFilter { $SitePath -ceq $ExpectedSite }
+        Should -Invoke Set-SiteOffline -Times 1 -Exactly -ParameterFilter { $SitePath -ceq $ExpectedSite }
+        Should -Invoke Publish-Site -Times 1 -Exactly -ParameterFilter { $PublishPath -ceq $ExpectedPublish -and $SitePath -ceq $ExpectedSite }
+        Should -Invoke Set-SiteOnline -Times 1 -Exactly -ParameterFilter { $SitePath -ceq $ExpectedSite }
+    }
+
+    It 'refuses a site path that is a root (<Site>), before it touches anything' -ForEach @(
+        @{ Site = 'C:\' }, @{ Site = 'D:/' }, @{ Site = '\' }, @{ Site = '/' }
+    ) {
+        { Invoke-Deployment -PublishPath $script:Publish -SitePath $Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' } |
+            Should -Throw '*root*'
+
+        $script:Calls | Should -BeNullOrEmpty
+    }
+
     It 'A failed health check restores the previous files, then throws' {
         Mock Wait-Healthy { $script:Calls.Add('health'); $false }
 
-        { Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' } |
-            Should -Throw '*health*'
+        $failure = $null
+        try { Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' }
+        catch { $failure = $_ }
 
+        # The restore is not health-checked, so the message claims the files, not a working previous version.
+        $failure.Exception.Message | Should -BeLike '*health*'
+        $failure.Exception.Message | Should -BeLike '*the previous files were restored*'
+        $failure.Exception.Message | Should -Not -BeLike '*previous version was restored*'
         $script:Calls -join ',' | Should -Be 'preflight,migrate,backup,offline,publish,online,health,restore'
         Should -Invoke Restore-Site -Times 1 -Exactly -ParameterFilter { $SitePath -eq $script:Site }
     }
@@ -154,8 +232,13 @@ Describe 'Invoke-Deployment' {
         Mock Wait-Healthy { $script:Calls.Add('health'); $false }
         Mock Restore-Site { $script:Calls.Add('restore'); throw 'No previous version to restore.' }
 
-        { Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' } |
-            Should -Throw '*No previous version*'
+        $failure = $null
+        try { Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' }
+        catch { $failure = $_ }
+
+        $failure.Exception.Message | Should -BeLike '*No previous version*'
+        # The reason the deployment failed is kept next to the reason the restore failed.
+        $failure.Exception.Message | Should -BeLike '*health*'
     }
 
     It 'rejects a missing parameter before it touches anything' -ForEach @(
@@ -278,6 +361,38 @@ Describe 'Invoke-Migration' {
     }
 }
 
+Describe 'Get-PreviousPath' {
+    # A trailing separator once put the backup inside the site (C:\Sites\App\.previous), where /MIR then deleted it.
+    It 'puts the backup of <Site> next to the site, at <Expected>' -ForEach @(
+        @{ Site = 'C:\Sites\App'; Expected = 'C:\Sites\App.previous' }
+        @{ Site = 'C:\Sites\App\'; Expected = 'C:\Sites\App.previous' }
+        @{ Site = 'C:\Sites\App\\'; Expected = 'C:\Sites\App.previous' }
+        @{ Site = 'C:\Sites\App/'; Expected = 'C:\Sites\App.previous' }
+        @{ Site = 'C:\Sites\My App\'; Expected = 'C:\Sites\My App.previous' }
+        @{ Site = '\\server\share\My App\'; Expected = '\\server\share\My App.previous' }
+        @{ Site = '/srv/my app/'; Expected = '/srv/my app.previous' }
+    ) {
+        Get-PreviousPath -SitePath $Site | Should -BeExactly $Expected
+    }
+}
+
+Describe 'Get-NormalizedPath' {
+    It 'keeps the root <Path> as it is, so it never becomes a drive-relative path or nothing' -ForEach @(
+        @{ Path = 'C:\' }, @{ Path = 'C:/' }, @{ Path = '\' }, @{ Path = '/' }
+    ) {
+        Get-NormalizedPath -Path $Path | Should -BeExactly $Path
+    }
+
+    It 'drops the trailing separators of <Path>' -ForEach @(
+        @{ Path = 'C:\Sites\My App\'; Expected = 'C:\Sites\My App' }
+        @{ Path = 'C:\Sites\App\/'; Expected = 'C:\Sites\App' }
+        @{ Path = 'publish/'; Expected = 'publish' }
+        @{ Path = 'C:\Sites\App'; Expected = 'C:\Sites\App' }
+    ) {
+        Get-NormalizedPath -Path $Path | Should -BeExactly $Expected
+    }
+}
+
 Describe 'Backup-Site' {
     BeforeEach {
         Mock Write-DeployLog { }
@@ -314,6 +429,17 @@ Describe 'Backup-Site' {
         $arguments[1] | Should -Be $script:Previous
         $arguments[0] | Should -Match ' '
         ($arguments | Where-Object { $_ -match '"' }) | Should -BeNullOrEmpty
+    }
+
+    It 'puts the backup next to the site, not inside it, when the site path ends with a separator' {
+        Add-ContentFile -Path (Join-Path $script:Site 'current.dll')
+
+        Backup-Site -SitePath ($script:Site + [IO.Path]::DirectorySeparatorChar)
+
+        $arguments = $script:RobocopyCalls[0]
+        $arguments[0] | Should -BeExactly $script:Site
+        $arguments[1] | Should -BeExactly $script:Previous
+        $arguments[1] | Should -Not -BeLike "$($script:Site)$([IO.Path]::DirectorySeparatorChar)*"
     }
 
     It 'leaves the server-owned files out of the backup' {
@@ -466,6 +592,16 @@ Describe 'Restore-Site' {
         $arguments | Should -Contain 'logs'
     }
 
+    It 'restores from the folder next to the site when the site path ends with a separator' {
+        Add-ContentFile -Path (Join-Path $script:Previous 'old.dll')
+
+        Restore-Site -SitePath ($script:Site + [IO.Path]::DirectorySeparatorChar)
+
+        $arguments = [string[]]$script:RobocopyCalls[0]
+        $arguments[0] | Should -BeExactly $script:Previous
+        $arguments[1] | Should -BeExactly $script:Site
+    }
+
     It 'throws when there is no previous version, and leaves the site as it is' {
         { Restore-Site -SitePath $script:Site } | Should -Throw '*previous*'
         $script:Calls | Should -BeNullOrEmpty
@@ -519,6 +655,55 @@ Describe 'Test-HealthEndpoint' {
     It 'is unhealthy when the request throws' {
         Mock Invoke-WebRequest { throw 'connection refused' }
         Test-HealthEndpoint -Url 'http://localhost/health/ready' | Should -BeFalse
+    }
+
+    It 'allows TLS 1.2 before the request (an https health URL under Windows PowerShell 5.1)' {
+        Mock Enable-Tls12 { }
+        Mock Invoke-WebRequest { [pscustomobject]@{ StatusCode = 200 } }
+
+        Test-HealthEndpoint -Url 'https://api.example.test/health/ready' | Should -BeTrue
+
+        Should -Invoke Enable-Tls12 -Times 1 -Exactly
+    }
+}
+
+Describe 'Enable-Tls12' {
+    BeforeEach {
+        $script:SavedProtocol = [Net.ServicePointManager]::SecurityProtocol
+    }
+
+    AfterEach {
+        [Net.ServicePointManager]::SecurityProtocol = $script:SavedProtocol
+    }
+
+    It 'adds TLS 1.2 on Windows PowerShell and keeps what was allowed' {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls
+
+        Enable-Tls12 -Edition 'Desktop'
+
+        $protocol = [Net.ServicePointManager]::SecurityProtocol
+        ($protocol -band [Net.SecurityProtocolType]::Tls12) | Should -Be ([Net.SecurityProtocolType]::Tls12)
+        ($protocol -band [Net.SecurityProtocolType]::Tls) | Should -Be ([Net.SecurityProtocolType]::Tls)
+    }
+
+    It 'leaves the system default (0) alone on Windows PowerShell: the OS already offers TLS 1.2' {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]0
+
+        Enable-Tls12 -Edition 'Desktop'
+
+        [int][Net.ServicePointManager]::SecurityProtocol | Should -Be 0
+    }
+
+    It 'changes nothing on PowerShell 7' {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls
+
+        Enable-Tls12 -Edition 'Core'
+
+        [Net.ServicePointManager]::SecurityProtocol | Should -Be ([Net.SecurityProtocolType]::Tls)
+    }
+
+    It 'runs in the current shell without an error' {
+        { Enable-Tls12 } | Should -Not -Throw
     }
 }
 
