@@ -9,8 +9,10 @@ WORKDIR /src
 # Restore layer cache. Dockerfile COPY cannot glob and keep the folder layout, so each project's .csproj and
 # packages.lock.json is copied to its own folder, one COPY per project. Only the projects the Api references are
 # listed (the test projects are not needed, and .dockerignore drops tests/), so restoring the Api project restores
-# all of them. The layers up to the restore are rebuilt only when a project file, a lock file, a Directory.* file,
+# all of them. The layers up to the restore are rebuilt only when a project file, a lock file, a root Directory.* file,
 # global.json or Version.props changes; Version.props is imported by Directory.Build.props, so it must be here.
+# src/Directory.Build.props is not in this layer (it arrives with COPY src/ below and holds compile-time items only), so it must
+# stay free of properties that change what restore resolves.
 # The solution file is left out on purpose: it changes whenever a test project is added and would bust the cache.
 # Add a COPY line when a project is added to the Api's references; the restore below fails loudly if one is missing.
 COPY global.json Directory.Build.props Directory.Build.targets Directory.Packages.props Version.props ./

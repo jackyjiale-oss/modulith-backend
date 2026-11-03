@@ -145,10 +145,19 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
 
     /// <summary>
     /// Creates the database <paramref name="name"/> on the factory's SQL Server container, with no tables, and returns its connection
-    /// string. For tests that migrate a database of their own; <see cref="ResetDatabasesAsync"/> does not touch it.
+    /// string. For tests that migrate a database of their own; <see cref="ResetDatabasesAsync"/> does not touch it. The name goes into
+    /// the SQL text, so it must be a plain identifier (letters, digits and underscores, not starting with a digit, at most 128
+    /// characters); anything else throws <see cref="ArgumentException"/>.
     /// </summary>
     public async Task<string> CreateEmptyDatabaseAsync(string name, CancellationToken cancellationToken)
     {
+        if (name.Length is 0 or > 128
+            || !(char.IsAsciiLetter(name[0]) || name[0] == '_')
+            || !name.All(character => char.IsAsciiLetterOrDigit(character) || character == '_'))
+        {
+            throw new ArgumentException($"The database name '{name}' is not a plain identifier.", nameof(name));
+        }
+
         await using var master = new SqlConnection(_sqlServer.GetConnectionString());
         await master.OpenAsync(cancellationToken);
         await using var command = master.CreateCommand();

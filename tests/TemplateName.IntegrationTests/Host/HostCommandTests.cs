@@ -54,7 +54,7 @@ public sealed class HostCommandTests
         var exitCode = await HostCommand.RunHealthCheckAsync("8080", output, new StubHandler(_ => Task.FromResult(new HttpResponseMessage(status))), TimeSpan.FromSeconds(3), Ct);
 
         exitCode.ShouldBe(0);
-        OneLine(output).ShouldContain(((int)status).ToString());
+        OneLine(output).ShouldBe($"healthy ({(int)status})");
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public sealed class HostCommandTests
             Ct);
 
         exitCode.ShouldBe(1);
-        OneLine(output).ShouldContain("503");
+        OneLine(output).ShouldBe("unhealthy (503)");
     }
 
     [Fact]
@@ -126,7 +126,7 @@ public sealed class HostCommandTests
             Ct);
 
         exitCode.ShouldBe(1);
-        OneLine(output).ShouldContain(nameof(HttpRequestException));
+        OneLine(output).ShouldBe($"unhealthy ({nameof(HttpRequestException)})");
     }
 
     [Fact]
