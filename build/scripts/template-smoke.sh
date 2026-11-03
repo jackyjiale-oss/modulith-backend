@@ -92,7 +92,7 @@ fi
 # self-contained file, kept out of search indexes, refreshing by itself.
 maintenance_page="$out/build/deploy/maintenance.html"
 if [[ -f "$maintenance_page" ]]; then
-  for marker in 'lang="en"' 'lang="ms"' 'lang="zh-Hans"' 'http-equiv="refresh"' 'noindex'; do
+  for marker in '<section lang="en"' '<section lang="ms"' '<section lang="zh-Hans"' 'http-equiv="refresh"' 'noindex'; do
     grep -qF "$marker" "$maintenance_page" || fail "build/deploy/maintenance.html does not contain $marker"
   done
   if grep -nE 'https?://|src=|<link' "$maintenance_page" > /dev/null; then

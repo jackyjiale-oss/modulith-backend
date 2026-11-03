@@ -80,8 +80,9 @@
 </section>
 </main>
 <script>
-// Without JavaScript all three languages stay visible. With it, only the visitor's language is shown (English when neither
-// Malay nor Chinese is preferred). Any unexpected condition leaves every section visible.
+// Without JavaScript all three languages stay visible. With it, only the visitor's language is shown: the browser's language
+// list is walked in order and the first tag that starts with en, ms or zh decides; any other tag is skipped, and English is
+// the fallback. Any unexpected condition leaves every section visible.
 (function () {
   try {
     var sections = document.querySelectorAll("main > section[lang]");
@@ -89,6 +90,7 @@
     var wanted = "en";
     for (var i = 0; i < preferred.length; i++) {
       var tag = String(preferred[i] || "").toLowerCase();
+      if (tag.indexOf("en") === 0) { wanted = "en"; break; }
       if (tag.indexOf("ms") === 0) { wanted = "ms"; break; }
       if (tag.indexOf("zh") === 0) { wanted = "zh-Hans"; break; }
     }
