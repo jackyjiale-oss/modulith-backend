@@ -49,7 +49,8 @@ internal static partial class HostCommand
 
     /// <summary>
     /// Makes one GET to the liveness endpoint and writes one line to <paramref name="output"/>: the status code, or the kind of failure.
-    /// Returns 0 for a 2xx answer and 1 for anything else, a timeout or a refused connection included.
+    /// Returns 0 for a 2xx answer and 1 for anything else, a timeout or a refused connection included. A redirect is not followed, so
+    /// HTTPS redirection switched on by an https port reads <c>unhealthy (307)</c> instead of a failure somewhere else.
     /// </summary>
     /// <param name="httpPorts">The value of <c>ASPNETCORE_HTTP_PORTS</c>.</param>
     /// <param name="output">Where the line goes.</param>
@@ -62,7 +63,7 @@ internal static partial class HostCommand
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
-        using var client = new HttpClient(handler ?? new SocketsHttpHandler(), disposeHandler: true) { Timeout = timeout };
+        using var client = new HttpClient(handler ?? new SocketsHttpHandler { AllowAutoRedirect = false }, disposeHandler: true) { Timeout = timeout };
 
         try
         {

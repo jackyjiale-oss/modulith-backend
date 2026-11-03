@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using TemplateName.Api;
 
 namespace TemplateName.IntegrationTests.Host;
@@ -72,6 +74,46 @@ public sealed class HostCommandTests
     }
 
     [Fact]
+    public async Task Healthcheck_exits_1_on_a_redirect()
+    {
+        using var output = new StringWriter();
+
+        var exitCode = await HostCommand.RunHealthCheckAsync(
+            "8080",
+            output,
+            new StubHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.TemporaryRedirect))),
+            TimeSpan.FromSeconds(3),
+            Ct);
+
+        exitCode.ShouldBe(1);
+        OneLine(output).ShouldBe("unhealthy (307)");
+    }
+
+    [Fact]
+    public async Task Healthcheck_does_not_follow_a_redirect_with_the_real_handler()
+    {
+        // HTTPS redirection with an https port set answers /health/live with a 307; followed, it would reach a port nothing listens
+        // on (or, here, a 200 from another path) and hide the misconfiguration. A loopback server answers both paths.
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var requestedPaths = new List<string>();
+        using var stopServer = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        var server = ServeRedirectAsync(listener, port, requestedPaths, stopServer.Token);
+        using var output = new StringWriter();
+
+        var exitCode = await HostCommand.RunHealthCheckAsync(port.ToString(CultureInfo.InvariantCulture), output, null, TimeSpan.FromSeconds(3), Ct);
+
+        await stopServer.CancelAsync();
+        listener.Stop();
+        // The server loop ends by throwing (cancelled, or the listener stopped); observed here so it is never unobserved.
+        await Record.ExceptionAsync(() => server);
+        exitCode.ShouldBe(1);
+        OneLine(output).ShouldBe("unhealthy (307)");
+        string.Join(",", requestedPaths).ShouldBe("/health/live");
+    }
+
+    [Fact]
     public async Task Healthcheck_exits_1_on_a_failed_request()
     {
         using var output = new StringWriter();
@@ -130,6 +172,42 @@ public sealed class HostCommandTests
         line.ShouldNotBeEmpty();
         line.ShouldNotContain('\n');
         return line;
+    }
+
+    /// <summary>
+    /// Answers each connection once, until cancelled: <c>/health/live</c> with a 307 to <c>/redirected</c> on the same port, any other path
+    /// with a 200. Records every path asked for. Ends with an exception when cancelled or when the listener stops.
+    /// </summary>
+    private static async Task ServeRedirectAsync(TcpListener listener, int port, List<string> requestedPaths, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            using var client = await listener.AcceptTcpClientAsync(cancellationToken);
+            await using var stream = client.GetStream();
+            var head = new StringBuilder();
+            var buffer = new byte[4096];
+            while (!head.ToString().Contains("\r\n\r\n", StringComparison.Ordinal))
+            {
+                var read = await stream.ReadAsync(buffer, cancellationToken);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                head.Append(Encoding.ASCII.GetString(buffer, 0, read));
+            }
+
+            var path = head.ToString().Split(' ')[1];
+            lock (requestedPaths)
+            {
+                requestedPaths.Add(path);
+            }
+
+            var response = path == "/health/live"
+                ? $"HTTP/1.1 307 Temporary Redirect\r\nLocation: http://127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)}/redirected\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                : "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            await stream.WriteAsync(Encoding.ASCII.GetBytes(response), cancellationToken);
+        }
     }
 
     private sealed class StubHandler(Func<CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler

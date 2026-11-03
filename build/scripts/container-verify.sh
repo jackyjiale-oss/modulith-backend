@@ -2,7 +2,7 @@
 # Verifies an API image, the one set of checks CI (ci.yml, job `container`) and CD (cd.yml, on the pushed digest) both run:
 #   1. start a throwaway SQL Server on a private Docker network, with a password generated for this run;
 #   2. run `<image> migrate` against it, retried while the server starts, then run it again: both must exit 0;
-#   3. start `<image>` as the API in Production with the minimum configuration listed below;
+#   3. start `<image>` as the API in Production with the minimum configuration listed below and a non-wildcard AllowedHosts;
 #   4. wait until Docker reports the image's own HEALTHCHECK as `healthy`;
 #   5. GET /health/ready from this machine: 200;
 #   6. the container's configured user is not root;
@@ -26,12 +26,15 @@
 # container by name (`-e NAME`, taken from the environment of that one docker command), never on a command line, so the runner's
 # process list does not show them.
 #
-# The minimum Production configuration (design spec, risk 2). Production refuses to start without:
+# The minimum Production configuration (docs/deployment/docker.md, "Running it"; ADR 0033). Production refuses to start without:
 #   ConnectionStrings__Database                    ConnectionStringsOptions.Database is [Required], validated on start; `migrate`
 #                                                  reads it too (ADR 0006), and is given nothing else.
 #   Auth__Jwt__SigningKeys__0__KeyId               JwtOptions: an empty Auth:Jwt:SigningKeys fails ValidateOnStart outside Development and
 #   Auth__Jwt__SigningKeys__0__PrivateKeyPem       Testing; the key must be EC P-256, PEM 'PRIVATE KEY' (PKCS#8) or 'EC PRIVATE KEY'.
 # ASPNETCORE_ENVIRONMENT=Production is set explicitly (the image's default is Production too).
+# AllowedHosts is set the way the docs tell a deployment to set it, not left at `*`: a public host name plus 127.0.0.1 (the
+# image's HEALTHCHECK sends Host 127.0.0.1:<port>) and localhost. Host filtering answers 400 to any other Host, so steps 4 and 5
+# (the HEALTHCHECK and the curl to 127.0.0.1) prove that this documented shape keeps the probes working.
 # Everything else starts in Production with the defaults of appsettings.json, read from the options classes and the module
 # registrations (AddInfrastructureCommon, AddHttpSecurity, AddAuthModule, AddNotificationsModule, AddAuditModule, AddPlatformRedis):
 #   - the only environment-dependent checks in src/ are the signing key (above), HSTS plus HTTPS redirection outside Development
@@ -233,6 +236,7 @@ step "3/7 Starting '$image' as the API in Production"
 ConnectionStrings__Database="$connection_string" Auth__Jwt__SigningKeys__0__PrivateKeyPem="$signing_key_pem" \
   docker run -d --name "$api" --label "$label" --network "$network" -p "127.0.0.1::$api_port" \
   -e ASPNETCORE_ENVIRONMENT=Production \
+  -e "AllowedHosts=api.example.test;127.0.0.1;localhost" \
   -e ConnectionStrings__Database \
   -e Auth__Jwt__SigningKeys__0__KeyId=verify \
   -e Auth__Jwt__SigningKeys__0__PrivateKeyPem \
