@@ -127,15 +127,44 @@ case_modified_not_added() {
   assert_contains "comparing with release tag v1.0.0" "$err" "modified_not_added: base"
 }
 
-case_designer_and_snapshot_ignored() {
+# A migration's marker is matched as the word ContractMigration anywhere in an added file under Migrations, the way the architecture
+# test (reflection) accepts it: in a .Designer.cs partial, in a list of attributes, fully qualified. A false positive is the safe direction.
+case_designer_file_counts() {
   make_repo
   commit_file README.md "first" "initial"
   tag v1.0.0
   commit_file "$migration_dir/20261101000000_AddX.Designer.cs" "$contract_content" "add designer"
+  run_script "$detect"
+  assert_eq "true" "$out" "designer_file_counts"
+  assert_contains "comparing with release tag v1.0.0" "$err" "designer_file_counts: base"
+}
+
+case_combined_attribute_list_counts() {
+  make_repo
+  commit_file README.md "first" "initial"
+  tag v1.0.0
+  commit_file "$migration_dir/20261101000000_AddX.cs" '[Obsolete, ContractMigration("x")]' "add combined list"
+  run_script "$detect"
+  assert_eq "true" "$out" "combined_attribute_list_counts"
+}
+
+case_fully_qualified_attribute_counts() {
+  make_repo
+  commit_file README.md "first" "initial"
+  tag v1.0.0
+  commit_file "$migration_dir/20261101000000_AddX.cs" '[Some.Namespace.ContractMigration("x")]' "add qualified attribute"
+  run_script "$detect"
+  assert_eq "true" "$out" "fully_qualified_attribute_counts"
+}
+
+case_model_snapshot_ignored() {
+  make_repo
+  commit_file README.md "first" "initial"
+  tag v1.0.0
   commit_file "$migration_dir/ADbContextModelSnapshot.cs" "$contract_content" "add snapshot"
   run_script "$detect"
-  assert_eq "false" "$out" "designer_and_snapshot_ignored"
-  assert_contains "comparing with release tag v1.0.0" "$err" "designer_and_snapshot_ignored: base"
+  assert_eq "false" "$out" "model_snapshot_ignored"
+  assert_contains "comparing with release tag v1.0.0" "$err" "model_snapshot_ignored: base"
 }
 
 case_head_carries_its_own_tag() {
@@ -159,6 +188,37 @@ case_unmerged_tag_ignored() {
   commit_file "$migration_dir/20261101000000_AddX.cs" "$contract_content" "add contract migration"
   run_script "$detect"
   assert_eq "true" "$out" "unmerged_tag_ignored"
+  assert_contains "comparing with release tag v1.0.0" "$err" "unmerged_tag_ignored: base"
+}
+
+# A pre-release tag ranks above its release in version order and can never be deployed to production, so it is never the base.
+case_prerelease_tag_never_the_base() {
+  make_repo
+  commit_file README.md "first" "initial"
+  tag v1.0.0
+  commit_file "$migration_dir/20261101000000_AddX.cs" "$contract_content" "add contract migration"
+  commit_file README.md "second" "docs"
+  tag v1.1.0-rc.1
+  commit_file README.md "third" "more docs"
+  run_script "$detect"
+  assert_eq "true" "$out" "prerelease_tag_never_the_base: stdout"
+  assert_contains "comparing with release tag v1.0.0" "$err" "prerelease_tag_never_the_base: base"
+}
+
+# A shallow clone has no tags and no history to diff, and would silently answer false.
+case_shallow_clone_refused() {
+  make_repo
+  commit_file README.md "first" "initial"
+  tag v1.0.0
+  commit_file "$migration_dir/20261101000000_AddX.cs" "$contract_content" "add contract migration"
+  local origin="$PWD"
+  must git clone -q --depth 1 "file://$origin" "$tmp_root/shallow.$$"
+  must cd "$tmp_root/shallow.$$"
+  run_script "$detect"
+  assert_eq "1" "$status" "shallow_clone_refused: exit code"
+  assert_eq "" "$out" "shallow_clone_refused: stdout empty"
+  assert_contains "fetch-depth: 0" "$err" "shallow_clone_refused: stderr names fetch-depth"
+  assert_contains "fetch-tags: true" "$err" "shallow_clone_refused: stderr names fetch-tags"
 }
 
 case_explicit_base_ref() {
@@ -216,7 +276,9 @@ run_case() {
 
 for c in \
   case_no_previous_tag case_tag_with_no_change case_added_expand_migration case_added_contract_migration \
-  case_modified_not_added case_designer_and_snapshot_ignored case_head_carries_its_own_tag case_unmerged_tag_ignored \
+  case_modified_not_added case_designer_file_counts case_combined_attribute_list_counts \
+  case_fully_qualified_attribute_counts case_model_snapshot_ignored case_head_carries_its_own_tag case_unmerged_tag_ignored \
+  case_prerelease_tag_never_the_base case_shallow_clone_refused \
   case_explicit_base_ref case_unresolvable_base_ref case_resolve_auto case_resolve_off_warns \
   case_resolve_rejects_unknown_mode; do
   run_case "$c"
