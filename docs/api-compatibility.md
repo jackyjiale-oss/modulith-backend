@@ -73,7 +73,7 @@ For a schema change that old clients or old code can still observe (a rename, a 
 
 | Phase | What happens | Release | Tool in this template |
 |---|---|---|---|
-| **Expand** | Add the new column or table next to the old one; nothing is removed. Plan how old and new code read and write during the transition. | Release N | A migration that only adds (`dotnet ef migrations add`, [`docs/services/api.md`](services/api.md#migrations)). In production it is applied by the `migrate` mode that Plan 6 adds; until then only local start-up migration (`Database:ApplyMigrationsOnStartup`) exists. |
+| **Expand** | Add the new column or table next to the old one; nothing is removed. Plan how old and new code read and write during the transition. | Release N | A migration that only adds (`dotnet ef migrations add`, [`docs/services/api.md`](services/api.md#migrations)). In production it is applied by the `migrate` mode before the roll-out ([`docs/deployment/migrations.md`](deployment/migrations.md)); `Database:ApplyMigrationsOnStartup` is local development only. |
 | **Migrate** | Backfill existing rows into the new structure, and move the code to it. Verify data accuracy, constraints, indexes and query behaviour. | Release N (the backfill) and N or N+1 (the code) | The backfill is a migration or a batched job; the module's reads and writes move to the new structure. |
 | **Transition and monitor** | Release compatible backend and client changes; watch for use of the old code path; check everything that may read the old structure. Allow enough time for customer deployments and rollback requirements. | N+1 up to the later release | Logs and metrics (section "Retiring a version"); the checklist below. |
 | **Contract** | Confirm nothing reads or writes the old structure; remove it in a later migration, and remove the compatibility code. | A later release, after the checklist | A migration that drops or renames, marked `[ContractMigration]`. |
@@ -91,7 +91,7 @@ Add the marker by hand to the migration's own file (the one that holds `Up`, not
 public partial class DropUsersFullName : Migration
 ```
 
-**The upgrade path.** A project tests that its migrations apply from the previous release to this one over data, and that a fresh database works. The template does not ship that test yet; it comes with the `migrate` mode and the runbooks of Plan 6, which is also where the contract phase is run.
+**The upgrade path.** A project tests that its migrations apply from the previous release to this one over data, and that a fresh database works. The template does not ship that test (the delivery pipeline added the `migrate` mode and the [migrations runbook](deployment/migrations.md), where the contract phase is run, but not the test); write it in your project.
 
 ## When can a column or table go?
 

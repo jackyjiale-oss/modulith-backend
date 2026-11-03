@@ -143,6 +143,20 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
         await PersistenceTestsDatabase.ResetAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Creates the database <paramref name="name"/> on the factory's SQL Server container, with no tables, and returns its connection
+    /// string. For tests that migrate a database of their own; <see cref="ResetDatabasesAsync"/> does not touch it.
+    /// </summary>
+    public async Task<string> CreateEmptyDatabaseAsync(string name, CancellationToken cancellationToken)
+    {
+        await using var master = new SqlConnection(_sqlServer.GetConnectionString());
+        await master.OpenAsync(cancellationToken);
+        await using var command = master.CreateCommand();
+        command.CommandText = $"IF DB_ID(N'{name}') IS NOT NULL BEGIN ALTER DATABASE [{name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{name}]; END; CREATE DATABASE [{name}];";
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        return ConnectionStringFor(name);
+    }
+
     public override async ValueTask DisposeAsync()
     {
         await base.DisposeAsync();

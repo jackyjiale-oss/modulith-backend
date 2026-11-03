@@ -48,8 +48,9 @@ Required status checks must already exist (have run at least once), or GitHub bl
 | 1 | after plan Task 14 is merged | `… --checks build-test,template-smoke,commit-lint` | required CI checks, branch must be up to date |
 | 2 | after plan Task 17 is merged | `… --checks build-test,template-smoke,commit-lint,licenses` | licence check |
 | 3 | when a second maintainer joins | `… --checks … --approvals 1`, plus a `.github/CODEOWNERS` file | human review |
+| 4 | after the delivery-pipeline PR (Plan 6, Section 5) is merged and each new job has run once | `… --checks build-test,template-smoke,commit-lint,licenses,container,codeql,gitleaks` | the image check, code scanning and secret scanning |
 
-The check names are job names: `build-test`, `template-smoke` and `licenses` run in `.github/workflows/ci.yml`; `commit-lint` (the PR-title check) runs in `.github/workflows/pr-title.yml`, so that editing a PR title re-runs only it.
+The check names are job names: `build-test`, `template-smoke`, `licenses` and `container` run in `.github/workflows/ci.yml`; `codeql` in `codeql.yml`; `gitleaks` in `gitleaks.yml`; `commit-lint` (the PR-title check) runs in `.github/workflows/pr-title.yml`, so that editing a PR title re-runs only it.
 
 On a pull request the `build-test` job also compares the OpenAPI document with the base branch's (`OpenApiBaselineTests`, [`api-compatibility.md`](api-compatibility.md)) and fails on a breaking change unless the PR title carries `!` (`feat(api)!: …`); the title is read when the job runs, so push again after adding the `!`.
 
@@ -61,6 +62,20 @@ On a pull request the `build-test` job also compares the OpenAPI document with t
 - Releases: release-please keeps a `chore(release): release x.y.z` PR open. Merging it tags `vx.y.z`, writes `CHANGELOG.md` and creates the GitHub Release (plan Task 17). It runs with the repository secret `RELEASE_PLEASE_TOKEN`, a fine-grained PAT for this repo only with Contents + Pull requests read/write: PRs opened with the default `GITHUB_TOKEN` do not trigger CI, so the release PR could never get its required checks.
 - Dependabot PRs: titles are `chore(deps): bump …` (NuGet) and `ci(deps): bump …` (actions), configured in `.github/dependabot.yml`. The `commit-lint` job skips Dependabot because long package names exceed 72 characters. Let CI run, check the changelog for breaking changes, and squash-merge.
 
-## 5. Later (Plan 6)
+## 5. The delivery pipeline (Plan 6)
 
-`staging` and `production` environments with required reviewers, OIDC to the cloud (no long-lived secrets), CodeQL, and gitleaks.
+Design: [`docs/superpowers/specs/2026-11-02-delivery-pipeline-design.md`](superpowers/specs/2026-11-02-delivery-pipeline-design.md); plan: [`docs/superpowers/plans/2026-11-02-delivery-pipeline.md`](superpowers/plans/2026-11-02-delivery-pipeline.md); decision: [ADR 0033](adr/0033-delivery-pipeline.md); runbooks for generated projects: [`docs/deployment/`](deployment/README.md) (the pipeline, its variables and secret, Docker, IIS, migrations, the production checklist).
+
+What this repository does with it: `ci.yml` gains the jobs `container` (builds `build/docker/Dockerfile` and runs `build/scripts/container-verify.sh`), `scripts` (Pester and PSScriptAnalyzer for `deploy-iis.ps1`) and `actionlint`; `codeql.yml` and `gitleaks.yml` run on every pull request and weekly; `cd.yml` and `release.yml`'s `cd` job run, but `cd.yml`'s `detect` job finds `.template.config` and skips `image` and every job after it, so **this repository publishes no image and deploys nothing**. A generated project has no `.template.config` and gets the whole pipeline.
+
+The settings the template repository needs for it:
+
+| Setting | Value | Why |
+|---|---|---|
+| Variables `DEPLOY_ENABLED`, `IIS_ENABLED` | unset | Nothing is deployed from here; the deploy jobs are skipped anyway. |
+| Variable `CODEQL_ENABLED` | unset | The repository is public, so CodeQL is free; the first run may ask for code scanning to be allowed under Settings, Advanced Security. |
+| Environments `staging`, `production` | none | Only generated projects create them. |
+
+Required checks (Section 3, phase 4): `container`, `codeql` and `gitleaks` join the list once each has run at least once on a pull request, or GitHub blocks every merge. `actionlint` and `scripts` also exist and may be added. When `cd.yml` calls `ci.yml`, the called jobs show as `ci / build-test` and so on in that run only; the check names on a pull request do not change.
+
+Things to do when the plan's first pull request is open, none of which had been done when the plan was written: check that the `container`, `scripts`, `actionlint`, `codeql` and `gitleaks` jobs are green on it; read the first `container-verify.sh` run in the log; confirm CodeQL's upload works for a Dependabot pull request; add a `.github/CODEOWNERS` entry for `.gitleaks.toml` and `.github/` with the second maintainer (phase 3), because a pull request can edit the allowlist that scans it; raise the pinned tools by hand when they age (gitleaks 8.30.1 with its SHA-256, actionlint 1.7.12, Pester 5.9.1, PSScriptAnalyzer 1.25.0; Dependabot sees none of them).

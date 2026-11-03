@@ -18,3 +18,11 @@ updates:
     commit-message:
       prefix: ci
       include: scope
+
+  - package-ecosystem: docker
+    directory: /build/docker
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope

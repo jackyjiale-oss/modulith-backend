@@ -28,7 +28,7 @@ Reads:
 
 Migrations:
 - `MigrateModuleDatabasesAsync` migrates every module context in registration order. It is the single code path for development, tests and production; there are no EF migration bundles (blueprint review, Section 4).
-- Production migrates through a `migrate` command-line mode of the API (`dotnet TemplateName.Api.dll migrate`, delivered in Plan 6), which calls `MigrateModuleDatabasesAsync` and can use a DDL-privileged connection string.
+- Production migrates through a `migrate` command-line mode of the API (`dotnet TemplateName.Api.dll migrate`, delivered by the delivery pipeline, [ADR 0033](0033-delivery-pipeline.md)), which calls `MigrateModuleDatabasesAsync` and reads the same `ConnectionStrings:Database` key, which the deploy job sets to a DDL-privileged connection string for that one process.
 - Applying migrations on application start is Development only: `Database:ApplyMigrationsOnStartup` is `true` only in `appsettings.Development.json`.
 - Amended by Plan 3: the Development settings file is no longer committed (`**/appsettings.Development.json` is git-ignored), so `appsettings.json` keeps `Database:ApplyMigrationsOnStartup` `false` and developers set it to `true` locally (user secrets, as the README does, an environment variable, or their own git-ignored `appsettings.Development.json`). Production still never migrates on start.
 
