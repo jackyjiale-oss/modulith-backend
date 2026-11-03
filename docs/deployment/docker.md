@@ -67,6 +67,25 @@ It needs `docker`, `openssl`, `curl` and `timeout` (GNU coreutils; on macOS Home
 
 What the script cannot rule out: it starts the image against an empty database, so the outbox, the recurring jobs, the delivery worker and the seeding run but have nothing to do, and a problem that appears only with data is not seen. The integration tests that start Production switch those services off.
 
+## The maintenance hook
+
+In maintenance mode ([`README.md`](README.md#maintenance-mode), [ADR 0034](../adr/0034-maintenance-mode-for-contract-phase-releases.md)), which a production release that adds a contract migration runs in, `deploy-production` calls a second project-owned hook around the release:
+
+```bash
+bash build/deploy/maintenance.sh on production build/deploy/maintenance.html     # before migrate
+bash build/deploy/maintenance.sh off production build/deploy/maintenance.html    # after the smoke test passed
+```
+
+The order is `on`, `migrate`, `roll-out.sh`, the smoke test, `off`. The contract, which the header of the file repeats:
+
+- `on` makes every request to the site answer the page (the third argument, `build/deploy/maintenance.html`) with status 503 until `off` runs. It is idempotent and must exit non-zero when it could not do it.
+- `off` removes it, so the site answers normally again. It is idempotent too.
+- Neither step has `always()`. If a later step fails, `off` does not run: **the page stays up and the run fails**, because after a contract migration the previous version cannot run on the schema. The operator restores the database from a backup if a contract migration was applied, redeploys the previous image through `roll-out.sh` (by digest, [Rolling back](#rolling-back)), and runs `bash build/deploy/maintenance.sh off production build/deploy/maintenance.html` by hand once the site is healthy.
+
+`build/deploy/maintenance.sh` ships as a stub that exits 1 with a message, like `roll-out.sh`. A project that sets `DEPLOY_ENABLED` and releases a contract migration without having written it gets a red job at the `on` step, **before the database is touched**. Its header holds examples to start from: nginx and Caddy over SSH, and a load balancer's fixed-response rule. Replace the body with your own commands and keep credentials in the environment's secrets, passed through `env:` on the workflow step (the workflow steps pass none; add `env:` to them).
+
+A normal Docker release does not call the hook, and staging never does. The template cannot know what sits in front of your API, so it ships no proxy; the page is `build/deploy/maintenance.html`, the file IIS serves as `app_offline.htm`, and **a project edits that one file for its brand and contact**. A proxy can add a `Retry-After` header; the page itself refreshes every 30 seconds. The hook has not been run against a real proxy.
+
 ## Rolling back
 
-A container rollback is **redeploying the previous image**: the previous release tag (`x.y.z`) or, better, the previous digest, through the same `roll-out.sh` your project wrote. There is no automatic rollback. The database is not rolled back: every migration is expand-only (ADR 0031), so the previous version runs on the new schema. If a release contracted a column (`[ContractMigration]`), that guarantee ends there; see [`migrations.md`](migrations.md#expand-then-contract). Find the previous digest in the package's version list on GHCR or in the previous `cd.yml` run (`image` job output).
+A container rollback is **redeploying the previous image**: the previous release tag (`x.y.z`) or, better, the previous digest, through the same `roll-out.sh` your project wrote. There is no automatic rollback. The database is not rolled back: every migration is expand-only (ADR 0031), so the previous version runs on the new schema. If a release contracted a column (`[ContractMigration]`), that guarantee ends there; see [`migrations.md`](migrations.md#expand-then-contract). Such a release goes out in [maintenance mode](#the-maintenance-hook), and when it fails the page stays up while you restore the database first. Find the previous digest in the package's version list on GHCR or in the previous `cd.yml` run (`image` job output).
