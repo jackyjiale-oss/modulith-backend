@@ -14,7 +14,8 @@
 #   VERIFY_TIMEOUT    seconds each wait may take (SQL Server ready, the migrate retries, healthy, ready); default 120. One migrate
 #                     attempt is bounded by what is left of its wait (a hung attempt is killed and counts as a failed one).
 #   VERIFY_SQL_IMAGE  the SQL Server image; default mcr.microsoft.com/mssql/server:2022-latest, as docker-compose.yml and the tests.
-# Needs docker, openssl, curl and timeout (GNU coreutils). Exits 0 only when every check passes.
+# Needs docker, openssl, curl and timeout (GNU coreutils; on macOS Homebrew installs it as `gtimeout`: put coreutils' gnubin on
+# PATH or alias it). Exits 0 only when every check passes.
 #
 # Clean-up: every container and the network it creates carry the label container-verify=<pid of this script>-<random hex> (so two
 # runs on one daemon never remove each other's objects) and are removed on exit, normal or not (EXIT, INT, TERM; a second signal
@@ -221,7 +222,9 @@ pass "SQL Server is ready"
 # overrun VERIFY_TIMEOUT by a whole attempt. `timeout` stops it (SIGTERM, which docker forwards to the container, then SIGKILL
 # after 5 s) and answers 124, or 137 when it had to kill. Both are mapped to 1, a failed attempt; the labelled container, if one
 # is left, is removed with the rest at the end. --foreground keeps `timeout` in this script's process group, so a Ctrl-C reaches
-# it. Argument: the seconds the attempt may take.
+# it. On the 137 path the docker CLI is killed but the detached container may keep running until the label clean-up removes it
+# (the EF migration lock makes an overlap with the next attempt safe). 137 is also what a container killed by the kernel (out of
+# memory) exits with, so the message below covers both. Argument: the seconds the attempt may take.
 run_migrate() {
   local status=0
   ConnectionStrings__Database="$connection_string" timeout --foreground --kill-after=5 "$1" \
@@ -229,7 +232,7 @@ run_migrate() {
     -e ASPNETCORE_ENVIRONMENT=Production -e ConnectionStrings__Database \
     "$image" migrate >"$work/migrate.log" 2>&1 || status=$?
   if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
-    echo "migrate was stopped after $1s (the attempt took too long)." >>"$work/migrate.log"
+    echo "migrate exited $status: timed out (limit ${1}s) or killed." >>"$work/migrate.log"
     status=1
   fi
   return "$status"
