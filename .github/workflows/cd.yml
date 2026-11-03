@@ -344,7 +344,8 @@ jobs:
       # Maintenance mode (the `maintenance` job): the page goes up before the database changes and comes down only after the smoke
       # test of the new version passed. Neither step has always(): when a later step fails the page stays up and the run fails (M4,
       # ADR 0034), because after a contract migration the previous version cannot run on the schema. A project's hook is
-      # build/deploy/maintenance.sh, which fails until the project writes it.
+      # build/deploy/maintenance.sh, which fails until the project writes it. While `on` the hook must pass /health/live and
+      # /health/ready through to the API (answering the page for every other request): the smoke test below runs before `off`.
       - name: Maintenance page on
         if: needs.maintenance.outputs.enabled == 'true'
         run: bash build/deploy/maintenance.sh on production build/deploy/maintenance.html
