@@ -18,27 +18,33 @@ migration_dir="src/Modules/A/Infrastructure/Persistence/Migrations"
 contract_content='[ContractMigration("drop old column")]'
 expand_content='public partial class AddX { }'
 
+# must <command...>: runs a setup command and ends the case (it runs in a subshell) when the command fails. A case runs on the
+# left of ||, where bash ignores set -e, so a broken setup would otherwise carry on and let the negative cases pass vacuously.
+must() {
+  "$@" || { echo "FAIL: setup command failed: $*" >&2; exit 1; }
+}
+
 # make_repo: creates a temporary repository, enters it and leaves it as the current directory.
 make_repo() {
   local dir
-  dir="$(mktemp -d "$tmp_root/repo.XXXXXX")"
-  cd "$dir"
-  git init -q -b main
-  git config user.name "Test"
-  git config user.email "test@example.com"
-  git config commit.gpgsign false
-  git config core.autocrlf false
+  dir="$(mktemp -d "$tmp_root/repo.XXXXXX")" || exit 1
+  must cd "$dir"
+  must git init -q -b main
+  must git config user.name "Test"
+  must git config user.email "test@example.com"
+  must git config commit.gpgsign false
+  must git config core.autocrlf false
 }
 
 # commit_file <path> <content> <message>
 commit_file() {
-  mkdir -p "$(dirname "$1")"
-  printf '%s\n' "$2" > "$1"
-  git add -- "$1"
-  git commit -q -m "$3"
+  must mkdir -p "$(dirname "$1")"
+  printf '%s\n' "$2" > "$1" || exit 1
+  must git add -- "$1"
+  must git commit -q -m "$3"
 }
 
-tag() { git tag "$1"; }
+tag() { must git tag "$1"; }
 
 assert_eq() {
   local expected="$1" actual="$2" name="$3"
@@ -88,6 +94,7 @@ case_tag_with_no_change() {
   commit_file README.md "second" "docs"
   run_script "$detect"
   assert_eq "false" "$out" "tag_with_no_change"
+  assert_contains "comparing with release tag v1.0.0" "$err" "tag_with_no_change: base"
 }
 
 case_added_expand_migration() {
@@ -97,6 +104,7 @@ case_added_expand_migration() {
   commit_file "$migration_dir/20261101000000_AddX.cs" "$expand_content" "add expand migration"
   run_script "$detect"
   assert_eq "false" "$out" "added_expand_migration"
+  assert_contains "comparing with release tag v1.0.0" "$err" "added_expand_migration: base"
 }
 
 case_added_contract_migration() {
@@ -116,6 +124,7 @@ case_modified_not_added() {
   commit_file "$migration_dir/20261101000000_AddX.cs" "$contract_content // edited" "edit the applied migration"
   run_script "$detect"
   assert_eq "false" "$out" "modified_not_added"
+  assert_contains "comparing with release tag v1.0.0" "$err" "modified_not_added: base"
 }
 
 case_designer_and_snapshot_ignored() {
@@ -126,6 +135,7 @@ case_designer_and_snapshot_ignored() {
   commit_file "$migration_dir/ADbContextModelSnapshot.cs" "$contract_content" "add snapshot"
   run_script "$detect"
   assert_eq "false" "$out" "designer_and_snapshot_ignored"
+  assert_contains "comparing with release tag v1.0.0" "$err" "designer_and_snapshot_ignored: base"
 }
 
 case_head_carries_its_own_tag() {
@@ -142,10 +152,10 @@ case_unmerged_tag_ignored() {
   make_repo
   commit_file README.md "first" "initial"
   tag v1.0.0
-  git checkout -q -b side
+  must git checkout -q -b side
   commit_file side.txt "side" "side work"
   tag v9.9.9
-  git checkout -q main
+  must git checkout -q main
   commit_file "$migration_dir/20261101000000_AddX.cs" "$contract_content" "add contract migration"
   run_script "$detect"
   assert_eq "true" "$out" "unmerged_tag_ignored"
