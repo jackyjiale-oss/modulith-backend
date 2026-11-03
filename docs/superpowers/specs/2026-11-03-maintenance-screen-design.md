@@ -47,7 +47,8 @@
 |---|---|
 | `build/deploy/maintenance.html` | The page (M1). |
 | `build/deploy/maintenance.sh` | The Docker hook stub (M5), with nginx, Caddy and load-balancer examples in its header. |
-| `build/scripts/detect-contract-migration.sh` | Detection (M3). Reads git history, so the job that runs it checks out with `fetch-depth: 0`. |
+| `build/scripts/detect-contract-migration.sh` | Detection (M3). Reads git history, so the job that runs it checks out with `fetch-depth: 0` and `fetch-tags: true`. |
+| `build/scripts/resolve-maintenance.sh` | Resolves the `maintenance` input and the detection answer to the final `true` or `false` (section 5), so the override and its warning are testable. |
 | `.github/workflows/cd.yml` | The `maintenance` input on `workflow_dispatch` and `workflow_call`; a `maintenance` job (needs `detect`, production only, skipped for the template) that resolves `auto\|on\|off` to `true` or `false`; the extra steps in `deploy-production` and a `-Maintenance` flag in `deploy-iis`. `release.yml` is unchanged. |
 | `build/scripts/deploy-iis.ps1` | `-MaintenancePage <path>` (the page to copy as `app_offline.htm`; defaults to the file beside `build/deploy`) and `-Maintenance` (M2, M4). `Set-SiteOffline` copies the page instead of writing a string. `app_offline.htm` is already among the server-owned files, so the swap's `/MIR` never deletes it mid-run. |
 
@@ -63,7 +64,9 @@
 
 ## 6. Detection
 
-`detect-contract-migration.sh <base-ref>`: lists the files added (`--diff-filter=A`) between `<base-ref>` and `HEAD` under any `**/Migrations/*.cs`, skipping `*.Designer.cs` and `*ModelSnapshot.cs`, and prints `true` when any contains `[ContractMigration`, else `false`. Exit 0 either way; exit 1 only on a git error or a base ref that does not resolve. The caller derives the base ref: the highest `v*` tag reachable from `HEAD` that does not point at `HEAD` itself (the release commit carries its own tag).
+`detect-contract-migration.sh [base-ref]`: lists the files added (`--diff-filter=A`, renames off) between `<base-ref>` and `HEAD` under any `**/Migrations/*.cs`, skipping `*.Designer.cs` and `*ModelSnapshot.cs`, and prints `true` when any contains `[ContractMigration`, else `false`. Exit 0 either way; exit 1 only on a git error or a base ref that does not resolve. Without an argument the script derives the base ref itself, so the rule is tested: the highest `v*` tag reachable from `HEAD` that does not point at `HEAD` (the release commit carries its own tag).
+
+`resolve-maintenance.sh <mode> <detected>`: `mode` is `auto` (or empty), `on` or `off`; `detected` is the answer above. It prints `true` or `false` and exits 1 on any other mode. A forced `off` with `detected` true prints a `::warning` annotation to stderr, where the runner reads it; `on` with nothing detected prints a notice.
 
 ## 7. Documents and housekeeping
 
@@ -75,14 +78,14 @@
 ## 8. Tests
 
 - **Pester** (`build/scripts/tests/deploy-iis.Tests.ps1`): maintenance order (migrate after the page is up); the page stays up and the run exits 1 on a failed migrate, swap and health check in maintenance mode; normal mode unchanged; the page file is copied and removed; a missing page file fails before any change.
-- **Script tests** for `detect-contract-migration.sh` against a throwaway git repository: no tag, a tag with no change, an added expand migration, an added `[ContractMigration]`, a modified (not added) file, a Designer file that mentions the attribute. Run by the `scripts` CI job.
+- **Script tests** for `detect-contract-migration.sh` against a throwaway git repository (no tag, a tag with no change, an added expand migration, an added `[ContractMigration]`, a modified file, a Designer file that mentions the attribute, a tag on `HEAD`) and for `resolve-maintenance.sh`. Run by the `scripts` CI job.
 - **`template-smoke.sh`**: `maintenance.html` and `maintenance.sh` ship; `maintenance.sh` fails by design in the template; the page has the three languages and no external reference.
 - **actionlint** covers the workflow change. The `container` and `build-test` jobs are unaffected.
 
 ## 9. Risks and points the plan must settle
 
 - **Never run on a real server.** Like Plan 6, the Pester tests mock IIS; the manual checklist in `docs/deployment/iis.md` gains the maintenance-mode steps.
-- **A forced `off` on a contract release** deploys with the old code running on a schema it cannot use; the warning annotation is the only guard. The plan decides whether that also needs a required confirmation.
+- **A forced `off` on a contract release** deploys with the old code running on a schema it cannot use. Decided: the warning annotation is the only extra guard, because the override is an explicit dispatch input and the `production` environment's required reviewers already gate the run. ADR 0034 records it.
 - **The base-ref rule** assumes release tags are `v*` and reachable from `main`; a squash or rebase that drops a tag changes the diff. The plan covers a release run from a `v*` tag.
 - **Language choice in the page** is by the browser's language list, not by the API's `Accept-Language` handling; a visitor with an unlisted language sees English.
 - **Concurrency.** `cd.yml` allows one deploy per ref and never cancels one half-way, and a release has its own group. Two releases cannot therefore interleave their `on` and `off` calls; the plan must still confirm that a main-push run (edge, staging only) can never reach the maintenance steps.
