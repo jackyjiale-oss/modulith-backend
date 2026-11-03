@@ -316,7 +316,7 @@ How long the Audit module keeps its audit trails before a cleanup job deletes th
 
 | Key | Default | Meaning |
 |---|---|---|
-| `AllowedHosts` | `*` | ASP.NET Core host filtering. Set it to the public host names in production. |
+| `AllowedHosts` | `*` | ASP.NET Core host filtering (400 for any other `Host`). Set it to the public host names in production, plus `127.0.0.1` in the container, where the image's health check sends that host ([`deployment/docker.md`](../deployment/docker.md#running-it)). |
 
 ## Health
 
@@ -361,7 +361,7 @@ Local URLs: `https://localhost:5001` and `http://localhost:5000`.
 
 HTTP security:
 - When the connection has no remote IP address (a Unix domain socket), the forwarded-headers middleware accepts `X-Forwarded-For` from it whatever the trusted lists say. Do not listen on a socket that untrusted clients can reach.
-- Behind a TLS-terminating proxy that does not send `X-Forwarded-Proto`, HTTPS redirection cannot work out the port; set `HTTPS_PORT` (or `https_port`) or forward the scheme.
+- Behind a TLS-terminating proxy that does not send `X-Forwarded-Proto`, HTTPS redirection cannot work out the port; forward the scheme. Setting `HTTPS_PORT` (or `https_port`) is the other way, but **not in the container**: there it redirects the image's health check too, which does not follow the redirect and reports `unhealthy (307)` ([`deployment/docker.md`](../deployment/docker.md#running-it)). This is the case where TLS ends at the proxy, so forwarding `X-Forwarded-Proto` is the fix.
 - CORS preflight requests are answered before the rate limiter, so they are not counted. 401 and 403 responses are counted: the limiter (slot 9a) runs before authorization (slot 10), so an anonymous request to a protected or unknown route and a signed-in request without the permission each use up the caller's allowance (an anonymous caller is partitioned by address, a signed-in one by `user:{sub}`).
 - An anonymous request to a route that does not exist gets 401, not 404: the fallback policy also covers requests that matched no endpoint, so anonymous callers cannot probe which routes exist. A signed-in caller gets 404.
 - IPv6 and IPv4-mapped addresses are partition keys as plain strings, so one client can appear as two addresses.

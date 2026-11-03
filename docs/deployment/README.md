@@ -32,7 +32,7 @@ The `container` job builds `build/docker/Dockerfile` and runs `build/scripts/con
 | `ci` | always | Calls `ci.yml`, so what is published passed the same jobs as a pull request. |
 | `image` | `ci` passed and this is not the template repository | Builds and pushes `ghcr.io/<repository>/api` (the name is lower-cased) with an SBOM and a provenance attestation. Tags: `sha-<short>` on every run, `edge` only on a non-release run from `main`, `x.y.z` and `latest` on a release. A release is refused unless the ref is `main` or a `v*` tag. Outputs the digest. |
 | `verify` | after `image` | Pulls the image by digest and runs `container-verify.sh` on it. |
-| `deploy-staging` | after `verify`, `DEPLOY_ENABLED` is `true`, and the run is on `main` or a release | Environment `staging`: `migrate` from the image, `build/deploy/roll-out.sh staging <image@digest>`, then `GET $STAGING_URL/health/ready` for about a minute. |
+| `deploy-staging` | after `verify`, `DEPLOY_ENABLED` is `true`, and the run is on `main` or a release | Environment `staging`: `migrate` from the image, `build/deploy/roll-out.sh staging <image@digest>`, then `GET $STAGING_URL/health/ready`, retried up to ten times 6 seconds apart (each try at most 15 seconds); an empty `STAGING_URL` fails the step with a message. |
 | `deploy-production` | a release, after `deploy-staging`, and `DEPLOY_ENABLED` is `true` | Environment `production`: the same three steps. |
 | `deploy-iis` | a release, after `verify`, and `IIS_ENABLED` is `true` | Environment `production`, on a self-hosted Windows runner: `dotnet publish`, then `deploy-iis.ps1` ([`iis.md`](iis.md)). Independent of the Docker path; it does not wait for staging. |
 
@@ -46,11 +46,16 @@ A green push to `main` goes to staging; a release (merging the release-please pu
 | Dispatch, `release` unticked, from another branch or a tag (a dry run) | `sha-<short>` only, never `edge` | none: `ci`, `image` and `verify` run, no deploy job |
 | Dispatch, `release` ticked, from a `v*` tag | `sha-<short>`, `x.y.z`, `latest` | as a release; `version` must equal the tag without the leading `v` |
 | Dispatch, `release` ticked, from `main` | `sha-<short>`, `x.y.z`, `latest` | as a release; `version` is `x.y.z` without a leading `v` |
-| Dispatch, `release` ticked, from any other ref | none: the `image` job fails early with "A release runs only from main or a v* tag" | none |
+| Dispatch, `release` ticked, from any other ref | none: a step of the `image` job (after `ci`) fails with "A release runs only from main or a v* tag" | none |
+| Any run whose `version` is not exactly `x.y.z` (a pre-release such as `1.2.0-rc.1`, a leading `v` or zero, a second line), `release` ticked or not | none: the `image` job fails at "Check the version" | none |
+
+The `version` input is validated as a whole string and only the validated value reaches the tag list, so an input cannot add tags of its own. Pre-releases are not releasable through this workflow, so `latest` never points at one.
 
 `cd.yml` can be run by hand (Actions, Run workflow) for a dry run or to repeat a release. **To repeat or recover a release** (cancelled or failed after the image, or a missed deploy), run it **from the tag `vX.Y.Z`** (the "Use workflow from" selector), with `release` ticked and `version` set to `X.Y.Z`, never from a branch: `main` may be ahead of the release, and a release from `main` would publish and deploy whatever `main` holds now under that version. Two checks the workflow does not make: a release dispatched from an **old** `v*` tag publishes `latest` and deploys that old tag to production (there is no newest-tag check), and a release dispatched from `main` is not compared with the version in `Version.props`. Use the tag selector and the version you mean.
 
 **Concurrency.** One deploy per ref runs at a time and none is cancelled half-way. A push to `main` uses the group `deploy-<ref>`; GitHub keeps only the newest pending run of a group, which suits `edge`. A release uses its own group, `deploy-<ref>-release`, so a later push cannot replace it while it waits. The two groups can overlap: an `edge` and a release roll-out to staging can run at the same time, and the release commit is built twice (the push and the release call), so staging is rolled out twice for it and `sha-<short>` is re-pointed to the second digest. Your `roll-out.sh` must tolerate that.
+
+`release.yml` has a concurrency group of its own, `Release`, with no cancel, and its `cd` job is inside it: while a release waits for the `production` approval it holds that group, so the release-please runs of later pushes to `main` queue behind it (and GitHub keeps only the newest pending one). Approve or reject a pending release promptly.
 
 ### The deploy hook
 
@@ -68,14 +73,16 @@ A green push to `main` goes to staging; a release (merging the release-please pu
 | `IIS_APP_POOL` | `deploy-iis` | The site's application pool. |
 | `IIS_HEALTH_URL` | `deploy-iis` | The readiness URL the script polls: the site's public https URL, `https://<public host>/health/ready`, with a certificate valid for that host. Not `http://localhost`: HTTPS redirection would send it to `https://localhost` ([`iis.md`](iis.md#health-url)). |
 | `CODEQL_ENABLED` | `codeql` | `false` skips the CodeQL job (see below). Anything else, or unset, runs it. |
-| `STAGING_URL` | `deploy-staging` | Base URL of staging, without a trailing slash; the smoke test calls `<url>/health/ready`. A repository variable, or one on the `staging` environment. |
+| `STAGING_URL` | `deploy-staging` | Base URL of staging (a trailing slash is dropped); the smoke test calls `<url>/health/ready`. A repository variable, or one on the `staging` environment. |
 | `PRODUCTION_URL` | `deploy-production` | The same for production. |
 
 That is eight variables. `STAGING_URL` and `PRODUCTION_URL` also set the environment's link in the run; read a deployment's own page, not that link, if it is empty.
 
-**Secret.** `MIGRATION_CONNECTION_STRING`, a secret of **each environment** (`staging`, `production`): the connection string of the login that may change the schema ([`migrations.md`](migrations.md)). It reaches `migrate` as `ConnectionStrings__Database` for that one process, by name, never on a command line; for IIS the script reads it from the same variable. `RELEASE_PLEASE_TOKEN` (see `release.yml`) is a separate, optional secret for the release pull request.
+**Secret.** `MIGRATION_CONNECTION_STRING`, a secret of **each environment** (`staging`, `production`): the connection string of the login that may change the schema ([`migrations.md`](migrations.md)). It reaches `migrate` as `ConnectionStrings__Database` for that one process, by name, never on a command line; for IIS the script reads it from the same variable. It must be an **environment** secret: `release.yml` calls `cd.yml` without `secrets: inherit` (least privilege), so a repository secret of that name would reach a push to `main` but not a release. `RELEASE_PLEASE_TOKEN` (see `release.yml`) is a separate, optional secret for the release pull request.
 
-**Environments** (Settings, Environments). Create `staging` and `production`. Add required reviewers to `production`, so the approval hangs on the release run: a job that names an environment waits for its protection rules. A private repository needs a paid GitHub plan for required reviewers. `deploy-production` and `deploy-iis` both use `production`, so a release that deploys both ways asks twice. Put `MIGRATION_CONNECTION_STRING` on each environment, so the production secret is visible only to a job that was approved.
+**Environments** (Settings, Environments). Create `staging` and `production`. Add required reviewers to `production` (and ideally to `staging`), so the approval hangs on the run: a job that names an environment waits for its protection rules. A private repository needs a paid GitHub plan for required reviewers. `deploy-production` and `deploy-iis` both use `production`, so a release that deploys both ways asks twice. Put `MIGRATION_CONNECTION_STRING` on each environment, so the production secret is visible only to a job that was approved.
+
+**Server-side controls.** Set each environment's **Deployment branches and tags** to selected branches and tags: `main` and the tag pattern `v*`, nothing else. Protect `v*` tags with a **tag ruleset** (Settings, Rules, Rulesets: restrict creation, update and deletion of `v*` to the people who may release). The ref check in `cd.yml` guards against mistakes, **not against a malicious writer**: `workflow_dispatch` runs the `cd.yml` of the selected ref, so a writer can edit it on a branch and dispatch it, or push a `v9.9.9` tag on an unreviewed commit and dispatch a release from that tag. Only the environment rules, the reviewers and the tag ruleset, which live in the repository settings, stop that.
 
 **OIDC.** Nothing here requests an `id-token`, and nothing here talks to a cloud. A project that deploys to Azure, AWS or Google Cloud should not store a long-lived cloud key as a secret: add `id-token: write` to its deploy job and use the provider's federated credential action, scoped to the environment, in `roll-out.sh`'s step. That is guidance; the template does not wire it.
 

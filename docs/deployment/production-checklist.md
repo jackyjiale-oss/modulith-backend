@@ -25,7 +25,7 @@ The environment of a .NET host that is not told otherwise is `Production`, and t
 
 ## HTTPS, HSTS and a valid certificate
 
-`Program.cs` calls `UseHsts` and `UseHttpsRedirection` whenever the environment is not Development; HSTS acts on requests the application sees as https. The **certificate and TLS are not the application's**: they end at the proxy or load balancer, or at the IIS https binding. **Yours:** a valid certificate on that endpoint, and the proxy forwarding the scheme ([below](#forwarded-headers-behind-a-proxy-or-load-balancer)). Do not set an https port inside the container: the health check would be redirected to it ([`docker.md`](docker.md#running-it)). With no https port configured, `UseHttpsRedirection` only logs a warning and passes the request on.
+`Program.cs` calls `UseHsts` and `UseHttpsRedirection` whenever the environment is not Development; HSTS acts on requests the application sees as https. The **certificate and TLS are not the application's**: they end at the proxy or load balancer, or at the IIS https binding. **Yours:** a valid certificate on that endpoint, and the proxy forwarding the scheme ([below](#forwarded-headers-behind-a-proxy-or-load-balancer)). Do not set an https port inside the container: the health check would get a redirect and report `unhealthy (307)` ([`docker.md`](docker.md#running-it)). With no https port configured, `UseHttpsRedirection` only logs a warning and passes the request on. On IIS an https binding gives the application its https port (the ASP.NET Core Module sets `ASPNETCORE_ANCM_HTTPS_PORT`), so a plain `http://localhost` health URL is redirected: `IIS_HEALTH_URL` must be the site's public https URL, `https://<public host>/health/ready`, with a certificate valid for that host ([`iis.md`](iis.md#health-url)). Exempting `/health/*` from the redirect is an open follow-up ([ADR 0033](../adr/0033-delivery-pipeline.md)).
 
 ## Migrations applied by a command, not on startup
 
@@ -48,7 +48,7 @@ The environment of a .NET host that is not told otherwise is `Production`, and t
 
 ## Forwarded headers behind a proxy or load balancer
 
-`ForwardedHeaders:KnownProxies` and `ForwardedHeaders:KnownNetworks` are empty by default, so only a loopback proxy is trusted and a proxy anywhere else has its `X-Forwarded-For` and `X-Forwarded-Proto` ignored. Each entry is validated on start (a valid address or CIDR). **Yours:** set the proxy's address or network, make the proxy send both headers, and set `AllowedHosts` ([`docker.md`](docker.md#behind-a-proxy-or-load-balancer), [`services/api.md`](../services/api.md#forwardedheaders)).
+`ForwardedHeaders:KnownProxies` and `ForwardedHeaders:KnownNetworks` are empty by default, so only a loopback proxy is trusted and a proxy anywhere else has its `X-Forwarded-For` and `X-Forwarded-Proto` ignored. Each entry is validated on start (a valid address or CIDR). **Yours:** set the proxy's address or network, make the proxy send both headers, and set `AllowedHosts` to the public host names **plus `127.0.0.1`** for a container (the image's health check sends that host; without it the check gets 400 and the container is restarted), plus the host of `IIS_HEALTH_URL` on IIS (the public host, so already listed) and any host a load balancer's probe sends ([`docker.md`](docker.md#running-it), [`services/api.md`](../services/api.md#forwardedheaders)).
 
 ## Health checks wired to the load balancer or monitor
 
@@ -67,6 +67,9 @@ Nothing in the template takes or tests a backup. **Yours:** schedule database ba
 - [ ] Every item above has an owner and a date.
 - [ ] `Auth:Links`, `Notifications:Email`, `Cors:AllowedOrigins` and the other environment-specific settings name your real hosts; the defaults point at `localhost`.
 - [ ] The runtime database login has no DDL rights, and the migration login exists only as the environment secret.
-- [ ] `roll-out.sh` is written, `DEPLOY_ENABLED` is set only after it is, and `production` has required reviewers.
+- [ ] `roll-out.sh` is written, `DEPLOY_ENABLED` is set only after it is, and `production` (ideally `staging` too) has required reviewers.
+- [ ] Each environment's **Deployment branches and tags** allows only `main` and `v*` tags, and a tag ruleset protects `v*` (who may create, move or delete one). The workflow's own ref check guards against mistakes, not a malicious writer ([`README.md`](README.md#what-to-configure)).
+- [ ] `MIGRATION_CONNECTION_STRING` is a secret of each environment, not a repository secret (a release run, called from `release.yml`, is not handed repository secrets).
+- [ ] `AllowedHosts` lists the public host names and `127.0.0.1` ([`docker.md`](docker.md#running-it)).
 - [ ] The checks `container`, `codeql` and `gitleaks` are required on `main`, and `.gitleaks.toml` and `.github/` have a CODEOWNERS entry ([`README.md`](README.md#codeql-and-gitleaks)).
 - [ ] For IIS: the [manual checklist](iis.md#manual-checklist-for-a-real-server) has been run on a test server.
