@@ -13,7 +13,7 @@ Deploying to a Windows server running IIS with `build/scripts/deploy-iis.ps1`. T
 | Parameter | Meaning |
 |---|---|
 | `-PublishPath` | The folder `dotnet publish` wrote; it must hold `TemplateName.Api.dll`. |
-| `-SitePath` | The IIS site's physical path. A trailing `\` or `/` is dropped; a drive root (`C:\`) is refused. |
+| `-SitePath` | The IIS site's physical path. A trailing `\` or `/` is dropped; a drive root (`C:\`) or a share root (`\\server\share`) is refused; a folder below a share is accepted. |
 | `-AppPool` | The site's application pool; it must be set to No Managed Code. |
 | `-HealthUrl` | The site's public readiness URL, `https://<public host>/health/ready`, that must answer 2xx after the swap ([Health URL](#health-url)). |
 
@@ -21,7 +21,7 @@ The connection string is never a parameter: the script reads it from the environ
 
 **Order.**
 
-1. **Preflight.** The `IISAdministration` module is installed; the ASP.NET Core Hosting Bundle is installed (`%ProgramFiles%\IIS\Asp.Net Core Module\V2\aspnetcorev2.dll` exists); the app pool exists and has no .NET CLR version; the publish folder holds `TemplateName.Api.dll`. A failure stops here.
+1. **Preflight.** The `IISAdministration` module is installed; the ASP.NET Core Hosting Bundle is installed (`IIS\Asp.Net Core Module\V2\aspnetcorev2.dll` exists under `%ProgramW6432%`, or under `%ProgramFiles%` when that is not set); the app pool exists and has no .NET CLR version; the publish folder holds `TemplateName.Api.dll`. A failure stops here.
 2. **Migrate.** `dotnet TemplateName.Api.dll migrate` from the publish folder, while the old version still serves. Migrations are expand-only (ADR 0031), so they are safe under the old code. A non-zero exit stops the script with the site untouched: no backup, no `app_offline.htm`.
 3. **Back up.** Copy the site to `{SitePath}.previous`, a folder next to the site (`C:\inetpub\api.previous`), replacing the copy of the last release (never merging into it). If there is no site yet, there is nothing to copy.
 4. **Swap.** Write `app_offline.htm` (IIS then answers every request with that page and unloads the app), `robocopy /MIR` the publish folder over the site, remove `app_offline.htm`.
@@ -32,13 +32,13 @@ The connection string is never a parameter: the script reads it from the environ
 
 `{SitePath}.previous` is always kept after a run, so a manual rollback stays possible: mirror it back with the same robocopy switches the script uses (`/MIR /XF appsettings.Production.json app_offline.htm /XD logs`) while `app_offline.htm` is in place.
 
-**Server-owned files.** The swap neither overwrites, deletes nor backs up `appsettings.Production.json`, a `logs` folder and `app_offline.htm`. They are matched by name at any depth, so a file or folder of those names inside the application is spared too. Everything else in the site folder is replaced by the publish folder's contents, so **never keep other server-only files in the site folder**.
+**Server-owned files.** The swap neither overwrites, deletes nor backs up `appsettings.Production.json`, a `logs` folder and `app_offline.htm`. They are matched by name at any depth, so a file or folder of those names inside the application is spared too: a nested `wwwroot\logs`, or an `appsettings.Production.json` in a subfolder, is not updated by a release. Everything else in the site folder is replaced by the publish folder's contents, so **never keep other server-only files in the site folder**.
 
 ## Health URL
 
 Set `IIS_HEALTH_URL` to the site's **public https URL**, `https://<public host>/health/ready`, served with a certificate valid for that host. A plain `http://localhost` URL does not work on a site with an https binding: the ASP.NET Core Module then tells the application its https port (`ASPNETCORE_ANCM_HTTPS_PORT`), HTTPS redirection (on outside Development, for the whole application) answers the plain request with a 307 to `https://localhost`, and that certificate does not match `localhost`, so the check fails and the deploy is rolled back although the application is healthy. A second binding does not avoid it: the redirect is the application's, not the binding's. The script adds TLS 1.2 to the protocols Windows PowerShell 5.1 may use before each request (PowerShell 7 needs nothing).
 
-Three conditions, all checked in the list below: the runner's machine resolves the public host to **this** server (the runner runs on it; on a web farm behind a load balancer the public name may reach another server, so add a `hosts` entry on this server that points the public host at `127.0.0.1`), the certificate is valid for that host, and `AllowedHosts` lists it (it must, as the public host). Exempting `/health/*` from the redirect would allow a plain local URL again; that is an open follow-up ([ADR 0033](../adr/0033-delivery-pipeline.md)), not built.
+Three conditions, all checked in the list below: the runner's machine resolves the public host to **this** server (the runner runs on it; on a web farm behind a load balancer the public name may reach another server, so add a `hosts` entry on this server that points the public host at `127.0.0.1`; that reaches an https binding set to All Unassigned or to an SNI host name, but not one tied to a specific IP address, which a request to `127.0.0.1` does not match), the certificate is valid for that host, and `AllowedHosts` lists it (it must, as the public host). Exempting `/health/*` from the redirect would allow a plain local URL again; that is an open follow-up ([ADR 0033](../adr/0033-delivery-pipeline.md)), not built.
 
 ## The pipeline step
 

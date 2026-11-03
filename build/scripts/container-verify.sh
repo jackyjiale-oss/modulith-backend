@@ -11,12 +11,15 @@
 # Usage: bash build/scripts/container-verify.sh <image>      for example api:ci, or ghcr.io/owner/repo@sha256:...
 #
 # Environment:
-#   VERIFY_TIMEOUT    seconds each wait may take (SQL Server ready, the migrate retries, healthy, ready); default 120.
+#   VERIFY_TIMEOUT    seconds each wait may take (SQL Server ready, the migrate retries, healthy, ready); default 120. One migrate
+#                     attempt is bounded by what is left of its wait (a hung attempt is killed and counts as a failed one).
 #   VERIFY_SQL_IMAGE  the SQL Server image; default mcr.microsoft.com/mssql/server:2022-latest, as docker-compose.yml and the tests.
-# Needs docker, openssl and curl. Exits 0 only when every check passes.
+# Needs docker, openssl, curl and timeout (GNU coreutils; on macOS Homebrew installs it as `gtimeout`: put coreutils' gnubin on
+# PATH or alias it). Exits 0 only when every check passes.
 #
-# Clean-up: every container and the network it creates carry the label container-verify=<pid of this script> and are removed on
-# exit, normal or not (EXIT, INT, TERM), so after any run that has finished both of these print nothing:
+# Clean-up: every container and the network it creates carry the label container-verify=<pid of this script>-<random hex> (so two
+# runs on one daemon never remove each other's objects) and are removed on exit, normal or not (EXIT, INT, TERM; a second signal
+# during the clean-up is ignored, so the clean-up always finishes), so after any run that has finished both of these print nothing:
 #   docker ps -a --filter label=container-verify -q
 #   docker network ls --filter label=container-verify -q
 # A SIGKILL cannot be trapped; remove what it leaves with the same label filters.
@@ -57,13 +60,14 @@
 set -euo pipefail
 
 readonly sql_image="${VERIFY_SQL_IMAGE:-mcr.microsoft.com/mssql/server:2022-latest}"
-readonly timeout="${VERIFY_TIMEOUT:-120}"
-readonly label="container-verify=$$"
-readonly prefix="container-verify-$$"
-readonly network="$prefix"
-readonly sql="$prefix-sql"
-readonly api="$prefix-api"
+readonly wait_limit="${VERIFY_TIMEOUT:-120}"
 readonly api_port=8080
+# Set once the tools are known to exist (the random part needs openssl); nothing that uses them runs before $work is set.
+label=""
+prefix=""
+network=""
+sql=""
+api=""
 work=""
 
 step() {
@@ -87,7 +91,7 @@ inspect() {
 }
 
 print_diagnostics() {
-  echo
+  echo >&2
   echo "==> Diagnostics" >&2
   if [ -n "$work" ] && [ -s "$work/migrate.log" ]; then
     echo "--- output of the last migrate run" >&2
@@ -130,7 +134,10 @@ cleanup() {
   if [ "$#" -gt 0 ]; then
     status=$1
   fi
-  trap - EXIT INT TERM
+  # Ignore INT and TERM from here on: GitHub sends SIGINT and, about 7.5 s later, SIGTERM when it cancels a run, and a second
+  # signal must not cut the clean-up short (a trap that is reset would let it kill the script before the removal ran).
+  trap - EXIT
+  trap '' INT TERM
   set +e
   # $work is set just before the first docker object is created; before that (usage, a missing tool) there is nothing to show or remove.
   if [ -n "$work" ]; then
@@ -152,12 +159,22 @@ if [ "$#" -ne 1 ] || [ -z "$1" ]; then
 fi
 readonly image="$1"
 
-if ! [[ "$timeout" =~ ^[1-9][0-9]*$ ]]; then
+if ! [[ "$wait_limit" =~ ^[1-9][0-9]*$ ]]; then
   fail "VERIFY_TIMEOUT must be a whole number of seconds, greater than 0."
 fi
-for tool in docker openssl curl; do
+for tool in docker openssl curl timeout; do
   command -v "$tool" >/dev/null 2>&1 || fail "$tool is required."
 done
+
+# Unique per run, not only per process: another run on the same daemon (a self-hosted runner, a re-run, a PID reused in another
+# container) must neither share these names nor have its objects matched by this run's clean-up filter.
+run_id="$$-$(openssl rand -hex 3)"
+label="container-verify=$run_id"
+prefix="container-verify-$run_id"
+network="$prefix"
+sql="$prefix-sql"
+api="$prefix-api"
+readonly run_id label prefix network sql api
 
 work="$(mktemp -d)"
 
@@ -175,14 +192,14 @@ if [ -n "${GITHUB_ACTIONS:-}" ]; then
 fi
 connection_string="Server=$sql,1433;Database=Verify;User Id=sa;Password=$sa_password;Encrypt=True;TrustServerCertificate=True"
 
-echo "Verifying $image (each wait up to ${timeout}s; label $label)"
+echo "Verifying $image (each wait up to ${wait_limit}s; label $label)"
 
 step "1/7 Starting SQL Server ($sql_image) on the private network $network"
 docker network create --label "$label" "$network" >/dev/null
 MSSQL_SA_PASSWORD="$sa_password" docker run -d --name "$sql" --label "$label" --network "$network" \
   -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD \
   "$sql_image" >/dev/null
-deadline=$((SECONDS + timeout))
+deadline=$((SECONDS + wait_limit))
 while :; do
   sql_logs="$(docker logs "$sql" 2>&1 || true)"
   case "$sql_logs" in
@@ -193,7 +210,7 @@ while :; do
     fail "SQL Server stopped before it was ready (state: $sql_state)."
   fi
   if [ "$SECONDS" -ge "$deadline" ]; then
-    fail "SQL Server was not ready after ${timeout}s."
+    fail "SQL Server was not ready after ${wait_limit}s."
   fi
   sleep 2
 done
@@ -201,18 +218,41 @@ pass "SQL Server is ready"
 
 # The migrate mode exits 1 on any failure, an unreachable server or a login refused while SQL Server finishes starting included,
 # so 1 is retried until the timeout; any other code (125 to 127: Docker could not run the image or the command) fails at once.
+# One attempt, bounded: EF's connection retry can keep a single attempt running for over a minute, which would let the wait
+# overrun VERIFY_TIMEOUT by a whole attempt. `timeout` stops it (SIGTERM, which docker forwards to the container, then SIGKILL
+# after 5 s) and answers 124, or 137 when it had to kill. Both are mapped to 1, a failed attempt; the labelled container, if one
+# is left, is removed with the rest at the end. --foreground keeps `timeout` in this script's process group, so a Ctrl-C reaches
+# it. On the 137 path the docker CLI is killed but the detached container may keep running until the label clean-up removes it
+# (the EF migration lock makes an overlap with the next attempt safe). 137 is also what a container killed by the kernel (out of
+# memory) exits with, so the message below covers both. Argument: the seconds the attempt may take.
 run_migrate() {
-  ConnectionStrings__Database="$connection_string" docker run --rm --label "$label" --network "$network" \
+  local status=0
+  ConnectionStrings__Database="$connection_string" timeout --foreground --kill-after=5 "$1" \
+    docker run --rm --label "$label" --network "$network" \
     -e ASPNETCORE_ENVIRONMENT=Production -e ConnectionStrings__Database \
-    "$image" migrate >"$work/migrate.log" 2>&1
+    "$image" migrate >"$work/migrate.log" 2>&1 || status=$?
+  if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+    echo "migrate exited $status: timed out (limit ${1}s) or killed." >>"$work/migrate.log"
+    status=1
+  fi
+  return "$status"
+}
+
+# Seconds left until $deadline, at least 1, for run_migrate.
+attempt_seconds() {
+  local left=$((deadline - SECONDS))
+  if [ "$left" -lt 1 ]; then
+    left=1
+  fi
+  echo "$left"
 }
 
 step "2/7 Running '$image migrate', twice"
-deadline=$((SECONDS + timeout))
+deadline=$((SECONDS + wait_limit))
 attempt=0
 while :; do
   attempt=$((attempt + 1))
-  if run_migrate; then
+  if run_migrate "$(attempt_seconds)"; then
     break
   else
     migrate_status=$?
@@ -221,12 +261,13 @@ while :; do
     fail "migrate exited $migrate_status on attempt $attempt; only 1 (the migrate mode's failure) is retried."
   fi
   if [ "$SECONDS" -ge "$deadline" ]; then
-    fail "migrate still failed after ${timeout}s ($attempt attempts)."
+    fail "migrate still failed after ${wait_limit}s ($attempt attempts)."
   fi
   sleep 3
 done
 pass "migrate exited 0 (attempt $attempt)"
-if run_migrate; then
+deadline=$((SECONDS + wait_limit))
+if run_migrate "$(attempt_seconds)"; then
   pass "migrate exited 0 again (idempotent)"
 else
   fail "the second migrate exited $? instead of 0."
@@ -244,7 +285,7 @@ ConnectionStrings__Database="$connection_string" Auth__Jwt__SigningKeys__0__Priv
 pass "the API container started"
 
 step "4/7 Waiting for the HEALTHCHECK to report healthy"
-deadline=$((SECONDS + timeout))
+deadline=$((SECONDS + wait_limit))
 while :; do
   health="$(inspect "$api" '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}')"
   case "$health" in
@@ -257,7 +298,7 @@ while :; do
     fail "the API container is $api_state, not running."
   fi
   if [ "$SECONDS" -ge "$deadline" ]; then
-    fail "the HEALTHCHECK did not report healthy within ${timeout}s (last status: $health)."
+    fail "the HEALTHCHECK did not report healthy within ${wait_limit}s (last status: $health)."
   fi
   sleep 2
 done
@@ -271,9 +312,9 @@ if ! [[ "$host_port" =~ ^[0-9]+$ ]]; then
   fail "could not read the published port of $api_port/tcp (docker port printed '$published')."
 fi
 ready_url="http://127.0.0.1:$host_port/health/ready"
-deadline=$((SECONDS + timeout))
+deadline=$((SECONDS + wait_limit))
 while :; do
-  ready_status="$(curl -sS -o "$work/ready.body" -w '%{http_code}' --max-time 10 "$ready_url" 2>"$work/curl.err")" || ready_status="000"
+  ready_status="$(curl -sS --noproxy '*' -o "$work/ready.body" -w '%{http_code}' --max-time 10 "$ready_url" 2>"$work/curl.err")" || ready_status="000"
   if [ "$ready_status" = 200 ]; then
     break
   fi
@@ -282,7 +323,7 @@ while :; do
     fail "the API container is $api_state, not running."
   fi
   if [ "$SECONDS" -ge "$deadline" ]; then
-    fail "$ready_url answered $ready_status, not 200, for ${timeout}s ($(cat "$work/curl.err"))."
+    fail "$ready_url answered $ready_status, not 200, for ${wait_limit}s ($(cat "$work/curl.err"))."
   fi
   sleep 2
 done

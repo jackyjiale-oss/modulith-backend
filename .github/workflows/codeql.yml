@@ -15,7 +15,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -51,8 +51,12 @@ jobs:
           build-mode: manual
           queries: security-extended
 
+      # Restore from the lock files, as ci.yml does. UseSharedCompilation=false: CodeQL traces the compiler process, and the
+      # Roslyn build server would compile outside that trace.
       - name: Build
-        run: dotnet build -c Release
+        run: |
+          dotnet restore --locked-mode
+          dotnet build --no-restore -c Release -p:UseSharedCompilation=false
 
       - uses: github/codeql-action/analyze@v4
         with:

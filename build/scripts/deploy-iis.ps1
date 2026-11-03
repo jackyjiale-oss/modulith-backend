@@ -46,6 +46,7 @@ param(
 
 function Get-ServerOwnedExclusion {
     # robocopy switches for the files and folders the server owns: the swap neither overwrites, deletes nor backs them up.
+    # /XF and /XD match a bare name at any depth: a nested wwwroot\logs, or an appsettings.Production.json in a subfolder, is skipped too.
     return @('/XF', 'appsettings.Production.json', 'app_offline.htm', '/XD', 'logs')
 }
 
@@ -120,9 +121,11 @@ function Test-IisModuleAvailable {
 }
 
 function Test-HostingBundleInstalled {
-    # The Hosting Bundle installs the ASP.NET Core Module for IIS.
-    if (-not $env:ProgramFiles) { return $false }
-    $module = Join-Path $env:ProgramFiles 'IIS\Asp.Net Core Module\V2\aspnetcorev2.dll'
+    # The Hosting Bundle installs the ASP.NET Core Module for IIS. ProgramW6432 is the 64-bit Program Files even for a 32-bit
+    # host process, whose ProgramFiles is "Program Files (x86)", where the module is not.
+    $programFiles = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
+    if (-not $programFiles) { return $false }
+    $module = Join-Path $programFiles 'IIS\Asp.Net Core Module\V2\aspnetcorev2.dll'
     return (Test-Path -LiteralPath $module)
 }
 
@@ -292,9 +295,11 @@ function Invoke-Deployment {
     # Once, before any step: with a trailing separator {SitePath}.previous would land inside the site (IIS_SITE_PATH=C:\inetpub\api\).
     $PublishPath = Get-NormalizedPath -Path $PublishPath
     $SitePath = Get-NormalizedPath -Path $SitePath
-    if ($SitePath -ne $SitePath.TrimEnd('\', '/') -or $SitePath.EndsWith(':')) {
+    # A drive root (C:\) or a UNC share root (\\server\share, trailing separators already dropped, or \\server alone).
+    $isRoot = $SitePath -ne $SitePath.TrimEnd('\', '/') -or $SitePath.EndsWith(':') -or $SitePath -match '^[\\/]{2}[^\\/]+([\\/][^\\/]+)?$'
+    if ($isRoot) {
         # /MIR over a root would delete everything on it that the publish folder lacks.
-        throw "The site path '$SitePath' is a root; the site must be a folder of its own."
+        throw "The site path '$SitePath' is a root (a drive or a share); the site must be a folder of its own."
     }
 
     Test-IisPreflight -PublishPath $PublishPath -AppPool $AppPool
