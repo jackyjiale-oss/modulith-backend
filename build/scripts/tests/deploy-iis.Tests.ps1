@@ -9,6 +9,7 @@ BeforeDiscovery {
 
 BeforeAll {
     $script:ScriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'deploy-iis.ps1'
+    $script:ScriptsFolder = Split-Path -Parent $script:ScriptPath
 
     # The Windows-only IIS cmdlet does not exist on Linux; a stub lets Pester mock it there.
     if (-not (Get-Command Get-IISAppPool -ErrorAction SilentlyContinue)) {
@@ -35,6 +36,17 @@ BeforeAll {
         if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
         Set-Content -LiteralPath $Path -Value $Value
     }
+
+    # A maintenance page like the real one: UTF-8 without a BOM, with text outside ASCII (built from code points, so this file
+    # stays ASCII whatever encoding a shell reads it with). Returns the path.
+    function Add-MaintenancePage {
+        param([string] $Folder)
+        $path = Join-Path $Folder 'maintenance.html'
+        $text = "<!DOCTYPE html><html><head><meta charset=`"utf-8`"><title>Back soon</title></head><body>" +
+            "<p>Caf$([char]0x00E9) - $([char]0x7CFB)$([char]0x7EDF)$([char]0x7EF4)$([char]0x62A4)$([char]0x4E2D) - Sistem diselenggara</p></body></html>"
+        [IO.File]::WriteAllBytes($path, ([Text.UTF8Encoding]::new($false)).GetBytes($text))
+        return $path
+    }
 }
 
 Describe 'deploy-iis.ps1 as a script' {
@@ -46,6 +58,14 @@ Describe 'deploy-iis.ps1 as a script' {
         $names | Should -Contain 'SitePath'
         $names | Should -Contain 'AppPool'
         $names | Should -Contain 'HealthUrl'
+    }
+
+    It 'has the optional MaintenancePage parameter and the Maintenance switch' {
+        $parameters = (Get-Command $script:ScriptPath).Parameters
+        $parameters.Keys | Should -Contain 'MaintenancePage'
+        $parameters.Keys | Should -Contain 'Maintenance'
+        $parameters['MaintenancePage'].ParameterType | Should -Be ([string])
+        $parameters['Maintenance'].SwitchParameter | Should -BeTrue
     }
 
     It 'keeps every parameter optional so that dot-sourcing never prompts' {
@@ -122,6 +142,123 @@ Describe 'Invoke-Deployment' {
         Mock Set-SiteOnline { $script:Calls.Add('online') }
         Mock Wait-Healthy { $script:Calls.Add('health'); $true }
         Mock Restore-Site { $script:Calls.Add('restore') }
+    }
+
+    Context 'in maintenance mode' {
+        BeforeAll {
+            $script:Page = 'C:\Build\maintenance.html'
+        }
+
+        It 'runs preflight, backup, offline, migrate, publish, online, health' {
+            Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' -Maintenance
+
+            $script:Calls -join ',' | Should -Be 'preflight,backup,offline,migrate,publish,online,health'
+            Should -Invoke Restore-Site -Times 0 -Exactly
+        }
+
+        It 'hands the page to the preflight and to the page step' {
+            Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' -MaintenancePage $script:Page -Maintenance
+
+            Should -Invoke Test-IisPreflight -Times 1 -Exactly -ParameterFilter { $MaintenancePage -eq $script:Page }
+            Should -Invoke Set-SiteOffline -Times 1 -Exactly -ParameterFilter { $MaintenancePage -eq $script:Page -and $SitePath -eq $script:Site }
+        }
+
+        It 'a failed migration leaves the page up, does not restore and throws' {
+            Mock Invoke-Migration { $script:Calls.Add('migrate'); throw 'The database migration failed with exit code 1.' }
+
+            $failure = $null
+            try { Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' -Maintenance }
+            catch { $failure = $_ }
+
+            $failure.Exception.Message | Should -BeLike '*failed at migrate*'
+            $failure.Exception.Message | Should -BeLike '*restore the database*'
+            $failure.Exception.Message | Should -BeLike '*maintenance page is still up*'
+            $failure.Exception.Message | Should -BeLike '*migration failed with exit code 1*'
+            $script:Calls -join ',' | Should -Be 'preflight,backup,offline,migrate'
+            Should -Invoke Restore-Site -Times 0 -Exactly
+            Should -Invoke Set-SiteOnline -Times 0 -Exactly
+        }
+
+        It 'a failed swap leaves the page up, does not restore and throws' {
+            Mock Publish-Site { $script:Calls.Add('publish'); throw 'robocopy failed with exit code 16.' }
+
+            $failure = $null
+            try { Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' -Maintenance }
+            catch { $failure = $_ }
+
+            $failure.Exception.Message | Should -BeLike '*failed at swap*'
+            $failure.Exception.Message | Should -BeLike '*restore the database*'
+            $failure.Exception.Message | Should -BeLike '*robocopy failed*'
+            $script:Calls -join ',' | Should -Be 'preflight,backup,offline,migrate,publish'
+            Should -Invoke Restore-Site -Times 0 -Exactly
+            Should -Invoke Set-SiteOnline -Times 0 -Exactly
+            Should -Invoke Wait-Healthy -Times 0 -Exactly
+        }
+
+        It 'a failed health check puts the page back, does not restore and throws' {
+            Mock Wait-Healthy { $script:Calls.Add('health'); $false }
+
+            $failure = $null
+            try { Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' -Maintenance }
+            catch { $failure = $_ }
+
+            $failure.Exception.Message | Should -BeLike '*failed at health check*'
+            $failure.Exception.Message | Should -BeLike '*restore the database*'
+            $script:Calls -join ',' | Should -Be 'preflight,backup,offline,migrate,publish,online,health,offline'
+            Should -Invoke Restore-Site -Times 0 -Exactly
+        }
+
+        It 'still fails with the same message when putting the page back also fails' {
+            $script:OfflineRuns = 0
+            Mock Set-SiteOffline { $script:Calls.Add('offline'); $script:OfflineRuns++; if ($script:OfflineRuns -gt 1) { throw 'disk full' } }
+            Mock Wait-Healthy { $script:Calls.Add('health'); $false }
+
+            { Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' -Maintenance } |
+                Should -Throw '*failed at health check*'
+        }
+
+        It 'a failed preflight does not put the page up' {
+            Mock Test-IisPreflight { $script:Calls.Add('preflight'); throw 'The maintenance page does not exist.' }
+
+            { Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' -Maintenance } |
+                Should -Throw '*maintenance page*'
+
+            $script:Calls -join ',' | Should -Be 'preflight'
+        }
+
+        It 'a failed backup does not put the page up' {
+            Mock Backup-Site { $script:Calls.Add('backup'); throw 'copy failed' }
+
+            { Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' -Maintenance } |
+                Should -Throw '*copy failed*'
+
+            $script:Calls -join ',' | Should -Be 'preflight,backup'
+            Should -Invoke Set-SiteOffline -Times 0 -Exactly
+        }
+
+        It 'leaves $LASTEXITCODE at 0 after a successful run, whatever robocopy left there' {
+            Mock Publish-Site { $script:Calls.Add('publish'); $global:LASTEXITCODE = 3 }
+
+            Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' -Maintenance
+
+            $global:LASTEXITCODE | Should -Be 0
+        }
+    }
+
+    It 'normal mode passes the maintenance page to the page step and the preflight' {
+        $page = 'C:\Build\maintenance.html'
+
+        Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' -MaintenancePage $page
+
+        Should -Invoke Set-SiteOffline -Times 1 -Exactly -ParameterFilter { $MaintenancePage -eq $page }
+        Should -Invoke Test-IisPreflight -Times 1 -Exactly -ParameterFilter { $MaintenancePage -eq $page }
+    }
+
+    It 'uses the shared page next to the script when none is given' {
+        Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready'
+
+        $expected = Join-Path (Split-Path -Parent $script:ScriptsFolder) 'deploy/maintenance.html'
+        Should -Invoke Set-SiteOffline -Times 1 -Exactly -ParameterFilter { $MaintenancePage -eq $expected }
     }
 
     It 'Runs in the order preflight, migrate, backup, offline, publish, online, health' {
@@ -303,6 +440,16 @@ Describe 'Test-IisPreflight' {
         $empty = Join-Path (Initialize-WorkFolder) 'empty'
         New-Item -ItemType Directory -Path $empty | Out-Null
         { Test-IisPreflight -PublishPath $empty -AppPool 'Api' } | Should -Throw '*TemplateName.Api.dll*'
+    }
+
+    It 'fails before any change when the maintenance page does not exist' {
+        $missing = Join-Path (Initialize-WorkFolder) 'maintenance.html'
+        { Test-IisPreflight -PublishPath $script:Publish -AppPool 'Api' -MaintenancePage $missing } | Should -Throw '*maintenance page*'
+    }
+
+    It 'passes when the maintenance page exists' {
+        $page = Add-MaintenancePage -Folder (Initialize-WorkFolder)
+        { Test-IisPreflight -PublishPath $script:Publish -AppPool 'Api' -MaintenancePage $page } | Should -Not -Throw
     }
 }
 
@@ -594,14 +741,16 @@ Describe 'Publish-Site' {
 Describe 'Set-SiteOffline and Set-SiteOnline' {
     BeforeEach {
         Mock Write-DeployLog { }
-        $script:Site = Join-Path (Initialize-WorkFolder) 'My App'
+        $folder = Initialize-WorkFolder
+        $script:Site = Join-Path $folder 'My App'
         $script:OfflineFile = Join-Path $script:Site 'app_offline.htm'
+        $script:Page = Add-MaintenancePage -Folder $folder
     }
 
     It 'writes app_offline.htm and removes it again' {
         Add-ContentFile -Path (Join-Path $script:Site 'web.config')
 
-        Set-SiteOffline -SitePath $script:Site
+        Set-SiteOffline -SitePath $script:Site -MaintenancePage $script:Page
         Test-Path -LiteralPath $script:OfflineFile | Should -BeTrue
         (Get-Content -LiteralPath $script:OfflineFile -Raw).Length | Should -BeGreaterThan 0
 
@@ -610,8 +759,27 @@ Describe 'Set-SiteOffline and Set-SiteOnline' {
         Test-Path -LiteralPath (Join-Path $script:Site 'web.config') | Should -BeTrue
     }
 
+    It 'copies the page byte for byte as app_offline.htm' {
+        Set-SiteOffline -SitePath $script:Site -MaintenancePage $script:Page
+
+        $copy = [IO.File]::ReadAllBytes($script:OfflineFile)
+        $original = [IO.File]::ReadAllBytes($script:Page)
+        # The page holds non-ASCII text (UTF-8), so a re-encoding copy would change the bytes.
+        ($original | Where-Object { $_ -gt 127 }).Count | Should -BeGreaterThan 0
+        $copy.Length | Should -Be $original.Length
+        ($copy -join ',') | Should -BeExactly ($original -join ',')
+    }
+
+    It 'replaces an app_offline.htm that is already there' {
+        Add-ContentFile -Path $script:OfflineFile -Value 'stale'
+
+        Set-SiteOffline -SitePath $script:Site -MaintenancePage $script:Page
+
+        [IO.File]::ReadAllBytes($script:OfflineFile).Length | Should -Be ([IO.File]::ReadAllBytes($script:Page).Length)
+    }
+
     It 'creates the site folder for a first deployment' {
-        Set-SiteOffline -SitePath $script:Site
+        Set-SiteOffline -SitePath $script:Site -MaintenancePage $script:Page
         Test-Path -LiteralPath $script:OfflineFile | Should -BeTrue
     }
 
@@ -646,6 +814,15 @@ Describe 'Restore-Site' {
         $arguments | Should -Contain 'appsettings.Production.json'
         $arguments | Should -Contain 'app_offline.htm'
         $arguments | Should -Contain 'logs'
+    }
+
+    It 'passes the maintenance page to the page step' {
+        Add-ContentFile -Path (Join-Path $script:Previous 'old.dll')
+        $page = 'C:\Build\maintenance.html'
+
+        Restore-Site -SitePath $script:Site -MaintenancePage $page
+
+        Should -Invoke Set-SiteOffline -Times 1 -Exactly -ParameterFilter { $MaintenancePage -eq $page }
     }
 
     It 'restores from the folder next to the site when the site path ends with a separator' {
@@ -778,13 +955,18 @@ Describe 'Publish, backup and restore with a real robocopy' -Skip:(-not $script:
         Add-ContentFile -Path (Join-Path $publish 'TemplateName.Api.dll') -Value 'new'
         Add-ContentFile -Path (Join-Path $publish 'added-in-new-release.dll') -Value 'new'
         Add-ContentFile -Path "$site.previous\leftover.dll" -Value 'stale'
+        # robocopy treats a file with the same size and the same timestamp as unchanged. Both dlls are written within one clock tick
+        # and 'old' and 'new' have the same size, so without this the mirror sometimes skips the new file; a real release is never
+        # that close to the one before.
+        [IO.File]::SetLastWriteTime((Join-Path $site 'TemplateName.Api.dll'), [DateTime]::Now.AddHours(-1))
+        $page =Add-MaintenancePage -Folder (Split-Path -Parent $site)
 
         Backup-Site -SitePath $site
         Test-Path -LiteralPath "$site.previous\leftover.dll" | Should -BeFalse
         Get-Content -LiteralPath "$site.previous\TemplateName.Api.dll" | Should -Be 'old'
         Test-Path -LiteralPath "$site.previous\appsettings.Production.json" | Should -BeFalse
 
-        Set-SiteOffline -SitePath $site
+        Set-SiteOffline -SitePath $site -MaintenancePage $page
         Publish-Site -PublishPath $publish -SitePath $site
         Set-SiteOnline -SitePath $site
 
@@ -795,7 +977,7 @@ Describe 'Publish, backup and restore with a real robocopy' -Skip:(-not $script:
         Get-Content -LiteralPath (Join-Path $site 'logs\today.log') | Should -Be 'server-owned'
         Test-Path -LiteralPath (Join-Path $site 'app_offline.htm') | Should -BeFalse
 
-        Restore-Site -SitePath $site
+        Restore-Site -SitePath $site -MaintenancePage $page
         Get-Content -LiteralPath (Join-Path $site 'TemplateName.Api.dll') | Should -Be 'old'
         Test-Path -LiteralPath (Join-Path $site 'added-in-new-release.dll') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $site 'removed-in-new-release.dll') | Should -BeTrue

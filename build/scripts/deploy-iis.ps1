@@ -6,15 +6,23 @@
     Runbook: docs/deployment/iis.md; decision: docs/adr/0033-delivery-pipeline.md.
 
       1. Preflight: IIS administration module, ASP.NET Core Hosting Bundle, app pool with No Managed Code,
-         TemplateName.Api.dll in the publish folder.
+         TemplateName.Api.dll in the publish folder, the maintenance page.
       2. Migrate:   `dotnet TemplateName.Api.dll migrate` from the publish folder while the old version still serves.
                     A failure stops here with the site untouched.
-      3. Swap:      copy the site to {SitePath}.previous (replacing the one before), write app_offline.htm, mirror the
-                    publish folder over the site (appsettings.Production.json, logs and app_offline.htm stay), remove
-                    app_offline.htm.
+      3. Swap:      copy the site to {SitePath}.previous (replacing the one before), copy the maintenance page to
+                    app_offline.htm (byte for byte), mirror the publish folder over the site (appsettings.Production.json,
+                    logs and app_offline.htm stay), remove app_offline.htm.
       4. Check:     poll HealthUrl for a bounded time.
       5. Roll back: if the swap or the check fails, restore {SitePath}.previous and fail. The database is not rolled
                     back: the migrations are expand-only, so the previous code runs on the new schema (ADR 0031).
+
+    With -Maintenance (a release that contains a contract migration, see docs/api-compatibility.md) the order is:
+    preflight, back up the site to {SitePath}.previous, put the maintenance page up (app_offline.htm), migrate, swap the
+    files, remove the page, check. Nothing is rolled back in this mode: the contract migration may already have changed the
+    schema, so restoring the old files could not work. A failure after the page is up leaves the page up and the files as
+    they are, and the script fails; the message says to restore the database from a backup first, then restore
+    {SitePath}.previous and remove app_offline.htm by hand. A failure before the page is up (preflight, backup) leaves the
+    site untouched.
 
     The connection string is read from the environment variable ConnectionStrings__Database and is never a
     parameter and never printed. {SitePath}.previous is always kept after a run, so a manual rollback stays possible.
@@ -35,13 +43,22 @@
 
 .PARAMETER HealthUrl
     The readiness endpoint (/health/ready) that must answer 2xx after the swap.
+
+.PARAMETER MaintenancePage
+    The page IIS serves while the site is offline; it is copied to app_offline.htm. Defaults to build/deploy/maintenance.html
+    next to this script's folder (the page the Docker rollout shares).
+
+.PARAMETER Maintenance
+    Runs the maintenance mode described above instead of the normal order.
 #>
 [CmdletBinding()]
 param(
     [string] $PublishPath,
     [string] $SitePath,
     [string] $AppPool,
-    [string] $HealthUrl
+    [string] $HealthUrl,
+    [string] $MaintenancePage,
+    [switch] $Maintenance
 )
 
 function Get-ServerOwnedExclusion {
@@ -144,7 +161,7 @@ function Get-AppPoolInfo {
 # --- Steps --------------------------------------------------------------------------------------------------------------
 
 function Test-IisPreflight {
-    param([string] $PublishPath, [string] $AppPool)
+    param([string] $PublishPath, [string] $AppPool, [string] $MaintenancePage)
 
     if (-not (Test-IisModuleAvailable)) {
         throw 'The IIS administration module (IISAdministration) is not installed. Add the IIS management scripts and tools.'
@@ -161,6 +178,10 @@ function Test-IisPreflight {
     }
     if (-not (Test-Path -LiteralPath (Join-Path $PublishPath 'TemplateName.Api.dll'))) {
         throw "TemplateName.Api.dll is not in the publish path '$PublishPath'."
+    }
+    # Last, and only when a page is given: the page is what a deployment puts up, so it must be there before any change.
+    if ($MaintenancePage -and -not (Test-Path -LiteralPath $MaintenancePage -PathType Leaf)) {
+        throw "The maintenance page '$MaintenancePage' does not exist."
     }
     Write-DeployLog "Preflight passed (app pool '$AppPool', publish path '$PublishPath')."
 }
@@ -218,14 +239,13 @@ function Publish-Site {
 function Set-SiteOffline {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'A pipeline step that must always run; -WhatIf would silently skip the offline page the swap relies on.')]
     [CmdletBinding()]
-    param([string] $SitePath)
+    param([string] $SitePath, [string] $MaintenancePage)
 
     if (-not (Test-Path -LiteralPath $SitePath)) {
         New-Item -ItemType Directory -Path $SitePath -Force -ErrorAction Stop | Out-Null
     }
-    $page = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Back soon</title></head>' +
-        '<body><h1>Down for maintenance</h1><p>The service is being updated and will be back in a moment.</p></body></html>'
-    Set-Content -LiteralPath (Join-Path $SitePath 'app_offline.htm') -Value $page -Encoding ASCII -ErrorAction Stop
+    # A file copy, never Get-Content/Set-Content: the page is UTF-8 with text outside ASCII, which a re-encoding would damage.
+    Copy-Item -LiteralPath $MaintenancePage -Destination (Join-Path $SitePath 'app_offline.htm') -Force -ErrorAction Stop
     Write-DeployLog 'The site is offline (app_offline.htm written).'
 }
 
@@ -258,7 +278,7 @@ function Wait-Healthy {
 }
 
 function Restore-Site {
-    param([string] $SitePath)
+    param([string] $SitePath, [string] $MaintenancePage)
 
     $SitePath = Get-NormalizedPath -Path $SitePath
     $previous = Get-PreviousPath -SitePath $SitePath
@@ -269,7 +289,7 @@ function Restore-Site {
     Write-DeployLog "Restoring '$previous' over '$SitePath'."
     # Offline while the files change, as for the swap. If the restore itself fails the site stays offline, on purpose:
     # a maintenance page is better than a half restored site answering requests.
-    Set-SiteOffline -SitePath $SitePath
+    Set-SiteOffline -SitePath $SitePath -MaintenancePage $MaintenancePage
     $arguments = @($previous.TrimEnd('\', '/'), $SitePath.TrimEnd('\', '/'), '/MIR', '/R:3', '/W:5', '/NFL', '/NDL', '/NP') + (Get-ServerOwnedExclusion)
     $exitCode = Invoke-Robocopy -ArgumentList $arguments
     if ($exitCode -ge 8) {
@@ -279,7 +299,7 @@ function Restore-Site {
 }
 
 function Invoke-Deployment {
-    param([string] $PublishPath, [string] $SitePath, [string] $AppPool, [string] $HealthUrl)
+    param([string] $PublishPath, [string] $SitePath, [string] $AppPool, [string] $HealthUrl, [string] $MaintenancePage, [switch] $Maintenance)
 
     $ErrorActionPreference = 'Stop'
 
@@ -302,13 +322,54 @@ function Invoke-Deployment {
         throw "The site path '$SitePath' is a root (a drive or a share); the site must be a folder of its own."
     }
 
-    Test-IisPreflight -PublishPath $PublishPath -AppPool $AppPool
+    if (-not $MaintenancePage) {
+        $MaintenancePage = Join-Path (Split-Path -Parent $PSScriptRoot) 'deploy/maintenance.html'
+    }
+
+    Test-IisPreflight -PublishPath $PublishPath -AppPool $AppPool -MaintenancePage $MaintenancePage
+
+    if ($Maintenance) {
+        # Maintenance mode: the page goes up before the migration, because a contract migration changes the schema under the
+        # old code. A failure before the page is up (preflight, backup) leaves the site untouched.
+        Backup-Site -SitePath $SitePath
+        Set-SiteOffline -SitePath $SitePath -MaintenancePage $MaintenancePage
+        $step = 'migrate'
+        try {
+            Invoke-Migration -PublishPath $PublishPath
+            $step = 'swap'
+            Publish-Site -PublishPath $PublishPath -SitePath $SitePath
+            $step = 'health check'
+            Set-SiteOnline -SitePath $SitePath
+            if (-not (Wait-Healthy -HealthUrl $HealthUrl -TimeoutSeconds 120)) {
+                throw "The health check at $HealthUrl did not pass."
+            }
+        }
+        catch {
+            $reason = $_.Exception.Message
+            $previous = Get-PreviousPath -SitePath $SitePath
+            Write-DeployLog "The deployment failed at $step in maintenance mode: $reason The maintenance page stays up; nothing is restored."
+            if ($step -eq 'health check') {
+                # The page came down for the check; put it back, best effort, so users never reach a version that is not healthy.
+                try {
+                    Set-SiteOffline -SitePath $SitePath -MaintenancePage $MaintenancePage
+                }
+                catch {
+                    Write-DeployLog "The maintenance page could not be put back: $($_.Exception.Message)"
+                }
+            }
+            throw "The deployment failed at $step in maintenance mode: $reason The maintenance page is still up. If a contract migration was applied, restore the database from a backup first; then restore '$previous' over '$SitePath' and remove app_offline.htm."
+        }
+        Write-DeployLog 'The deployment succeeded.'
+        $global:LASTEXITCODE = 0
+        return
+    }
+
     # While the old version still serves; a failure here ends the run with the site untouched (design D8).
     Invoke-Migration -PublishPath $PublishPath
     Backup-Site -SitePath $SitePath
 
     try {
-        Set-SiteOffline -SitePath $SitePath
+        Set-SiteOffline -SitePath $SitePath -MaintenancePage $MaintenancePage
         Publish-Site -PublishPath $PublishPath -SitePath $SitePath
         Set-SiteOnline -SitePath $SitePath
         if (-not (Wait-Healthy -HealthUrl $HealthUrl -TimeoutSeconds 120)) {
@@ -319,7 +380,7 @@ function Invoke-Deployment {
         $reason = $_.Exception.Message
         Write-DeployLog "The deployment failed: $reason Restoring the previous files."
         try {
-            Restore-Site -SitePath $SitePath
+            Restore-Site -SitePath $SitePath -MaintenancePage $MaintenancePage
         }
         catch {
             throw "The deployment failed ($reason) and the previous files could not be restored: $($_.Exception.Message)"
@@ -337,7 +398,7 @@ function Invoke-Deployment {
 # runner appends `if ((Test-Path -LiteralPath variable:\LASTEXITCODE)) { exit $LASTEXITCODE }` to a powershell step.
 if ($MyInvocation.InvocationName -ne '.') {
     try {
-        Invoke-Deployment -PublishPath $PublishPath -SitePath $SitePath -AppPool $AppPool -HealthUrl $HealthUrl
+        Invoke-Deployment -PublishPath $PublishPath -SitePath $SitePath -AppPool $AppPool -HealthUrl $HealthUrl -MaintenancePage $MaintenancePage -Maintenance:$Maintenance
     }
     catch {
         [Console]::Error.WriteLine("deploy-iis: $($_.Exception.Message)")
