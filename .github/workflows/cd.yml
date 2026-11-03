@@ -5,6 +5,7 @@ name: CD
 # Everything below `ci` needs it, so what is published and deployed has passed the same jobs as a pull request (design D4).
 # The deploy jobs are real but dormant: they run only when the repository variable DEPLOY_ENABLED is `true` (IIS_ENABLED for IIS),
 # and the project replaces build/deploy/roll-out.sh with its own roll-out (design D7).
+# A production release that ships a contract migration runs in maintenance mode (a maintenance page for the length of the release; the `maintenance` input and ADR 0034).
 # Actions use their latest major tag so Dependabot can update them.
 # Production forks should pin each action to a full commit SHA (with the tag in a comment).
 
@@ -22,6 +23,10 @@ on:
         description: The release version, x.y.z, without a leading v. Required when release is true.
         type: string
         default: ""
+      maintenance:
+        description: Maintenance page during a production release, auto, on or off. auto turns it on when the release ships a contract migration.
+        type: string
+        default: auto
   # Lets the workflow run from a branch or tag. Without `release`, anything but main is a dry run: ci, image (only the sha-<short> tag,
   # never edge) and verify run, nothing is deployed. With `release`, only main or a v* tag is accepted (the version must match the tag).
   workflow_dispatch:
@@ -34,6 +39,11 @@ on:
         description: The release version, x.y.z, without a leading v. Required when release is true.
         type: string
         default: ""
+      maintenance:
+        description: Maintenance page during a production release, auto, on or off. auto turns it on when the release ships a contract migration.
+        type: choice
+        options: [auto, "on", "off"]
+        default: auto
 
 permissions:
   contents: read
@@ -71,6 +81,37 @@ jobs:
           else
             echo "is_template=false" >> "$GITHUB_OUTPUT"
           fi
+
+  # Whether a production release runs in maintenance mode (decision: docs/adr/0034-maintenance-mode-for-contract-phase-releases.md). A release only: a push to
+  # main never reaches this job, nor any maintenance step. Detection reads git history, so the whole history and every tag are
+  # fetched: a shallow clone would answer false, the unsafe direction. The input is a free string when release.yml calls this
+  # workflow, so it reaches the script through env and resolve-maintenance.sh rejects any value but auto, on and off (the job fails).
+  maintenance:
+    name: maintenance
+    needs: detect
+    if: inputs.release && needs.detect.outputs.is_template != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      enabled: ${{ steps.resolve.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Resolve the maintenance mode
+        id: resolve
+        env:
+          MODE: ${{ inputs.maintenance }}
+        run: |
+          detected="$(bash build/scripts/detect-contract-migration.sh)"
+          enabled="$(bash build/scripts/resolve-maintenance.sh "$MODE" "$detected")"
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+          echo "Maintenance mode: input '${MODE:-auto}', contract migration detected: $detected, maintenance page: $enabled."
 
   # The same jobs as a pull request. A called workflow cannot raise its own permissions, so build-test's coverage comment and
   # test report need these two here.
@@ -279,7 +320,7 @@ jobs:
   # A release only, after staging. The environment `production` should have required reviewers: the approval hangs on this run.
   deploy-production:
     name: deploy-production
-    needs: [image, verify, deploy-staging]
+    needs: [image, verify, deploy-staging, maintenance]
     if: inputs.release && vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -299,6 +340,14 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Maintenance mode (the `maintenance` job): the page goes up before the database changes and comes down only after the smoke
+      # test of the new version passed. Neither step has always(): when a later step fails the page stays up and the run fails (M4,
+      # ADR 0034), because after a contract migration the previous version cannot run on the schema. A project's hook is
+      # build/deploy/maintenance.sh, which fails until the project writes it.
+      - name: Maintenance page on
+        if: needs.maintenance.outputs.enabled == 'true'
+        run: bash build/deploy/maintenance.sh on production build/deploy/maintenance.html
 
       - name: Migrate the database
         env:
@@ -321,11 +370,15 @@ jobs:
           fi
           curl -sS --fail --connect-timeout 5 --max-time 15 --retry 10 --retry-delay 6 --retry-connrefused "${PRODUCTION_URL%/}/health/ready"
 
+      - name: Maintenance page off
+        if: needs.maintenance.outputs.enabled == 'true'
+        run: bash build/deploy/maintenance.sh off production build/deploy/maintenance.html
+
   # A release only, on a self-hosted Windows runner (labels self-hosted, windows, iis) with IIS and the .NET SDK: publish, then
   # build/scripts/deploy-iis.ps1 migrates, swaps the files and checks the health URL (design D8). Independent of the Docker path.
   deploy-iis:
     name: deploy-iis
-    needs: verify
+    needs: [verify, maintenance]
     if: inputs.release && vars.IIS_ENABLED == 'true'
     runs-on: [self-hosted, windows, iis]
     timeout-minutes: 30
@@ -351,11 +404,15 @@ jobs:
       # by the script from the environment; it has no parameter for it.
       # Windows PowerShell 5.1 (`powershell`): a self-hosted Windows runner may lack PowerShell 7 (pwsh), and IISAdministration
       # is native to 5.1. The script targets 5.1 and 7.
+      # -Maintenance:(...) binds as a switch only because the script runs in this session; keep it a direct call, never
+      # `powershell.exe -File`, which would pass the text on as a string. In maintenance mode the script puts the page up before the
+      # migration and, after a failure, leaves it up (M4, ADR 0034).
       - name: Deploy to IIS
         shell: powershell
         env:
           IIS_SITE_PATH: ${{ vars.IIS_SITE_PATH }}
           IIS_APP_POOL: ${{ vars.IIS_APP_POOL }}
           IIS_HEALTH_URL: ${{ vars.IIS_HEALTH_URL }}
+          MAINTENANCE: ${{ needs.maintenance.outputs.enabled }}
           ConnectionStrings__Database: ${{ secrets.MIGRATION_CONNECTION_STRING }}
-        run: ./build/scripts/deploy-iis.ps1 -PublishPath publish -SitePath $env:IIS_SITE_PATH -AppPool $env:IIS_APP_POOL -HealthUrl $env:IIS_HEALTH_URL
+        run: ./build/scripts/deploy-iis.ps1 -PublishPath publish -SitePath $env:IIS_SITE_PATH -AppPool $env:IIS_APP_POOL -HealthUrl $env:IIS_HEALTH_URL -Maintenance:($env:MAINTENANCE -eq 'true')
