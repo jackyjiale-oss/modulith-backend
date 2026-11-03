@@ -229,6 +229,10 @@ jobs:
           Import-Module Pester -RequiredVersion 5.9.1
           Invoke-Pester -Path build/scripts/tests -CI
 
+      # Contract-migration detection and mode resolution (maintenance screen design, sections 5 and 6); each case builds a throwaway git repository.
+      - name: Maintenance scripts
+        run: bash build/scripts/tests/maintenance-scripts.test.sh
+
       - name: PSScriptAnalyzer
         shell: pwsh
         run: |

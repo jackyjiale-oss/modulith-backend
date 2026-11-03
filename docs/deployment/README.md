@@ -1,14 +1,14 @@
 # Deployment
 
-How a change becomes a verified image, a migrated database and a running service. The pipeline is GitHub Actions; the roll-out itself is yours (one hook), except for IIS, which has a script. Decisions and their reasons: [ADR 0033](../adr/0033-delivery-pipeline.md).
+How a change becomes a verified image, a migrated database and a running service. The pipeline is GitHub Actions; the roll-out itself is yours (one hook), except for IIS, which has a script. Decisions and their reasons: [ADR 0033](../adr/0033-delivery-pipeline.md); the maintenance mode of a release that contracts the database: [ADR 0034](../adr/0034-maintenance-mode-for-contract-phase-releases.md).
 
-What was and was not run: the workflows, the Dockerfile and the scripts were written and unit-checked in the template repository, and the IIS script has Pester tests with the IIS and file calls mocked. A real IIS server, a real deploy and the first CI runs of the `container`, `scripts`, CodeQL and gitleaks jobs had not been executed when this page was written, and the Docker runs on the developer machine had not either. Treat the first release of a project as the first real test of the pipeline, and the checklist in [`iis.md`](iis.md#manual-checklist-for-a-real-server) as the test of the IIS script.
+What was and was not run: the workflows, the Dockerfile and the scripts were written and unit-checked in the template repository, and the IIS script has Pester tests with the IIS and file calls mocked. A real IIS server, a real deploy, a real proxy serving the maintenance page and the first CI runs of the `container`, `scripts`, CodeQL and gitleaks jobs had not been executed when this page was written, and the Docker runs on the developer machine had not either. Treat the first release of a project as the first real test of the pipeline, and the checklist in [`iis.md`](iis.md#manual-checklist-for-a-real-server) as the test of the IIS script.
 
 | Page | Covers |
 |---|---|
-| [`docker.md`](docker.md) | Build, run, port, health check, proxy, rollback |
-| [`iis.md`](iis.md) | The IIS script and the checklist for a real server |
-| [`migrations.md`](migrations.md) | `migrate`, the two logins, expand then contract |
+| [`docker.md`](docker.md) | Build, run, port, health check, proxy, the maintenance hook, rollback |
+| [`iis.md`](iis.md) | The IIS script (normal and maintenance orders, recovery) and the checklist for a real server |
+| [`migrations.md`](migrations.md) | `migrate`, the two logins, expand then contract and the maintenance mode |
 | [`production-checklist.md`](production-checklist.md) | The production checklist, line by line |
 
 ## The pipeline
@@ -22,30 +22,31 @@ What was and was not run: the workflows, the Dockerfile and the scripts were wri
 | `cd.yml` | push to `main`, `workflow_call`, `workflow_dispatch` | Calls `ci.yml`, then builds, verifies and deploys the image. |
 | `release.yml` | push to `main` | release-please; when it creates a release it calls `cd.yml` with `release: true`. |
 
-The `container` job builds `build/docker/Dockerfile` and runs `build/scripts/container-verify.sh` on it (a throwaway SQL Server, `migrate` twice, start in Production, wait for the image's own `HEALTHCHECK`, `GET /health/ready`, assert a non-root user). Every pull request does this, so a regression in the Dockerfile or in `migrate` fails the pull request, not the release. The `scripts` job runs the Pester tests of the IIS script and PSScriptAnalyzer; `actionlint` lints every workflow.
+The `container` job builds `build/docker/Dockerfile` and runs `build/scripts/container-verify.sh` on it (a throwaway SQL Server, `migrate` twice, start in Production, wait for the image's own `HEALTHCHECK`, `GET /health/ready`, assert a non-root user). Every pull request does this, so a regression in the Dockerfile or in `migrate` fails the pull request, not the release. The `scripts` job runs the Pester tests of the IIS script, PSScriptAnalyzer and the tests of the two maintenance scripts (`build/scripts/tests/maintenance-scripts.test.sh`, against throwaway git repositories); `actionlint` lints every workflow.
 
 ### `cd.yml`
 
 | Job | Runs when | What it does |
 |---|---|---|
 | `detect` | always | Reads whether `.template.config/template.json` exists, which is true only in the template repository. |
+| `maintenance` | a release, and this is not the template repository | Decides whether the production release runs in maintenance mode ([below](#maintenance-mode)): detects a contract migration, applies the `maintenance` input and outputs `enabled`. Runs beside `ci` and does not gate staging; `deploy-production` and `deploy-iis` need it. |
 | `ci` | always | Calls `ci.yml`, so what is published passed the same jobs as a pull request. |
 | `image` | `ci` passed and this is not the template repository | Builds and pushes `ghcr.io/<repository>/api` (the name is lower-cased) with an SBOM and a provenance attestation. Tags: `sha-<short>` on every run, `edge` only on a non-release run from `main`, `x.y.z` and `latest` on a release. A release is refused unless the ref is `main` or a `v*` tag. Outputs the digest. |
 | `verify` | after `image` | Pulls the image by digest and runs `container-verify.sh` on it. |
 | `deploy-staging` | after `verify`, `DEPLOY_ENABLED` is `true`, and the run is on `main` or a release | Environment `staging`: `migrate` from the image, `build/deploy/roll-out.sh staging <image@digest>`, then `GET $STAGING_URL/health/ready`, retried up to ten times 6 seconds apart (each try at most 15 seconds); an empty `STAGING_URL` fails the step with a message. |
-| `deploy-production` | a release, after `deploy-staging`, and `DEPLOY_ENABLED` is `true` | Environment `production`: the same three steps. |
-| `deploy-iis` | a release, after `verify`, and `IIS_ENABLED` is `true` | Environment `production`, on a self-hosted Windows runner: `dotnet publish`, then `deploy-iis.ps1` ([`iis.md`](iis.md)). Independent of the Docker path; it does not wait for staging. |
+| `deploy-production` | a release, after `deploy-staging` and `maintenance`, and `DEPLOY_ENABLED` is `true` | Environment `production`: the same three steps. In maintenance mode the maintenance hook runs `on` before `migrate` and `off` after the smoke test passes ([below](#maintenance-mode)). |
+| `deploy-iis` | a release, after `verify` and `maintenance`, and `IIS_ENABLED` is `true` | Environment `production`, on a self-hosted Windows runner: `dotnet publish`, then `deploy-iis.ps1` ([`iis.md`](iis.md)), with `-Maintenance` when the `maintenance` job said so. Independent of the Docker path; it does not wait for staging. |
 
 A green push to `main` goes to staging; a release (merging the release-please pull request) goes to staging and then, after approval, to production. The template repository itself publishes and deploys nothing: where `.template.config` exists the `image` job and everything after it are skipped. What each trigger does:
 
 | Trigger | Image tags | Deploys |
 |---|---|---|
 | Push to `main` | `sha-<short>`, `edge` | `deploy-staging` with `DEPLOY_ENABLED`; production and IIS are skipped |
-| Release call from `release.yml` (ref `main`, `release` true) | `sha-<short>`, `x.y.z`, `latest` | staging, then production (`DEPLOY_ENABLED`); IIS if `IIS_ENABLED` |
+| Release call from `release.yml` (ref `main`, `release` true) | `sha-<short>`, `x.y.z`, `latest` | staging, then production (`DEPLOY_ENABLED`); IIS if `IIS_ENABLED`; the `maintenance` input is always `auto` |
 | Dispatch, `release` unticked, from `main` | `sha-<short>`, `edge` | as a push to `main` |
 | Dispatch, `release` unticked, from another branch or a tag (a dry run) | `sha-<short>` only, never `edge` | none: `ci`, `image` and `verify` run, no deploy job |
-| Dispatch, `release` ticked, from a `v*` tag | `sha-<short>`, `x.y.z`, `latest` | as a release; `version` must equal the tag without the leading `v` |
-| Dispatch, `release` ticked, from `main` | `sha-<short>`, `x.y.z`, `latest` | as a release; `version` is `x.y.z` without a leading `v` |
+| Dispatch, `release` ticked, from a `v*` tag | `sha-<short>`, `x.y.z`, `latest` | as a release; `version` must equal the tag without the leading `v`; `maintenance` may be `auto`, `on` or `off` |
+| Dispatch, `release` ticked, from `main` | `sha-<short>`, `x.y.z`, `latest` | as a release; `version` is `x.y.z` without a leading `v`; `maintenance` may be `auto`, `on` or `off` |
 | Dispatch, `release` ticked, from any other ref | none: a step of the `image` job (after `ci`) fails with "A release runs only from main or a v* tag" | none |
 | Any run whose `version` is not exactly `x.y.z` (a pre-release such as `1.2.0-rc.1`, a leading `v` or zero, a second line), `release` ticked or not | none: the `image` job fails at "Check the version" | none |
 
@@ -57,9 +58,34 @@ The `version` input is validated as a whole string and only the validated value 
 
 `release.yml` has a concurrency group of its own, `Release`, with no cancel, and its `cd` job is inside it: while a release waits for the `production` approval it holds that group, so the release-please runs of later pushes to `main` queue behind it (and GitHub keeps only the newest pending one). Approve or reject a pending release promptly.
 
+### Maintenance mode
+
+A production release that adds a contract migration (a drop or a rename, marked `[ContractMigration]`, [`migrations.md`](migrations.md#expand-then-contract)) cannot run with the old version still serving: after the migration the previous code cannot work on the schema. Such a release runs in **maintenance mode**: a maintenance page is up before `migrate` and comes down only after the new version passed its health check. Decision and reasons: [ADR 0034](../adr/0034-maintenance-mode-for-contract-phase-releases.md). Staging and a push to `main` never use it; the `maintenance` job and every maintenance step run for a release only.
+
+The `maintenance` job runs `build/scripts/detect-contract-migration.sh` and `build/scripts/resolve-maintenance.sh` after a checkout of the whole history and every tag. The `maintenance` input of `cd.yml` is `auto` (the default), `on` or `off`:
+
+| Input | Result |
+|---|---|
+| `auto` (or empty) | Maintenance mode when detection says `true`. |
+| `on` | Maintenance mode; a notice when detection found nothing. |
+| `off` | No maintenance mode. When detection found a contract migration the job prints a `::warning` annotation and the release deploys anyway, with the old code running on a schema it cannot use. It is not refused: the override is an explicit dispatch input and the required reviewers of the `production` environment gate the run. |
+| anything else | The job fails, so production and IIS do not run. A dispatch offers only the three values and `release.yml` sends none, so this is reachable only through another caller of `cd.yml`. |
+
+**Detection** answers `true` when a migration file **added** since the previous release tag mentions the word `ContractMigration`. The previous release tag is the highest `v[0-9]*` tag without a pre-release suffix (no `-` in the name, so `v1.1.0-rc.1` is never the base) merged into `HEAD` that does not point at `HEAD` (the release commit has its own tag). The diff covers `**/Migrations/*.cs` and skips `*ModelSnapshot.cs`; a `*.Designer.cs` file is read like any other. The word is matched anywhere in the file, so a marker in a list of attributes (`[Obsolete, ContractMigration("x")]`) or written fully qualified counts, as it does for the architecture test that reads the attribute by reflection; a comment that merely mentions it counts too, which can turn maintenance mode on needlessly (the safe direction). With no previous tag (the first release) the answer is `false`. A shallow checkout makes the script exit 1 rather than answer `false`. A migration file that was only modified does not count, and a file that was moved or renamed counts as added, with the same safe direction. The rule relies on the release tags being `v*` and reachable from the commit released.
+
+**The limit of that rule, and the manual rule.** The base is the previous release **tag**, not what production last ran. A contract release that never reached production (the Docker hook stub failing at `on` on the first one, a failed staging smoke test, a rejected `production` approval) still leaves its tag. The next release compares with that tag, answers `false`, and migrates with the old code serving and no page. **Until a release has completed its production deploy, every later release must be dispatched by hand with `maintenance: on`** (a `workflow_dispatch` of `cd.yml`, `release` ticked, the `version`, `maintenance` set to `on`); the automatic release path cannot do it. The proper fix, basing the comparison on the commit of the last successful `production` deployment, is recorded in [ADR 0034](../adr/0034-maintenance-mode-for-contract-phase-releases.md).
+
+**The override is reachable only by hand.** `release.yml` does not forward the input, so the automatic release path always uses `auto`. `maintenance: on` or `off` needs a manual run of `cd.yml` (Actions, Run workflow) with `release` ticked and the `version` set, from `main` or a `v*` tag ([above](#cdyml)).
+
+**What it does.** The orders are in [`iis.md`](iis.md#maintenance-mode) (IIS) and [`docker.md`](docker.md#the-maintenance-hook) (Docker). In short: the page goes up before the migration; if a later step fails the **page stays up, nothing is restored and the run fails**. The operator then restores the database from a backup if a contract migration was applied, restores or redeploys the previous version, and removes the page. On Docker the page answers every request except `/health/live` and `/health/ready`, which reach the API so that the smoke test, which runs before the page comes down, can pass.
+
+**The page** is one self-contained file, `build/deploy/maintenance.html`: English, Malay and Simplified Chinese, chosen by the browser's language list with English as the fallback (all three show without JavaScript), `noindex`, a refresh every 30 seconds, no external asset. IIS serves it as `app_offline.htm` (status 503 from the ASP.NET Core Module; there is no `Retry-After` on IIS, because it is a file). **A project edits that one file for its brand and contact.**
+
 ### The deploy hook
 
 `build/deploy/roll-out.sh <environment> <image@digest>` is a stub that prints what to replace and exits 1. A project that sets `DEPLOY_ENABLED` without writing its roll-out gets a red job rather than a deploy that did nothing. Replace the body with your own commands (the file shows an SSH and Compose example and a Kubernetes one), keep credentials in the environment's secrets passed through `env:` on the workflow step, and use the digest, not a tag, so what runs is what was verified.
+
+`build/deploy/maintenance.sh <on|off> <environment> <page-path>` is a second stub of the same kind, called only in maintenance mode ([`docker.md`](docker.md#the-maintenance-hook)): it exits 1 until the project writes it, so a contract release without the hook fails before the database is touched. Its contract: while `on`, every request answers the page with status 503 except `/health/live` and `/health/ready`, which pass through to the API (the smoke test needs `/health/ready` before `off` runs). A release that is not in maintenance mode never runs it.
 
 ## What to configure
 

@@ -75,6 +75,8 @@ for required in \
   build/scripts/container-verify.sh \
   build/scripts/deploy-iis.ps1 \
   build/deploy/roll-out.sh \
+  build/deploy/maintenance.html \
+  build/deploy/maintenance.sh \
   .github/workflows/cd.yml \
   .github/workflows/codeql.yml \
   .github/workflows/gitleaks.yml; do
@@ -85,6 +87,26 @@ echo "Checked $required_count required files"
 # The image starts the generated API, so its entry point and health check name the renamed assembly.
 if [[ -f "$out/build/docker/Dockerfile" ]] && ! grep -qF "$project_name.Api.dll" "$out/build/docker/Dockerfile"; then
   fail "build/docker/Dockerfile does not name $project_name.Api.dll"
+fi
+# The maintenance page is served by every deployment path (app_offline.htm on IIS, the Docker hook): all three languages in one
+# self-contained file, kept out of search indexes, refreshing by itself.
+maintenance_page="$out/build/deploy/maintenance.html"
+if [[ -f "$maintenance_page" ]]; then
+  for marker in '<section lang="en"' '<section lang="ms"' '<section lang="zh-Hans"' 'http-equiv="refresh"' 'noindex'; do
+    grep -qF "$marker" "$maintenance_page" || fail "build/deploy/maintenance.html does not contain $marker"
+  done
+  if grep -nE 'https?://|src=|<link' "$maintenance_page" > /dev/null; then
+    fail "build/deploy/maintenance.html must be self-contained: no http://, https://, src= or <link"
+  fi
+fi
+# The Docker maintenance hook is a stub that fails on purpose, like roll-out.sh, and says why on stderr.
+if [[ -f "$out/build/deploy/maintenance.sh" ]]; then
+  maintenance_stderr="$tmp/maintenance-stderr.txt"
+  if bash "$out/build/deploy/maintenance.sh" on production "$maintenance_page" > /dev/null 2> "$maintenance_stderr"; then
+    fail "build/deploy/maintenance.sh must exit non-zero until the project writes its hook"
+  elif [[ ! -s "$maintenance_stderr" ]]; then
+    fail "build/deploy/maintenance.sh must explain on stderr why it failed"
+  fi
 fi
 # A generated project must not look like the template repository: its delivery jobs are skipped where .template.config exists
 # (cd.yml, job detect). The only references allowed are that guard and the skip of the template smoke test in ci.yml.
