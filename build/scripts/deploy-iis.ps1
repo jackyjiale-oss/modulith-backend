@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-    Deploys the API to an IIS site: migrate, swap the files, check health, roll back on failure.
+    Deploys the API to an IIS site: migrate, swap the files, check health. On failure it restores the previous files; in
+    maintenance mode (-Maintenance) it leaves the maintenance page up and restores nothing.
 
 .DESCRIPTION
     Runbook: docs/deployment/iis.md; decision: docs/adr/0033-delivery-pipeline.md.
@@ -348,16 +349,25 @@ function Invoke-Deployment {
             $reason = $_.Exception.Message
             $previous = Get-PreviousPath -SitePath $SitePath
             Write-DeployLog "The deployment failed at $step in maintenance mode: $reason The maintenance page stays up; nothing is restored."
+            # Before the health check the page is still up; for a failed health check it came down and is put back below.
+            $pageUp = $true
             if ($step -eq 'health check') {
                 # The page came down for the check; put it back, best effort, so users never reach a version that is not healthy.
                 try {
                     Set-SiteOffline -SitePath $SitePath -MaintenancePage $MaintenancePage
                 }
                 catch {
+                    $pageUp = $false
                     Write-DeployLog "The maintenance page could not be put back: $($_.Exception.Message)"
                 }
             }
-            throw "The deployment failed at $step in maintenance mode: $reason The maintenance page is still up. If a contract migration was applied, restore the database from a backup first; then restore '$previous' over '$SitePath' and remove app_offline.htm."
+            if ($pageUp) {
+                $pageState = 'The maintenance page is still up.'
+            }
+            else {
+                $pageState = 'The maintenance page could NOT be put back: the site is serving the new build that failed its health check; copy the maintenance page to app_offline.htm by hand now.'
+            }
+            throw "The deployment failed at $step in maintenance mode: $reason $pageState If a contract migration was applied, restore the database from a backup first; then restore '$previous' over '$SitePath' and remove app_offline.htm."
         }
         Write-DeployLog 'The deployment succeeded.'
         $global:LASTEXITCODE = 0

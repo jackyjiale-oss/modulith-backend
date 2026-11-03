@@ -123,6 +123,49 @@ if ((Test-Path -LiteralPath variable:\LASTEXITCODE)) { exit `$LASTEXITCODE }
         $LASTEXITCODE | Should -Be $Expected -Because $output
         if ($Expected -eq 0) { Test-Path -LiteralPath (Join-Path $site 'app_offline.htm') | Should -BeFalse }
     }
+
+    # The script-level -Maintenance switch must reach Invoke-Deployment (the entry point forwards it with -Maintenance:$Maintenance).
+    # The stubbed dotnet (the `migrate` call) records whether app_offline.htm is already in the site folder at that moment: in
+    # maintenance mode the page is up before the migration, in the normal order it is not.
+    It 'runs the maintenance order when the script is run with -Maintenance=<Maintenance>: the page is up at the migrate call = <PageUpAtMigrate>' -ForEach @(
+        @{ Maintenance = $true; PageUpAtMigrate = $true }
+        @{ Maintenance = $false; PageUpAtMigrate = $false }
+    ) {
+        $root = Initialize-WorkFolder
+        $modules = Join-Path $root 'modules'
+        Add-ContentFile -Path (Join-Path $modules 'IISAdministration/IISAdministration.psm1') -Value @'
+function Get-IISAppPool { [CmdletBinding()] param([string] $Name) [pscustomobject]@{ Name = $Name; ManagedRuntimeVersion = '' } }
+'@
+        $programFiles = Join-Path $root 'Program Files'
+        Add-ContentFile -Path (Join-Path $programFiles 'IIS/Asp.Net Core Module/V2/aspnetcorev2.dll')
+        $publish = Join-Path $root 'publish'
+        Add-ContentFile -Path (Join-Path $publish 'TemplateName.Api.dll')
+        $site = Join-Path $root 'My Site'
+        Add-ContentFile -Path (Join-Path $site 'TemplateName.Api.dll')
+        $seen = Join-Path $root 'page-up-at-migrate.txt'
+        $switch = if ($Maintenance) { '-Maintenance' } else { '' }
+
+        $step = Join-Path $root 'step.ps1'
+        Set-Content -LiteralPath $step -Value @"
+`$ErrorActionPreference = 'stop'
+`$env:PSModulePath = '$modules' + [IO.Path]::PathSeparator + `$env:PSModulePath
+`$env:ProgramFiles = '$programFiles'
+`$env:ProgramW6432 = '$programFiles'
+`$env:ConnectionStrings__Database = 'Server=stub'
+function global:dotnet { Set-Content -LiteralPath '$seen' -Value (Test-Path -LiteralPath '$(Join-Path $site 'app_offline.htm')'); `$global:LASTEXITCODE = 0 }
+function global:robocopy { if (`$args -contains '/MIR') { `$global:LASTEXITCODE = 3 } else { `$global:LASTEXITCODE = 1 } }
+function global:Invoke-WebRequest { [pscustomobject]@{ StatusCode = 200 } }
+& '$($script:ScriptPath)' -PublishPath '$publish' -SitePath '$site' -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' $switch
+if ((Test-Path -LiteralPath variable:\LASTEXITCODE)) { exit `$LASTEXITCODE }
+"@
+
+        $shell = (Get-Process -Id $PID).Path
+        $output = & $shell -NoProfile -NonInteractive -Command ". '$step'" 2>&1 | Out-String
+
+        $LASTEXITCODE | Should -Be 0 -Because $output
+        (Get-Content -LiteralPath $seen -Raw).Trim() | Should -Be ([string] $PageUpAtMigrate) -Because $output
+        Test-Path -LiteralPath (Join-Path $site 'app_offline.htm') | Should -BeFalse
+    }
 }
 
 Describe 'Invoke-Deployment' {
@@ -204,17 +247,27 @@ Describe 'Invoke-Deployment' {
 
             $failure.Exception.Message | Should -BeLike '*failed at health check*'
             $failure.Exception.Message | Should -BeLike '*restore the database*'
+            $failure.Exception.Message | Should -BeLike '*maintenance page is still up*'
+            $failure.Exception.Message | Should -Not -BeLike '*could NOT be put back*'
             $script:Calls -join ',' | Should -Be 'preflight,backup,offline,migrate,publish,online,health,offline'
             Should -Invoke Restore-Site -Times 0 -Exactly
         }
 
-        It 'still fails with the same message when putting the page back also fails' {
+        It 'says the page could not be put back, and not that it is still up, when putting it back also fails' {
             $script:OfflineRuns = 0
             Mock Set-SiteOffline { $script:Calls.Add('offline'); $script:OfflineRuns++; if ($script:OfflineRuns -gt 1) { throw 'disk full' } }
             Mock Wait-Healthy { $script:Calls.Add('health'); $false }
 
-            { Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' -Maintenance } |
-                Should -Throw '*failed at health check*'
+            $failure = $null
+            try { Invoke-Deployment -PublishPath $script:Publish -SitePath $script:Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' -Maintenance }
+            catch { $failure = $_ }
+
+            $failure.Exception.Message | Should -BeLike '*failed at health check*'
+            $failure.Exception.Message | Should -Not -BeLike '*still up*'
+            $failure.Exception.Message | Should -BeLike '*could NOT be put back*'
+            $failure.Exception.Message | Should -BeLike '*copy the maintenance page to app_offline.htm by hand*'
+            $failure.Exception.Message | Should -BeLike '*restore the database*'
+            Should -Invoke Restore-Site -Times 0 -Exactly
         }
 
         It 'a failed preflight does not put the page up' {
