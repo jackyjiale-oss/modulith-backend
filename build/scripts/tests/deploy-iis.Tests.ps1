@@ -88,6 +88,7 @@ function Get-IISAppPool { [CmdletBinding()] param([string] $Name) [pscustomobjec
 `$ErrorActionPreference = 'stop'
 `$env:PSModulePath = '$modules' + [IO.Path]::PathSeparator + `$env:PSModulePath
 `$env:ProgramFiles = '$programFiles'
+`$env:ProgramW6432 = '$programFiles'
 `$env:ConnectionStrings__Database = 'Server=stub'
 function global:dotnet { `$global:LASTEXITCODE = 0 }
 function global:robocopy { if (`$args -contains '/MIR') { `$global:LASTEXITCODE = $PublishExit } else { `$global:LASTEXITCODE = 1 } }
@@ -187,11 +188,22 @@ Describe 'Invoke-Deployment' {
 
     It 'refuses a site path that is a root (<Site>), before it touches anything' -ForEach @(
         @{ Site = 'C:\' }, @{ Site = 'D:/' }, @{ Site = '\' }, @{ Site = '/' }
+        # A UNC share root, with and without the trailing separator, and a server without a share.
+        @{ Site = '\\fileserver\sites' }, @{ Site = '\\fileserver\sites\' }, @{ Site = '//fileserver/sites/' }, @{ Site = '\\fileserver' }
     ) {
         { Invoke-Deployment -PublishPath $script:Publish -SitePath $Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready' } |
             Should -Throw '*root*'
 
         $script:Calls | Should -BeNullOrEmpty
+    }
+
+    It 'accepts a folder below a UNC share (<Site>)' -ForEach @(
+        @{ Site = '\\fileserver\sites\api'; Expected = '\\fileserver\sites\api' }
+        @{ Site = '\\fileserver\sites\api\'; Expected = '\\fileserver\sites\api' }
+    ) {
+        Invoke-Deployment -PublishPath $script:Publish -SitePath $Site -AppPool 'Api' -HealthUrl 'http://localhost/health/ready'
+
+        Should -Invoke Publish-Site -Times 1 -Exactly -ParameterFilter { $SitePath -ceq $Expected }
     }
 
     It 'A failed health check restores the previous files, then throws' {
@@ -291,6 +303,58 @@ Describe 'Test-IisPreflight' {
         $empty = Join-Path (Initialize-WorkFolder) 'empty'
         New-Item -ItemType Directory -Path $empty | Out-Null
         { Test-IisPreflight -PublishPath $empty -AppPool 'Api' } | Should -Throw '*TemplateName.Api.dll*'
+    }
+}
+
+Describe 'Test-HostingBundleInstalled' {
+    BeforeAll {
+        $script:ModulePath = 'IIS/Asp.Net Core Module/V2/aspnetcorev2.dll'
+    }
+
+    BeforeEach {
+        $script:SavedProgramFiles = $env:ProgramFiles
+        $script:SavedProgramW6432 = $env:ProgramW6432
+        $root = Initialize-WorkFolder
+        $script:With = Join-Path $root 'Program Files'
+        $script:Without = Join-Path $root 'Program Files (x86)'
+        Add-ContentFile -Path (Join-Path $script:With $script:ModulePath)
+        New-Item -ItemType Directory -Path $script:Without | Out-Null
+    }
+
+    AfterEach {
+        $env:ProgramFiles = $script:SavedProgramFiles
+        $env:ProgramW6432 = $script:SavedProgramW6432
+    }
+
+    It 'looks in ProgramW6432 first: a 32-bit host reports Program Files (x86) as ProgramFiles' {
+        $env:ProgramFiles = $script:Without
+        $env:ProgramW6432 = $script:With
+
+        Test-HostingBundleInstalled | Should -BeTrue
+    }
+
+    It 'does not fall back to ProgramFiles when ProgramW6432 is set and holds no module' {
+        $env:ProgramFiles = $script:With
+        $env:ProgramW6432 = $script:Without
+
+        Test-HostingBundleInstalled | Should -BeFalse
+    }
+
+    It 'falls back to ProgramFiles when ProgramW6432 is not set' {
+        $env:ProgramFiles = $script:With
+        $env:ProgramW6432 = $null
+
+        Test-HostingBundleInstalled | Should -BeTrue
+    }
+
+    It 'is false when the module is not there, and when neither variable is set' {
+        $env:ProgramFiles = $script:Without
+        $env:ProgramW6432 = $script:Without
+        Test-HostingBundleInstalled | Should -BeFalse
+
+        $env:ProgramFiles = $null
+        $env:ProgramW6432 = $null
+        Test-HostingBundleInstalled | Should -BeFalse
     }
 }
 
@@ -503,19 +567,11 @@ Describe 'Publish-Site' {
         $arguments = [string[]]$script:RobocopyCalls[0]
         $arguments | Should -Contain '/MIR'
 
+        # The exact sequence from /XF to the end: the two files, then /XD with the one folder, nothing else.
         $excludeFiles = $arguments.IndexOf('/XF')
-        $excludeDirectories = $arguments.IndexOf('/XD')
         $excludeFiles | Should -BeGreaterThan 1
-        $excludeDirectories | Should -BeGreaterThan 1
-
-        # Files named after /XF (up to the next switch) and directories named after /XD.
-        $files = $arguments[($excludeFiles + 1)..($arguments.Length - 1)] | Where-Object { $_ -notmatch '^/' } |
-            Select-Object -First 5
-        $directories = $arguments[($excludeDirectories + 1)..($arguments.Length - 1)] | Where-Object { $_ -notmatch '^/' } |
-            Select-Object -First 5
-        $files | Should -Contain 'appsettings.Production.json'
-        $files | Should -Contain 'app_offline.htm'
-        $directories | Should -Contain 'logs'
+        $tail = $arguments[$excludeFiles..($arguments.Length - 1)]
+        ($tail -join '|') | Should -BeExactly '/XF|appsettings.Production.json|app_offline.htm|/XD|logs'
     }
 
     It 'treats robocopy exit code <Code> (below 8) as success' -ForEach @(
