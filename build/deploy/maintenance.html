@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta http-equiv="refresh" content="30">
+<title>Down for maintenance</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --text: #1d2430;
+    --muted: #4b5565;
+    --line: #d9dde3;
+    --accent: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11151b;
+      --card: #1a2029;
+      --text: #e7eaee;
+      --muted: #aab2bf;
+      --line: #2c3541;
+      --accent: #7aa7ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    line-height: 1.5;
+  }
+  main {
+    width: 100%;
+    max-width: 32rem;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--accent);
+    border-radius: 8px;
+    padding: 24px;
+  }
+  section + section {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+  }
+  h1 {
+    margin: 0 0 8px;
+    font-size: 1.5rem;
+    line-height: 1.25;
+  }
+  p {
+    margin: 0;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<main>
+<section lang="en">
+<h1>Down for maintenance</h1>
+<p>We are updating the service and will be back shortly. This page refreshes by itself.</p>
+</section>
+<section lang="ms">
+<h1>Dalam penyelenggaraan</h1>
+<p>Kami sedang mengemas kini perkhidmatan dan akan kembali sebentar lagi. Halaman ini dimuat semula secara automatik.</p>
+</section>
+<section lang="zh-Hans">
+<h1>系统维护中</h1>
+<p>我们正在更新服务，很快就会恢复。本页面会自动刷新。</p>
+</section>
+</main>
+<script>
+// Without JavaScript all three languages stay visible. With it, only the visitor's language is shown (English when neither
+// Malay nor Chinese is preferred). Any unexpected condition leaves every section visible.
+(function () {
+  try {
+    var sections = document.querySelectorAll("main > section[lang]");
+    var preferred = (navigator.languages && navigator.languages.length) ? navigator.languages : [navigator.language || ""];
+    var wanted = "en";
+    for (var i = 0; i < preferred.length; i++) {
+      var tag = String(preferred[i] || "").toLowerCase();
+      if (tag.indexOf("ms") === 0) { wanted = "ms"; break; }
+      if (tag.indexOf("zh") === 0) { wanted = "zh-Hans"; break; }
+    }
+    var matched = false;
+    for (var j = 0; j < sections.length; j++) {
+      if (sections[j].getAttribute("lang") === wanted) { matched = true; }
+    }
+    if (!matched) { return; }
+    for (var k = 0; k < sections.length; k++) {
+      if (sections[k].getAttribute("lang") !== wanted) { sections[k].hidden = true; }
+    }
+  } catch (e) { /* leave every section visible */ }
+})();
+</script>
+</body>
+</html>
