@@ -235,10 +235,11 @@ if [[ -f "$out/README.md" ]] && ! grep -qF "TN0001" "$out/README.md"; then
 fi
 
 step "Checking that no template marker is left in the generated files"
-# A conditional marker of the template engine ("#if", "#elseif", "#else", "#endif" after // or <!-- or at the start of a line) that survives
-# generation means the engine did not process it. Every file type is searched, not only code.
+# A conditional marker of the template engine ("#if", "#elseif", "#else", "#endif" after //, <!-- or %% (the Mermaid comment style used in
+# docs/architecture/overview.md), or at the start of a line) that survives generation means the engine did not process it.
+# Every file type is searched, not only code.
 leftover_markers="$(grep -rInE --exclude-dir=bin --exclude-dir=obj --exclude-dir=.git \
-  -e '(//|<!--|^[[:space:]]*)#(if|elseif|else|endif)([[:space:]]|\(|-->|$)' "$out" || true)"
+  -e '(//|<!--|%%|^[[:space:]]*)#(if|elseif|else|endif)([[:space:]]|\(|-->|$)' "$out" || true)"
 if [[ -n "$leftover_markers" ]]; then
   fail "template conditional markers are left in the generated files:"$'\n'"$leftover_markers"
 fi
