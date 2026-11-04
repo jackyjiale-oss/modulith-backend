@@ -144,6 +144,14 @@ case_redis_allowlist() {
   run_check true true memory
   assert_eq "1" "$status" "redis_allowlist: outside the allowlist"
   assert_contains "src/Host/Acme.Api/Program.cs:1" "$out" "redis_allowlist: names file and line"
+  make_tree
+  put tests/Acme.IntegrationTests/Caching/CachingProviderWithoutRedisTests.cs 'AddPlatformRedis'
+  run_check true true memory
+  assert_eq "0" "$status" "redis_allowlist: the test of a project without the Redis project"
+  make_tree
+  put tests/Acme.IntegrationTests/Caching/CachingProviderTests.cs 'AddPlatformRedis'
+  run_check true true memory
+  assert_eq "1" "$status" "redis_allowlist: another test in the Caching folder"
 }
 
 case_redis_other_patterns() {

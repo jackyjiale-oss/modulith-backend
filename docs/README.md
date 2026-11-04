@@ -23,7 +23,9 @@ Everything about how this service is built and run. Documents are part of the de
 | [`building-blocks/application-common.md`](building-blocks/application-common.md) | `Application.Common`: handlers and decorators, current user, error messages, cursor pagination |
 | [`building-blocks/infrastructure-common.md`](building-blocks/infrastructure-common.md) | `Infrastructure.Common`: module `DbContext`s, migrations, outbox, inbox, recurring jobs and cleanup, idempotency, caching provider, HTTP resilience |
 | [`building-blocks/web-common.md`](building-blocks/web-common.md) | `Web.Common`: ProblemDetails, HTTP security, localization, observability |
+<!--#if (caching == "redis")-->
 | [`building-blocks/platform-redis.md`](building-blocks/platform-redis.md) | `Platform.Redis` (optional, host only): Redis as the shared cache level, the shared rate limiter and the SignalR backplane, with a circuit and a readiness check |
+<!--#endif-->
 
 ## Modules
 
@@ -75,7 +77,9 @@ Everything about how this service is built and run. Documents are part of the de
 | [0024](adr/0024-mfa-challenge-as-a-hashed-server-side-token.md) | The sign-in challenge is an opaque token over a hashed server-side row, with wrong codes counted on it and in the lockout |
 | [0025](adr/0025-trusted-devices-bound-to-the-security-stamp.md) | Trusted devices are hashed bearer tokens bound to the security stamp, skipping the challenge only (`amr` `pwd`) |
 | [0026](adr/0026-recurring-jobs-on-our-own-scheduler.md) | Recurring jobs run on our own scheduler with a SQL lease, not Hangfire |
+<!--#if (caching == "redis")-->
 | [0027](adr/0027-optional-redis-through-one-project.md) | Optional Redis through one project referenced only by the host (cache second level, rate limiter, backplane), degraded not down when Redis fails, our own fixed-window limiter, Valkey in compose |
+<!--#endif-->
 | [0028](adr/0028-retention-policy-and-the-inbox-window.md) | Retention per kind of data in bounded delete batches, dead letters kept, and an inbox window that outlasts outbox redelivery |
 | [0029](adr/0029-standard-http-resilience-pipelines.md) | Standard HTTP resilience pipelines from `Microsoft.Extensions.Http.Resilience`, named and bound from `Resilience:Pipelines`, with a breaker and the `hibp` budget |
 | [0030](adr/0030-audit-trail-through-the-owning-modules-outbox.md) | Audit trail through the owning module's outbox: `[Audited]` entities, one change set per save, consumed by the Audit module through its inbox; both logs kept, a delete window and no archive |

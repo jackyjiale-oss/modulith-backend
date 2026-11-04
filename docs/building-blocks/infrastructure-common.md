@@ -49,10 +49,14 @@ Error codes (messages in `Resources/InfrastructureErrorMessages.resx`, `.ms.resx
 
 ## Caching
 
-`Caching:Provider` decides where `HybridCache` keeps its entries (ADR 0027). This building block owns the setting, so a host without the optional Redis project still honours it:
+`Caching:Provider` decides where `HybridCache` keeps its entries. This building block owns the setting, so a host without the optional Redis project still honours it:
 
 - **`memory`** (the default): `HybridCache` in memory per instance; nothing else is needed.
-- **`redis`**: Redis as the shared second level. The host must call `AddPlatformRedis` from [`TemplateName.Platform.Redis`](platform-redis.md), which registers the distributed cache; a host that does not fails on start (`Caching:Provider is redis, but no distributed cache is registered`) rather than caching in memory only without saying so.
+- **`redis`**: Redis as the shared second level. The host must register the distributed cache; a host that does not fails on start (`Caching:Provider is redis, but no distributed cache is registered`) rather than caching in memory only without saying so.
+  <!--#if (caching == "redis")-->
+  `AddPlatformRedis` from [`TemplateName.Platform.Redis`](platform-redis.md) registers it (ADR 0027).
+  <!--#endif-->
+  A project generated with `--caching memory` has no `Platform.Redis` project: to use `Caching:Provider=redis` later it has to add the project back, and until it does the host refuses to start and says so.
 - **`none`**: no cache, for diagnosing. A `PostConfigure` of `HybridCacheOptions` adds `DisableLocalCache | DisableDistributedCache` to `DefaultEntryOptions.Flags`. HybridCache uses the default flags for every entry whose own options set no `Flags`, so an entry whose caller passes its own expirations (the Auth permission set does) is still read from its source every time (`Caching/CachingProviderTests.Provider_none_makes_every_permission_read_hit_the_database`). An entry that sets its own `Flags` is not covered; only the Auth module's spent provider nonces (`auth:ext-nonce:*`) do, on purpose: they are a security record, not a cache, so `none` must not switch their cross-instance layer off. (Single use within one instance does not rest on `HybridCache` at all: the Auth module's own atomic in-process gate guarantees it whatever `Caching:Provider` says; [Auth module](../modules/auth.md#configuration).)
 
 A value other than the three (any case) fails on start. `HybridCache` itself is registered by the module that uses it (`AddHybridCache`, Auth today).

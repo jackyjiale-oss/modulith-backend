@@ -20,7 +20,9 @@ COPY src/BuildingBlocks/TemplateName.SharedKernel/TemplateName.SharedKernel.cspr
 COPY src/BuildingBlocks/TemplateName.Application.Common/TemplateName.Application.Common.csproj src/BuildingBlocks/TemplateName.Application.Common/packages.lock.json src/BuildingBlocks/TemplateName.Application.Common/
 COPY src/BuildingBlocks/TemplateName.Infrastructure.Common/TemplateName.Infrastructure.Common.csproj src/BuildingBlocks/TemplateName.Infrastructure.Common/packages.lock.json src/BuildingBlocks/TemplateName.Infrastructure.Common/
 COPY src/BuildingBlocks/TemplateName.Web.Common/TemplateName.Web.Common.csproj src/BuildingBlocks/TemplateName.Web.Common/packages.lock.json src/BuildingBlocks/TemplateName.Web.Common/
+#if (caching == "redis")
 COPY src/BuildingBlocks/TemplateName.Platform.Redis/TemplateName.Platform.Redis.csproj src/BuildingBlocks/TemplateName.Platform.Redis/packages.lock.json src/BuildingBlocks/TemplateName.Platform.Redis/
+#endif
 COPY src/Modules/Auth/TemplateName.Modules.Auth.Contracts/TemplateName.Modules.Auth.Contracts.csproj src/Modules/Auth/TemplateName.Modules.Auth.Contracts/packages.lock.json src/Modules/Auth/TemplateName.Modules.Auth.Contracts/
 COPY src/Modules/Auth/TemplateName.Modules.Auth/TemplateName.Modules.Auth.csproj src/Modules/Auth/TemplateName.Modules.Auth/packages.lock.json src/Modules/Auth/TemplateName.Modules.Auth/
 COPY src/Modules/Notifications/TemplateName.Modules.Notifications/TemplateName.Modules.Notifications.csproj src/Modules/Notifications/TemplateName.Modules.Notifications/packages.lock.json src/Modules/Notifications/TemplateName.Modules.Notifications/

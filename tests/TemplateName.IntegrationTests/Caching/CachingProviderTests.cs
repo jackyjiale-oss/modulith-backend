@@ -4,7 +4,9 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
+//#if (caching == "redis")
 using StackExchange.Redis;
+//#endif
 using TemplateName.Infrastructure.Common.Caching;
 using TemplateName.IntegrationTests.Infrastructure;
 using TemplateName.Modules.Auth.Application;
@@ -36,7 +38,9 @@ public sealed class CachingProviderTests(IntegrationTestWebAppFactory factory) :
     public async Task Default_memory_provider_needs_no_Redis()
     {
         Factory.Services.GetRequiredService<IOptions<CachingOptions>>().Value.Provider.ShouldBe(CachingProvider.Memory);
+        //#if (caching == "redis")
         Factory.Services.GetService<IConnectionMultiplexer>().ShouldBeNull();
+        //#endif
         Factory.Services.GetService<IDistributedCache>().ShouldBeNull();
         Factory.Services.GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations
             .ShouldNotContain(registration => registration.Name == "redis");

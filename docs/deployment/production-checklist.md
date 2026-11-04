@@ -52,7 +52,10 @@ The environment of a .NET host that is not told otherwise is `Production`, and t
 
 ## Health checks wired to the load balancer or monitor
 
-`/health/live` (the process answers) and `/health/ready` (a check per database schema, and Redis when enabled) exist, are anonymous and exempt from rate limiting. The image's `HEALTHCHECK` probes `/health/live`, `container-verify.sh` and the CD smoke test call `/health/ready`, and the IIS script polls the URL you give it. **Yours:** point the load balancer or uptime monitor at `/health/ready` (a database outage then takes the instance out of rotation) and alert on it. With Redis down `/health/ready` answers 200 `Degraded`, by design ([`services/api.md`](../services/api.md#health)).
+`/health/live` (the process answers) and `/health/ready` (the readiness checks: one per database schema, and any other check tagged `ready`) exist, are anonymous and exempt from rate limiting. The image's `HEALTHCHECK` probes `/health/live`, `container-verify.sh` and the CD smoke test call `/health/ready`, and the IIS script polls the URL you give it. **Yours:** point the load balancer or uptime monitor at `/health/ready` (a database outage then takes the instance out of rotation) and alert on it.
+<!--#if (caching == "redis")-->
+With Redis down `/health/ready` answers 200 `Degraded`, by design ([`services/api.md`](../services/api.md#health)).
+<!--#endif-->
 
 ## Log level Information, and masking
 

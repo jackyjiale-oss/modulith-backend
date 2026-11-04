@@ -74,6 +74,8 @@ if [[ "$caching" == "memory" ]]; then
     '^src/BuildingBlocks/[^/]+\.Infrastructure\.Common/Caching/'
     # The Security folder's comments say AddPlatformRedis replaces the in-memory rate limiter.
     '^src/BuildingBlocks/[^/]+\.Web\.Common/Security/'
+    # The test that proves a project without the Redis project refuses Caching:Provider=redis names that project and AddPlatformRedis.
+    '^tests/[^/]+\.IntegrationTests/Caching/CachingProviderWithoutRedisTests\.cs$'
   )
   scan 'Platform\.Redis|PlatformRedis|platform-redis|StackExchange|[Vv]alkey' '--caching memory' "${allow[@]}"
 fi

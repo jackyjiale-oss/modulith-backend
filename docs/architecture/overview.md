@@ -21,7 +21,9 @@ flowchart TD
         Infra["Infrastructure.Common<br/>persistence, outbox, inbox, jobs, idempotency, HTTP resilience"]
         App["Application.Common<br/>handlers, decorators, pagination, messages"]
         Kernel["SharedKernel<br/>Result, Error, Entity, AggregateRoot"]
+        %%#if (caching == "redis")
         Redis["Platform.Redis (optional)<br/>Redis cache level, rate limiter, SignalR backplane"]
+        %%#endif
     end
 
     Api --> Auth
@@ -31,7 +33,9 @@ flowchart TD
     Api --> Web
     Api --> Infra
     Api --> App
+    %%#if (caching == "redis")
     Api -. "Caching:Provider = redis" .-> Redis
+    %%#endif
     Auth -. "other modules only via" .-> Contracts
     Sample -. "other modules only via" .-> Contracts
     Notifications -. "reads Auth only via" .-> Contracts
@@ -56,8 +60,10 @@ flowchart TD
     Web --> Kernel
     Infra --> Kernel
     App --> Kernel
+    %%#if (caching == "redis")
     Redis --> Infra
     Redis --> Web
+    %%#endif
 ```
 
 - **Host** (`src/Host/TemplateName.Api`, [`docs/services/api.md`](../services/api.md)) wires the building blocks and modules in `Program.cs`: services, the middleware pipeline, health checks, OpenAPI and the `/api/v1` route group.
@@ -65,9 +71,15 @@ flowchart TD
 - **Auth** ([`docs/modules/auth.md`](../modules/auth.md)) is the identity module: users, sessions, roles, permissions and the audit log in the `auth` schema, with the sign-in, token, password and administration endpoints, social login (the client posts a Google, Apple, Microsoft, Facebook or generic OpenID Connect proof and the backend verifies it and issues its own tokens; ADR 0032, [setup guide](../social-login-setup.md)), and two-step verification (an authenticator app with single-use recovery codes, a step-up before sensitive actions, trusted devices and an administrator's reset; ADRs 0022 to 0025). It implements `IPermissionChecker` for the whole host; no other module references it (its `TemplateName.Modules.Auth.Contracts` project holds its integration events and `IUserContactDirectory`; Auth publishes the events from its outbox, and the Notifications module consumes them).
 - **Notifications** ([`docs/modules/notifications.md`](../modules/notifications.md)) is the module through which every message the template sends goes (Auth sends no email itself): it consumes the integration events other modules publish and renders and delivers them by email and in-app in the recipient's language. It holds the code-defined notification type catalog with its embedded templates, the recipient culture and time zone rules, its `notify` schema, the consumers of Auth's integration events (which create notification and delivery rows through its inbox), the delivery worker with the email (SMTP, `Notifications:Email`) and in-app channels, the inbox, preference and hub-ticket APIs, the SignalR hub (`/hubs/notifications`) that pushes new in-app notifications, and the administrator's delivery list and retry. It references `TemplateName.Modules.Auth.Contracts` only, never the Auth module, and no module references it.
 - **Audit** ([`docs/modules/audit.md`](../modules/audit.md)) keeps the audit trail: who changed which field of which record, from which value to which, in the `audit` schema, read through `GET /api/v1/admin/audit/trails`. It is one project with no `.Contracts` project (it offers nothing to other modules), no `Resources/` folder and no error code. It references no module and no module references it: an entity marked `[Audited]` in any module has its changes written, in the same save, to that module's own outbox, and the Audit module consumes them as `EntityChangesRecordedIntegrationEvent` (defined in `Application.Common`) through its inbox. Auth's security log (`auth.AuthAuditLogs`) is a different log and stays in Auth (ADR 0030).
-- **Building blocks** ([`shared-kernel`](../building-blocks/shared-kernel.md), [`application-common`](../building-blocks/application-common.md), [`infrastructure-common`](../building-blocks/infrastructure-common.md), [`web-common`](../building-blocks/web-common.md)) hold everything every module needs. [`platform-redis`](../building-blocks/platform-redis.md) is the exception: an optional project only the host references, active with `Caching:Provider = redis`, that a solution without Redis deletes (ADR 0027).
+- **Building blocks** ([`shared-kernel`](../building-blocks/shared-kernel.md), [`application-common`](../building-blocks/application-common.md), [`infrastructure-common`](../building-blocks/infrastructure-common.md), [`web-common`](../building-blocks/web-common.md)) hold everything every module needs.
+  <!--#if (caching == "redis")-->
+  [`platform-redis`](../building-blocks/platform-redis.md) is the exception: an optional project only the host references, active with `Caching:Provider = redis`, that a solution without Redis deletes (ADR 0027).
+  <!--#endif-->
 
-The arrows are project references, and architecture tests (`tests/TemplateName.ArchitectureTests`) enforce them: SharedKernel has no dependencies; Application.Common does not depend on Infrastructure.Common or Web.Common; a module's `Domain` depends on nothing but SharedKernel; its `Application` does not depend on its `Infrastructure` or `Endpoints`; no module references another module except its `.Contracts`; and only the host references Platform.Redis.
+The arrows are project references, and architecture tests (`tests/TemplateName.ArchitectureTests`) enforce them: SharedKernel has no dependencies; Application.Common does not depend on Infrastructure.Common or Web.Common; a module's `Domain` depends on nothing but SharedKernel; its `Application` does not depend on its `Infrastructure` or `Endpoints`; no module references another module except its `.Contracts`.
+<!--#if (caching == "redis")-->
+Only the host references Platform.Redis.
+<!--#endif-->
 
 ## Request lifecycle
 
@@ -100,7 +112,11 @@ Work that does not belong to a request runs in hosted services of the API proces
 - **The delivery worker** of the Notifications module sends emails and writes the in-app inbox ([Notifications](../modules/notifications.md#background-processing)).
 - **The recurring-job scheduler** (`RecurringJobBackgroundService`, ADR 0026) runs the jobs that `AddRecurringJob` registered, one instance at a time per job, and records each run in `platform.JobStates`. Today every job is a cleanup that deletes what has outlived its retention in bounded batches: the outbox and inbox of each context, `platform.IdempotencyKeys`, and the Auth, Notifications and Audit tables ([`infrastructure-common`](../building-blocks/infrastructure-common.md#cleanup-jobs), ADR 0028).
 
-State that is shared between instances is per instance by default: the permission cache, the rate-limit counters, the SignalR pushes. With `Caching:Provider = redis` the optional Platform.Redis project shares them, and the API serves from the database, degraded, when Redis fails (ADR 0027). Outbound HTTP calls go through named resilience pipelines with a timeout, retries and a circuit breaker (ADR 0029).
+State that is shared between instances is per instance by default: the permission cache, the rate-limit counters, the SignalR pushes.
+<!--#if (caching == "redis")-->
+With `Caching:Provider = redis` the optional Platform.Redis project shares them, and the API serves from the database, degraded, when Redis fails (ADR 0027).
+<!--#endif-->
+Outbound HTTP calls go through named resilience pipelines with a timeout, retries and a circuit breaker (ADR 0029).
 
 ## Data ownership
 
@@ -167,7 +183,9 @@ The rules for when a boundary is crossed:
 | [0024](../adr/0024-mfa-challenge-as-a-hashed-server-side-token.md) | The sign-in challenge is an opaque token over a hashed server-side row, with wrong codes counted on it and in the lockout |
 | [0025](../adr/0025-trusted-devices-bound-to-the-security-stamp.md) | Trusted devices are hashed bearer tokens bound to the security stamp, skipping the challenge only (`amr` `pwd`) |
 | [0026](../adr/0026-recurring-jobs-on-our-own-scheduler.md) | Recurring jobs run on our own scheduler with a SQL lease, not Hangfire |
+<!--#if (caching == "redis")-->
 | [0027](../adr/0027-optional-redis-through-one-project.md) | Optional Redis through one project referenced only by the host (cache second level, rate limiter, backplane), degraded not down when Redis fails, our own fixed-window limiter, Valkey in compose |
+<!--#endif-->
 | [0028](../adr/0028-retention-policy-and-the-inbox-window.md) | Retention per kind of data in bounded delete batches, dead letters kept, and an inbox window that outlasts outbox redelivery |
 | [0029](../adr/0029-standard-http-resilience-pipelines.md) | Standard HTTP resilience pipelines from `Microsoft.Extensions.Http.Resilience`, named and bound from `Resilience:Pipelines`, with a breaker and the `hibp` budget |
 | [0030](../adr/0030-audit-trail-through-the-owning-modules-outbox.md) | Audit trail through the owning module's outbox: `[Audited]` entities, one change set per save, consumed by the Audit module through its inbox; both logs kept, a delete window and no archive |

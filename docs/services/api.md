@@ -18,7 +18,9 @@ Order matters; `Program.cs` marks it with comments.
 | 8 | `AddHttpSecurity(configuration)` | CORS, the global rate limiter, the `auth-strict` rate-limit policy, forwarded headers |
 | 9 | `AddPermissionAuthorization()` | The permission authorization handler behind `RequirePermission(code)` and the **fallback policy**: every endpoint requires an authenticated user unless it says `.AllowAnonymous()` ([web-common](../building-blocks/web-common.md)). It needs the explicit `UseAuthentication` and `UseAuthorization` of the pipeline (slots 1a and 10): without them `WebApplication` adds `UseAuthorization` ahead of `UseRouting` by itself, where no endpoint is known and the fallback policy answers 401 to every request. |
 | 10 | `AddAuthModule(configuration)`, `AddNotificationsModule(configuration)`, `AddSampleModule()`, `AddAuditModule(configuration)` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme (the default authentication scheme), the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)); the Notifications module also its delivery worker, SignalR, the `HubTicket` authentication scheme (not a default scheme: only the hub's policy uses it) and the rate-limit policy of its ticket route ([Notifications module](../modules/notifications.md)); the Audit module its inbox, the consumer of the audit change sets every module's outbox publishes, the optional trail retention and its permission source ([Audit module](../modules/audit.md)); it can be registered at any position among the modules |
+<!--#if (caching == "redis")-->
 | 10a | `AddPlatformRedis(configuration)` | Nothing unless `Caching:Provider` is `redis`; then the Redis connection, Redis as the `HybridCache` second level behind a circuit, the rate-limit windows counted in Redis, the SignalR backplane, and the `ready` check `redis` ([platform-redis](../building-blocks/platform-redis.md)). Optional: a solution without Redis deletes this line and the project. |
+<!--#endif-->
 | 11 | `AddOptions<KestrelServerOptions>()…Bind("Kestrel")` | Binds the whole `Kestrel` section lazily, so `Kestrel:Limits:*` apply and test overrides work |
 | 12 | `AddApplicationDecorators()` | Validation and logging decorators around every handler registered above; always last |
 
@@ -71,7 +73,9 @@ Sections are bound lazily through `IOptions<T>` and, where marked, validated on 
 | Key | Default | Validation | Meaning |
 |---|---|---|---|
 | `Database` | empty in `appsettings.json` | required, on start: the host does not start without it | SQL Server connection string for every module context and the Dapper connection factory. Supply it with user secrets (`dotnet user-secrets set "ConnectionStrings:Database" "…" --project src/Host/TemplateName.Api`) or the environment (`ConnectionStrings__Database`). |
+<!--#if (caching == "redis")-->
 | `Redis` | empty in `appsettings.json` | required and must parse with at least one server, on start, only when `Caching:Provider` is `redis` | The Redis server, a StackExchange.Redis configuration string (`localhost:6379` for the compose `valkey` service). A password belongs in user secrets or the environment (`ConnectionStrings__Redis`). `abortConnect` and the timeouts are set from `Caching:Redis` whatever the string says ([`Caching`](#caching)). |
+<!--#endif-->
 
 A module context can name another entry (`AddModuleDbContext<T>(schema, connectionStringName: "…")`); none does today. Contexts read the string when they are created, never in `Program.cs`, so `WebApplicationFactory` overrides apply.
 
@@ -114,17 +118,29 @@ How long the building blocks keep what they own before a cleanup job deletes it 
 
 ### `Caching`
 
-Where `HybridCache` keeps its entries (ADR 0027; [infrastructure-common](../building-blocks/infrastructure-common.md#caching), [platform-redis](../building-blocks/platform-redis.md)). The Auth module keeps two: the permission set (`auth:perm:{userId}`, 30 seconds) and the spent social-login nonces (`auth:ext-nonce:{hash}`, `Auth:External:MaxTokenAge` plus `Auth:Jwt:ClockSkew`), the second kept even with `none` because it guards against replay (single use within one instance comes from the Auth module's own in-process gate, which does not depend on this setting).
+Where `HybridCache` keeps its entries ([infrastructure-common](../building-blocks/infrastructure-common.md#caching)).
+<!--#if (caching == "redis")-->
+With the provider `redis` Redis is the shared second level ([platform-redis](../building-blocks/platform-redis.md), ADR 0027).
+<!--#endif-->
+The Auth module keeps two: the permission set (`auth:perm:{userId}`, 30 seconds) and the spent social-login nonces (`auth:ext-nonce:{hash}`, `Auth:External:MaxTokenAge` plus `Auth:Jwt:ClockSkew`), the second kept even with `none` because it guards against replay (single use within one instance comes from the Auth module's own in-process gate, which does not depend on this setting).
 
 | Key | Default | Validation (on start) | Meaning |
 |---|---|---|---|
-| `Provider` | `memory` | `memory`, `redis` or `none` (any case); `redis` also needs `AddPlatformRedis` in the host and `ConnectionStrings:Redis` | `memory`: in memory per instance. `redis`: in memory per instance with Redis as the shared second level, so a set one instance loaded is served to the others. `none`: no cache at all, every read goes to the database (for diagnosing); the spent social-login nonces are still kept in memory, and their in-process gate still makes each nonce single-use per instance. |
+| `Provider` | `memory` | `memory`, `redis` or `none` (any case); `redis` also needs a distributed cache in the host, or the host does not start ([infrastructure-common](../building-blocks/infrastructure-common.md#caching)) | `memory`: in memory per instance. `redis`: in memory per instance with Redis as the shared second level, so a set one instance loaded is served to the others. `none`: no cache at all, every read goes to the database (for diagnosing); the spent social-login nonces are still kept in memory, and their in-process gate still makes each nonce single-use per instance. |
+<!--#if (caching == "redis")-->
 | `Redis:InstanceName` | `TemplateName:` | required (provider `redis`) | The prefix of every Redis key (`{InstanceName}{module}:{entity}:{id}`, the rate-limit windows `{InstanceName}rl:…`) and of the SignalR channels (`{InstanceName}signalr…`), so applications can share one server. **Unique per deployment** sharing a Redis, for example `MyApp:prod:` and `MyApp:staging:`, because deployments that share a server with the same prefix share rate-limit counts, SignalR channels (pushes) and cached permission sets; staging and production sharing one Redis with the default would count each other's requests and, when staging's database is a restored copy of production (the same user ids), serve each other's permission sets and pushes. |
 | `Redis:FailureThreshold` | `3` | 1 to 100 (provider `redis`) | Consecutive failed Redis calls after which Redis is skipped for `BreakDuration`. |
 | `Redis:BreakDuration` | `00:00:30` | `00:00:01` to `01:00:00` (provider `redis`) | How long Redis is skipped (reads miss to the database, writes are dropped) once the threshold is reached; then it is tried again. |
 | `Redis:CommandTimeout` | `00:00:00.500` | `00:00:00.050` to `00:00:30`, and shorter than `BreakDuration` (provider `redis`) | The connect, sync and async timeouts, and the bound on every asynchronous cache call and readiness `PING`: the most a request or a check waits for a Redis that does not answer. While the connection is down commands fail at once (`FailFast`), and the heartbeat that detects timed-out commands is shortened to this value (at most one second). |
+<!--#endif-->
 
-With Redis down the API keeps serving: cache reads go to the database, one warning is logged per outage and `/health/ready` answers 200 `Degraded`. One warning per outage is the circuit's own log only: the health-check service (`Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService`) also logs every check that ends `Degraded` at Warning (and `Unhealthy` at Error), with the check's exception, so a readiness probe every few seconds writes a Warning each time for the whole outage (checked against the installed 10.0 framework). To keep only the circuit's line, set `Serilog:MinimumLevel:Override:Microsoft.Extensions.Diagnostics.HealthChecks` to `Error` (`Serilog__MinimumLevel__Override__Microsoft.Extensions.Diagnostics.HealthChecks=Error` in the environment); an `Unhealthy` check, such as the database's, still logs. An instance keeps a permission set in memory for 30 seconds, and a change made through another instance is not pushed to it, so a removed permission can still be used on another instance for up to 30 seconds, with or without Redis ([platform-redis](../building-blocks/platform-redis.md#cross-instance-invalidation-the-honest-limit)).
+<!--#if (caching == "redis")-->
+With Redis down the API keeps serving: cache reads go to the database, one warning is logged per outage and `/health/ready` answers 200 `Degraded`. One warning per outage is the circuit's own log only: the health-check service (`Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService`) also logs every check that ends `Degraded` at Warning (and `Unhealthy` at Error), with the check's exception, so a readiness probe every few seconds writes a Warning each time for the whole outage (checked against the installed 10.0 framework). To keep only the circuit's line, set `Serilog:MinimumLevel:Override:Microsoft.Extensions.Diagnostics.HealthChecks` to `Error` (`Serilog__MinimumLevel__Override__Microsoft.Extensions.Diagnostics.HealthChecks=Error` in the environment); an `Unhealthy` check, such as the database's, still logs.
+<!--#endif-->
+An instance keeps a permission set in memory for 30 seconds, and a change made through another instance is not pushed to it, so a removed permission can still be used on another instance for up to 30 seconds.
+<!--#if (caching == "redis")-->
+Redis does not change that ([platform-redis](../building-blocks/platform-redis.md#cross-instance-invalidation-the-honest-limit)).
+<!--#endif-->
 
 ### `Jobs`
 
@@ -325,8 +341,10 @@ How long the Audit module keeps its audit trails before a cleanup job deletes th
 | `GET /health/live` | none: 200 while the process serves requests | Liveness probe |
 | `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `auth`, `notify`, `sample`, `audit`, plus one per added module), and with `Caching:Provider = redis` the check `redis` (a `PING`) | Readiness probe, load balancer |
 
+<!--#if (caching == "redis")-->
 The `redis` check fails as `Degraded`, not `Unhealthy`: with Redis down `/health/ready` answers **200** with the body `Degraded`, because the instance still serves from the database and a load balancer must not drain every instance for a cache outage. A database check that fails still answers 503 `Unhealthy`.
 
+<!--#endif-->
 Both are anonymous, exempt from rate limiting, logged at `Verbose` when healthy, and left out of traces.
 
 ## OpenAPI and Scalar
@@ -365,11 +383,18 @@ HTTP security:
 - CORS preflight requests are answered before the rate limiter, so they are not counted. 401 and 403 responses are counted: the limiter (slot 9a) runs before authorization (slot 10), so an anonymous request to a protected or unknown route and a signed-in request without the permission each use up the caller's allowance (an anonymous caller is partitioned by address, a signed-in one by `user:{sub}`).
 - An anonymous request to a route that does not exist gets 401, not 404: the fallback policy also covers requests that matched no endpoint, so anonymous callers cannot probe which routes exist. A signed-in caller gets 404.
 - IPv6 and IPv4-mapped addresses are partition keys as plain strings, so one client can appear as two addresses.
-- With the default `Caching:Provider` (`memory`) the limiters keep their counters in memory per instance: with N instances a client gets up to N × `GlobalPermitLimit`. With `redis` every fixed window (global, `auth-strict`, hub tickets) is one count in Redis shared by the instances, and while Redis is down each instance counts on its own again ([platform-redis](../building-blocks/platform-redis.md#rate-limiting)).
+- With the default `Caching:Provider` (`memory`) the limiters keep their counters in memory per instance: with N instances a client gets up to N × `GlobalPermitLimit`.
+  <!--#if (caching == "redis")-->
+  With `redis` every fixed window (global, `auth-strict`, hub tickets) is one count in Redis shared by the instances, and while Redis is down each instance counts on its own again ([platform-redis](../building-blocks/platform-redis.md#rate-limiting)).
+  <!--#endif-->
 - A bare `Accept-Language: zh` gets English, because `zh` is not a supported culture and `zh-Hans` is its child, not its parent.
 
 Notifications:
-- With `Caching:Provider = redis` the SignalR hub pushes to the user's connections on every instance (the Redis backplane) and the per-user hub ticket limit is one count shared by the instances; without it, the hub pushes only to the connections on the instance that delivered the notification and each instance counts tickets alone. While Redis is down no push is live. The inbox endpoints are always complete. More: [Notifications: Operations and known limits](../modules/notifications.md#operations-and-known-limits).
+- Without Redis the SignalR hub pushes only to the connections on the instance that delivered the notification, and each instance counts hub tickets alone.
+  <!--#if (caching == "redis")-->
+  With `Caching:Provider = redis` it pushes to the user's connections on every instance (the Redis backplane) and the per-user hub ticket limit is one count shared by the instances; while Redis is down no push is live.
+  <!--#endif-->
+  The inbox endpoints are always complete. More: [Notifications: Operations and known limits](../modules/notifications.md#operations-and-known-limits).
 - A rejected sender address (a wrong `Notifications:Email:From`) fails every email; it is retried for about 81 minutes before the emails are dead-lettered: watch the retry Warnings and the dead-letter metric.
 
 Observability:

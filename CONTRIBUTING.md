@@ -139,7 +139,7 @@ Update the matching document **in the same PR** when you change any of these:
 | You changed… | Update |
 |---|---|
 | an endpoint, error code, event, table, configuration key or background job of a module | `docs/modules/{module}.md` |
-| a building block (SharedKernel, Application.Common, Infrastructure.Common, Web.Common, Platform.Redis) | `docs/building-blocks/{name}.md` |
+| a building block (a project under `src/BuildingBlocks/`) | `docs/building-blocks/{name}.md` |
 | host pipeline, configuration sections, health checks, hosting | `docs/services/api.md` |
 | module boundaries or cross-module flows | `docs/architecture/overview.md` |
 | a significant or hard-to-reverse decision | a new `docs/adr/NNNN-*.md` |

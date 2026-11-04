@@ -39,7 +39,10 @@
 # image's HEALTHCHECK sends Host 127.0.0.1:<port>) and localhost. Host filtering answers 400 to any other Host, so steps 4 and 5
 # (the HEALTHCHECK and the curl to 127.0.0.1) prove that this documented shape keeps the probes working.
 # Everything else starts in Production with the defaults of appsettings.json, read from the options classes and the module
-# registrations (AddInfrastructureCommon, AddHttpSecurity, AddAuthModule, AddNotificationsModule, AddAuditModule, AddPlatformRedis):
+# registrations (AddInfrastructureCommon, AddHttpSecurity, AddAuthModule, AddNotificationsModule, AddAuditModule):
+#if (caching == "redis")
+#   - AddPlatformRedis registers nothing while Caching:Provider is memory (the default, below);
+#endif
 #   - the only environment-dependent checks in src/ are the signing key (above), HSTS plus HTTPS redirection outside Development
 #     (with no https port configured, UseHttpsRedirection only logs a warning and passes the request on; HSTS acts on https requests
 #     only; the Dockerfile says not to set an https port), OpenAPI and Scalar (not mapped in Production) and the log format;

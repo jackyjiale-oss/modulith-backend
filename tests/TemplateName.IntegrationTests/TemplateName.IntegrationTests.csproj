@@ -22,7 +22,9 @@
     <PackageReference Include="Respawn" />
     <PackageReference Include="Testcontainers" />
     <PackageReference Include="Testcontainers.MsSql" />
+    <!--#if (caching == "redis")-->
     <PackageReference Include="Testcontainers.Redis" />
+    <!--#endif-->
   </ItemGroup>
 
   <ItemGroup>

@@ -19,7 +19,7 @@ namespace TemplateName.UnitTests.Web;
 /// <summary>
 /// <see cref="IFixedWindowLimiterFactory"/>: the in-memory default behaves as the built-in fixed window always did, and the three
 /// fixed-window policies (<c>global</c>, <c>auth-strict</c>, <c>notifications-hub-tickets</c>) get their limiters from whatever factory
-/// is registered, so Platform.Redis can swap in its own.
+/// is registered, so another factory (a distributed one) can swap in its own.
 /// </summary>
 public sealed class FixedWindowLimiterFactoryTests
 {

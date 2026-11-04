@@ -93,6 +93,23 @@
             "tests/TemplateName.ArchitectureTests/packages.lock.json",
             "tests/TemplateName.IntegrationTests/packages.lock.json"
           ]
+        },
+        {
+          "condition": "(caching == \"memory\")",
+          "exclude": [
+            "src/BuildingBlocks/TemplateName.Platform.Redis/**",
+            "tests/TemplateName.IntegrationTests/Redis/**",
+            "tests/TemplateName.UnitTests/Platform/**",
+            "tests/TemplateName.IntegrationTests/Infrastructure/ValkeyFixture.cs",
+            "docs/building-blocks/platform-redis.md",
+            "docs/adr/0027-optional-redis-through-one-project.md"
+          ]
+        },
+        {
+          "condition": "(caching == \"redis\")",
+          "exclude": [
+            "tests/TemplateName.IntegrationTests/Caching/CachingProviderWithoutRedisTests.cs"
+          ]
         }
       ]
     },
