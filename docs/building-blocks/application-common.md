@@ -60,7 +60,11 @@ Code: `src/BuildingBlocks/TemplateName.Application.Common/`.
 
 ### Pagination
 
-Cursor (keyset) pagination for list queries (ADR 0010); the Sample module's list is the worked example, and the README's "Adding a paged list endpoint" recipe walks through it.
+Cursor (keyset) pagination for list queries (ADR 0010);
+<!--#if (includeSample)-->
+the Sample module's list is the worked example, and
+<!--#endif-->
+the README's "Adding a paged list endpoint" recipe walks through it.
 
 | Type | What it is |
 |---|---|

@@ -11,7 +11,9 @@ using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Audit;
 using TemplateName.Modules.Auth;
 using TemplateName.Modules.Notifications;
+//#if (includeSample)
 using TemplateName.Modules.Sample;
+//#endif
 //#if (caching == "redis")
 using TemplateName.Platform.Redis;
 //#endif
@@ -51,7 +53,9 @@ builder.Services.AddPermissionAuthorization();
 // Module registrations
 builder.Services.AddAuthModule(builder.Configuration);
 builder.Services.AddNotificationsModule(builder.Configuration);
+//#if (includeSample)
 builder.Services.AddSampleModule();
+//#endif
 // Consumes the change sets every module's outbox publishes (EntityChangesRecordedIntegrationEvent); any position among the modules works.
 builder.Services.AddAuditModule(builder.Configuration);
 //#if (caching == "redis")
@@ -149,7 +153,9 @@ api.MapAuthEndpoints();
 app.MapAuthWellKnownEndpoints();
 api.MapNotificationsEndpoints();
 app.MapNotificationsHub();
+//#if (includeSample)
 api.MapSampleEndpoints();
+//#endif
 api.MapAuditEndpoints();
 
 app.Run();

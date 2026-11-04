@@ -9,9 +9,11 @@
     <Project Path="src/BuildingBlocks/TemplateName.Platform.Redis/TemplateName.Platform.Redis.csproj" />
     <!--#endif-->
   </Folder>
+  <!--#if (includeSample)-->
   <Folder Name="/src/Modules/Sample/">
     <Project Path="src/Modules/Sample/TemplateName.Modules.Sample/TemplateName.Modules.Sample.csproj" />
   </Folder>
+  <!--#endif-->
   <Folder Name="/src/Modules/Auth/">
     <Project Path="src/Modules/Auth/TemplateName.Modules.Auth/TemplateName.Modules.Auth.csproj" />
     <Project Path="src/Modules/Auth/TemplateName.Modules.Auth.Contracts/TemplateName.Modules.Auth.Contracts.csproj" />

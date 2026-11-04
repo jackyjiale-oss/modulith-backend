@@ -110,6 +110,24 @@
           "exclude": [
             "tests/TemplateName.IntegrationTests/Caching/CachingProviderWithoutRedisTests.cs"
           ]
+        },
+        {
+          "condition": "(!includeSample)",
+          "exclude": [
+            "src/Modules/Sample/**",
+            "tests/TemplateName.UnitTests/Sample/**",
+            "tests/TemplateName.IntegrationTests/Sample/**",
+            "tests/TemplateName.IntegrationTests/Idempotency/IdempotencyTests.cs",
+            "tests/TemplateName.UnitTests/Localization/ErrorMessageLocalizerTests.cs",
+            "docs/modules/sample.md"
+          ]
+        },
+        {
+          "condition": "(!notifications || !includeSample)",
+          "exclude": [
+            "tests/TemplateName.IntegrationTests/Documentation/OpenApiSnapshotTests.OpenApi_document_matches_snapshot.verified.json",
+            "tests/TemplateName.IntegrationTests/Documentation/OpenApiSnapshotTests.cs"
+          ]
         }
       ]
     },

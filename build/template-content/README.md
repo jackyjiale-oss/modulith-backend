@@ -56,7 +56,9 @@ With these settings the API applies the module migrations on startup and seeds t
 | Auth (sign-in, social login, tokens, sessions, two-step verification with recovery codes, step-up and trusted devices, roles, permissions, audit log) | [`docs/modules/auth.md`](docs/modules/auth.md) |
 | Notifications (every email and in-app message, the inbox, the SignalR hub, preferences, quiet hours) | [`docs/modules/notifications.md`](docs/modules/notifications.md) |
 | Audit (the audit trail of field changes: who changed what, from which value to which, `GET /api/v1/admin/audit/trails`) | [`docs/modules/audit.md`](docs/modules/audit.md) |
+<!--#if (includeSample)-->
 | Sample (leave requests) | [`docs/modules/sample.md`](docs/modules/sample.md) |
+<!--#endif-->
 
 A new module gets its own page, copied from [`docs/modules/_template.md`](docs/modules/_template.md).
 
@@ -94,10 +96,16 @@ A new module creates `Resources/{Module}ErrorMessages.cs` (an empty `internal se
 
 ### Adding a paged list endpoint
 
-List endpoints page by cursor (keyset), never by offset (ADR 0010). Clients send `pageSize` (default 20, max 100), `cursor`, `sort` (`-createdAt`, `startDate,-createdAt`) and `includeTotalCount`, and get `{ items, pageSize, nextCursor, previousCursor, totalCount? }`. The Sample module's `GET /api/v1/sample/leave-requests` (`Application/LeaveRequests/List/`) is the worked example.
+List endpoints page by cursor (keyset), never by offset (ADR 0010). Clients send `pageSize` (default 20, max 100), `cursor`, `sort` (`-createdAt`, `startDate,-createdAt`) and `includeTotalCount`, and get `{ items, pageSize, nextCursor, previousCursor, totalCount? }`.
+<!--#if (includeSample)-->
+The Sample module's `GET /api/v1/sample/leave-requests` (`Application/LeaveRequests/List/`) is the worked example.
+<!--#endif-->
 
 1. **Allow-list the sort fields.** Add `{Aggregates}SortFields` next to the query: one `SortField(apiName, "[Column]", typeof(T))` per sortable field (camelCase API name, a bracketed column constant, a non-nullable column), the `Id` tie-breaker, `Allowed` and `Default`. Column names are written into SQL, so they are only ever these constants, never request text.
-2. **Index every allowed sort.** In the entity configuration add one index per sort, `(filter columns…, SortColumn, Id)`, for example `HasIndex(x => new { x.EmployeeId, x.CreatedAt, x.Id })`, then generate a migration with `dotnet ef migrations add` (see the module page). Migration review checks that each allowed sort has its index. Combinations without one (a multi-term sort such as `startDate,-createdAt`, or a filter that does not lead the sort's index, such as `employeeId` with `sort=startDate` in the Sample module) fall back to a scan plus a top-N sort: allow-list only covered sorts, or add the index.
+2. **Index every allowed sort.** In the entity configuration add one index per sort, `(filter columns…, SortColumn, Id)`, for example `HasIndex(x => new { x.EmployeeId, x.CreatedAt, x.Id })`, then generate a migration with `dotnet ef migrations add` (see the module page). Migration review checks that each allowed sort has its index. Combinations without one (a multi-term sort such as `startDate,-createdAt`, or a filter that does not lead the sort's index, such as `employeeId` with `sort=startDate`) fall back to a scan plus a top-N sort: allow-list only covered sorts, or add the index.
+   <!--#if (includeSample)-->
+   The second example is from the Sample module.
+   <!--#endif-->
 3. **Write the query, validator and handler.** `List{Aggregates}Query(filters…, CursorPageRequest Page) : IQuery<CursorPage<{Item}Response>>`; the validator checks `Page.PageSize` is 1 to `CursorPageRequest.MaxPageSize` (`.OverridePropertyName("PageSize")`, so the error key is `pageSize`). The handler:
    - parses the sort with `SortSpecification.Parse(page.Sort, Allowed, Id, Default)`;
    - hashes the canonical filter text with `CursorCodec.ComputeFilterHash("employeeId=…;status=…")` and, when a cursor was sent, decodes it with `CursorCodec.Decode(cursor, sort, filterHash)` (return the error on failure);

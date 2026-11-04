@@ -12,7 +12,9 @@ using TemplateName.Modules.Auth.Domain.Roles;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
 using TemplateName.Modules.Notifications.Application;
+//#if (includeSample)
 using TemplateName.Modules.Sample.Application;
+//#endif
 
 namespace TemplateName.IntegrationTests.Auth;
 
@@ -52,7 +54,15 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
     private readonly List<AsyncServiceScope> _scopes = [];
 
     /// <summary>The codes the modules declare: those of the Auth, Sample, Notifications and Audit modules (through their <c>IPermissionSource</c>).</summary>
-    private static IEnumerable<string> ModuleCodes => new IPermissionSource[] { new AuthPermissionSource(), new SamplePermissionSource(), new NotificationsPermissionSource(), new AuditPermissionSource() }
+    private static IEnumerable<string> ModuleCodes => new IPermissionSource[]
+        {
+            new AuthPermissionSource(),
+            //#if (includeSample)
+            new SamplePermissionSource(),
+            //#endif
+            new NotificationsPermissionSource(),
+            new AuditPermissionSource(),
+        }
         .SelectMany(source => source.Permissions)
         .Select(permission => permission.Code);
 

@@ -56,7 +56,9 @@ public sealed class AuditingTests
     {
         AuditedTypes().Select(type => type.FullName).ShouldBe(
             [
+                //#if (includeSample)
                 "TemplateName.Modules.Sample.Domain.LeaveRequests.LeaveRequest",
+                //#endif
                 "TemplateName.Modules.Auth.Domain.Users.User",
                 "TemplateName.Modules.Auth.Domain.Roles.Role",
                 "TemplateName.Modules.Auth.Domain.Roles.RolePermission",
@@ -73,7 +75,9 @@ public sealed class AuditingTests
 
         ignored["User"].ShouldBe(["NormalizedEmail", "LastLoginAt", "AccessFailedCount", "PasswordHash", "SecurityStamp"], ignoreOrder: true);
         ignored["Role"].ShouldBe(["NormalizedName"]);
+        //#if (includeSample)
         ignored["LeaveRequest"].ShouldBeEmpty();
+        //#endif
         ignored["RolePermission"].ShouldBeEmpty();
         ignored["UserRole"].ShouldBeEmpty();
         ignored["UserExternalLogin"].ShouldBe(["LastUsedAt"]);

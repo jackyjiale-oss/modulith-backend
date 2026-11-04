@@ -2,19 +2,26 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Resources;
+//#if (includeSample)
 using System.Text;
+//#endif
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
+//#if (includeSample)
 using TemplateName.Infrastructure.Common.Resources;
+//#endif
 using TemplateName.IntegrationTests.Infrastructure;
+//#if (includeSample)
 using TemplateName.Modules.Sample.Endpoints;
 using TemplateName.Modules.Sample.Resources;
+//#endif
 using TemplateName.Web.Common.Resources;
 
 namespace TemplateName.IntegrationTests.Localization;
 
 public sealed class LocalizationTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)
 {
+    //#if (includeSample)
     private const string BaseRoute = "/api/v1/sample/leave-requests";
 
     // A saved locale the API does not support. The saved locale wins over Accept-Language (decision D7); this one leaves the choice to
@@ -124,6 +131,7 @@ public sealed class LocalizationTests(IntegrationTestWebAppFactory factory) : In
         (await response.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("status").GetString().ShouldBe("Pending");
     }
 
+    //#endif
     [Fact]
     public async Task Rate_limit_responses_are_localized()
     {
@@ -144,6 +152,7 @@ public sealed class LocalizationTests(IntegrationTestWebAppFactory factory) : In
             .ShouldBe(Resource(typeof(CommonErrorMessages), "rate_limit.exceeded", "zh-Hans"));
     }
 
+    //#if (includeSample)
     [Fact]
     public async Task Idempotency_responses_are_localized()
     {
@@ -159,6 +168,7 @@ public sealed class LocalizationTests(IntegrationTestWebAppFactory factory) : In
         body.GetProperty("detail").GetString().ShouldBe(Resource(typeof(InfrastructureErrorMessages), "idempotency.invalid_key", "ms"));
     }
 
+    //#endif
     [Fact]
     public void Background_default_culture_is_english()
     {
@@ -166,17 +176,21 @@ public sealed class LocalizationTests(IntegrationTestWebAppFactory factory) : In
         CultureInfo.DefaultThreadCurrentCulture!.Name.ShouldBe("en");
     }
 
+    //#if (includeSample)
     private static SubmitLeaveRequestRequest Valid()
         => new(Guid.NewGuid(), new DateOnly(2026, 2, 2), new DateOnly(2026, 2, 4), "Family trip");
 
+    //#endif
     /// <summary>The translation itself (no parent fallback), so a missing entry fails instead of comparing English with English.</summary>
     private static string Resource(Type resource, string key, string culture)
         => new ResourceManager(resource.FullName!, resource.Assembly)
             .GetResourceSet(CultureInfo.GetCultureInfo(culture), createIfNotExists: true, tryParents: false)!
             .GetString(key)!;
 
+    //#if (includeSample)
     private Task<HttpResponseMessage> GetAsync(string url, string language) => GetAsync(Client, url, language);
 
+    //#endif
     private static async Task<HttpResponseMessage> GetAsync(HttpClient client, string url, string language, string? accessToken = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
@@ -188,6 +202,7 @@ public sealed class LocalizationTests(IntegrationTestWebAppFactory factory) : In
 
         return await client.SendAsync(request, Ct);
     }
+    //#if (includeSample)
 
     private async Task<JsonElement> SubmitInvalidAsync(string language)
     {
@@ -199,4 +214,5 @@ public sealed class LocalizationTests(IntegrationTestWebAppFactory factory) : In
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         return await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
     }
+    //#endif
 }

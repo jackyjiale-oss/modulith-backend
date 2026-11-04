@@ -1,10 +1,14 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
 using TemplateName.Application.Common.Identity;
+//#if (includeSample)
 using TemplateName.Modules.Auth.Application;
 using TemplateName.Modules.Auth.Infrastructure.Authorization;
+//#endif
 using TemplateName.Modules.Notifications.Application;
+//#if (includeSample)
 using TemplateName.Modules.Sample.Application;
+//#endif
 
 namespace TemplateName.UnitTests.Notifications;
 
@@ -44,6 +48,7 @@ public sealed partial class NotificationsPermissionSourceTests
         new NotificationsPermissionSource().Permissions.Select(permission => permission.Code).ShouldBe(declared, ignoreOrder: true);
     }
 
+    //#if (includeSample)
     [Fact]
     public void The_auth_synchronizer_accepts_the_source_next_to_the_other_modules()
     {
@@ -55,6 +60,7 @@ public sealed partial class NotificationsPermissionSourceTests
         definitions.Count(definition => definition.Module == "notifications").ShouldBe(2);
     }
 
+    //#endif
     [Fact]
     public void PermissionDefinition_is_not_an_admin_default_unless_flagged()
     {

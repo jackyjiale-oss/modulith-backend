@@ -11,7 +11,9 @@
     <ProjectReference Include="..\..\src\Modules\Auth\TemplateName.Modules.Auth\TemplateName.Modules.Auth.csproj" />
     <ProjectReference Include="..\..\src\Modules\Auth\TemplateName.Modules.Auth.Contracts\TemplateName.Modules.Auth.Contracts.csproj" />
     <ProjectReference Include="..\..\src\Modules\Notifications\TemplateName.Modules.Notifications\TemplateName.Modules.Notifications.csproj" />
+    <!--#if (includeSample)-->
     <ProjectReference Include="..\..\src\Modules\Sample\TemplateName.Modules.Sample\TemplateName.Modules.Sample.csproj" />
+    <!--#endif-->
     <ProjectReference Include="..\..\src\Modules\Audit\TemplateName.Modules.Audit\TemplateName.Modules.Audit.csproj" />
     <ProjectReference Include="..\..\src\Host\TemplateName.Api\TemplateName.Api.csproj" />
   </ItemGroup>

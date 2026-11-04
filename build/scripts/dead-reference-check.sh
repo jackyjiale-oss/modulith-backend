@@ -64,8 +64,30 @@ if [[ "$notifications" == "false" ]]; then
 fi
 
 if [[ "$include_sample" == "false" ]]; then
-  # No allowlist: the tracing sampler (a "Sample = ..." property) matches none of these patterns.
-  scan 'Modules\.Sample|SampleModule|SampleDbContext|SampleError|modules/sample|Sample module|LeaveRequest|leave request' '--includeSample false'
+  # The tracing sampler (a "Sample = ..." property) matches none of these patterns.
+  # The module's names: allowed only where the naming conventions and the building-block pages use them as examples of a name.
+  allow=(
+    # The naming tables give Sample's names as the example of each rule (SampleDbContext, SampleModule, the namespace, the paths).
+    '^docs/coding-conventions\.md$'
+    # The code examples of a handler's registration and of a module DbContext are written as Sample's.
+    '^docs/building-blocks/(application|infrastructure)-common\.md$'
+  )
+  scan 'Modules\.Sample|SampleModule|SampleDbContext|SampleError|modules/sample|Sample module' '--includeSample false' "${allow[@]}"
+  # Its aggregate: also allowed where "LeaveRequest" is only an example name or a string of test data, never a type that is used.
+  allow+=(
+    # The code examples of an aggregate and an endpoint group use the leave request.
+    '^docs/building-blocks/(shared-kernel|web-common)\.md$'
+    # The Conventional Commit examples.
+    '^CONTRIBUTING\.md$'
+    # Doc comments that give "LeaveRequest" as an example of an entity type name.
+    '^src/BuildingBlocks/[^/]+\.SharedKernel/Auditing/EntityChange\.cs$'
+    '^src/Modules/Audit/[^/]+/Application/Trails/List/AuditTrailResponse\.cs$'
+    # Tests of the audit trail and the permission synchronizer whose data names an entity type or a permission as plain strings.
+    '^tests/[^/]+\.UnitTests/(Audit/AuditTrailTests|Auth/PermissionSynchronizerTests)\.cs$'
+    '^tests/[^/]+\.UnitTests/(SharedKernel|Infrastructure)/Auditing/EntityChangesRecorded(Event|DomainEventHandler)Tests\.cs$'
+    '^tests/[^/]+\.IntegrationTests/Audit/Audit(Consumer|Persistence|TrailEndpoint|TrailsCleanupJob)Tests\.cs$'
+  )
+  scan 'LeaveRequest|leave request' '--includeSample false' "${allow[@]}"
 fi
 
 if [[ "$caching" == "memory" ]]; then

@@ -8,8 +8,10 @@ using TemplateName.Modules.Auth.Contracts.Users;
 using TemplateName.Modules.Auth.Resources;
 using TemplateName.Modules.Notifications;
 using TemplateName.Modules.Notifications.Resources;
+//#if (includeSample)
 using TemplateName.Modules.Sample;
 using TemplateName.Modules.Sample.Resources;
+//#endif
 //#if (caching == "redis")
 using TemplateName.Platform.Redis;
 //#endif
@@ -45,7 +47,9 @@ public static class Assemblies
     [
         typeof(AuthModule).Assembly,
         typeof(NotificationsModule).Assembly,
+        //#if (includeSample)
         typeof(SampleModule).Assembly,
+        //#endif
         typeof(AuditModule).Assembly,
     ];
 
@@ -74,7 +78,9 @@ public static class Assemblies
         typeof(InfrastructureErrorMessages),
         typeof(AuthErrorMessages),
         typeof(NotificationsErrorMessages),
+        //#if (includeSample)
         typeof(SampleErrorMessages),
+        //#endif
     ];
 
     /// <summary>

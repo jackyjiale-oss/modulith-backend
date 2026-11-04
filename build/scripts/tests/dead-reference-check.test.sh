@@ -197,6 +197,33 @@ case_sample_other_patterns() {
   done
 }
 
+case_sample_allowlist() {
+  make_tree
+  put docs/coding-conventions.md "$(printf 'SampleDbContext\nLeaveRequest')"
+  run_check true false redis
+  assert_eq "0" "$status" "sample_allowlist: the naming conventions"
+  make_tree
+  put docs/building-blocks/shared-kernel.md 'LeaveRequest'
+  run_check true false redis
+  assert_eq "0" "$status" "sample_allowlist: an example aggregate"
+  make_tree
+  put docs/building-blocks/shared-kernel.md 'SampleModule'
+  run_check true false redis
+  assert_eq "1" "$status" "sample_allowlist: the module's name on a page that only borrows its aggregate"
+  make_tree
+  put tests/Acme.IntegrationTests/Audit/AuditTrailEndpointTests.cs 'LeaveRequest'
+  run_check true false redis
+  assert_eq "0" "$status" "sample_allowlist: test data of the audit trail"
+  make_tree
+  put tests/Acme.IntegrationTests/Audit/AuditTrailEndpointTests.cs 'using Acme.Modules.Sample.Domain;'
+  run_check true false redis
+  assert_eq "1" "$status" "sample_allowlist: the module's namespace in a test of the audit trail"
+  make_tree
+  put tests/Acme.IntegrationTests/Audit/AuditTrailEndToEndTests.cs 'LeaveRequest'
+  run_check true false redis
+  assert_eq "1" "$status" "sample_allowlist: another audit test"
+}
+
 case_each_part_checked_only_when_removed() {
   make_tree
   put src/A.cs "$(everything)"
@@ -249,7 +276,7 @@ run_case() {
 for c in \
   case_all_switches_on case_notifications_removed_hit case_notifications_other_patterns case_hit_line_number \
   case_ignored_paths case_flag_text_line_allowed case_redis_allowlist case_redis_other_patterns \
-  case_notifications_allowlist case_sample_removed case_sample_other_patterns \
+  case_notifications_allowlist case_sample_removed case_sample_other_patterns case_sample_allowlist \
   case_each_part_checked_only_when_removed case_caching_redis_never_checked case_usage_errors; do
   run_case "$c"
 done

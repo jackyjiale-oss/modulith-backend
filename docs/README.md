@@ -34,7 +34,9 @@ Everything about how this service is built and run. Documents are part of the de
 | [`modules/auth.md`](modules/auth.md) | Auth: registration, sign-in, social login (Google, Apple, Microsoft, Facebook, generic OpenID Connect), tokens, sessions, passwords, two-step verification (TOTP, recovery codes, step-up, trusted devices), roles, permissions and the audit log |
 | [`modules/notifications.md`](modules/notifications.md) | Notifications: every email and in-app message, from Auth's integration events to SMTP, the inbox and the SignalR hub; templates, preferences, quiet hours, delivery worker, administration |
 | [`modules/audit.md`](modules/audit.md) | Audit: the audit trail of field changes (who changed what, from which value to which), fed by every module's outbox, the admin trail list, optional retention |
+<!--#if (includeSample)-->
 | [`modules/sample.md`](modules/sample.md) | Sample: leave requests, the worked example of every pattern |
+<!--#endif-->
 | [`modules/_template.md`](modules/_template.md) | The required outline; copy it to `modules/{module}.md` when you add a module |
 
 ## Deployment

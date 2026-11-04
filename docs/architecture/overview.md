@@ -11,7 +11,9 @@ flowchart TD
     subgraph Modules["Business modules (internal by default)"]
         Auth["TemplateName.Modules.Auth<br/>Domain · Application · Infrastructure · Endpoints"]
         Notifications["TemplateName.Modules.Notifications<br/>Domain · Application · Infrastructure · Endpoints"]
+        %%#if (includeSample)
         Sample["TemplateName.Modules.Sample<br/>Domain · Application · Infrastructure · Endpoints"]
+        %%#endif
         Audit["TemplateName.Modules.Audit<br/>Domain · Application · Infrastructure · Endpoints"]
         Contracts["TemplateName.Modules.{Module}.Contracts<br/>integration events, public interfaces<br/>(Auth today)"]
     end
@@ -28,7 +30,9 @@ flowchart TD
 
     Api --> Auth
     Api --> Notifications
+    %%#if (includeSample)
     Api --> Sample
+    %%#endif
     Api --> Audit
     Api --> Web
     Api --> Infra
@@ -37,7 +41,9 @@ flowchart TD
     Api -. "Caching:Provider = redis" .-> Redis
     %%#endif
     Auth -. "other modules only via" .-> Contracts
+    %%#if (includeSample)
     Sample -. "other modules only via" .-> Contracts
+    %%#endif
     Notifications -. "reads Auth only via" .-> Contracts
     Auth --> Web
     Auth --> Infra
@@ -51,10 +57,12 @@ flowchart TD
     Audit --> Infra
     Audit --> App
     Audit --> Kernel
+    %%#if (includeSample)
     Sample --> Web
     Sample --> Infra
     Sample --> App
     Sample --> Kernel
+    %%#endif
     Web --> App
     Infra --> App
     Web --> Kernel
@@ -93,9 +101,16 @@ flowchart LR
     AuthZ --> Idem["11 Idempotency-Key"] --> EP["12 Endpoint"]
 ```
 
-**Authentication and authorization.** Every endpoint requires a signed-in user unless it says `.AllowAnonymous()` (the fallback policy). Authentication (slot 1a) validates the `Authorization: Bearer` access token, an ES256 JWT the Auth module issued, with no database read; a missing or invalid token leaves the request anonymous and never fails there. It runs before localization so the token's saved `locale` claim picks the response language ahead of `Accept-Language` (ADR 0009). Authorization (slot 10) runs after routing and the rate limiter: an endpoint with `.RequirePermission(code)` asks `IPermissionChecker`, which the Auth module implements over a per-user set cached for 30 seconds, because permissions are never carried in the token (ADR 0016). Anonymous callers get 401 and signed-in callers without the permission 403, both as ProblemDetails, and both are counted by the rate limiter. Other modules declare their permissions with `IPermissionSource` and depend only on `Application.Common`'s `IPermissionChecker` and `ICurrentUser`, never on the Auth module; the Sample module's `LeaveRequestEndpoints` is the example. A sensitive action asks for a fresh identity through the token's `auth_time` and `amr` claims (a step-up, ADR 0023), again with no database read. Details: [Auth module](../modules/auth.md#access-tokens), [Auth: Multi-factor authentication](../modules/auth.md#multi-factor-authentication) and [`docs/services/api.md`](../services/api.md#pipeline).
+**Authentication and authorization.** Every endpoint requires a signed-in user unless it says `.AllowAnonymous()` (the fallback policy). Authentication (slot 1a) validates the `Authorization: Bearer` access token, an ES256 JWT the Auth module issued, with no database read; a missing or invalid token leaves the request anonymous and never fails there. It runs before localization so the token's saved `locale` claim picks the response language ahead of `Accept-Language` (ADR 0009). Authorization (slot 10) runs after routing and the rate limiter: an endpoint with `.RequirePermission(code)` asks `IPermissionChecker`, which the Auth module implements over a per-user set cached for 30 seconds, because permissions are never carried in the token (ADR 0016). Anonymous callers get 401 and signed-in callers without the permission 403, both as ProblemDetails, and both are counted by the rate limiter. Other modules declare their permissions with `IPermissionSource` and depend only on `Application.Common`'s `IPermissionChecker` and `ICurrentUser`, never on the Auth module.
+<!--#if (includeSample)-->
+The Sample module's `LeaveRequestEndpoints` is the example.
+<!--#endif-->
+A sensitive action asks for a fresh identity through the token's `auth_time` and `amr` claims (a step-up, ADR 0023), again with no database read. Details: [Auth module](../modules/auth.md#access-tokens), [Auth: Multi-factor authentication](../modules/auth.md#multi-factor-authentication) and [`docs/services/api.md`](../services/api.md#pipeline).
 
-Inside an endpoint (the Sample module's `LeaveRequestEndpoints` is the worked example):
+Inside an endpoint:
+<!--#if (includeSample)-->
+(the Sample module's `LeaveRequestEndpoints` is the worked example)
+<!--#endif-->
 
 1. The endpoint binds the body or query (malformed input throws, and the exception handler answers `400 request.malformed`), builds a command or query record and calls the injected `ICommandHandler<…>` or `IQueryHandler<…>`.
 2. The handler is wrapped by the decorators: logging (outermost) then validation. Validation failures return `400 validation.failed` with camel-cased field `errors` without reaching the handler (ADR 0005).
@@ -127,14 +142,23 @@ One SQL Server database, one schema per owner, each with its own `__EFMigrations
 | `platform` | Infrastructure.Common (building block) | `PlatformDbContext` | `IdempotencyKeys`, `JobStates` | `src/BuildingBlocks/TemplateName.Infrastructure.Common/Idempotency/Migrations/` |
 | `auth` | Auth module | `AuthDbContext` | `Users`, `PasswordHistory`, `UserRoles`, `Roles`, `Permissions`, `RolePermissions`, `UserExternalLogins`, `UserSessions`, `RefreshTokens`, `VerificationCodes`, `UserMfaMethods`, `RecoveryCodes`, `MfaChallenges`, `TrustedDevices`, `AuthAuditLogs`, `DataProtectionKeys`, `OutboxMessages`, `OutboxMessageConsumers` | `src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Persistence/Migrations/` |
 | `notify` | Notifications module | `NotificationsDbContext` | `Notifications`, `Deliveries`, `InAppNotifications`, `UserPreferences`, `UserSettings`, `HubTickets`, `InboxMessages` (no outbox) | `src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Persistence/Migrations/` |
+<!--#if (includeSample)-->
 | `sample` | Sample module | `SampleDbContext` | `LeaveRequests`, `OutboxMessages`, `OutboxMessageConsumers` | `src/Modules/Sample/TemplateName.Modules.Sample/Infrastructure/Persistence/Migrations/` |
+<!--#endif-->
 | `audit` | Audit module | `AuditDbContext` | `AuditTrails`, `InboxMessages` (no outbox) | `src/Modules/Audit/TemplateName.Modules.Audit/Infrastructure/Persistence/Migrations/` |
 
 `MigrateModuleDatabasesAsync` applies every registered context's migrations in registration order (`platform` first, because `AddInfrastructureCommon` registers it before any module). The tables of each module are described in its document; `platform.IdempotencyKeys` in [`infrastructure-common`](../building-blocks/infrastructure-common.md#idempotency) and `platform.JobStates` under [recurring jobs](../building-blocks/infrastructure-common.md#recurring-jobs).
 
 ## Cross-module communication
 
-There are four modules today (Sample, Auth, Notifications and Audit). Auth's outbox handlers turn ten domain events into the integration events of `TemplateName.Modules.Auth.Contracts`, which also holds `IUserContactDirectory` (see [`docs/modules/auth.md`](../modules/auth.md#events)); Notifications references that project only and consumes the events through its inbox (see [`docs/modules/notifications.md`](../modules/notifications.md#events)). Sample uses neither. The Audit module is fed differently: its input event, `EntityChangesRecordedIntegrationEvent`, is defined in `Application.Common` (not in a module's contracts, because every module's outbox publishes it and Audit must not reference every module's contracts), and every module's outbox runs one handler for it, registered once for the host. A contracts project references only `TemplateName.SharedKernel` and holds only public sealed records, enums and interfaces (`ContractsTests`). One message, from the endpoint to the recipient:
+<!--#if (includeSample)-->
+There are four modules today (Sample, Auth, Notifications and Audit).
+<!--#endif-->
+Auth's outbox handlers turn ten domain events into the integration events of `TemplateName.Modules.Auth.Contracts`, which also holds `IUserContactDirectory` (see [`docs/modules/auth.md`](../modules/auth.md#events)); Notifications references that project only and consumes the events through its inbox (see [`docs/modules/notifications.md`](../modules/notifications.md#events)).
+<!--#if (includeSample)-->
+Sample uses neither.
+<!--#endif-->
+The Audit module is fed differently: its input event, `EntityChangesRecordedIntegrationEvent`, is defined in `Application.Common` (not in a module's contracts, because every module's outbox publishes it and Audit must not reference every module's contracts), and every module's outbox runs one handler for it, registered once for the host. A contracts project references only `TemplateName.SharedKernel` and holds only public sealed records, enums and interfaces (`ContractsTests`). One message, from the endpoint to the recipient:
 
 ```mermaid
 flowchart LR

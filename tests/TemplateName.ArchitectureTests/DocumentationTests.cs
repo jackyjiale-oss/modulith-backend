@@ -78,7 +78,9 @@ public sealed class DocumentationTests
     }
 
     [Theory]
+    //#if (includeSample)
     [InlineData("Sample", "sample", "sample.md")]
+    //#endif
     [InlineData("LeaveManagement", "leave-management", "leave-management.md")]
     public void Module_document_name_is_the_kebab_case_module_name(string moduleName, string routeSegment, string fileName)
     {
@@ -90,7 +92,9 @@ public sealed class DocumentationTests
     }
 
     [Theory]
+    //#if (includeSample)
     [InlineData("/api/v1/sample/leave-requests/", "sample")]
+    //#endif
     [InlineData("/api/v1/auth/sessions/{id:guid}", "auth")]
     [InlineData("/api/v1/admin/auth/users/{id:guid}/lock", "auth")]
     [InlineData("/api/v1/admin/auth/users/", "auth")]
