@@ -15,6 +15,38 @@
   "guids": [
     "98fe211a-0cbf-4e56-bc38-acafb05bfb77"
   ],
+  "symbols": {
+    "notifications": {
+      "type": "parameter",
+      "datatype": "bool",
+      "defaultValue": "true",
+      "description": "Include the Notifications module (email and in-app notifications, the SignalR hub)."
+    },
+    "includeSample": {
+      "type": "parameter",
+      "datatype": "bool",
+      "defaultValue": "true",
+      "description": "Include the Sample module, the worked example of a module (leave requests)."
+    },
+    "caching": {
+      "type": "parameter",
+      "datatype": "choice",
+      "defaultValue": "redis",
+      "description": "The cache and coordination provider the project starts with.",
+      "choices": [
+        { "choice": "redis", "description": "Redis through the Platform.Redis building block." },
+        { "choice": "memory", "description": "In-memory only; the Platform.Redis project is not generated." }
+      ]
+    }
+  },
+  "SpecialCustomOperations": {
+    "docs/architecture/overview.md": {
+      "operations": [
+        { "type": "conditional", "configuration": { "if": ["<!--#if"], "else": ["<!--#else"], "elseif": ["<!--#elseif"], "endif": ["<!--#endif"], "trim": "true", "wholeLine": "true", "evaluator": "C++" } },
+        { "type": "conditional", "configuration": { "if": ["%%#if"], "else": ["%%#else"], "elseif": ["%%#elseif"], "endif": ["%%#endif"], "trim": "true", "wholeLine": "true", "evaluator": "C++" } }
+      ]
+    }
+  },
   "sources": [
     {
       "source": "./",
@@ -51,6 +83,17 @@
         "Version.props",
         "**/*.received.*",
         "build/template-content/**"
+      ],
+      "modifiers": [
+        {
+          "condition": "(!notifications || !includeSample || caching == \"memory\")",
+          "exclude": [
+            "src/Host/TemplateName.Api/packages.lock.json",
+            "tests/TemplateName.UnitTests/packages.lock.json",
+            "tests/TemplateName.ArchitectureTests/packages.lock.json",
+            "tests/TemplateName.IntegrationTests/packages.lock.json"
+          ]
+        }
       ]
     },
     {
