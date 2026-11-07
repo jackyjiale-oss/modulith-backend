@@ -4,7 +4,7 @@ using TemplateName.Modules.Sample.Domain.LeaveRequests.Events;
 
 namespace TemplateName.Modules.Sample.Application.LeaveRequests.Submit;
 
-/// <summary>Placeholder reaction to a submitted request; the Notifications plan replaces the log line with a notification.</summary>
+/// <summary>Placeholder reaction to a submitted request; a project replaces the log line with its own reaction.</summary>
 internal sealed partial class LeaveRequestSubmittedDomainEventHandler(
     ILogger<LeaveRequestSubmittedDomainEventHandler> logger) : IDomainEventHandler<LeaveRequestSubmittedDomainEvent>
 {

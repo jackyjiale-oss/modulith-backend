@@ -38,7 +38,11 @@ The query is a Dapper read (ADR 0006) over `[audit].[AuditTrails]`: every filter
 
 **Known gap in the OpenAPI document.** `changes` is described as an any-JSON-value schema (`{}`, the `JsonElement` component of the snapshot), not as `type: object`, because the response record carries it as a `JsonElement`. At runtime it is always a JSON object (`CK_AuditTrails_Changes_IsJson` only checks that the text is JSON, and the interceptor always writes an object); a client generated from the document should treat it as a free-form object.
 
-**No effect on assigning `Admin`.** `audit.trails.view` is not flagged `AdminDefault`, so adding the module does not change what the `Admin` role holds and the no-escalation rule for assigning it (`auth.permission_grant_not_allowed`, [Auth: User administration](auth.md#user-administration)) is unchanged, unlike the Notifications permissions ([Notifications: Permissions](notifications.md#permissions)). The seeder grants an `AdminDefault` code only to a newly created `Admin` role or in the run that first inserts it, and never takes a grant away; so a database whose seeding run inserted this code while it was still flagged would keep that `Admin` grant until an administrator removes it through `PUT /api/v1/admin/auth/roles/{id}/permissions`.
+**No effect on assigning `Admin`.** `audit.trails.view` is not flagged `AdminDefault`, so adding the module does not change what the `Admin` role holds and the no-escalation rule for assigning it (`auth.permission_grant_not_allowed`, [Auth: User administration](auth.md#user-administration)) is unchanged.
+<!--#if (notifications)-->
+The Notifications permissions, which are flagged `AdminDefault`, do change it ([Notifications: Permissions](notifications.md#permissions)).
+<!--#endif-->
+The seeder grants an `AdminDefault` code only to a newly created `Admin` role or in the run that first inserts it, and never takes a grant away; so a database whose seeding run inserted this code while it was still flagged would keep that `Admin` grant until an administrator removes it through `PUT /api/v1/admin/auth/roles/{id}/permissions`.
 
 ## Domain model
 

@@ -28,7 +28,9 @@ public sealed class MigrateCommandTests(IntegrationTestWebAppFactory factory)
         var schemas = await QueryAsync<string>(connectionString, "SELECT name FROM sys.schemas", Ct);
         schemas.ShouldContain("platform");
         schemas.ShouldContain("auth");
+        //#if (notifications)
         schemas.ShouldContain("notify");
+        //#endif
         //#if (includeSample)
         schemas.ShouldContain("sample");
         //#endif

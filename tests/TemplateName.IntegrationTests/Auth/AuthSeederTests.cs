@@ -11,7 +11,9 @@ using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Domain.Roles;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+//#if (notifications)
 using TemplateName.Modules.Notifications.Application;
+//#endif
 //#if (includeSample)
 using TemplateName.Modules.Sample.Application;
 //#endif
@@ -42,25 +44,32 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
         "auth.audit.view",
     ];
 
-    // The Auth defaults plus the two Notifications permissions, which are flagged AdminDefault too. The Audit permission is not: it reads
-    // every audited module's data, so only SuperAdmin holds it by default.
+    // The Auth defaults plus the other modules' permissions flagged AdminDefault.
+    //#if (notifications)
+    // The two Notifications permissions are flagged AdminDefault too.
+    //#endif
+    // The Audit permission is not: it reads every audited module's data, so only SuperAdmin holds it by default.
     private static readonly string[] AdminDefaults =
     [
         .. AuthAdminDefaults,
+        //#if (notifications)
         NotificationsPermissions.DeliveryView,
         NotificationsPermissions.DeliveryRetry,
+        //#endif
     ];
 
     private readonly List<AsyncServiceScope> _scopes = [];
 
-    /// <summary>The codes the modules declare: those of the Auth, Sample, Notifications and Audit modules (through their <c>IPermissionSource</c>).</summary>
+    /// <summary>The codes the modules declare: those of every module (through their <c>IPermissionSource</c>).</summary>
     private static IEnumerable<string> ModuleCodes => new IPermissionSource[]
         {
             new AuthPermissionSource(),
             //#if (includeSample)
             new SamplePermissionSource(),
             //#endif
+            //#if (notifications)
             new NotificationsPermissionSource(),
+            //#endif
             new AuditPermissionSource(),
         }
         .SelectMany(source => source.Permissions)
@@ -135,15 +144,24 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
         admin.ShouldNotContain(AuthPermissions.UserAssignRoles);
         admin.ShouldNotContain(AuthPermissions.RoleManage);
 
-        // The only additions are the other modules' flagged permissions (Notifications here; Sample and Audit flag none).
+        // The only additions are the other modules' flagged permissions (Sample and Audit flag none).
+        //#if (notifications)
+        // Notifications flags two.
+        //#endif
         admin.Where(code => !code.StartsWith("auth.", StringComparison.Ordinal)).ShouldBe(
-            [NotificationsPermissions.DeliveryView, NotificationsPermissions.DeliveryRetry],
+            [
+                //#if (notifications)
+                NotificationsPermissions.DeliveryView,
+                NotificationsPermissions.DeliveryRetry,
+                //#endif
+            ],
             ignoreOrder: true);
         admin.ShouldNotContain(AuditPermissions.TrailsView);
         (await GrantedCodesAsync(SystemRoles.User)).ShouldBeEmpty();
         (await GrantedCodesAsync(SystemRoles.SuperAdmin)).ShouldBe(ModuleCodes, ignoreOrder: true);
     }
 
+    //#if (notifications)
     [Fact]
     public async Task Notifications_permissions_are_declared_and_held_by_admin_and_super_admin()
     {
@@ -158,6 +176,7 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
         }
     }
 
+    //#endif
     [Fact]
     public async Task Admin_receives_flagged_permission_when_first_declared_but_not_after_removal()
     {

@@ -98,7 +98,7 @@ public sealed class SignalRBackplaneTests
             services.AddSingleton(connection);
         }
 
-        // What a module with a hub does (Notifications' AddHub) is AddSignalR; the host calls AddPlatformRedis before or after it.
+        // What a module with a hub does (in its AddHub) is AddSignalR; the host calls AddPlatformRedis before or after it.
         if (signalRFirst)
         {
             services.AddSignalR();

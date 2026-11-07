@@ -17,7 +17,10 @@ Order matters; `Program.cs` marks it with comments.
 | 7 | `AddHealthChecks()` | Health checks; each module context adds its own `ready` check |
 | 8 | `AddHttpSecurity(configuration)` | CORS, the global rate limiter, the `auth-strict` rate-limit policy, forwarded headers |
 | 9 | `AddPermissionAuthorization()` | The permission authorization handler behind `RequirePermission(code)` and the **fallback policy**: every endpoint requires an authenticated user unless it says `.AllowAnonymous()` ([web-common](../building-blocks/web-common.md)). It needs the explicit `UseAuthentication` and `UseAuthorization` of the pipeline (slots 1a and 10): without them `WebApplication` adds `UseAuthorization` ahead of `UseRouting` by itself, where no endpoint is known and the fallback policy answers 401 to every request. |
-| 10 | `AddAuthModule(configuration)`, `AddNotificationsModule(configuration)` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme (the default authentication scheme), the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)); the Notifications module also its delivery worker, SignalR, the `HubTicket` authentication scheme (not a default scheme: only the hub's policy uses it) and the rate-limit policy of its ticket route ([Notifications module](../modules/notifications.md)) |
+| 10 | `AddAuthModule(configuration)` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme (the default authentication scheme), the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)) |
+<!--#if (notifications)-->
+| 10 | `AddNotificationsModule(configuration)` | The module's context, inbox, handlers, validators and error messages, its delivery worker, SignalR, the `HubTicket` authentication scheme (not a default scheme: only the hub's policy uses it) and the rate-limit policy of its ticket route ([Notifications module](../modules/notifications.md)) |
+<!--#endif-->
 <!--#if (includeSample)-->
 | 10 | `AddSampleModule()` | The module's context, outbox, handlers, validators and error messages ([Sample module](../modules/sample.md)) |
 <!--#endif-->
@@ -64,7 +67,10 @@ Before the pipeline serves requests, the host runs two steps, in this order:
 | 9a | `UseRateLimiter` | Global fixed-window limiter, plus the `auth-strict` policy on the endpoints that ask for it; 429 `rate_limit.exceeded` with `Retry-After`. After routing (the endpoint's rate-limit metadata is known) and authentication (the `user:{sub}` partition sees the signed-in user), and before authorization, so the 401 and 403 responses that slot 10 produces are counted too. |
 | 10 | `UseAuthorization` | After routing, so it reads the endpoint's metadata. An endpoint with `.AllowAnonymous()` passes; one with `RequirePermission(code)` needs that permission (403 for a signed-in caller without it); every other endpoint, and a request that matched no endpoint, falls under the fallback policy and needs an authenticated user. An anonymous caller gets 401 `http.401` (localized, with `traceId` and `WWW-Authenticate: Bearer`). |
 | 11 | `UseIdempotency` | `Idempotency-Key` on endpoints marked `WithIdempotency()`; after routing because it reads endpoint metadata. |
-| 12 | Endpoints | `/health/live`, `/health/ready` (both anonymous and exempt from rate limiting), OpenAPI and Scalar outside Production (anonymous), then the `/api/v1` group with every module's endpoints, the Auth module's anonymous `GET /.well-known/jwks.json` at the root (`MapAuthWellKnownEndpoints`), and the Notifications SignalR hub at `/hubs/notifications` (`MapNotificationsHub`: WebSockets only, authorized by the JWT bearer scheme or a single-use hub ticket, [Notifications module](../modules/notifications.md#realtime-hub)). Slots 1a to 10 apply to the hub's negotiate and WebSocket requests like to any endpoint. Everything else is protected by the fallback policy. |
+| 12 | Endpoints | `/health/live`, `/health/ready` (both anonymous and exempt from rate limiting), OpenAPI and Scalar outside Production (anonymous), then the `/api/v1` group with every module's endpoints, the Auth module's anonymous `GET /.well-known/jwks.json` at the root (`MapAuthWellKnownEndpoints`). Everything else is protected by the fallback policy. |
+<!--#if (notifications)-->
+| 12 | Notifications hub | The SignalR hub at `/hubs/notifications` (`MapNotificationsHub`: WebSockets only, authorized by the JWT bearer scheme or a single-use hub ticket, [Notifications module](../modules/notifications.md#realtime-hub)). Slots 1a to 10 apply to the hub's negotiate and WebSocket requests like to any endpoint. |
+<!--#endif-->
 
 Slots 4 and 5 register their headers with `Response.OnStarting` before the rest of the pipeline runs, so they are written when the response starts and survive the exception handler clearing the response headers. `Content-Language` is the exception: responses written by the exception handler (500, malformed body, concurrency conflict) do not carry it, although their `detail` is still localized (ADR 0009).
 
@@ -112,13 +118,16 @@ The first request with a key holds it as a lease for `InProgressTimeout`; duplic
 
 ### `Retention`
 
-How long the building blocks keep what they own before a cleanup job deletes it (ADR 0028; the jobs are in [infrastructure-common](../building-blocks/infrastructure-common.md#cleanup-jobs)). A row goes only when strictly older than the retention. Set a retention to `00:00:00` (or empty) to turn that cleanup off; modules keep their own retentions in their own sections (`Auth:Retention`, `Notifications:Retention` and `Audit:Retention`, below).
+How long the building blocks keep what they own before a cleanup job deletes it (ADR 0028; the jobs are in [infrastructure-common](../building-blocks/infrastructure-common.md#cleanup-jobs)). A row goes only when strictly older than the retention. Set a retention to `00:00:00` (or empty) to turn that cleanup off; modules keep their own retentions in their own sections (such as `Auth:Retention` and `Audit:Retention`, below).
+<!--#if (notifications)-->
+`Notifications:Retention` is one more.
+<!--#endif-->
 
 | Key | Default | Validation (on start) | Meaning |
 |---|---|---|---|
 | `BatchSize` | `1000` | 1 to 10000 | Most rows one delete statement removes; a run repeats it up to `Jobs:MaxBatchesPerRun` times. |
 | `Outbox` | `7.00:00:00` (7 days) | not negative | How long a published outbox message (and its consumer rows) is kept after `ProcessedAt`. Abandoned messages are never deleted. The job `{Context}OutboxCleanup` runs daily. |
-| `Inbox` | `7.00:00:00` (7 days) | not negative; zero or at least `1.00:00:00`; and longer than the outbox's retry span for `Outbox:MaxAttempts` (12 min 35 s by default, just under a day at 28 attempts (23 h 12 min 35 s) and more than a day from 29; a longer `MaxAttempts` needs a longer `Inbox`) | How long an inbox row is kept after `ProcessedAt`, so it outlasts outbox redelivery and a late retry never runs a consumer twice. The job `{Context}InboxCleanup` (today `NotificationsInboxCleanup`) runs daily. |
+| `Inbox` | `7.00:00:00` (7 days) | not negative; zero or at least `1.00:00:00`; and longer than the outbox's retry span for `Outbox:MaxAttempts` (12 min 35 s by default, just under a day at 28 attempts (23 h 12 min 35 s) and more than a day from 29; a longer `MaxAttempts` needs a longer `Inbox`) | How long an inbox row is kept after `ProcessedAt`, so it outlasts outbox redelivery and a late retry never runs a consumer twice. The job `{Context}InboxCleanup` (such as `AuditInboxCleanup`) runs daily. |
 
 ### `Caching`
 
@@ -187,7 +196,9 @@ For example `Resilience__Pipelines__hibp__Retries=0` (the pipeline name is part 
 
 The policy exposes `X-Trace-Id`, `Location`, `Retry-After` and `Idempotency-Replayed` (`Access-Control-Expose-Headers`), so browser code on an allowed origin can read them.
 
+<!--#if (notifications)-->
 **The notification hub.** A browser on an allowed origin calls `POST /api/v1/notifications/hub-tickets` and the hub's negotiate request through this policy like any route. Browsers do not apply CORS to the WebSocket request itself, and the hub does not check its `Origin`: the hub accepts no cookie, so there is no ambient credential for a hostile page to use (cross-site WebSocket hijacking), and a page cannot get a ticket without the user's access token ([ADR 0021](../adr/0021-signalr-hub-tickets.md)).
+<!--#endif-->
 
 ### `RateLimiting`
 
@@ -271,6 +282,7 @@ The Auth module reads the sections below, each with its keys, defaults and range
 | `Auth:DataProtection` | The Data Protection application name. |
 | `Auth:Seed` | Above. |
 
+<!--#if (notifications)-->
 ### `Notifications:Email`
 
 The SMTP server the Notifications email channel sends through ([Notifications module](../modules/notifications.md#email-channel)); Mailpit locally. Validated on start. Until Plan 3 these keys were `Auth:Email`: the host **refuses to start** while any `Auth:Email` key is still set, in any source (a settings file, user secrets, `Auth__Email__*` in the environment), with `Auth:Email has moved to Notifications:Email (see docs/modules/notifications.md#configuration).` (D15). Rename the keys; their values and meaning are unchanged.
@@ -324,6 +336,7 @@ How long the Notifications module keeps its time-bound rows before a cleanup job
 | `Notifications` | `180.00:00:00` (180 days) | not negative | How long a notification is kept after its `CreatedAt`; its deliveries, dead-lettered ones included, go with it, and one with a delivery still pending stays. The job `NotificationsRowsCleanup` runs daily. |
 | `InAppNotifications` | `180.00:00:00` (180 days) | not negative | How long an inbox row is kept after its `CreatedAt`, read or unread. The job `NotificationsInAppCleanup` runs daily. |
 
+<!--#endif-->
 ### `Audit:Retention`
 
 How long the Audit module keeps its audit trails before a cleanup job deletes them (ADR 0028, [ADR 0030](../adr/0030-audit-trail-through-the-owning-modules-outbox.md); the job and its rules are in [Audit module: Background processing](../modules/audit.md#background-processing)). A `TimeSpan` that is not negative: a trail goes only when strictly older than it, and `00:00:00` or an empty value turns the cleanup off. Validated on start. The batch size and the most batches per run are the building-block settings under [`Retention`](#retention) and [`Jobs`](#jobs).
@@ -389,10 +402,11 @@ HTTP security:
 - IPv6 and IPv4-mapped addresses are partition keys as plain strings, so one client can appear as two addresses.
 - With the default `Caching:Provider` (`memory`) the limiters keep their counters in memory per instance: with N instances a client gets up to N × `GlobalPermitLimit`.
   <!--#if (caching == "redis")-->
-  With `redis` every fixed window (global, `auth-strict`, hub tickets) is one count in Redis shared by the instances, and while Redis is down each instance counts on its own again ([platform-redis](../building-blocks/platform-redis.md#rate-limiting)).
+  With `redis` every fixed window (global, `auth-strict` and any a module adds) is one count in Redis shared by the instances, and while Redis is down each instance counts on its own again ([platform-redis](../building-blocks/platform-redis.md#rate-limiting)).
   <!--#endif-->
 - A bare `Accept-Language: zh` gets English, because `zh` is not a supported culture and `zh-Hans` is its child, not its parent.
 
+<!--#if (notifications)-->
 Notifications:
 - Without Redis the SignalR hub pushes only to the connections on the instance that delivered the notification, and each instance counts hub tickets alone.
   <!--#if (caching == "redis")-->
@@ -400,6 +414,7 @@ Notifications:
   <!--#endif-->
   The inbox endpoints are always complete. More: [Notifications: Operations and known limits](../modules/notifications.md#operations-and-known-limits).
 - A rejected sender address (a wrong `Notifications:Email:From`) fails every email; it is retried for about 81 minutes before the emails are dead-lettered: watch the retry Warnings and the dead-letter metric.
+<!--#endif-->
 
 Observability:
 - `OpenTelemetry.Instrumentation.EntityFrameworkCore` is `1.19.1-beta.1`, the only prerelease dependency: no stable release exists ([ADR 0013](../adr/0013-prerelease-ef-core-opentelemetry-instrumentation.md)). The SqlClient instrumentation is stable.

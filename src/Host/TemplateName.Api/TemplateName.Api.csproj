@@ -13,7 +13,9 @@
     <ProjectReference Include="..\..\BuildingBlocks\TemplateName.Platform.Redis\TemplateName.Platform.Redis.csproj" />
     <!--#endif-->
     <ProjectReference Include="..\..\Modules\Auth\TemplateName.Modules.Auth\TemplateName.Modules.Auth.csproj" />
+    <!--#if (notifications)-->
     <ProjectReference Include="..\..\Modules\Notifications\TemplateName.Modules.Notifications\TemplateName.Modules.Notifications.csproj" />
+    <!--#endif-->
     <!--#if (includeSample)-->
     <ProjectReference Include="..\..\Modules\Sample\TemplateName.Modules.Sample\TemplateName.Modules.Sample.csproj" />
     <!--#endif-->

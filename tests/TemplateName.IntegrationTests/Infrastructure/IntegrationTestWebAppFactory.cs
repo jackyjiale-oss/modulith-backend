@@ -18,16 +18,20 @@ using TemplateName.Infrastructure.Common.Jobs;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.IntegrationTests.Jobs;
+//#if (notifications)
 using TemplateName.IntegrationTests.Notifications;
+//#endif
 using TemplateName.IntegrationTests.Outbox;
 using TemplateName.IntegrationTests.Persistence;
 using TemplateName.Modules.Auth;
 using TemplateName.Modules.Auth.Contracts.IntegrationEvents;
 using TemplateName.Modules.Auth.Infrastructure.External;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+//#if (notifications)
 using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
 using TemplateName.Modules.Notifications.Infrastructure.Hubs;
+//#endif
 using TemplateName.SharedKernel;
 using TemplateName.UnitTests.Auth.External;
 using Testcontainers.MsSql;
@@ -68,6 +72,7 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     /// <summary>A permission source tests change to declare or drop permissions before seeding again; empty at the start of every test.</summary>
     public TestPermissionSource PermissionSource { get; } = new();
 
+    //#if (notifications)
     /// <summary>
     /// The email transport of the hosts built by this factory: the real Notifications email channel hands it every message, which it
     /// keeps in memory instead of sending through SMTP, and it fails on demand; empty at the start of every test.
@@ -80,6 +85,7 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
     /// </summary>
     internal RecordingInAppNotificationPusher InAppPusher { get; } = new();
 
+    //#endif
     /// <summary>
     /// The OpenID Connect provider behind the <c>oidc-discovery</c> client of every host built by this factory: it answers discovery and the
     /// key set at any address and signs ID tokens on <see cref="Time"/>. <c>Google</c> is the one enabled provider (client ID
@@ -186,9 +192,11 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
                 // Tests run recurring jobs through RecurringJobRunner.RunDueAsync with a job-name filter.
                 ["Jobs:Enabled"] = "false",
 
+                //#if (notifications)
                 // Tests run the delivery worker by hand (DispatchNotificationsAsync, or the dispatcher itself).
                 ["Notifications:Delivery:Enabled"] = "false",
 
+                //#endif
                 // Keep test output to problems: no per-request or host-lifetime lines.
                 ["Serilog:MinimumLevel:Default"] = "Warning",
 
@@ -205,6 +213,7 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.AddSingleton<TimeProvider>(Time);
             services.RemoveAll<ICurrentUser>();
             services.AddSingleton<ICurrentUser>(CurrentUser);
+            //#if (notifications)
             services.RemoveAll<IEmailTransport>();
             services.AddSingleton<IEmailTransport>(EmailSender);
             // Each host records its pushes in the shared recorder, then pushes them through its own hub to that host's clients.
@@ -212,13 +221,14 @@ public sealed class IntegrationTestWebAppFactory : WebApplicationFactory<Program
             services.AddSingleton<IInAppNotificationPusher>(
                 serviceProvider => InAppPusher.ForwardingTo(ActivatorUtilities.CreateInstance<SignalRInAppNotificationPusher>(serviceProvider)));
             services.AddSingleton<INotificationTypeSource, DeliveryTestTypeSource>();
+            //#endif
 
             // Production keeps the Identity default iteration count and has no setting for it; tests hash far more often.
             services.Configure<PasswordHasherOptions>(options => options.IterationCount = TestPasswordHashIterations);
             services.AddModuleDbContext<TestDbContext>(TestDbContext.Schema, PersistenceTestsConnectionStringName, includeInMigrations: false);
 
-            // A recording consumer for each Auth integration event, after the Notifications consumers the host registers and before the
-            // scanned test handlers.
+            // A recording consumer for each Auth integration event, after the consumers the host registers and before the scanned test
+            // handlers.
             AddRecordingIntegrationEventHandler<EmailVerificationRequestedIntegrationEvent>(services);
             AddRecordingIntegrationEventHandler<PasswordResetRequestedIntegrationEvent>(services);
             AddRecordingIntegrationEventHandler<RegistrationAttemptedIntegrationEvent>(services);

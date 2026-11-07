@@ -35,8 +35,10 @@ public sealed class TrustedDeviceTests(IntegrationTestWebAppFactory factory) : I
     private const string MethodsRoute = "/api/v1/auth/mfa/methods";
     private const string RegenerateRoute = "/api/v1/auth/mfa/recovery-codes/regenerate";
     private const string ChangePasswordRoute = "/api/v1/auth/password/change";
+    //#if (notifications)
     private const string ForgotRoute = "/api/v1/auth/password/forgot";
     private const string ResetRoute = "/api/v1/auth/password/reset";
+    //#endif
     private const string AdminUsersRoute = "/api/v1/admin/auth/users";
     private const string Email = "alice@example.com";
     private const string OtherEmail = "bob@example.com";
@@ -140,7 +142,9 @@ public sealed class TrustedDeviceTests(IntegrationTestWebAppFactory factory) : I
     }
 
     [Theory]
+    //#if (notifications)
     [InlineData("password reset")]
+    //#endif
     [InlineData("mfa change")]
     [InlineData("suspension")]
     public async Task Password_reset_mfa_change_and_suspension_forget_every_device(string change)
@@ -152,6 +156,7 @@ public sealed class TrustedDeviceTests(IntegrationTestWebAppFactory factory) : I
 
         switch (change)
         {
+            //#if (notifications)
             case "password reset":
                 using (var forgot = await PostAsync(Client, ForgotRoute, new { email = Email }))
                 {
@@ -167,6 +172,7 @@ public sealed class TrustedDeviceTests(IntegrationTestWebAppFactory factory) : I
                 password = NewPassword;
                 break;
 
+            //#endif
             case "mfa change":
                 // The verify's session holds a fresh code step-up; regenerating the recovery codes rotates the stamp (D13).
                 using (var regenerate = await SendAsync(HttpMethod.Post, RegenerateRoute, remembered.AccessToken))

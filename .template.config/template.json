@@ -123,6 +123,23 @@
           ]
         },
         {
+          "condition": "(!notifications)",
+          "exclude": [
+            "src/Modules/Notifications/**",
+            "tests/TemplateName.UnitTests/Notifications/**",
+            "tests/TemplateName.IntegrationTests/Notifications/**",
+            "tests/TemplateName.IntegrationTests/Infrastructure/RecordingEmailSender.cs",
+            "tests/TemplateName.IntegrationTests/Infrastructure/RecordingInAppNotificationPusher.cs",
+            "tests/TemplateName.IntegrationTests/Infrastructure/NotificationHubClient.cs",
+            "tests/TemplateName.IntegrationTests/Auth/AuthFlowTests.cs",
+            "tests/TemplateName.IntegrationTests/Auth/MfaFlowTests.cs",
+            "tests/TemplateName.IntegrationTests/Redis/RedisBackplaneTests.cs",
+            "docs/modules/notifications.md",
+            "docs/adr/0019-embedded-scriban-notification-templates.md",
+            "docs/adr/0021-signalr-hub-tickets.md"
+          ]
+        },
+        {
           "condition": "(!notifications || !includeSample)",
           "exclude": [
             "tests/TemplateName.IntegrationTests/Documentation/OpenApiSnapshotTests.OpenApi_document_matches_snapshot.verified.json",

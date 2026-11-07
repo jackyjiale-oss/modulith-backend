@@ -15,14 +15,19 @@ using TemplateName.Modules.Auth.Domain.Roles;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Domain.Verification;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+//#if (notifications)
 using EmailSendException = TemplateName.Modules.Notifications.Application.Abstractions.EmailSendException;
+//#endif
 
 namespace TemplateName.IntegrationTests.Auth;
 
 /// <summary>
-/// Registration, email confirmation and resending the confirmation through the running host. Neither the outbox nor the delivery worker
-/// runs by itself in tests, so every test dispatches both after a call (<c>DispatchNotificationsAsync</c>: Auth's outbox publishes, the
-/// Notifications module renders and sends) and reads the emails <see cref="RecordingEmailSender"/> kept.
+/// Registration, email confirmation and resending the confirmation through the running host.
+//#if (notifications)
+/// Neither the outbox nor the delivery worker runs by itself in tests, so every test dispatches both after a call
+/// (<c>DispatchNotificationsAsync</c>: Auth's outbox publishes, the Notifications module renders and sends) and reads the emails
+/// <see cref="RecordingEmailSender"/> kept.
+//#endif
 /// </summary>
 public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)
 {
@@ -30,11 +35,14 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
     private const string ConfirmRoute = "/api/v1/auth/email/confirm";
     private const string ResendRoute = "/api/v1/auth/email/resend-confirmation";
     private const string Password = "correct horse battery staple";
+    //#if (notifications)
     private const string ConfirmSubject = "Confirm your email address";
     private const string AttemptSubject = "Sign-up attempt with your email address";
+    //#endif
 
     private static readonly string[] VolatileHeaders = ["X-Trace-Id", "Date"];
 
+    //#if (notifications)
     [Fact]
     public async Task Register_sends_one_confirmation_email_and_confirm_returns_204()
     {
@@ -246,6 +254,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
         duplicate.AttemptedIdentifier.ShouldBe("a****@example.com");
     }
 
+    //#endif
     [Fact]
     public async Task Concurrent_registrations_of_one_new_address_create_one_account_and_never_a_500()
     {
@@ -306,6 +315,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
         var user = (await QueryAsync(context => context.Set<User>().ToListAsync(Ct))).ShouldHaveSingleItem();
         user.Email.ShouldBe("Alice@Example.com");
         user.NormalizedEmail.ShouldBe("ALICE@EXAMPLE.COM");
+        //#if (notifications)
 
         // Both events were saved at the same instant and the outbox does not order messages (ADR 0007).
         Factory.EmailSender.Sent.Select(message => message.Subject).ShouldBe([ConfirmSubject, AttemptSubject], ignoreOrder: true);
@@ -320,8 +330,10 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
         await DispatchNotificationsAsync();
         Factory.EmailSender.Sent.Count.ShouldBe(3);
         Factory.EmailSender.Sent[^1].Subject.ShouldBe(ConfirmSubject);
+        //#endif
     }
 
+    //#if (notifications)
     [Fact]
     public async Task Resend_within_cooldown_sends_nothing_but_returns_202()
     {
@@ -341,16 +353,20 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
         Factory.EmailSender.Sent.ShouldHaveSingleItem().Subject.ShouldBe(ConfirmSubject);
     }
 
+    //#endif
     [Fact]
     public async Task Resend_for_unknown_email_returns_202_and_sends_nothing()
     {
         await AssertResendAcceptedAsync("nobody@example.com");
 
         await DispatchNotificationsAsync();
+        //#if (notifications)
         Factory.EmailSender.Sent.ShouldBeEmpty();
+        //#endif
         (await QueryAsync(context => context.Set<VerificationCode>().CountAsync(Ct))).ShouldBe(0);
     }
 
+    //#if (notifications)
     [Fact]
     public async Task Resend_for_a_confirmed_email_returns_202_and_sends_nothing()
     {
@@ -369,6 +385,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
         Factory.EmailSender.Sent.ShouldBeEmpty();
     }
 
+    //#endif
     [Fact]
     public async Task Registered_user_has_the_User_role_and_the_requested_locale()
     {
@@ -436,6 +453,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
         body.GetProperty("code").GetString().ShouldBe("rate_limit.exceeded");
     }
 
+    //#if (notifications)
     [Fact]
     public async Task Outbox_message_does_not_contain_the_plaintext_token()
     {
@@ -449,6 +467,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
         code.TokenHash.ShouldBe(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
     }
 
+    //#endif
     private static object Body(string route, int attempt) => route switch
     {
         RegisterRoute => new { email = $"user{attempt}@example.com", password = Password, displayName = "User" },
@@ -461,6 +480,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
             .Where(header => !VolatileHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase))
             .ToDictionary(header => header.Key, header => string.Join(", ", header.Value), StringComparer.OrdinalIgnoreCase);
 
+    //#if (notifications)
     private static async Task AssertInvalidTokenAsync(HttpResponseMessage response)
     {
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
@@ -470,6 +490,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
         body.GetProperty("traceId").GetString().ShouldBe(response.Headers.GetValues("X-Trace-Id").Single());
     }
 
+    //#endif
     private async Task AssertResendAcceptedAsync(string email)
     {
         using var response = await ResendAsync(email);
@@ -491,10 +512,13 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
         return await Client.SendAsync(request, Ct);
     }
 
+    //#if (notifications)
     private Task<HttpResponseMessage> ConfirmAsync(string token) => Client.PostAsJsonAsync(ConfirmRoute, new { token }, Ct);
 
+    //#endif
     private Task<HttpResponseMessage> ResendAsync(string email) => Client.PostAsJsonAsync(ResendRoute, new { email }, Ct);
 
+    //#if (notifications)
     /// <summary>Registers, delivers the confirmation email and returns the token from its link.</summary>
     private async Task<string> RegisterAndReadTokenAsync(string email)
     {
@@ -504,6 +528,7 @@ public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : In
         return Factory.EmailSender.LastLinkToken(email);
     }
 
+    //#endif
     private Task<User> FindUserAsync(string email)
         => QueryAsync(context => context.Set<User>()
             .Include(user => user.Roles)

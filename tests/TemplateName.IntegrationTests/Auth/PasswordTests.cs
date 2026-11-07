@@ -19,9 +19,11 @@ using TemplateName.Modules.Auth.Infrastructure.Persistence;
 namespace TemplateName.IntegrationTests.Auth;
 
 /// <summary>
-/// <c>POST /api/v1/auth/password/forgot</c>, <c>/reset</c> and <c>/change</c> through the running host. Neither the outbox nor
-/// the delivery worker runs by itself in tests, so the tests dispatch both (<c>DispatchNotificationsAsync</c>) and read the reset links
-/// <see cref="RecordingEmailSender"/> kept.
+/// <c>POST /api/v1/auth/password/forgot</c>, <c>/reset</c> and <c>/change</c> through the running host.
+//#if (notifications)
+/// Neither the outbox nor the delivery worker runs by itself in tests, so the tests dispatch both (<c>DispatchNotificationsAsync</c>)
+/// and read the reset links <see cref="RecordingEmailSender"/> kept.
+//#endif
 /// </summary>
 public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)
 {
@@ -34,7 +36,9 @@ public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : Integr
     private const string Email = "alice@example.com";
     private const string OldPassword = AuthTestHarness.Password;
     private const string NewPassword = "a brand new passphrase";
+    //#if (notifications)
     private const string ResetSubject = "Reset your password";
+    //#endif
 
     private static readonly string[] VolatileHeaders = ["X-Trace-Id", "Date"];
 
@@ -63,6 +67,7 @@ public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : Integr
         (await QueryAsync(context => context.Set<VerificationCode>().CountAsync(Ct))).ShouldBe(1);
     }
 
+    //#if (notifications)
     [Fact]
     public async Task Forgot_sends_a_reset_email_after_outbox_dispatch()
     {
@@ -383,6 +388,7 @@ public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : Integr
         Factory.EmailSender.Sent.Count.ShouldBe(2);
     }
 
+    //#endif
     [Fact]
     public async Task Change_password_kills_other_sessions_but_keeps_the_current_one()
     {
@@ -476,6 +482,7 @@ public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : Integr
         body.GetProperty("code").GetString().ShouldBe("http.401");
     }
 
+    //#if (notifications)
     [Theory]
     [InlineData(129)]
     [InlineData(1024 * 1024)]
@@ -502,6 +509,7 @@ public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : Integr
         code.ConsumedAt.ShouldBeNull();
     }
 
+    //#endif
     [Theory]
     [InlineData(ForgotRoute)]
     [InlineData(ResetRoute)]
@@ -582,6 +590,7 @@ public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : Integr
         return await Client.SendAsync(request, Ct);
     }
 
+    //#if (notifications)
     /// <summary>Asks for a reset link, delivers the email and returns the token from the link.</summary>
     private async Task<string> ForgotAndReadTokenAsync(string email)
     {
@@ -610,6 +619,7 @@ public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : Integr
         return token.Value;
     }
 
+    //#endif
     private Task<User> FindUserAsync(string email)
         => QueryAsync(context => context.Set<User>()
             .Include(user => user.PasswordHistory)

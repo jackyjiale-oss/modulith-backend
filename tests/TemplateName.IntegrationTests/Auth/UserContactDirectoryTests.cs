@@ -8,7 +8,7 @@ using TemplateName.Modules.Auth.Infrastructure.Persistence;
 namespace TemplateName.IntegrationTests.Auth;
 
 /// <summary>
-/// <see cref="IUserContactDirectory"/> as the Notifications module calls it: one Dapper query on <c>auth.Users</c>, which bypasses the
+/// <see cref="IUserContactDirectory"/> as a consuming module calls it: one Dapper query on <c>auth.Users</c>, which bypasses the
 /// EF Core soft-delete filter, so these tests prove the SQL repeats it.
 /// </summary>
 public sealed class UserContactDirectoryTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)

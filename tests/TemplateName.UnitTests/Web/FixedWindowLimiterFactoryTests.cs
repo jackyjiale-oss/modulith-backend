@@ -9,17 +9,22 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using NSubstitute;
+//#if (notifications)
 using TemplateName.Modules.Notifications;
 using TemplateName.Modules.Notifications.Endpoints;
+//#endif
 using TemplateName.Web.Common;
 using TemplateName.Web.Common.Security;
 
 namespace TemplateName.UnitTests.Web;
 
 /// <summary>
-/// <see cref="IFixedWindowLimiterFactory"/>: the in-memory default behaves as the built-in fixed window always did, and the three
-/// fixed-window policies (<c>global</c>, <c>auth-strict</c>, <c>notifications-hub-tickets</c>) get their limiters from whatever factory
-/// is registered, so another factory (a distributed one) can swap in its own.
+/// <see cref="IFixedWindowLimiterFactory"/>: the in-memory default behaves as the built-in fixed window always did, and the
+/// fixed-window policies get their limiters from whatever factory is registered, so another factory (a distributed one) can swap in its
+/// own. From <c>AddHttpSecurity</c>: <c>global</c> and <c>auth-strict</c>.
+//#if (notifications)
+/// From the Notifications module: <c>notifications-hub-tickets</c>.
+//#endif
 /// </summary>
 public sealed class FixedWindowLimiterFactoryTests
 {
@@ -67,13 +72,17 @@ public sealed class FixedWindowLimiterFactoryTests
 
         (await SendAsync(client, "/anonymous", subject: null)).ShouldBe(HttpStatusCode.OK);
         (await SendAsync(client, "/strict", subject: null)).ShouldBe(HttpStatusCode.OK);
+        //#if (notifications)
         (await SendAsync(client, "/tickets", Subject)).ShouldBe(HttpStatusCode.OK);
+        //#endif
 
         factory.Received(1).Create("global", $"ip:{Address}", 300, TimeSpan.FromMinutes(1));
         factory.Received(1).Create("auth-strict", $"ip:{Address}", 10, TimeSpan.FromMinutes(1));
+        //#if (notifications)
         factory.Received(1).Create("global", $"user:{Subject}", 300, TimeSpan.FromMinutes(1));
         factory.Received(1).Create("notifications-hub-tickets", $"user:{Subject}", 30, TimeSpan.FromMinutes(1));
         factory.ReceivedCalls().Count().ShouldBe(4);
+        //#endif
     }
 
     [Fact]
@@ -111,7 +120,9 @@ public sealed class FixedWindowLimiterFactoryTests
                     // Registered first: AddHttpSecurity adds the in-memory factory only when none is registered.
                     services.AddSingleton(factory);
                     services.AddRouting().AddWebCommon().AddHttpSecurity(context.Configuration);
+                    //#if (notifications)
                     NotificationsModule.AddHub(services, context.Configuration);
+                    //#endif
                 })
                 .Configure(app =>
                 {
@@ -132,7 +143,9 @@ public sealed class FixedWindowLimiterFactoryTests
                     {
                         endpoints.MapGet("/anonymous", () => Results.Ok());
                         endpoints.MapGet("/strict", () => Results.Ok()).RequireRateLimiting(RateLimitPolicies.AuthStrict);
+                        //#if (notifications)
                         endpoints.MapGet("/tickets", () => Results.Ok()).RequireRateLimiting(HubTicketRateLimit.PolicyName);
+                        //#endif
                     });
                 }))
             .StartAsync(TestContext.Current.CancellationToken);

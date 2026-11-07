@@ -10,7 +10,9 @@ flowchart TD
 
     subgraph Modules["Business modules (internal by default)"]
         Auth["TemplateName.Modules.Auth<br/>Domain · Application · Infrastructure · Endpoints"]
+        %%#if (notifications)
         Notifications["TemplateName.Modules.Notifications<br/>Domain · Application · Infrastructure · Endpoints"]
+        %%#endif
         %%#if (includeSample)
         Sample["TemplateName.Modules.Sample<br/>Domain · Application · Infrastructure · Endpoints"]
         %%#endif
@@ -29,7 +31,9 @@ flowchart TD
     end
 
     Api --> Auth
+    %%#if (notifications)
     Api --> Notifications
+    %%#endif
     %%#if (includeSample)
     Api --> Sample
     %%#endif
@@ -44,15 +48,19 @@ flowchart TD
     %%#if (includeSample)
     Sample -. "other modules only via" .-> Contracts
     %%#endif
+    %%#if (notifications)
     Notifications -. "reads Auth only via" .-> Contracts
+    %%#endif
     Auth --> Web
     Auth --> Infra
     Auth --> App
     Auth --> Kernel
+    %%#if (notifications)
     Notifications --> Web
     Notifications --> Infra
     Notifications --> App
     Notifications --> Kernel
+    %%#endif
     Audit --> Web
     Audit --> Infra
     Audit --> App
@@ -75,9 +83,18 @@ flowchart TD
 ```
 
 - **Host** (`src/Host/TemplateName.Api`, [`docs/services/api.md`](../services/api.md)) wires the building blocks and modules in `Program.cs`: services, the middleware pipeline, health checks, OpenAPI and the `/api/v1` route group.
-- **Modules** (`src/Modules/{Module}`, one document per module under [`docs/modules/`](../modules/)) are two projects: `TemplateName.Modules.{Module}` with `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/` and `Resources/` folders (a module that declares notification types also has `Templates/`, its embedded notification templates), and `TemplateName.Modules.{Module}.Contracts`, the only project another module may reference (ADR 0001). A module with nothing to offer other modules ships one project only (Notifications and Audit), and one that defines no error code has no `Resources/` folder (Audit). The entry point `{Module}Module` (`Add{Module}Module`, `Map{Module}Endpoints`) is the only public type.
-- **Auth** ([`docs/modules/auth.md`](../modules/auth.md)) is the identity module: users, sessions, roles, permissions and the audit log in the `auth` schema, with the sign-in, token, password and administration endpoints, social login (the client posts a Google, Apple, Microsoft, Facebook or generic OpenID Connect proof and the backend verifies it and issues its own tokens; ADR 0032, [setup guide](../social-login-setup.md)), and two-step verification (an authenticator app with single-use recovery codes, a step-up before sensitive actions, trusted devices and an administrator's reset; ADRs 0022 to 0025). It implements `IPermissionChecker` for the whole host; no other module references it (its `TemplateName.Modules.Auth.Contracts` project holds its integration events and `IUserContactDirectory`; Auth publishes the events from its outbox, and the Notifications module consumes them).
+- **Modules** (`src/Modules/{Module}`, one document per module under [`docs/modules/`](../modules/)) are two projects: `TemplateName.Modules.{Module}` with `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/` and `Resources/` folders, and `TemplateName.Modules.{Module}.Contracts`, the only project another module may reference (ADR 0001).
+  <!--#if (notifications)-->
+  A module that declares notification types also has `Templates/`, its embedded notification templates. Notifications ships one project only.
+  <!--#endif-->
+  A module with nothing to offer other modules ships one project only (Audit), and one that defines no error code has no `Resources/` folder (Audit). The entry point `{Module}Module` (`Add{Module}Module`, `Map{Module}Endpoints`) is the only public type.
+- **Auth** ([`docs/modules/auth.md`](../modules/auth.md)) is the identity module: users, sessions, roles, permissions and the audit log in the `auth` schema, with the sign-in, token, password and administration endpoints, social login (the client posts a Google, Apple, Microsoft, Facebook or generic OpenID Connect proof and the backend verifies it and issues its own tokens; ADR 0032, [setup guide](../social-login-setup.md)), and two-step verification (an authenticator app with single-use recovery codes, a step-up before sensitive actions, trusted devices and an administrator's reset; ADRs 0022 to 0025). It implements `IPermissionChecker` for the whole host; no other module references it (its `TemplateName.Modules.Auth.Contracts` project holds its integration events and `IUserContactDirectory`; Auth publishes the events from its outbox).
+  <!--#if (notifications)-->
+  The Notifications module consumes them.
+  <!--#endif-->
+<!--#if (notifications)-->
 - **Notifications** ([`docs/modules/notifications.md`](../modules/notifications.md)) is the module through which every message the template sends goes (Auth sends no email itself): it consumes the integration events other modules publish and renders and delivers them by email and in-app in the recipient's language. It holds the code-defined notification type catalog with its embedded templates, the recipient culture and time zone rules, its `notify` schema, the consumers of Auth's integration events (which create notification and delivery rows through its inbox), the delivery worker with the email (SMTP, `Notifications:Email`) and in-app channels, the inbox, preference and hub-ticket APIs, the SignalR hub (`/hubs/notifications`) that pushes new in-app notifications, and the administrator's delivery list and retry. It references `TemplateName.Modules.Auth.Contracts` only, never the Auth module, and no module references it.
+<!--#endif-->
 - **Audit** ([`docs/modules/audit.md`](../modules/audit.md)) keeps the audit trail: who changed which field of which record, from which value to which, in the `audit` schema, read through `GET /api/v1/admin/audit/trails`. It is one project with no `.Contracts` project (it offers nothing to other modules), no `Resources/` folder and no error code. It references no module and no module references it: an entity marked `[Audited]` in any module has its changes written, in the same save, to that module's own outbox, and the Audit module consumes them as `EntityChangesRecordedIntegrationEvent` (defined in `Application.Common`) through its inbox. Auth's security log (`auth.AuthAuditLogs`) is a different log and stays in Auth (ADR 0030).
 - **Building blocks** ([`shared-kernel`](../building-blocks/shared-kernel.md), [`application-common`](../building-blocks/application-common.md), [`infrastructure-common`](../building-blocks/infrastructure-common.md), [`web-common`](../building-blocks/web-common.md)) hold everything every module needs.
   <!--#if (caching == "redis")-->
@@ -124,10 +141,15 @@ Inside an endpoint:
 Work that does not belong to a request runs in hosted services of the API process, and each takes its work under a SQL lease, so a second instance joins in without a second process and without doing the same work twice:
 
 - **Outbox dispatchers**, one per module context with an outbox, publish saved domain events (ADR 0007).
+<!--#if (notifications)-->
 - **The delivery worker** of the Notifications module sends emails and writes the in-app inbox ([Notifications](../modules/notifications.md#background-processing)).
-- **The recurring-job scheduler** (`RecurringJobBackgroundService`, ADR 0026) runs the jobs that `AddRecurringJob` registered, one instance at a time per job, and records each run in `platform.JobStates`. Today every job is a cleanup that deletes what has outlived its retention in bounded batches: the outbox and inbox of each context, `platform.IdempotencyKeys`, and the Auth, Notifications and Audit tables ([`infrastructure-common`](../building-blocks/infrastructure-common.md#cleanup-jobs), ADR 0028).
+<!--#endif-->
+- **The recurring-job scheduler** (`RecurringJobBackgroundService`, ADR 0026) runs the jobs that `AddRecurringJob` registered, one instance at a time per job, and records each run in `platform.JobStates`. Today every job is a cleanup that deletes what has outlived its retention in bounded batches: the outbox and inbox of each context, `platform.IdempotencyKeys`, and the modules' own tables ([`infrastructure-common`](../building-blocks/infrastructure-common.md#cleanup-jobs), ADR 0028).
 
-State that is shared between instances is per instance by default: the permission cache, the rate-limit counters, the SignalR pushes.
+State that is shared between instances is per instance by default: the permission cache and the rate-limit counters.
+<!--#if (notifications)-->
+So are the SignalR pushes.
+<!--#endif-->
 <!--#if (caching == "redis")-->
 With `Caching:Provider = redis` the optional Platform.Redis project shares them, and the API serves from the database, degraded, when Redis fails (ADR 0027).
 <!--#endif-->
@@ -141,7 +163,9 @@ One SQL Server database, one schema per owner, each with its own `__EFMigrations
 |---|---|---|---|---|
 | `platform` | Infrastructure.Common (building block) | `PlatformDbContext` | `IdempotencyKeys`, `JobStates` | `src/BuildingBlocks/TemplateName.Infrastructure.Common/Idempotency/Migrations/` |
 | `auth` | Auth module | `AuthDbContext` | `Users`, `PasswordHistory`, `UserRoles`, `Roles`, `Permissions`, `RolePermissions`, `UserExternalLogins`, `UserSessions`, `RefreshTokens`, `VerificationCodes`, `UserMfaMethods`, `RecoveryCodes`, `MfaChallenges`, `TrustedDevices`, `AuthAuditLogs`, `DataProtectionKeys`, `OutboxMessages`, `OutboxMessageConsumers` | `src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Persistence/Migrations/` |
+<!--#if (notifications)-->
 | `notify` | Notifications module | `NotificationsDbContext` | `Notifications`, `Deliveries`, `InAppNotifications`, `UserPreferences`, `UserSettings`, `HubTickets`, `InboxMessages` (no outbox) | `src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Persistence/Migrations/` |
+<!--#endif-->
 <!--#if (includeSample)-->
 | `sample` | Sample module | `SampleDbContext` | `LeaveRequests`, `OutboxMessages`, `OutboxMessageConsumers` | `src/Modules/Sample/TemplateName.Modules.Sample/Infrastructure/Persistence/Migrations/` |
 <!--#endif-->
@@ -151,14 +175,19 @@ One SQL Server database, one schema per owner, each with its own `__EFMigrations
 
 ## Cross-module communication
 
-<!--#if (includeSample)-->
+<!--#if (includeSample && notifications)-->
 There are four modules today (Sample, Auth, Notifications and Audit).
 <!--#endif-->
-Auth's outbox handlers turn ten domain events into the integration events of `TemplateName.Modules.Auth.Contracts`, which also holds `IUserContactDirectory` (see [`docs/modules/auth.md`](../modules/auth.md#events)); Notifications references that project only and consumes the events through its inbox (see [`docs/modules/notifications.md`](../modules/notifications.md#events)).
+Auth's outbox handlers turn ten domain events into the integration events of `TemplateName.Modules.Auth.Contracts`, which also holds `IUserContactDirectory` (see [`docs/modules/auth.md`](../modules/auth.md#events)).
+<!--#if (notifications)-->
+Notifications references that project only and consumes the events through its inbox (see [`docs/modules/notifications.md`](../modules/notifications.md#events)).
+<!--#endif-->
 <!--#if (includeSample)-->
 Sample uses neither.
 <!--#endif-->
-The Audit module is fed differently: its input event, `EntityChangesRecordedIntegrationEvent`, is defined in `Application.Common` (not in a module's contracts, because every module's outbox publishes it and Audit must not reference every module's contracts), and every module's outbox runs one handler for it, registered once for the host. A contracts project references only `TemplateName.SharedKernel` and holds only public sealed records, enums and interfaces (`ContractsTests`). One message, from the endpoint to the recipient:
+The Audit module is fed differently: its input event, `EntityChangesRecordedIntegrationEvent`, is defined in `Application.Common` (not in a module's contracts, because every module's outbox publishes it and Audit must not reference every module's contracts), and every module's outbox runs one handler for it, registered once for the host. A contracts project references only `TemplateName.SharedKernel` and holds only public sealed records, enums and interfaces (`ContractsTests`).
+<!--#if (notifications)-->
+One message, from the endpoint to the recipient:
 
 ```mermaid
 flowchart LR
@@ -170,6 +199,7 @@ flowchart LR
     Rows -->|"delivery worker"| In["In-app channel<br/>notify.InAppNotifications"]
     In -->|"push, best effort"| Hub["SignalR hub<br/>/hubs/notifications"]
 ```
+<!--#endif-->
 
 The rules for when a boundary is crossed:
 
@@ -199,9 +229,13 @@ The rules for when a boundary is crossed:
 | [0016](../adr/0016-server-side-permissions-with-per-user-cache.md) | Server-side permissions with a per-user cache |
 | [0017](../adr/0017-outbox-secrets-protected-with-data-protection.md) | Single-use tokens in outbox events protected with Data Protection |
 | [0018](../adr/0018-in-process-integration-events-with-inbox.md) | In-process integration events with a per-consumer inbox |
+<!--#if (notifications)-->
 | [0019](../adr/0019-embedded-scriban-notification-templates.md) | Notification templates as Scriban files embedded in the declaring assembly |
+<!--#endif-->
 | [0020](../adr/0020-secrets-in-cross-module-events.md) | Single-use links cross module boundaries encrypted |
+<!--#if (notifications)-->
 | [0021](../adr/0021-signalr-hub-tickets.md) | SignalR hub authenticated by single-use tickets, never a JWT in the query string |
+<!--#endif-->
 | [0022](../adr/0022-totp-secrets-and-replay-protection.md) | Own RFC 6238 TOTP with a monotonic replay guard, an Auth-only secret purpose and 80-bit recovery codes |
 | [0023](../adr/0023-step-up-through-auth-time-and-amr.md) | Step-up through a fresh `auth_time` and `amr` in the access token, checked by `StepUpPolicy` |
 | [0024](../adr/0024-mfa-challenge-as-a-hashed-server-side-token.md) | The sign-in challenge is an opaque token over a hashed server-side row, with wrong codes counted on it and in the lockout |

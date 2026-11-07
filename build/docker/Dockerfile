@@ -25,7 +25,9 @@ COPY src/BuildingBlocks/TemplateName.Platform.Redis/TemplateName.Platform.Redis.
 #endif
 COPY src/Modules/Auth/TemplateName.Modules.Auth.Contracts/TemplateName.Modules.Auth.Contracts.csproj src/Modules/Auth/TemplateName.Modules.Auth.Contracts/packages.lock.json src/Modules/Auth/TemplateName.Modules.Auth.Contracts/
 COPY src/Modules/Auth/TemplateName.Modules.Auth/TemplateName.Modules.Auth.csproj src/Modules/Auth/TemplateName.Modules.Auth/packages.lock.json src/Modules/Auth/TemplateName.Modules.Auth/
+#if (notifications)
 COPY src/Modules/Notifications/TemplateName.Modules.Notifications/TemplateName.Modules.Notifications.csproj src/Modules/Notifications/TemplateName.Modules.Notifications/packages.lock.json src/Modules/Notifications/TemplateName.Modules.Notifications/
+#endif
 #if (includeSample)
 COPY src/Modules/Sample/TemplateName.Modules.Sample/TemplateName.Modules.Sample.csproj src/Modules/Sample/TemplateName.Modules.Sample/packages.lock.json src/Modules/Sample/TemplateName.Modules.Sample/
 #endif

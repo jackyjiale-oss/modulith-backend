@@ -32,7 +32,9 @@ Everything about how this service is built and run. Documents are part of the de
 | Document | Module |
 |---|---|
 | [`modules/auth.md`](modules/auth.md) | Auth: registration, sign-in, social login (Google, Apple, Microsoft, Facebook, generic OpenID Connect), tokens, sessions, passwords, two-step verification (TOTP, recovery codes, step-up, trusted devices), roles, permissions and the audit log |
+<!--#if (notifications)-->
 | [`modules/notifications.md`](modules/notifications.md) | Notifications: every email and in-app message, from Auth's integration events to SMTP, the inbox and the SignalR hub; templates, preferences, quiet hours, delivery worker, administration |
+<!--#endif-->
 | [`modules/audit.md`](modules/audit.md) | Audit: the audit trail of field changes (who changed what, from which value to which), fed by every module's outbox, the admin trail list, optional retention |
 <!--#if (includeSample)-->
 | [`modules/sample.md`](modules/sample.md) | Sample: leave requests, the worked example of every pattern |
@@ -71,9 +73,13 @@ Everything about how this service is built and run. Documents are part of the de
 | [0016](adr/0016-server-side-permissions-with-per-user-cache.md) | Server-side permissions with a per-user cache |
 | [0017](adr/0017-outbox-secrets-protected-with-data-protection.md) | Single-use tokens in outbox events protected with Data Protection |
 | [0018](adr/0018-in-process-integration-events-with-inbox.md) | In-process integration events with a per-consumer inbox |
+<!--#if (notifications)-->
 | [0019](adr/0019-embedded-scriban-notification-templates.md) | Notification templates as Scriban files embedded in the declaring assembly |
+<!--#endif-->
 | [0020](adr/0020-secrets-in-cross-module-events.md) | Single-use links cross module boundaries encrypted |
+<!--#if (notifications)-->
 | [0021](adr/0021-signalr-hub-tickets.md) | SignalR hub authenticated by single-use tickets, never a JWT in the query string |
+<!--#endif-->
 | [0022](adr/0022-totp-secrets-and-replay-protection.md) | Own RFC 6238 TOTP with a monotonic replay guard, an Auth-only secret purpose and 80-bit recovery codes |
 | [0023](adr/0023-step-up-through-auth-time-and-amr.md) | Step-up through a fresh `auth_time` and `amr` in the access token, checked by `StepUpPolicy` |
 | [0024](adr/0024-mfa-challenge-as-a-hashed-server-side-token.md) | The sign-in challenge is an opaque token over a hashed server-side row, with wrong codes counted on it and in the lockout |

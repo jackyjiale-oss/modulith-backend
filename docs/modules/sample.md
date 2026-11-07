@@ -104,7 +104,7 @@ The list endpoint returns the cursor-pagination codes (declared in `PaginationEr
 
 | Event | Kind | Raised when | Handlers |
 |---|---|---|---|
-| `LeaveRequestSubmittedDomainEvent(LeaveRequestId, EmployeeId)` | Domain | A request is submitted | `LeaveRequestSubmittedDomainEventHandler` (logs; the Notifications plan replaces it with a notification) |
+| `LeaveRequestSubmittedDomainEvent(LeaveRequestId, EmployeeId)` | Domain | A request is submitted | `LeaveRequestSubmittedDomainEventHandler` (logs; a project replaces it with its own reaction) |
 | `LeaveRequestApprovedDomainEvent(LeaveRequestId, ApproverId)` | Domain | A request is approved | None yet |
 
 Domain events are written to `sample.OutboxMessages` in the same save as the aggregate and dispatched by the outbox (ADR 0007). The module publishes no integration events of its own; the same outbox also carries the audit change sets of `LeaveRequest` (`EntityChangesRecordedDomainEvent`), which a handler registered by the host publishes as `EntityChangesRecordedIntegrationEvent` for the [Audit module](audit.md#events).

@@ -41,7 +41,9 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
     private const string VerifyRoute = "/api/v1/auth/mfa/verify";
     private const string UsersRoute = "/api/v1/admin/auth/users";
     private const string Email = "alice@example.com";
+    //#if (notifications)
     private const string ConfirmEmailUrl = "http://localhost:3000/confirm-email?token=";
+    //#endif
     private const string ResetPasswordUrl = "http://localhost:3000/reset-password?token=";
 
     private int _addressCount;
@@ -63,6 +65,7 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
         published.UserId.ShouldBe(user.Id);
         published.Email.ShouldBe(Email);
         published.ExpiresAt.ShouldBe(code.ExpiresAt);
+        //#if (notifications)
 
         // The link is the one emailed, re-protected; the ciphertext holds neither the token nor the address of the link.
         var token = Factory.EmailSender.LastLinkToken(Email);
@@ -70,6 +73,7 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
         published.ProtectedActionUrl.ShouldNotContain(token);
         published.ProtectedActionUrl.ShouldNotContain(Uri.EscapeDataString(token));
         published.ProtectedActionUrl.ShouldNotContain("localhost");
+        //#endif
     }
 
     [Fact]
@@ -90,9 +94,11 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
         var published = AuthIntegrationEvents().Cast<EmailVerificationRequestedIntegrationEvent>().ToList();
         published.Count.ShouldBe(2);
         published.ShouldAllBe(integrationEvent => integrationEvent.Id == message.Id && integrationEvent.OccurredAt == OccurredAt(message));
+        //#if (notifications)
 
         // Only the publisher failed and ran again: the confirmation email went out once.
         Factory.EmailSender.Sent.ShouldHaveSingleItem();
+        //#endif
     }
 
     [Fact]
@@ -112,7 +118,9 @@ public sealed class IntegrationEventPublishingTests(IntegrationTestWebAppFactory
         var published = AuthIntegrationEvents().ShouldHaveSingleItem().ShouldBeOfType<PasswordResetRequestedIntegrationEvent>();
         published.Reason.ShouldBe(PasswordResetReason.SelfService);
         published.ExpiresAt.ShouldBe(codes[1].ExpiresAt);
+        //#if (notifications)
         Unprotect(published.ProtectedActionUrl).ShouldBe(ResetPasswordUrl + Uri.EscapeDataString(Factory.EmailSender.LastLinkToken(Email)));
+        //#endif
 
         // The stale code was skipped, not failed: every message is processed.
         (await QueryAsync(context => context.Set<OutboxMessage>().CountAsync(message => message.ProcessedAt == null, Ct))).ShouldBe(0);

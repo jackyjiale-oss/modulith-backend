@@ -18,9 +18,11 @@
     <Project Path="src/Modules/Auth/TemplateName.Modules.Auth/TemplateName.Modules.Auth.csproj" />
     <Project Path="src/Modules/Auth/TemplateName.Modules.Auth.Contracts/TemplateName.Modules.Auth.Contracts.csproj" />
   </Folder>
+  <!--#if (notifications)-->
   <Folder Name="/src/Modules/Notifications/">
     <Project Path="src/Modules/Notifications/TemplateName.Modules.Notifications/TemplateName.Modules.Notifications.csproj" />
   </Folder>
+  <!--#endif-->
   <Folder Name="/src/Modules/Audit/">
     <Project Path="src/Modules/Audit/TemplateName.Modules.Audit/TemplateName.Modules.Audit.csproj" />
   </Folder>

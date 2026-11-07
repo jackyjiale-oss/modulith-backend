@@ -35,7 +35,11 @@ docker run -d --name api -p 8080:8080 \
   api:local
 ```
 
-`-e NAME` with no value takes the value from your shell, so the secret is on no command line and in no file. The settings above are the minimum for Production; the full list of keys and their defaults is [`services/api.md`](../services/api.md#configuration), and the front-end URLs in `Auth:Links`, the SMTP settings in `Notifications:Email`, `AllowedHosts`, `Cors` and `ForwardedHeaders` are what a real deployment sets as well. The signing key is an EC P-256 private key in PEM ([Auth: access tokens](../modules/auth.md#access-tokens)).
+`-e NAME` with no value takes the value from your shell, so the secret is on no command line and in no file. The settings above are the minimum for Production; the full list of keys and their defaults is [`services/api.md`](../services/api.md#configuration), and the front-end URLs in `Auth:Links`,
+<!--#if (notifications)-->
+the SMTP settings in `Notifications:Email`,
+<!--#endif-->
+`AllowedHosts`, `Cors` and `ForwardedHeaders` are what a real deployment sets as well. The signing key is an EC P-256 private key in PEM ([Auth: access tokens](../modules/auth.md#access-tokens)).
 
 **Port.** The image listens on HTTP 8080 only: `ASPNETCORE_HTTP_PORTS=8080`, `EXPOSE 8080`. TLS ends at the proxy or load balancer. To change the port set **`ASPNETCORE_HTTP_PORTS`**, not `ASPNETCORE_URLS`: the health check reads only the first port number of `ASPNETCORE_HTTP_PORTS` (8080 when it is unset or holds no port number), so a port set only through `ASPNETCORE_URLS` leaves the container reported unhealthy.
 

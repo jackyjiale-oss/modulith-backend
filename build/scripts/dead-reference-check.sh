@@ -26,6 +26,10 @@ case "$caching" in redis | memory) ;; *) fail "caching must be 'redis' or 'memor
 cd "$dir"
 hits=0
 
+# Names that contain a pattern without naming the removed part: an ERE whose matches are removed from a line before it is matched
+# again; a line that no longer matches is allowed. Empty: nothing is removed. Each part sets it before its scans.
+kept_names=""
+
 # scan <pattern> <flag-text> [allowed-path-regex...]: reports every line of the tree matching the ERE pattern, except in the paths and
 # lines the rules above allow. The allowed-path regexes are matched against the path relative to the tree.
 scan() {
@@ -43,6 +47,8 @@ scan() {
     [[ "$path" == docs/adr/* ]] && continue
     # The generated README names the switch that removed the part.
     [[ "$text" == *"$flag_text"* ]] && continue
+    # A kept name was the only match.
+    if [[ -n "$kept_names" ]] && ! sed -E "s/$kept_names//g" <<< "$text" | grep -qE -e "$pattern"; then continue; fi
 
     allowed=0
     for rule in "$@"; do
@@ -59,8 +65,17 @@ if [[ "$notifications" == "false" ]]; then
   allow=(
     # BatchedCleanupJob's doc comment only uses NotificationsDbContext as an example of a context name.
     '^src/BuildingBlocks/[^/]+\.Infrastructure\.Common/Jobs/BatchedCleanupJob\.cs$'
+    # Unit tests of building blocks whose data names a context ("Notifications") or a hub path (/hubs/notifications) as plain strings.
+    '^tests/[^/]+\.UnitTests/Infrastructure/OutboxAbandonedGaugeTests\.cs$'
+    '^tests/[^/]+\.UnitTests/Web/AccessTokenRedactionTests\.cs$'
   )
-  scan 'Notifications|Mailpit|mailpit|\bnotify\b' '--notifications false' "${allow[@]}"
+  # The integration test base keeps DispatchNotificationsAsync (and its message) in every project: it runs the Auth outbox, and the
+  # delivery worker only when the module ships.
+  kept_names='DispatchNotificationsAsync|Notifications were still being dispatched'
+  # "notify" as a word also catches the module's schema: "notify", 'notify' and notify.Table. The lower-case names are its permission
+  # codes and metrics (notifications.delivery.view), its routes and page (/notifications) and its rate limit (notifications-hub-tickets).
+  scan 'Notifications|Mailpit|mailpit|\bnotify\b|\bnotifications\.[a-z_]|/notifications\b|notifications-hub' '--notifications false' "${allow[@]}"
+  kept_names=""
 fi
 
 if [[ "$include_sample" == "false" ]]; then

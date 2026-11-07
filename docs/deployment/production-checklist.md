@@ -68,7 +68,11 @@ Nothing in the template takes or tests a backup. **Yours:** schedule database ba
 ## Also before the first release
 
 - [ ] Every item above has an owner and a date.
-- [ ] `Auth:Links`, `Notifications:Email`, `Cors:AllowedOrigins` and the other environment-specific settings name your real hosts; the defaults point at `localhost`.
+- [ ] `Auth:Links`,
+  <!--#if (notifications)-->
+  `Notifications:Email`,
+  <!--#endif-->
+  `Cors:AllowedOrigins` and the other environment-specific settings name your real hosts; the defaults point at `localhost`.
 - [ ] The runtime database login has no DDL rights, and the migration login exists only as the environment secret.
 - [ ] `build/deploy/maintenance.html` carries your brand and contact; `maintenance.sh` is written, and its `on` passes `/health/live` and `/health/ready` through to the API ([`docker.md`](docker.md#the-maintenance-hook)). A release in maintenance mode fails before `migrate` without the hook. Until a release has completed its production deploy, later releases are dispatched by hand with `maintenance: on` ([`README.md`](README.md#maintenance-mode)).
 - [ ] `roll-out.sh` is written, `DEPLOY_ENABLED` is set only after it is, and `production` (ideally `staging` too) has required reviewers.

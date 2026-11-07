@@ -13,7 +13,9 @@ using TemplateName.Modules.Auth.Application;
 using TemplateName.Modules.Auth.Domain.Roles;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+//#if (notifications)
 using TemplateName.Modules.Notifications.Infrastructure.Persistence;
+//#endif
 //#if (includeSample)
 using TemplateName.Modules.Sample.Application;
 using TemplateName.Modules.Sample.Domain.LeaveRequests;
@@ -310,7 +312,9 @@ public sealed class AuditTrailEndToEndTests(IntegrationTestWebAppFactory factory
             //#if (includeSample)
             scope.ServiceProvider.GetRequiredService<SampleDbContext>(),
             //#endif
+            //#if (notifications)
             scope.ServiceProvider.GetRequiredService<NotificationsDbContext>(),
+            //#endif
             scope.ServiceProvider.GetRequiredService<AuditDbContext>(),
         ];
 

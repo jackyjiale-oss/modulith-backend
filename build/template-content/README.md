@@ -19,7 +19,7 @@ Windows stops at 260 characters per path unless long paths are enabled. The long
 
 ```bash
 cp .env.example .env                 # then set your own SQL_SA_PASSWORD
-docker compose up -d                 # SQL Server, the Aspire dashboard and Mailpit
+docker compose up -d                 # the local services of docker-compose.yml
 git init                             # skip if this folder is already a repository
 git config core.hooksPath .githooks  # commit-message check (CONTRIBUTING.md)
 chmod +x .githooks/commit-msg        # the hook must be executable (harmless on Windows)
@@ -36,17 +36,28 @@ SQL Server needs several seconds on its first start: if the API stops at the mig
 
 Local development settings are not committed: `appsettings.Development.json` is git-ignored. The two settings above that are not secrets (`Database:ApplyMigrationsOnStartup` and `Auth:Seed:AdminEmail`) can live in such a local file instead of user secrets, along with `"OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4317"` (the Aspire dashboard) and a Serilog `MinimumLevel:Default` of `Debug`.
 
-With these settings the API applies the module migrations on startup and seeds the roles, the permissions and the first administrator, `admin@localhost.test`, with the password you set above (12 to 128 characters; choose your own and never commit it). Sign in as that administrator with `POST /api/v1/auth/login` in Scalar and send the returned `accessToken` as a bearer token. Remove `Auth:Seed:AdminPassword` from user secrets after the first start. Emails (account confirmation, password reset, security notices) are not delivered anywhere locally: Mailpit catches them, rendered in the recipient's language (`en`, `ms` or `zh-Hans`, the `locale` sent on registration), and its inbox is at <http://localhost:8025>. The Notifications module sends them in the background, so an email arrives a few seconds after the request (the Auth outbox and the delivery worker each poll every 5 seconds: two polling intervals, about 10 s, plus processing). Signed in, `GET /api/v1/notifications/inbox` lists the user's in-app notifications (a password change creates one, and an email), `GET /api/v1/notifications/inbox/unread-count` counts the unread ones, and a browser opens the SignalR hub at `/hubs/notifications` with a single-use ticket from `POST /api/v1/notifications/hub-tickets` to receive new ones live (client example: [`docs/modules/notifications.md`](docs/modules/notifications.md#realtime-hub)). The SMTP settings are `Notifications:Email:*` (they were `Auth:Email:*` in earlier versions: the API refuses to start while the old section is set).
+With these settings the API applies the module migrations on startup and seeds the roles, the permissions and the first administrator, `admin@localhost.test`, with the password you set above (12 to 128 characters; choose your own and never commit it). Sign in as that administrator with `POST /api/v1/auth/login` in Scalar and send the returned `accessToken` as a bearer token. Remove `Auth:Seed:AdminPassword` from user secrets after the first start.
+<!--#if (notifications)-->
+Docker Compose starts SQL Server, the Aspire dashboard and Mailpit. Emails (account confirmation, password reset, security notices) are not delivered anywhere locally: Mailpit catches them, rendered in the recipient's language (`en`, `ms` or `zh-Hans`, the `locale` sent on registration), and its inbox is at <http://localhost:8025>. The Notifications module sends them in the background, so an email arrives a few seconds after the request (the Auth outbox and the delivery worker each poll every 5 seconds: two polling intervals, about 10 s, plus processing). Signed in, `GET /api/v1/notifications/inbox` lists the user's in-app notifications (a password change creates one, and an email), `GET /api/v1/notifications/inbox/unread-count` counts the unread ones, and a browser opens the SignalR hub at `/hubs/notifications` with a single-use ticket from `POST /api/v1/notifications/hub-tickets` to receive new ones live (client example: [`docs/modules/notifications.md`](docs/modules/notifications.md#realtime-hub)). The SMTP settings are `Notifications:Email:*` (they were `Auth:Email:*` in earlier versions: the API refuses to start while the old section is set).
+<!--#endif-->
+
+A project generated with `--notifications false` has no consumer for Auth's integration events; add your own to deliver verification and reset codes.
 
 | What | URL |
 |---|---|
 | API reference (Scalar) | <https://localhost:5001/scalar/v1> |
 | Health (readiness) | <https://localhost:5001/health/ready> |
 | Aspire dashboard (logs, traces, metrics) | <http://localhost:18888> |
+<!--#if (notifications)-->
 | Mailpit inbox (emails the API sends) | <http://localhost:8025> |
+<!--#endif-->
 
 <!--#if (caching == "redis")-->
-**Optional: Redis.** By default the permission cache, the rate-limit counters and the SignalR pushes live in the memory of one instance, and nothing needs Redis. To share them across instances, start the Valkey service (a Redis-compatible server, behind the compose profile `redis`) and switch the provider on: `docker compose --profile redis up -d`, then `Caching__Provider=redis ConnectionStrings__Redis=localhost:6379 dotnet run --project src/Host/TemplateName.Api`. With Redis down the API keeps serving from the database and `/health/ready` answers 200 `Degraded` ([`docs/building-blocks/platform-redis.md`](docs/building-blocks/platform-redis.md)).
+**Optional: Redis.** By default the permission cache and the rate-limit counters
+<!--#if (notifications)-->
+(and the SignalR pushes)
+<!--#endif-->
+live in the memory of one instance, and nothing needs Redis. To share them across instances, start the Valkey service (a Redis-compatible server, behind the compose profile `redis`) and switch the provider on: `docker compose --profile redis up -d`, then `Caching__Provider=redis ConnectionStrings__Redis=localhost:6379 dotnet run --project src/Host/TemplateName.Api`. With Redis down the API keeps serving from the database and `/health/ready` answers 200 `Degraded` ([`docs/building-blocks/platform-redis.md`](docs/building-blocks/platform-redis.md)).
 
 <!--#endif-->
 ## Modules
@@ -54,7 +65,9 @@ With these settings the API applies the module migrations on startup and seeds t
 | Module | Document |
 |---|---|
 | Auth (sign-in, social login, tokens, sessions, two-step verification with recovery codes, step-up and trusted devices, roles, permissions, audit log) | [`docs/modules/auth.md`](docs/modules/auth.md) |
+<!--#if (notifications)-->
 | Notifications (every email and in-app message, the inbox, the SignalR hub, preferences, quiet hours) | [`docs/modules/notifications.md`](docs/modules/notifications.md) |
+<!--#endif-->
 | Audit (the audit trail of field changes: who changed what, from which value to which, `GET /api/v1/admin/audit/trails`) | [`docs/modules/audit.md`](docs/modules/audit.md) |
 <!--#if (includeSample)-->
 | Sample (leave requests) | [`docs/modules/sample.md`](docs/modules/sample.md) |

@@ -3,8 +3,8 @@ using System.Threading.RateLimiting;
 namespace TemplateName.Web.Common.Security;
 
 /// <summary>
-/// Creates the fixed-window limiter of one partition of a rate-limit policy. The <c>global</c>, <c>auth-strict</c> and
-/// <c>notifications-hub-tickets</c> policies get every partition's limiter here, so where the count lives is pluggable: the default
+/// Creates the fixed-window limiter of one partition of a rate-limit policy. Every fixed-window policy (<c>global</c>,
+/// <c>auth-strict</c> and those a module adds) gets every partition's limiter here, so where the count lives is pluggable: the default
 /// (registered by <c>AddHttpSecurity</c> unless another one is) counts in memory per instance, and <c>AddPlatformRedis</c> replaces it
 /// with a limiter whose count is shared by every instance through Redis (D5, ADR 0027).
 /// <para>

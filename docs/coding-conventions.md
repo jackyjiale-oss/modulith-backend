@@ -139,7 +139,7 @@ Every type plays one of these roles. Its name follows the role's pattern, and it
 | F2 | Generic type: `{Name}.cs`; when a non-generic type with the same name exists, the generic one is `{Name}OfT.cs`. | `Result.cs` + `ResultOfT.cs` | review |
 | F3 | Nested types stay in the parent's file. Partial classes are `{Type}.{Aspect}.cs`. | `ValidationDecorator.cs`, `SampleDbContext.Outbox.cs` | review |
 | F4 | Folder = namespace segment, PascalCase. Category folders are plural (`Events`, `Migrations`, `Resources`); use-case folders are named after the use case (`Submit`, `Approve`, `GetById`). | `Application/LeaveRequests/Submit/` | `.editorconfig` (IDE0130) |
-| F5 | **Module layout is fixed:** `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/`, `Resources/`, `{Module}Module.cs`; `Resources/` holds the module's error messages, so a module that defines no error code has none (the Audit module). A module that declares notification types adds one more folder at the project root, `Templates/` (embedded Scriban files: `Templates/Email/{type}.{culture}.{part}.scriban`, `Templates/InApp/...`; see [Notifications: Templates](modules/notifications.md#templates-and-rendering)); nothing else is added. | — | architecture test (layering: the dependencies between the folders); review (the set of folders) |
+| F5 | **Module layout is fixed:** `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/`, `Resources/`, `{Module}Module.cs`; `Resources/` holds the module's error messages, so a module that defines no error code has none (the Audit module). A module that declares notification types adds one more folder at the project root, `Templates/` (embedded Scriban files: `Templates/Email/{type}.{culture}.{part}.scriban`, `Templates/InApp/...`); nothing else is added. | — | architecture test (layering: the dependencies between the folders); review (the set of folders) |
 | F6 | **Project folder = project name = assembly name = root namespace.** `TemplateName.{Area}` for building blocks, `TemplateName.Modules.{Module}` and `TemplateName.Modules.{Module}.Contracts` for modules. | `src/Modules/Sample/TemplateName.Modules.Sample/` | review |
 | F7 | Tests live in `tests/{TestProject}/{Module or Area}/…/{Subject}Tests.cs`. | `tests/TemplateName.UnitTests/Sample/LeaveRequestTests.cs` | review |
 
@@ -178,7 +178,9 @@ These are part of public contracts or operations. Changing one is a breaking cha
 | HTTP headers | `Title-Case`; new custom headers have no `X-` prefix (RFC 6648). `X-Trace-Id` is the one established exception. | `Idempotency-Key`, `Idempotency-Replayed` |
 | Error codes | `{module}.{snake_case}`; generic HTTP errors are `http.{status}` | `leave.not_pending`, `http.404` |
 | Permission codes | `{module}.{resource}.{action}` | `leave.request.approve` |
+<!--#if (notifications)-->
 | Notification type codes | `{module}.{snake_case}` | `auth.password_changed` |
+<!--#endif-->
 | Config sections and keys | PascalCase; environment variables `Section__Key` | `Outbox:PollingInterval`, `Outbox__PollingInterval` |
 | Feature flags | PascalCase | `NewLeaveFlow` |
 | DB schema | lower-case module name | `sample`, `auth` |

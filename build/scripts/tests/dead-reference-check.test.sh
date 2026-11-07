@@ -62,7 +62,8 @@ run_check() {
 
 # Every pattern of every part, one per line.
 everything() {
-  printf '%s\n' 'Modules.Notifications' 'Mailpit' 'mailpit' 'notify the user' \
+  printf '%s\n' 'Modules.Notifications' 'Mailpit' 'mailpit' 'notify the user' 'notifications.delivery.view' '/api/v1/notifications' \
+    'notifications-hub-tickets' \
     'Modules.Sample' 'SampleModule' 'SampleDbContext' 'SampleError' 'modules/sample' 'Sample module' 'LeaveRequest' 'leave request' \
     'Platform.Redis' 'PlatformRedis' 'platform-redis' 'StackExchange.Redis' 'Valkey' 'valkey'
 }
@@ -173,6 +174,53 @@ case_notifications_allowlist() {
   put src/BuildingBlocks/Acme.Infrastructure.Common/Jobs/OtherJob.cs 'Notifications'
   run_check false true redis
   assert_eq "1" "$status" "notifications_allowlist: another job"
+  make_tree
+  put tests/Acme.UnitTests/Infrastructure/OutboxAbandonedGaugeTests.cs '_sut.Set("Notifications", 2, job);'
+  put tests/Acme.UnitTests/Web/AccessTokenRedactionTests.cs '[InlineData("/hubs/notifications")]'
+  run_check false true redis
+  assert_eq "0" "$status" "notifications_allowlist: building-block tests with the module as test data"
+  make_tree
+  put tests/Acme.UnitTests/Web/OtherTests.cs '[InlineData("/hubs/notifications")]'
+  run_check false true redis
+  assert_eq "1" "$status" "notifications_allowlist: another web test"
+}
+
+case_notifications_kept_names() {
+  local p
+  for p in 'await DispatchNotificationsAsync();' 'protected Task DispatchNotificationsAsync() => DispatchNotificationsAsync(Factory.Services);' \
+    'throw new InvalidOperationException($"Notifications were still being dispatched after {MaxRounds} rounds.");'; do
+    make_tree
+    put tests/Acme.IntegrationTests/Auth/X.cs "$p"
+    run_check false true redis
+    assert_eq "0" "$status" "notifications_kept_names: '$p'"
+  done
+  local q
+  for q in 'await DispatchNotificationsAsync(); // then read the Notifications inbox' 'DispatchNotifications(); NotificationsDbContext' \
+    'await DispatchNotificationsAsync(); Mailpit'; do
+    make_tree
+    put tests/Acme.IntegrationTests/Auth/X.cs "$q"
+    run_check false true redis
+    assert_eq "1" "$status" "notifications_kept_names: '$q' names the module too"
+  done
+}
+
+case_notifications_schema() {
+  local p
+  for p in 'schemas.ShouldContain("notify");' '{ "notify.OutboxMessages", "ProcessedAt", true },' "WHERE TABLE_SCHEMA = 'notify'" \
+    'await SignInAsync("notifications.delivery.view");' 'await client.GetAsync("/api/v1/notifications/inbox", Ct);' \
+    '"notifications-hub-tickets"' 'see docs/modules/notifications.md'; do
+    make_tree
+    put tests/Acme.IntegrationTests/Host/X.cs "$p"
+    run_check false true redis
+    assert_eq "1" "$status" "notifications_schema: '$p'"
+  done
+  local q
+  for q in 'the notifications scope of a commit' 'send notifications to users' 'docs/modules/auth.md'; do
+    make_tree
+    put tests/Acme.IntegrationTests/Host/X.cs "$q"
+    run_check false true redis
+    assert_eq "0" "$status" "notifications_schema: '$q' is not the module"
+  done
 }
 
 case_sample_removed() {
@@ -306,7 +354,7 @@ run_case() {
 for c in \
   case_all_switches_on case_notifications_removed_hit case_notifications_other_patterns case_hit_line_number \
   case_ignored_paths case_flag_text_line_allowed case_redis_allowlist case_redis_other_patterns \
-  case_notifications_allowlist case_sample_removed case_sample_other_patterns case_sample_allowlist case_sample_schema \
+  case_notifications_allowlist case_notifications_kept_names case_notifications_schema case_sample_removed case_sample_other_patterns case_sample_allowlist case_sample_schema \
   case_each_part_checked_only_when_removed case_caching_redis_never_checked case_usage_errors; do
   run_case "$c"
 done

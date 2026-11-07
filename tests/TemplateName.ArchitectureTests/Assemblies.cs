@@ -6,8 +6,10 @@ using TemplateName.Modules.Audit;
 using TemplateName.Modules.Auth;
 using TemplateName.Modules.Auth.Contracts.Users;
 using TemplateName.Modules.Auth.Resources;
+//#if (notifications)
 using TemplateName.Modules.Notifications;
 using TemplateName.Modules.Notifications.Resources;
+//#endif
 //#if (includeSample)
 using TemplateName.Modules.Sample;
 using TemplateName.Modules.Sample.Resources;
@@ -46,7 +48,9 @@ public static class Assemblies
     public static IReadOnlyList<Assembly> Modules { get; } =
     [
         typeof(AuthModule).Assembly,
+        //#if (notifications)
         typeof(NotificationsModule).Assembly,
+        //#endif
         //#if (includeSample)
         typeof(SampleModule).Assembly,
         //#endif
@@ -77,7 +81,9 @@ public static class Assemblies
         typeof(CommonErrorMessages),
         typeof(InfrastructureErrorMessages),
         typeof(AuthErrorMessages),
+        //#if (notifications)
         typeof(NotificationsErrorMessages),
+        //#endif
         //#if (includeSample)
         typeof(SampleErrorMessages),
         //#endif

@@ -10,7 +10,9 @@ using TemplateName.Infrastructure.Common.Idempotency;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Audit;
 using TemplateName.Modules.Auth;
+//#if (notifications)
 using TemplateName.Modules.Notifications;
+//#endif
 //#if (includeSample)
 using TemplateName.Modules.Sample;
 //#endif
@@ -52,7 +54,9 @@ builder.Services.AddHttpSecurity(builder.Configuration);
 builder.Services.AddPermissionAuthorization();
 // Module registrations
 builder.Services.AddAuthModule(builder.Configuration);
+//#if (notifications)
 builder.Services.AddNotificationsModule(builder.Configuration);
+//#endif
 //#if (includeSample)
 builder.Services.AddSampleModule();
 //#endif
@@ -151,8 +155,10 @@ if (!app.Environment.IsProduction())
 var api = app.MapGroup("/api/v1");
 api.MapAuthEndpoints();
 app.MapAuthWellKnownEndpoints();
+//#if (notifications)
 api.MapNotificationsEndpoints();
 app.MapNotificationsHub();
+//#endif
 //#if (includeSample)
 api.MapSampleEndpoints();
 //#endif

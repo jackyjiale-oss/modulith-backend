@@ -30,8 +30,8 @@ public static class PlatformRedisServiceCollectionExtensions
     /// stop the host, and connect, synchronous and asynchronous timeouts of <c>Caching:Redis:CommandTimeout</c>), the
     /// <see cref="RedisAvailability"/> circuit, <c>AddStackExchangeRedisCache</c> on that connection with keys prefixed by
     /// <c>Caching:Redis:InstanceName</c> and wrapped by a decorator that never lets a Redis failure reach the caller,
-    /// <see cref="RedisFixedWindowLimiterFactory"/> in place of the in-memory <see cref="IFixedWindowLimiterFactory"/> (so the
-    /// <c>global</c>, <c>auth-strict</c> and <c>notifications-hub-tickets</c> windows are shared by every instance, and counted in memory
+    /// <see cref="RedisFixedWindowLimiterFactory"/> in place of the in-memory <see cref="IFixedWindowLimiterFactory"/> (so the windows of
+    /// every fixed-window policy, <c>global</c> and <c>auth-strict</c> among them, are shared by every instance, and counted in memory
     /// while Redis is down), SignalR's Redis backplane on the same connection (channels prefixed <c>{InstanceName}signalr</c>, so a push
     /// made on one instance reaches the connections on every instance; see <see cref="AddSignalRBackplane"/>), and the readiness check
     /// <c>redis</c> (a <c>PING</c>; failure status <see cref="HealthStatus.Degraded"/>, tag
