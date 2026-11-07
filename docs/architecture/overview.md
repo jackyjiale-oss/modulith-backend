@@ -107,10 +107,10 @@ The Sample module's `LeaveRequestEndpoints` is the example.
 <!--#endif-->
 A sensitive action asks for a fresh identity through the token's `auth_time` and `amr` claims (a step-up, ADR 0023), again with no database read. Details: [Auth module](../modules/auth.md#access-tokens), [Auth: Multi-factor authentication](../modules/auth.md#multi-factor-authentication) and [`docs/services/api.md`](../services/api.md#pipeline).
 
-Inside an endpoint:
 <!--#if (includeSample)-->
-(the Sample module's `LeaveRequestEndpoints` is the worked example)
+The Sample module's `LeaveRequestEndpoints` is the worked example.
 <!--#endif-->
+Inside an endpoint:
 
 1. The endpoint binds the body or query (malformed input throws, and the exception handler answers `400 request.malformed`), builds a command or query record and calls the injected `ICommandHandler<…>` or `IQueryHandler<…>`.
 2. The handler is wrapped by the decorators: logging (outermost) then validation. Validation failures return `400 validation.failed` with camel-cased field `errors` without reaching the handler (ADR 0005).

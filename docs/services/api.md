@@ -17,10 +17,11 @@ Order matters; `Program.cs` marks it with comments.
 | 7 | `AddHealthChecks()` | Health checks; each module context adds its own `ready` check |
 | 8 | `AddHttpSecurity(configuration)` | CORS, the global rate limiter, the `auth-strict` rate-limit policy, forwarded headers |
 | 9 | `AddPermissionAuthorization()` | The permission authorization handler behind `RequirePermission(code)` and the **fallback policy**: every endpoint requires an authenticated user unless it says `.AllowAnonymous()` ([web-common](../building-blocks/web-common.md)). It needs the explicit `UseAuthentication` and `UseAuthorization` of the pipeline (slots 1a and 10): without them `WebApplication` adds `UseAuthorization` ahead of `UseRouting` by itself, where no endpoint is known and the fallback policy answers 401 to every request. |
-| 10 | `AddAuthModule(configuration)`, `AddNotificationsModule(configuration)`, `AddAuditModule(configuration)` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme (the default authentication scheme), the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)); the Notifications module also its delivery worker, SignalR, the `HubTicket` authentication scheme (not a default scheme: only the hub's policy uses it) and the rate-limit policy of its ticket route ([Notifications module](../modules/notifications.md)); the Audit module its inbox, the consumer of the audit change sets every module's outbox publishes, the optional trail retention and its permission source ([Audit module](../modules/audit.md)); it can be registered at any position among the modules |
+| 10 | `AddAuthModule(configuration)`, `AddNotificationsModule(configuration)` (one line per module) | The module's context, outbox, handlers, validators and error messages; the Auth module also the JWT bearer scheme (the default authentication scheme), the permission checker and its cache, and the seeder ([Auth module](../modules/auth.md)); the Notifications module also its delivery worker, SignalR, the `HubTicket` authentication scheme (not a default scheme: only the hub's policy uses it) and the rate-limit policy of its ticket route ([Notifications module](../modules/notifications.md)) |
 <!--#if (includeSample)-->
 | 10 | `AddSampleModule()` | The module's context, outbox, handlers, validators and error messages ([Sample module](../modules/sample.md)) |
 <!--#endif-->
+| 10 | `AddAuditModule(configuration)` | The module's context and handlers, its inbox, the consumer of the audit change sets every module's outbox publishes, the optional trail retention and its permission source ([Audit module](../modules/audit.md)); it can be registered at any position among the modules |
 <!--#if (caching == "redis")-->
 | 10a | `AddPlatformRedis(configuration)` | Nothing unless `Caching:Provider` is `redis`; then the Redis connection, Redis as the `HybridCache` second level behind a circuit, the rate-limit windows counted in Redis, the SignalR backplane, and the `ready` check `redis` ([platform-redis](../building-blocks/platform-redis.md)). Optional: a solution without Redis deletes this line and the project. |
 <!--#endif-->
@@ -342,7 +343,7 @@ How long the Audit module keeps its audit trails before a cleanup job deletes th
 | Endpoint | Checks | Use |
 |---|---|---|
 | `GET /health/live` | none: 200 while the process serves requests | Liveness probe |
-| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform`, `auth`, `notify`, `sample`, `audit`, plus one per added module), and with `Caching:Provider = redis` the check `redis` (a `PING`) | Readiness probe, load balancer |
+| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform` and each module's schema, such as `auth`), and with `Caching:Provider = redis` the check `redis` (a `PING`) | Readiness probe, load balancer |
 
 <!--#if (caching == "redis")-->
 The `redis` check fails as `Degraded`, not `Unhealthy`: with Redis down `/health/ready` answers **200** with the body `Degraded`, because the instance still serves from the database and a load balancer must not drain every instance for a cache outage. A database check that fails still answers 503 `Unhealthy`.

@@ -29,7 +29,9 @@ public sealed class MigrateCommandTests(IntegrationTestWebAppFactory factory)
         schemas.ShouldContain("platform");
         schemas.ShouldContain("auth");
         schemas.ShouldContain("notify");
+        //#if (includeSample)
         schemas.ShouldContain("sample");
+        //#endif
         schemas.ShouldContain("audit");
         var countsAfterFirst = await HistoryRowCountsAsync(connectionString, Ct);
         countsAfterFirst.ShouldNotBeEmpty();

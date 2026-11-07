@@ -19,7 +19,9 @@ public sealed class CleanupSchemaTests(IntegrationTestWebAppFactory factory)
     {
         { "platform.IdempotencyKeys", "ExpiresAt", false },
         { "auth.OutboxMessages", "ProcessedAt", true },
+        //#if (includeSample)
         { "sample.OutboxMessages", "ProcessedAt", true },
+        //#endif
         { "notify.InboxMessages", "ProcessedAt", false },
         { "auth.VerificationCodes", "ExpiresAt", false },
         { "auth.RefreshTokens", "ExpiresAt", false },

@@ -69,11 +69,15 @@ if [[ "$include_sample" == "false" ]]; then
   allow=(
     # The naming tables give Sample's names as the example of each rule (SampleDbContext, SampleModule, the namespace, the paths).
     '^docs/coding-conventions\.md$'
+  )
+  scan 'modules/sample|Sample module' '--includeSample false' "${allow[@]}"
+  allow+=(
     # The code examples of a handler's registration and of a module DbContext are written as Sample's.
     '^docs/building-blocks/(application|infrastructure)-common\.md$'
   )
-  scan 'Modules\.Sample|SampleModule|SampleDbContext|SampleError|modules/sample|Sample module' '--includeSample false' "${allow[@]}"
-  # Its aggregate: also allowed where "LeaveRequest" is only an example name or a string of test data, never a type that is used.
+  scan 'Modules\.Sample|SampleModule|SampleDbContext|SampleError' '--includeSample false' "${allow[@]}"
+  # Its aggregate and its schema: also allowed where "LeaveRequest" or "sample" is only an example name or a string of test data,
+  # never a type, a table or a permission the code uses.
   allow+=(
     # The code examples of an aggregate and an endpoint group use the leave request.
     '^docs/building-blocks/(shared-kernel|web-common)\.md$'
@@ -87,7 +91,8 @@ if [[ "$include_sample" == "false" ]]; then
     '^tests/[^/]+\.UnitTests/(SharedKernel|Infrastructure)/Auditing/EntityChangesRecorded(Event|DomainEventHandler)Tests\.cs$'
     '^tests/[^/]+\.IntegrationTests/Audit/Audit(Consumer|Persistence|TrailEndpoint|TrailsCleanupJob)Tests\.cs$'
   )
-  scan 'LeaveRequest|leave request' '--includeSample false' "${allow[@]}"
+  # "sample" and 'sample' as a string, sample.Table, sample.permission_code.
+  scan 'LeaveRequest|leave request|"sample"|'"'sample'"'|\bsample\.[A-Za-z_]' '--includeSample false' "${allow[@]}"
 fi
 
 if [[ "$caching" == "memory" ]]; then

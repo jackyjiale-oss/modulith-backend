@@ -222,6 +222,36 @@ case_sample_allowlist() {
   put tests/Acme.IntegrationTests/Audit/AuditTrailEndToEndTests.cs 'LeaveRequest'
   run_check true false redis
   assert_eq "1" "$status" "sample_allowlist: another audit test"
+  make_tree
+  put docs/building-blocks/application-common.md "$(printf 'services.AddApplicationHandlers(typeof(SampleModule).Assembly);\n// schema "sample"')"
+  run_check true false redis
+  assert_eq "0" "$status" "sample_allowlist: a building-block code example"
+  make_tree
+  put docs/building-blocks/application-common.md 'the Sample module is the worked example'
+  run_check true false redis
+  assert_eq "1" "$status" "sample_allowlist: a building-block page saying the module exists"
+  make_tree
+  put tests/Acme.IntegrationTests/Audit/AuditTrailEndpointTests.cs "$(printf 'string module = "sample",\nVALUES (NEWID(), '"'sample'"')')"
+  run_check true false redis
+  assert_eq "0" "$status" "sample_allowlist: the schema as test data of the audit trail"
+}
+
+case_sample_schema() {
+  local p
+  for p in 'schemas.ShouldContain("sample");' '{ "sample.OutboxMessages", "ProcessedAt", true },' "WHERE TABLE_SCHEMA = 'sample'" \
+    'await SignInAsync("sample.leave_request.create");'; do
+    make_tree
+    put tests/Acme.IntegrationTests/Host/X.cs "$p"
+    run_check true false redis
+    assert_eq "1" "$status" "sample_schema: '$p'"
+  done
+  local q
+  for q in 'a sample of the rows' 'Sample.verified.json' 'the sampler'; do
+    make_tree
+    put tests/Acme.IntegrationTests/Host/X.cs "$q"
+    run_check true false redis
+    assert_eq "0" "$status" "sample_schema: '$q' is not the schema"
+  done
 }
 
 case_each_part_checked_only_when_removed() {
@@ -276,7 +306,7 @@ run_case() {
 for c in \
   case_all_switches_on case_notifications_removed_hit case_notifications_other_patterns case_hit_line_number \
   case_ignored_paths case_flag_text_line_allowed case_redis_allowlist case_redis_other_patterns \
-  case_notifications_allowlist case_sample_removed case_sample_other_patterns case_sample_allowlist \
+  case_notifications_allowlist case_sample_removed case_sample_other_patterns case_sample_allowlist case_sample_schema \
   case_each_part_checked_only_when_removed case_caching_redis_never_checked case_usage_errors; do
   run_case "$c"
 done
