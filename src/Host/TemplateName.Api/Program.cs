@@ -78,7 +78,7 @@ builder.Services.AddApplicationDecorators();
 var app = builder.Build();
 
 // The migrate mode (ADR 0006): the built host knows every module's context, but it is never started, so no Kestrel, outbox dispatcher,
-// scheduler or delivery worker runs. Disposing the host flushes the logs before the process exits.
+// scheduler or other background service runs. Disposing the host flushes the logs before the process exits.
 if (HostCommand.Parse(args) == HostCommandKind.Migrate)
 {
     await using (app)

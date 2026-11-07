@@ -1,8 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <!-- The host's shared framework, referenced directly so restore prunes the packages it already provides (the SignalR client's
-         SignalR.Common and Http.Connections.Common among them): the test process runs them from the framework, never from a package. -->
+    <!-- The host's shared framework, referenced directly so restore prunes the packages it already provides: the test process runs
+         them from the framework, never from a package. -->
+    <!--#if (notifications)-->
+    <!-- Among them the SignalR client's SignalR.Common and Http.Connections.Common. -->
+    <!--#endif-->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 

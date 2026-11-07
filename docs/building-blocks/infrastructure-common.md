@@ -205,7 +205,11 @@ A pipeline name that is not built in starts from the `external-default` values. 
 
 **Metrics.** Polly's meter `Polly` is exported with the host's OpenTelemetry metrics (`AddObservability` adds it next to `TemplateName.Platform`, when an OTLP endpoint is set): the retry, breaker and timeout events and the attempt and pipeline durations, tagged with the pipeline and strategy names (`{pipeline}-retry`, `{pipeline}-breaker`, `{pipeline}-total-timeout`, `{pipeline}-attempt-timeout`).
 
-**Not covered.** MailKit SMTP is not HTTP; the email delivery worker keeps its own retry and dead-letter schedule. No pipeline exists yet for an SMS or an email provider (nothing calls one); the next section shows how to add it.
+**Not covered.**
+<!--#if (notifications)-->
+MailKit SMTP is not HTTP; the email delivery worker keeps its own retry and dead-letter schedule.
+<!--#endif-->
+No pipeline exists yet for an SMS or an email provider (nothing calls one); the next section shows how to add it.
 
 ### Add a pipeline for a new provider
 

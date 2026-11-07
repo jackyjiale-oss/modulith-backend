@@ -37,7 +37,7 @@ Order matters; `Program.cs` marks it with comments.
 
 | Mode | What it does | Exit code |
 |---|---|---|
-| `migrate` | Builds the host (so every module's context is registered) but never starts it: no Kestrel, outbox dispatcher, scheduler or delivery worker. Calls `MigrateModuleDatabasesAsync`, logs `The module databases are migrated` or the exception at Error, and returns. Reads `ConnectionStrings:Database`; ignores `Database:ApplyMigrationsOnStartup`; idempotent; seeds nothing. | 0 on success, 1 on any failure |
+| `migrate` | Builds the host (so every module's context is registered) but never starts it: no Kestrel, outbox dispatcher, scheduler or other background service. Calls `MigrateModuleDatabasesAsync`, logs `The module databases are migrated` or the exception at Error, and returns. Reads `ConnectionStrings:Database`; ignores `Database:ApplyMigrationsOnStartup`; idempotent; seeds nothing. | 0 on success, 1 on any failure |
 | `healthcheck` | Builds no host. One GET to `http://127.0.0.1:{port}/health/live` with a 3 second timeout, where `{port}` is the first number in `ASPNETCORE_HTTP_PORTS` (8080 when there is none), and prints one line (`healthy (200)`, `unhealthy (503)`, `unhealthy (TaskCanceledException)`). It is the image's `HEALTHCHECK`. | 0 on a 2xx, else 1 |
 
 Both are for deployments: [`deployment/migrations.md`](../deployment/migrations.md) and [`deployment/docker.md`](../deployment/docker.md).

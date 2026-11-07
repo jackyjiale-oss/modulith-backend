@@ -38,6 +38,9 @@ public sealed class OutboxWithoutHandlersTests(IntegrationTestWebAppFactory fact
 
         await DispatchUntilIdleAsync(host.Services);
 
+        // Not vacuous: the recording consumers the factory registers for every Auth event received nothing, so none was left.
+        Factory.IntegrationEvents.Events.ShouldBeEmpty();
+
         await using var scope = host.Services.CreateAsyncScope();
         var messages = await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Set<OutboxMessage>().AsNoTracking()
             .Select(message => new { message.Type, message.ProcessedAt, message.AttemptCount })

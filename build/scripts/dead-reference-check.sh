@@ -74,7 +74,8 @@ if [[ "$notifications" == "false" ]]; then
   kept_names='DispatchNotificationsAsync|Notifications were still being dispatched'
   # "notify" as a word also catches the module's schema: "notify", 'notify' and notify.Table. The lower-case names are its permission
   # codes and metrics (notifications.delivery.view), its routes and page (/notifications) and its rate limit (notifications-hub-tickets).
-  scan 'Notifications|Mailpit|mailpit|\bnotify\b|\bnotifications\.[a-z_]|/notifications\b|notifications-hub' '--notifications false' "${allow[@]}"
+  # Its test email transport (RecordingEmailSender, Factory.EmailSender) and its delivery worker, as code and prose name them.
+  scan 'Notifications|Mailpit|mailpit|\bnotify\b|\bnotifications\.[a-z_]|/notifications\b|notifications-hub|EmailSender|delivery worker' '--notifications false' "${allow[@]}"
   kept_names=""
 fi
 

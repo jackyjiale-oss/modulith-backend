@@ -65,8 +65,8 @@
 #     first (step 2); with Auth:Seed:AdminEmail/AdminPassword empty no administrator is created;
 #   - OTEL_EXPORTER_OTLP_ENDPOINT unset: no exporter.
 # The integration test HostTests.Scalar_is_not_mapped_in_production starts Production with the same files plus a signing key.
-# Not ruled out without running the image: that test switches the outbox dispatcher, the recurring jobs and the delivery worker
-# off and skips the seeding, while the container runs all of them; a background service that throws stops the host (and fails
+# Not ruled out without running the image: that test switches the outbox dispatcher, the recurring jobs and the other background
+# services off and skips the seeding, while the container runs all of them; a background service that throws stops the host (and fails
 # step 4 here, with the logs printed).
 set -euo pipefail
 

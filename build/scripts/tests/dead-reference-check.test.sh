@@ -63,7 +63,7 @@ run_check() {
 # Every pattern of every part, one per line.
 everything() {
   printf '%s\n' 'Modules.Notifications' 'Mailpit' 'mailpit' 'notify the user' 'notifications.delivery.view' '/api/v1/notifications' \
-    'notifications-hub-tickets' \
+    'notifications-hub-tickets' 'Factory.EmailSender' 'the delivery worker' \
     'Modules.Sample' 'SampleModule' 'SampleDbContext' 'SampleError' 'modules/sample' 'Sample module' 'LeaveRequest' 'leave request' \
     'Platform.Redis' 'PlatformRedis' 'platform-redis' 'StackExchange.Redis' 'Valkey' 'valkey'
 }
@@ -223,6 +223,23 @@ case_notifications_schema() {
   done
 }
 
+case_notifications_email_transport_and_worker() {
+  local p
+  for p in 'Factory.EmailSender.Sent.ShouldBeEmpty();' '`RecordingEmailSender` keeps the messages' 'the delivery worker sends the emails'; do
+    make_tree
+    put docs/x.md "$p"
+    run_check false true redis
+    assert_eq "1" "$status" "notifications_email_transport_and_worker: '$p'"
+  done
+  local q
+  for q in 'a delivery of the same event' 'the sender of an email' 'a background worker'; do
+    make_tree
+    put docs/x.md "$q"
+    run_check false true redis
+    assert_eq "0" "$status" "notifications_email_transport_and_worker: '$q' is not the module"
+  done
+}
+
 case_sample_removed() {
   make_tree
   put tests/T.cs 'LeaveRequest'
@@ -354,7 +371,7 @@ run_case() {
 for c in \
   case_all_switches_on case_notifications_removed_hit case_notifications_other_patterns case_hit_line_number \
   case_ignored_paths case_flag_text_line_allowed case_redis_allowlist case_redis_other_patterns \
-  case_notifications_allowlist case_notifications_kept_names case_notifications_schema case_sample_removed case_sample_other_patterns case_sample_allowlist case_sample_schema \
+  case_notifications_allowlist case_notifications_kept_names case_notifications_schema case_notifications_email_transport_and_worker case_sample_removed case_sample_other_patterns case_sample_allowlist case_sample_schema \
   case_each_part_checked_only_when_removed case_caching_redis_never_checked case_usage_errors; do
   run_case "$c"
 done

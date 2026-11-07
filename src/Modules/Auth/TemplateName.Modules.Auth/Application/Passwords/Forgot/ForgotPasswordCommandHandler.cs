@@ -10,7 +10,7 @@ using TemplateName.SharedKernel;
 namespace TemplateName.Modules.Auth.Application.Passwords.Forgot;
 
 /// <summary>
-/// Issues a password-reset code, whose event emails the link, and invalidates the pending ones. Every case succeeds, so the answer
+/// Issues a password-reset code, whose event carries the link to be emailed, and invalidates the pending ones. Every case succeeds, so the answer
 /// reveals nothing: an unknown address, a suspended account, or a code issued within <see cref="VerificationOptions.ResendCooldown"/>
 /// issues nothing. Every case also writes one audit entry (with the masked address) and saves once, so a known and an unknown address do
 /// comparable work. An account without a password (created by an administrator) is a known account here: the reset is how it sets its
