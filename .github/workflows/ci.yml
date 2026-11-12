@@ -67,7 +67,7 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           baseline="$RUNNER_TEMP/openapi-baseline.json"
-          # Must match the snapshot path of OpenApiSnapshotTests and ApiVersionRegisterTests (and OpenApiCompatibilityTests).
+          # Must match the snapshot path of OpenApiSnapshotTests, ApiVersionRegisterTests and OpenApiCompatibilityTests, in a project that has the snapshot.
           snapshot="tests/TemplateName.IntegrationTests/Documentation/OpenApiSnapshotTests.OpenApi_document_matches_snapshot.verified.json"
           if git show "origin/$BASE_REF:$snapshot" > "$baseline"; then
             echo "OPENAPI_BASELINE=$baseline" >> "$GITHUB_ENV"

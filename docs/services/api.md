@@ -366,7 +366,10 @@ Both are anonymous, exempt from rate limiting, logged at `Verbose` when healthy,
 
 ## OpenAPI and Scalar
 
-Outside Production (Development, Testing, and any other non-Production environment) the host serves the OpenAPI document at `/openapi/v1.json` and the Scalar reference at `/scalar/v1`. Production maps neither. The document declares the `Bearer` scheme (`http`, `bearer`, `JWT`) and marks every operation whose endpoint carries authorization data (`RequirePermission`, `RequireAuthorization`) and no `.AllowAnonymous()` with it, so Scalar can send an access token. The document is pinned by `OpenApiSnapshotTests` (ADR 0011): an intended API change is accepted by replacing the committed `.verified.json` with the `.received.json` the failing test writes.
+Outside Production (Development, Testing, and any other non-Production environment) the host serves the OpenAPI document at `/openapi/v1.json` and the Scalar reference at `/scalar/v1`. Production maps neither. The document declares the `Bearer` scheme (`http`, `bearer`, `JWT`) and marks every operation whose endpoint carries authorization data (`RequirePermission`, `RequireAuthorization`) and no `.AllowAnonymous()` with it, so Scalar can send an access token.
+<!--#if (notifications && includeSample)-->
+The document is pinned by `OpenApiSnapshotTests` (ADR 0011): an intended API change is accepted by replacing the committed `.verified.json` with the `.received.json` the failing test writes.
+<!--#endif-->
 
 ## Environments
 

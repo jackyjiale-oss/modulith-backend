@@ -6,7 +6,7 @@
 #                                             [--integration] [--generate-only] [--output DIR]
 #   --notifications, --includeSample, --caching  the template switches, passed to `dotnet new` (defaults: true, true, redis).
 #   --integration   also run the integration tests (they need Docker); without it only the unit and architecture tests run.
-#   --generate-only stop after the generation checks (about 5 minutes); no restore, build or tests. The full smoke takes 5 to 15 minutes.
+#   --generate-only stop after the generation checks (about 7 minutes); no restore, build or tests. The full smoke takes 5 to 15 minutes.
 #   --output DIR    keep the generated project in DIR, an absolute path that must not exist (use a short path such as C:/w/g1 on Windows).
 # With no arguments it generates with every switch on, builds and runs the unit and architecture tests.
 #
@@ -279,6 +279,25 @@ if [[ "$all_on" == "true" ]]; then
       "$generated" | head -n 8 || true)"
     fail "${generated#"$out"/} is not ${source#"$repo_root"/} without its marker lines ($where):"$'\n'"$excerpt"
   done <<< "$drift"
+
+  # The file list, the other way: a tracked file missing from the all-on project must be left out by an unconditional exclude of
+  # template.json, or by the one modifier meant to apply with every switch on ((caching == "redis"): files only a memory project has).
+  # A file that any other modifier left out means a condition is true with every switch on (a typo'd symbol, say).
+  mapfile -t all_on_excludes < <(awk '/"modifiers"/ { modifiers = 1 } /"condition"/ { condition = $0 }
+    /"exclude": \[/ { listing = 1; next } listing && /\]/ { listing = 0; next }
+    listing && (!modifiers || condition ~ /\(caching == \\"redis\\"\)/) { gsub(/^[ \t]*"|",?[ \t\r]*$/, ""); print }' \
+    "$repo_root/.template.config/template.json")
+  while IFS= read -r tracked; do
+    [[ -e "$out/${tracked//TemplateName/$project_name}" ]] && continue
+    excluded=false
+    for pattern in "${all_on_excludes[@]}"; do
+      # The engine's "**/" also matches no folder at all; a bash pattern's "*" already crosses "/".
+      if [[ "$pattern" == '**/'* ]]; then rest="${pattern#'**/'}"; rest="${rest//'**'/*}"; [[ "$tracked" == $rest || "$tracked" == */$rest ]] && excluded=true
+      else [[ "$tracked" == ${pattern//'**'/*} ]] && excluded=true; fi
+      [[ "$excluded" == true ]] && break
+    done
+    [[ "$excluded" == true ]] || fail "$tracked is tracked but not generated with every switch on, and no unconditional exclude of template.json leaves it out"
+  done < <(git -C "$repo_root" ls-files)
 fi
 
 step "Checking which parts of the template were generated"

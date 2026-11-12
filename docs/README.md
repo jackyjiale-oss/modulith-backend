@@ -1,6 +1,10 @@
 # Documentation
 
-Everything about how this service is built and run. Documents are part of the definition of done: a change to an endpoint, error code, event, table, configuration key or pipeline step updates the matching page in the same pull request ([`CONTRIBUTING.md`](../CONTRIBUTING.md), Section 4). Tests fail when a module or building block has no page, a module page misses a required section or an error code, an ADR is missing from the lists below, or a mapped endpoint is not documented (`DocumentationTests` in the architecture tests, `EndpointDocumentationTests` in the integration tests), or an API version is served without a row in the version register ([`api-compatibility.md`](api-compatibility.md), `ApiVersionRegisterTests`); `OpenApiSnapshotTests` fail on any change to the OpenAPI document (ADR 0011), and on a pull request the breaking-change gate (`OpenApiBaselineTests`) fails a breaking one unless the title carries `!` (ADR 0031).
+Everything about how this service is built and run. Documents are part of the definition of done: a change to an endpoint, error code, event, table, configuration key or pipeline step updates the matching page in the same pull request ([`CONTRIBUTING.md`](../CONTRIBUTING.md), Section 4). Tests fail when a module or building block has no page, a module page misses a required section or an error code, an ADR is missing from the lists below, or a mapped endpoint is not documented (`DocumentationTests` in the architecture tests, `EndpointDocumentationTests` in the integration tests).
+<!--#if (notifications && includeSample)-->
+They also fail when an API version is served without a row in the version register ([`api-compatibility.md`](api-compatibility.md), `ApiVersionRegisterTests`), and `OpenApiSnapshotTests` fail on any change to the OpenAPI document (ADR 0011).
+<!--#endif-->
+On a pull request whose base branch has a committed OpenAPI snapshot, the breaking-change gate (`OpenApiBaselineTests`) fails a breaking change unless the title carries `!` (ADR 0031).
 
 ## Start here
 
