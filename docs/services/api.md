@@ -356,7 +356,7 @@ How long the Audit module keeps its audit trails before a cleanup job deletes th
 | Endpoint | Checks | Use |
 |---|---|---|
 | `GET /health/live` | none: 200 while the process serves requests | Liveness probe |
-| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform` and each module's schema, such as `auth`), and with `Caching:Provider = redis` the check `redis` (a `PING`) | Readiness probe, load balancer |
+| `GET /health/ready` | every check tagged `ready`: one EF Core `DbContext` check per schema (`platform` and each module's schema, such as `auth`), and with `Caching:Provider = redis` the check `redis` (a `PING`; a project generated with `--caching memory` has no such check) | Readiness probe, load balancer |
 
 <!--#if (caching == "redis")-->
 The `redis` check fails as `Degraded`, not `Unhealthy`: with Redis down `/health/ready` answers **200** with the body `Degraded`, because the instance still serves from the database and a load balancer must not drain every instance for a cache outage. A database check that fails still answers 503 `Unhealthy`.

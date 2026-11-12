@@ -39,7 +39,11 @@ The question is: can an existing client keep working without changing its code o
 
 ### The breaking-change gate
 
-On a pull request, `OpenApiBaselineTests.OpenApi_changes_are_compatible_with_the_baseline` compares the current OpenAPI document (`/openapi/v1.json`) with the base branch's committed `OpenApiSnapshotTests.OpenApi_document_matches_snapshot.verified.json` ([ADR 0011](adr/0011-in-repo-openapi-snapshot.md)) using `OpenApiCompatibility.Compare`, our own classifier, with no package or external tool. It fails when it finds a breaking change, and lists every difference it found, breaking or compatible. CI names the baseline file in `OPENAPI_BASELINE` (the `OpenAPI baseline` step of `ci.yml`, pull requests only). Without that variable the test skips itself, so a local `dotnet test` and a push to `main` are unaffected.
+On a pull request, `OpenApiBaselineTests.OpenApi_changes_are_compatible_with_the_baseline` compares the current OpenAPI document (`/openapi/v1.json`) with the base branch's OpenAPI snapshot, `OpenApiSnapshotTests.OpenApi_document_matches_snapshot.verified.json` ([ADR 0011](adr/0011-in-repo-openapi-snapshot.md)), using `OpenApiCompatibility.Compare`, our own classifier, with no package or external tool. It fails when it finds a breaking change, and lists every difference it found, breaking or compatible. CI names the baseline file in `OPENAPI_BASELINE` (the `OpenAPI baseline` step of `ci.yml`, pull requests only). Without that variable the test skips itself, so a local `dotnet test` and a push to `main` are unaffected.
+<!--#if (notifications && includeSample)-->
+The snapshot is committed, and `OpenApiSnapshotTests` keeps it equal to the document the host serves.
+<!--#endif-->
+A project generated with `--notifications false` or `--includeSample false` has no committed OpenAPI snapshot, so CI warns that the base branch has none and skips the gate, and the register test below (`Register_matches_the_committed_openapi_snapshot`) is not generated either, until the project adds its own snapshot test ([ADR 0011](adr/0011-in-repo-openapi-snapshot.md)) and commits its `verified.json`.
 
 What it classifies, with `$ref` resolved and `allOf` members merged. The request side is the parameters and the request body; the response side is the bodies of the `2xx` responses.
 
@@ -63,7 +67,10 @@ Its limits, which review covers:
 
 1. **Confirm that old and new contracts must coexist.** If not (no client has the old shape yet, or every client is ours and ships with the backend), change the contract in place, mark the title `!`, and say what clients must do in the `BREAKING CHANGE:` footer.
 2. **Add the version.** `/api/v1` is a literal route group and there is one OpenAPI document, `v1` ([ADR 0008](adr/0008-literal-v1-routes.md)). The first break that has to coexist adopts `Asp.Versioning` with URL-segment versioning, which keeps `/api/v1` as it is: a `/api/v2` group, a second OpenAPI document `v2`, the snapshot and the gate run once per document, and each module's version-specific request and response types beside its endpoints (`Endpoints/V2/`). That change has its own ADR, which supersedes ADR 0008 and updates the trigger in ADR 0031.
-3. **Register it.** Add the row to the version register as `Active`. `Register_matches_the_committed_openapi_snapshot` fails for a served version without a row.
+3. **Register it.** Add the row to the version register as `Active`.
+<!--#if (notifications && includeSample)-->
+   `Register_matches_the_committed_openapi_snapshot` fails for a served version without a row.
+<!--#endif-->
 4. **Share the behaviour, version the contract.** Handlers stay shared where behaviour is the same; each version has its own request and response types, and the old response type is filled from the current model (`ProductV1Dto` and `ProductV2Dto` from one entity).
 5. **Deprecate the old version.** Set its register row to `Deprecated` with the date and the retirement criteria, tell clients, and start sending the headers (section "Retiring a version").
 
@@ -110,7 +117,11 @@ A module owns its tables ([data ownership](architecture/overview.md#data-ownersh
 
 ## Version register
 
-One row per API version; the test of this page (`Register_matches_the_committed_openapi_snapshot`) keeps it in step with the OpenAPI document. It fails for a version the document serves with no row, for an `Active` or `Deprecated` row whose version is not served, for a `Retired` row whose version is still served, and for a status that is not one of the four. Statuses: `Active`, `Deprecated`, `Retirement announced`, `Retired`. Every `Deprecated` or later row has an owner and the criteria for the next step. A retired version keeps its row.
+One row per API version.
+<!--#if (notifications && includeSample)-->
+The test of this page (`Register_matches_the_committed_openapi_snapshot`) keeps it in step with the OpenAPI document. It fails for a version the document serves with no row, for an `Active` or `Deprecated` row whose version is not served, for a `Retired` row whose version is still served, and for a status that is not one of the four.
+<!--#endif-->
+Statuses: `Active`, `Deprecated`, `Retirement announced`, `Retired`. Every `Deprecated` or later row has an owner and the criteria for the next step. A retired version keeps its row.
 
 | Version | Status | Since | Owner | Retirement criteria |
 |---|---|---|---|---|
@@ -148,7 +159,7 @@ For mobile apps consider telemetry, a minimum supported app version (the templat
 - Keep the register of active, deprecated and retired versions, with an owner and retirement criteria for every deprecated one.
 - Keep API contract types apart from entities.
 - Keep business logic in the shared handlers where behaviour is the same across versions.
-- Test every supported version's contract. The gate and the snapshot cover the published document; a project adds behaviour tests per version.
+- Test every supported version's contract. The gate and the snapshot, where the project has them, cover only the published document; a project adds behaviour tests per version.
 - Test fresh installs and upgrades of the database (the upgrade-path test above).
 - Track API usage and app versions in the logs (`ApiVersion`, `ClientVersion`).
 - Document a column rename and the systems that depend on it, in the pull request and the module page.

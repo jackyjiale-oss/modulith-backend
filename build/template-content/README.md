@@ -87,7 +87,7 @@ dotnet new modulith-backend -n Acme.Hr --notifications false --includeSample fal
 |---|---|
 | `--notifications false` | the Notifications module (`src/Modules/Notifications`), its tests, its page, its SignalR hub and the Mailpit service of `docker-compose.yml` |
 | `--includeSample false` | the Sample module (`src/Modules/Sample`), its tests, its page, and the tests that run through it |
-| `--caching memory` | `Platform.Redis` (the optional Redis project), its tests, its page, the Valkey service of `docker-compose.yml`, the `Caching:Redis` settings and the StackExchange.Redis package |
+| `--caching memory` | `Platform.Redis` (the optional Redis project), its tests, its page, the Valkey service of `docker-compose.yml`, the `Caching:Redis` settings and the Redis packages (`StackExchange.Redis`, `Microsoft.Extensions.Caching.StackExchangeRedis`, `Microsoft.AspNetCore.SignalR.StackExchangeRedis`) |
 
 `--caching memory` does not change the runtime default: `Caching:Provider` is `memory` either way. A project generated with `--caching memory` that sets `Caching:Provider` to `redis` refuses to start, and the message names `AddPlatformRedis`.
 
@@ -100,7 +100,9 @@ Tests that need a removed part are removed with it; nothing is rewritten to stan
 - With `--caching memory`, the Redis integration tests and the Platform unit tests (limiter, health check, backplane, resilient cache) are gone.
 - With `--notifications false` or `--includeSample false`, the OpenAPI snapshot (`OpenApiSnapshotTests` and its `verified.json`) is not generated, because one file lists every route. The breaking-change gate of [`docs/api-compatibility.md`](docs/api-compatibility.md) then has no baseline and only warns.
 
-A project generated with any of `--notifications false`, `--includeSample false` or `--caching memory` has no `packages.lock.json` in the host project and the three test projects, because their contents depend on the switches. Run `dotnet restore` once after generating, then commit the four lock files; until then `dotnet restore --locked-mode` (the CI and the Docker build) fails.
+A project generated with any of `--notifications false`, `--includeSample false` or `--caching memory` has no `packages.lock.json` in the host project and the three test projects, because their contents depend on the switches. Run `dotnet restore` once after generating, then commit the four lock files; until then CI's `dotnet restore --locked-mode` fails on the missing lock files, and the Docker build fails before its restore, at the `COPY` of the API's `packages.lock.json`.
+
+The template's own checks of these projects are narrower than their CI: for each combination it generates the project, builds it and runs its tests. The 80 % coverage gate, the `dotnet format` check, the image build and the licence job of a project generated with `--notifications false`, `--includeSample false` or `--caching memory` have not been run by the template, so the first push of such a project should be watched, and tests added if the coverage gate fails.
 
 The decision and its costs are in [ADR 0035](docs/adr/0035-template-switches-by-engine-conditionals.md).
 
