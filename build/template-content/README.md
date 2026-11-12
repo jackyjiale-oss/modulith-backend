@@ -75,6 +75,35 @@ live in the memory of one instance, and nothing needs Redis. To share them acros
 
 A new module gets its own page, copied from [`docs/modules/_template.md`](docs/modules/_template.md).
 
+## Switches
+
+Three switches choose the parts of the template when a project is generated. Each is on by default, so `dotnet new modulith-backend -n Acme.Hr` generates everything. To leave parts out, pass any of them:
+
+```bash
+dotnet new modulith-backend -n Acme.Hr --notifications false --includeSample false --caching memory
+```
+
+| Switch | What it removes |
+|---|---|
+| `--notifications false` | the Notifications module (`src/Modules/Notifications`), its tests, its page, its SignalR hub and the Mailpit service of `docker-compose.yml` |
+| `--includeSample false` | the Sample module (`src/Modules/Sample`), its tests, its page, and the tests that run through it |
+| `--caching memory` | `Platform.Redis` (the optional Redis project), its tests, its page, the Valkey service of `docker-compose.yml`, the `Caching:Redis` settings and the StackExchange.Redis package |
+
+`--caching memory` does not change the runtime default: `Caching:Provider` is `memory` either way. A project generated with `--caching memory` that sets `Caching:Provider` to `redis` refuses to start, and the message names `AddPlatformRedis`.
+
+A project generated with `--notifications false` keeps Auth as it is: Auth still publishes its integration events, and nothing consumes them. Add your own consumer to deliver verification and reset codes.
+
+Tests that need a removed part are removed with it; nothing is rewritten to stand in for them.
+
+- With `--notifications false`, the integration tests that read a token from the recorded email (the confirmation and password-reset flows) are gone.
+- With `--includeSample false`, the project has no integration test of the idempotency middleware, of `ErrorMessageLocalizer`, of the localization of validation errors by `Accept-Language`, or of the HTTP audit-trail route with its trace id: all of them ran through Sample.
+- With `--caching memory`, the Redis integration tests and the Platform unit tests (limiter, health check, backplane, resilient cache) are gone.
+- With `--notifications false` or `--includeSample false`, the OpenAPI snapshot (`OpenApiSnapshotTests` and its `verified.json`) is not generated, because one file lists every route. The breaking-change gate of [`docs/api-compatibility.md`](docs/api-compatibility.md) then has no baseline and only warns.
+
+A project generated with any of `--notifications false`, `--includeSample false` or `--caching memory` has no `packages.lock.json` in the host project and the three test projects, because their contents depend on the switches. Run `dotnet restore` once after generating, then commit the four lock files; until then `dotnet restore --locked-mode` (the CI and the Docker build) fails.
+
+The decision and its costs are in [ADR 0035](docs/adr/0035-template-switches-by-engine-conditionals.md).
+
 ## Testing
 
 ```bash

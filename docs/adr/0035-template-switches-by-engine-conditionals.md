@@ -1,0 +1,55 @@
+# 0035. Template switches by engine conditionals, tests dropped with their module
+
+- Status: Accepted
+- Date: 2026-11-12
+- Deciders: Lee Jia Le
+
+## Context
+Until now `dotnet new modulith-backend` generated one tree: both modules, the sample module, the Redis project. The blueprint (15.1) and the review ask for switches, and the review limits version 1 to three: `notifications`, `includeSample` and `caching`. A switch removes a module or a project; configuration still chooses providers inside what remains. The design (`docs/superpowers/specs/2026-11-03-template-switches-design.md` in the template repository, which a generated project does not carry) settled seven points, S1 to S7, and its plan added five more; this ADR records the ones that are hard to reverse or that a maintainer would otherwise have to rediscover.
+
+The constraint that shapes everything: the template repository is the all-on tree. It must build, test and run as it is, without the template engine, and a project generated with no options must stay what it was (ADR 0031: no route, response, table or column changes).
+
+## Options considered
+
+**How a part is removed (S4).**
+1. **A post-generation script that deletes files and edits text.** Opaque, outside the engine, and untestable without generating.
+2. **A separate source tree per combination.** Eight copies to keep in step.
+3. **The engine's own conditionals written as comments, plus `sources.modifiers` excludes.** The repository stays valid and all-on; the engine removes the marker lines and, when the condition is false, the lines between them.
+
+**What happens to Auth when Notifications is off (S3).**
+1. **Guards in Auth.** Conditionals in a module the switch does not own.
+2. **Pure removal.** Auth already publishes integration events through its Contracts project and has no code dependency on Notifications, so it keeps publishing to nobody.
+
+**What happens to tests that need a removed module (S5).**
+1. **Refactor them onto test-only seams.** More code and a second path to keep honest.
+2. **Drop them with the module, by file, or wrap the mixed files in conditionals.** The all-on CI in the template repository keeps running the whole suite.
+
+**Which combinations are generated (S6).**
+1. **Every combination (eight).** Full coverage, three more long jobs.
+2. **The five of the design** (all on, all off, each switch off alone) **on every pull request, and the three pairs on pushes to `main`.** The pairs are cheap to add and expensive to run on every pull request.
+
+## Decision
+We chose the engine's conditionals, pure removal, files dropped with their module, and eight combinations with the pairs off the pull-request path.
+
+- **Symbols (S1).** `notifications` (bool, default true), `includeSample` (bool, default true) and `caching` (choice `redis` or `memory`, default `redis`) in `.template.config/template.json`.
+- **Caching (S2).** `caching` = `memory` removes `TemplateName.Platform.Redis`, its tests, its page and the StackExchange.Redis package. The runtime default of `Caching:Provider` stays `memory` in both; choosing `memory` and then setting `Caching:Provider=redis` already fails fast from `CachingServiceCollectionExtensions`, naming `AddPlatformRedis`, so no new guard exists (a test pins the message).
+- **Auth events (S3).** Nothing in Auth changes; the generated README and the Auth page say a project must add its own consumer to deliver verification and reset codes.
+- **Markers (S4).** Comments in the all-on repository, **only on-only regions** (content present when the switch is on), never an `#else`: an `#else` branch would be code the repository itself does not run. Content that exists only when a switch is off is a file a modifier excludes when the switch is on. Marker forms: `//#if (expr)` in `.cs` and `appsettings.json`, `<!--#if (expr)-->` in `.csproj`, `.slnx`, `.props`, `.resx` and `.md`, bare `#if (expr)` in `.yml`, `Dockerfile` and `.sh`. `docs/architecture/overview.md` gets `SpecialCustomOperations` so its Mermaid block takes `%%#if (expr)` as well. Whole files go through `sources.modifiers` excludes.
+- **Tests (S5).** A test that needs a removed module is excluded by file, or its mixed file is wrapped in conditionals. Nothing is refactored onto test-only seams.
+- **The matrix (S6).** `{on, on, redis}` (the fast, required `template-smoke` job), `{off, off, memory}`, and each switch off alone run on pull requests; the three pairs (`no-notifications-memory`, `no-notifications-no-sample`, `no-sample-memory`) run on pushes to `main` and `workflow_dispatch`. Each generation runs the dead-reference check, a Release build, the unit and architecture tests and the integration tests. `template-matrix.yml` is a template-repository-only workflow, additional to `template-smoke`, so a generated project carries no idle matrix jobs.
+- **One script (S7).** `build/scripts/template-smoke.sh` takes the switch values and stays the one script that generates, checks and tests; the matrix calls it.
+- **The OpenAPI snapshot goes when a route can go.** `verified.json`, `OpenApiSnapshotTests.cs` and every test that reads them are dropped when `(!notifications || !includeSample)`: one file lists every route and cannot be conditional.
+- **Four lock files are not generated** (the API, UnitTests, ArchitectureTests and IntegrationTests projects) when `(!notifications || !includeSample || caching == "memory")`: their contents differ per combination and Dependabot would rewrite a marker in them. The project runs `dotnet restore` once and commits them; the other lock files are identical in every combination (asserted by the smoke script).
+- **The dead-reference check** (`build/scripts/dead-reference-check.sh`) scans the generated tree excluding `bin`, `obj`, `packages.lock.json` and `docs/adr/**` (a decision record is history). A line is exempt when it carries the matching `--notifications false`, `--includeSample false` or `--caching memory` text, or when its file is in a small allowlist: Sample's names used as plain examples in the naming tables of `docs/coding-conventions.md`, the building-block pages, `CONTRIBUTING.md`, and Audit test data. ADRs whose subject is a removed part ship only with that part: 0019 and 0021 (notifications), 0027 (redis).
+
+## Consequences
+- **The all-on output is not byte-identical to `main`.** Measured when the markers landed: 50 files out of the whole tree differ, of which 22 are Markdown prose, 19 comment-only, 7 C# layout-only (a collection expression or one split condition so that a marker can sit on its own line: `AuditTrailEndToEndTests`, `AuthSeederTests`, `AdminDeliveryTests`, `OutboxCleanupJobTests`, `InboxCleanupJobTests`, `IntegrationTestBase`, `DocumentationTests`; token-identical), and 2 others (the `UserSecretsId` GUID in `Api.csproj`, new for each generation, and the new `OutboxWithoutHandlersTests.cs`). This relaxes the design's "byte-identical apart from the markers' removal" to identical apart from prose, comments and layout.
+- **Markers cost something in the template repository.** A marker line between Markdown table rows breaks that table on GitHub, and a `<!--#if-->` line ends a CommonMark paragraph, so a sentence split by a marker renders as separate paragraphs in the repository view. The generated output is unaffected.
+- **ADRs 0018, 0020 and 0028 carry new link sentences** so that their links to removed pages do not dangle when Notifications is off. That relaxes "ADR edits are marker moves only".
+- **Each switch loses test coverage.** Unit and architecture tests: repository 2706 and 131; `--caching memory` 2643 and 130; `--includeSample false` 2674 and 123; `--notifications false` 2037 and 124 (one skipped); all three off 1943 and 117 (one skipped). With `--notifications false` the integration tests list 681 against 888 in the repository: 207 are dropped, mostly the reset and confirmation flows that read the token from the recorded email. A project without Sample has no integration test of the idempotency middleware, of `ErrorMessageLocalizer`, of the localization of validation errors by `Accept-Language`, or of the HTTP audit-trail route with the trace id: all of those ran through Sample. The generated README says so.
+- **The integration tests of the new combinations are proven only by CI.** Docker is broken on the maintainer's machine, so `CachingProviderWithoutRedisTests`, `OutboxWithoutHandlersTests` and every non-default combination's integration suite have never run when this was written. The first matrix run is the real test; the legs had not run yet.
+- **The dead-reference check cannot see everything.** It has lowercase patterns (schema strings, permission codes, routes) and the review sweeps what a grep cannot, but a leftover in prose that describes a removed part passes. A new part's documents need a manual sweep, and a new part needs its own pattern in the script.
+- **With `--notifications false`, Auth publishes to nobody.** Its outbox rows complete and are not retried (`OutboxWithoutHandlersTests`), so nothing piles up, but no verification or reset code is delivered until the project adds a consumer. The README states it.
+- **No OpenAPI snapshot in a reduced project.** The breaking-change gate of ADR 0031 only warns while the base branch has no snapshot, so a project that turns a switch off starts without that protection until it generates its own.
+- **The first restore after turning a switch off creates the lock files.** `dotnet restore --locked-mode` fails without them; plain `dotnet restore` writes the four and changes no other.
+- **Follow-ups.** The `modulith-module` item template (7b) and the pack, publish and the v1.0 cut (7c) are separate plans; `template-matrix` joins the required checks of `docs/repository-management.md` after the first green run.
