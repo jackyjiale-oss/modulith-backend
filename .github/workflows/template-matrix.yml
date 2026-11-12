@@ -1,0 +1,94 @@
+name: Template matrix
+
+# Template-repository-only: .template.config/template.json leaves this file out of generated projects.
+# Generates the template with each combination of the three switches (notifications, includeSample, caching) and runs the
+# smoke test with its integration tests, so a project that turns a switch off still builds and passes (switches design, section 5).
+# The all-on `template-smoke` job in ci.yml stays the fast required check; the `all-on` leg here is additional.
+# Actions use their latest major tag so Dependabot can update them.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  # The five single-switch and all-switch combinations, on every pull request.
+  template-matrix:
+    name: template-matrix (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: all-on
+            switches: ""
+          - name: all-off
+            switches: "--notifications false --includeSample false --caching memory"
+          - name: no-notifications
+            switches: "--notifications false"
+          - name: no-sample
+            switches: "--includeSample false"
+          - name: memory-cache
+            switches: "--caching memory"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      # The switches reach the script only through env, never interpolated into it; an empty string means the defaults.
+      - name: Template smoke test (${{ matrix.name }})
+        env:
+          SWITCHES: ${{ matrix.switches }}
+        run: |
+          read -r -a args <<< "$SWITCHES"
+          bash build/scripts/template-smoke.sh --integration "${args[@]}"
+
+  # The pair combinations, which take the longest to find a problem and so run only after merge or on demand.
+  template-matrix-pairs:
+    name: template-matrix-pairs (${{ matrix.name }})
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: no-notifications-memory
+            switches: "--notifications false --caching memory"
+          - name: no-notifications-no-sample
+            switches: "--notifications false --includeSample false"
+          - name: no-sample-memory
+            switches: "--includeSample false --caching memory"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Template smoke test (${{ matrix.name }})
+        env:
+          SWITCHES: ${{ matrix.switches }}
+        run: |
+          read -r -a args <<< "$SWITCHES"
+          bash build/scripts/template-smoke.sh --integration "${args[@]}"
