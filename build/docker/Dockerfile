@@ -3,7 +3,7 @@
 #
 # Configuration is environment variables only; no secret is baked into the image.
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0 AS build
 WORKDIR /src
 
 # Restore layer cache. Dockerfile COPY cannot glob and keep the folder layout, so each project's .csproj and
