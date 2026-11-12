@@ -35,7 +35,11 @@ kept_names=""
 scan() {
   local pattern="$1" flag_text="$2"
   shift 2
-  local line path rest lineno text allowed rule
+  local line path rest lineno text allowed rule matches grep_status=0
+  # grep exits 1 when nothing matches, which is clean, and 2 when it cannot read the tree, which must not pass as clean.
+  matches="$(grep -rnE -I --exclude-dir=bin --exclude-dir=obj --exclude-dir=.git --exclude=packages.lock.json -e "$pattern" .)" || grep_status=$?
+  (( grep_status <= 1 )) || fail "grep failed (exit $grep_status) while searching for '$pattern'"
+  [[ -n "$matches" ]] || return 0
   while IFS= read -r line; do
     line="${line#./}"
     path="${line%%:*}"
@@ -58,7 +62,7 @@ scan() {
 
     printf '%s:%s: %s\n' "$path" "$lineno" "$text"
     hits=$((hits + 1))
-  done < <(grep -rnE -I --exclude-dir=bin --exclude-dir=obj --exclude-dir=.git --exclude=packages.lock.json -e "$pattern" . || true)
+  done <<< "$matches"
 }
 
 if [[ "$notifications" == "false" ]]; then

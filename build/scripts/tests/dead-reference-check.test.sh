@@ -360,6 +360,24 @@ case_usage_errors() {
   assert_eq "2" "$rc" "usage_errors: directory missing"
 }
 
+# A grep that cannot read the tree exits 2; the check must stop with exit 2, not report the tree clean. A grep on PATH that always
+# exits 2 stands in for an unreadable file, which file permissions cannot produce on every platform.
+case_grep_error() {
+  make_tree
+  put src/A.cs 'Modules.Notifications'
+  local fake_bin="$tmp_root/fake-grep"
+  must mkdir -p "$fake_bin"
+  printf '#!/usr/bin/env bash
+echo "grep: simulated read error" >&2
+exit 2
+' > "$fake_bin/grep" || exit 1
+  must chmod +x "$fake_bin/grep"
+  PATH="$fake_bin:$PATH" run_check false true redis
+  assert_eq "2" "$status" "grep_error: exit code"
+  assert_eq "" "$out" "grep_error: stdout empty"
+  assert_contains "grep failed (exit 2)" "$err" "grep_error: names the failure"
+}
+
 # Each case runs in a subshell so that its tree and variables do not leak into the next.
 # The subshell reports its failures through its exit code, since variables do not cross the boundary.
 run_case() {
@@ -372,7 +390,7 @@ for c in \
   case_all_switches_on case_notifications_removed_hit case_notifications_other_patterns case_hit_line_number \
   case_ignored_paths case_flag_text_line_allowed case_redis_allowlist case_redis_other_patterns \
   case_notifications_allowlist case_notifications_kept_names case_notifications_schema case_notifications_email_transport_and_worker case_sample_removed case_sample_other_patterns case_sample_allowlist case_sample_schema \
-  case_each_part_checked_only_when_removed case_caching_redis_never_checked case_usage_errors; do
+  case_each_part_checked_only_when_removed case_caching_redis_never_checked case_usage_errors case_grep_error; do
   run_case "$c"
 done
 

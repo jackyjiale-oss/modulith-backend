@@ -6,8 +6,8 @@
 #                                             [--integration] [--generate-only] [--output DIR]
 #   --notifications, --includeSample, --caching  the template switches, passed to `dotnet new` (defaults: true, true, redis).
 #   --integration   also run the integration tests (they need Docker); without it only the unit and architecture tests run.
-#   --generate-only stop after the generation checks (about two minutes); no restore, build or tests.
-#   --output DIR    keep the generated project in DIR, which must not exist (use a short path such as C:/w/g1 on Windows).
+#   --generate-only stop after the generation checks (about 5 minutes); no restore, build or tests. The full smoke takes 5 to 15 minutes.
+#   --output DIR    keep the generated project in DIR, an absolute path that must not exist (use a short path such as C:/w/g1 on Windows).
 # With no arguments it generates with every switch on, builds and runs the unit and architecture tests.
 #
 # CI runs the integration tests of the default project in the build-test job; --integration is for a machine with Docker.
@@ -51,6 +51,11 @@ done
 case "$notifications" in true | false) ;; *) usage_error "--notifications must be 'true' or 'false', got '$notifications'" ;; esac
 case "$include_sample" in true | false) ;; *) usage_error "--includeSample must be 'true' or 'false', got '$include_sample'" ;; esac
 case "$caching" in redis | memory) ;; *) usage_error "--caching must be 'redis' or 'memory', got '$caching'" ;; esac
+# The project is generated after `cd "$repo_root"`, so a relative path would land inside the checkout.
+absolute_path='^(/|[A-Za-z]:[/\\])'
+if [[ -n "$output_dir" && ! "$output_dir" =~ $absolute_path ]]; then
+  usage_error "--output $output_dir must be an absolute path"
+fi
 if [[ -n "$output_dir" && -e "$output_dir" ]]; then
   usage_error "--output $output_dir already exists; give a directory that does not exist"
 fi
@@ -242,6 +247,38 @@ leftover_markers="$(grep -rInE --exclude-dir=bin --exclude-dir=obj --exclude-dir
   -e '(//|<!--|%%|^[[:space:]]*)#(if|elseif|else|endif)([[:space:]]|\(|-->|$)' "$out" || true)"
 if [[ -n "$leftover_markers" ]]; then
   fail "template conditional markers are left in the generated files:"$'\n'"$leftover_markers"
+fi
+
+if [[ "$all_on" == "true" ]]; then
+  step "Checking that the all-on project is the template source without its marker lines"
+  # The engine reads an unknown symbol (a typo such as "notfications") as false, and it also reads a plain C# "#if" or a marker
+  # quoted inside a line: any of them would silently drop content from every generation. So each generated file must equal its
+  # source (the build/template-content/ file that replaces it, else the same path with the placeholder put back) with the whole
+  # marker lines deleted and the placeholder renamed as the engine does. The UserSecretsId GUID is new in each generation (above).
+  marker_line='^[[:space:]]*(\/\/|<!--|%%)?#(if|elseif|else|endif)([[:space:]]|\(|-->|$)'
+  while IFS= read -r -d '' generated; do
+    relative="${generated#"$out"/}"
+    source="$repo_root/build/template-content/$relative"
+    [[ -f "$source" ]] || source="$repo_root/${relative//"$project_name"/TemplateName}"
+    printf '%s\t%s\n' "$generated" "$source"
+  done < <(find "$out" -type f -not -path '*/bin/*' -not -path '*/obj/*' -print0) > "$tmp/drift-pairs.tsv"
+  # One awk process for all files (a sed per file takes minutes on Windows); prints "generated<TAB>source<TAB>where" per mismatch.
+  drift="$(MARKER="$marker_line" awk -F '\t' -v name="$project_name" -v lower="${project_name,,}" '
+    function next_expected(   line) {
+      while ((getline line < $2) > 0) if (line !~ ENVIRON["MARKER"]) {
+        gsub(/TemplateName/, name, line); gsub(/templatename/, lower, line); expected = line; return 1 }
+      return 0 }
+    { if ((getline probe < $2) < 0) { print $1 "\t" $2 "\tno source file"; next } close($2); n = 0; bad = 0
+      while (!bad && (getline actual < $1) > 0) { n++
+        if (!next_expected() || (actual != expected && !(actual ~ /<UserSecretsId>/ && expected ~ /<UserSecretsId>/))) bad = 1 }
+      if (!bad && next_expected()) { n++; bad = 1 }
+      close($1); close($2); if (bad) print $1 "\t" $2 "\tfirst difference at line " n }' "$tmp/drift-pairs.tsv")"
+  while IFS=$'\t' read -r generated source where; do
+    [[ -n "$generated" ]] || continue
+    excerpt="$(diff <(sed -E -e "/$marker_line/d" -e "s/TemplateName/$project_name/g; s/templatename/${project_name,,}/g" "$source" 2> /dev/null) \
+      "$generated" | head -n 8 || true)"
+    fail "${generated#"$out"/} is not ${source#"$repo_root"/} without its marker lines ($where):"$'\n'"$excerpt"
+  done <<< "$drift"
 fi
 
 step "Checking which parts of the template were generated"
