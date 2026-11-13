@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Tests for project-index.sh (project index design): the CLI, the markers and routes shards, the MAP.md checks and --check.
+# Tests for project-index.sh (project index design): the CLI, the markers, routes, permissions and errors shards, the MAP.md checks and --check.
 # Each case builds its own throwaway tree, runs the script on it and checks the files it writes, its output and its exit code.
 #
-# Usage: bash build/scripts/tests/project-index.test.sh
+# Usage: bash build/scripts/tests/project-index.test.sh [case_name...]   (no argument: every case)
 set -euo pipefail
 
 scripts_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -742,6 +742,389 @@ A|GET|/api/v1/a/{code:length(3,8)}|GetQuery|Admin|src/Modules/A/A/Endpoints/AEnd
     "routes_shapes: policy name and commas inside the route"
 }
 
+# emit_of_tree <emit function...>: runs the emit functions of the sourced script on the current tree, one after the other (no full
+# generator run); sets status and combined (the rows of each, sorted, each block followed by a "--" line, or the error output).
+emit_of_tree() {
+  local f snippet="root='$tree'; cd '$tree'; prepare_files"
+  for f in "$@"; do snippet+="; $f > \"\$work/$f.out\"; sort \"\$work/$f.out\"; echo --"; done
+  sourced "$snippet"
+}
+
+# emit_fails <label> <needle> <emit function...>: the emit functions on the current tree exit 2 with a message containing the needle.
+emit_fails() {
+  local label="$1" needle="$2"
+  shift 2
+  emit_of_tree "$@"
+  assert_eq "2" "$status" "$label: exit code"
+  assert_contains "$needle" "$combined" "$label: message"
+}
+
+# permissions_fixture: module A with three constants, a source in both shapes of the tree (a one-line Define with adminDefault and a
+# multi-line new(...) with AdminDefault), a third constant with no source entry, and decoys (a comment and a string naming a constant,
+# a parenthesis and a comma inside a string, the Define helper itself); module B in CRLF with an explicit AdminDefault: false.
+permissions_fixture() {
+  put src/Modules/A/A/Application/APermissions.cs 'namespace X;
+
+/// <summary>The codes, <c>module.resource.action</c>; see APermissions.View.</summary>
+internal static class APermissions
+{
+    public const string View = "a.thing.view";
+
+    public const string Edit = "a.thing.edit"; // trailing comment
+
+    public const string Delete = "a.thing.delete";
+}'
+  put src/Modules/A/A/Application/APermissionSource.cs 'internal sealed class APermissionSource : IPermissionSource
+{
+    private const string ModuleName = "a";
+
+    // A comment naming APermissions.Delete with AdminDefault: true is not a record.
+    private static readonly PermissionDefinition[] All =
+    [
+        Define(APermissions.View, "View", "Read (and list) things, not APermissions.Delete, AdminDefault: false.", adminDefault: true),
+        new(
+            APermissions.Edit,
+            ModuleName, "Edit", "Change things",
+            AdminDefault: true),
+    ];
+
+    public IReadOnlyCollection<PermissionDefinition> Permissions => All;
+
+    private static PermissionDefinition Define(string code, string name, string description, bool adminDefault = false) =>
+        new(code, ModuleName, name, description, adminDefault);
+}'
+  put_raw src/Modules/B/B/Application/BPermissions.cs 'internal static class BPermissions\r\n{\r\n    public const string ItemView = "b.item.view";\r\n}\r\n'
+  put_raw src/Modules/B/B/Application/BPermissionSource.cs 'internal sealed class BPermissionSource : IPermissionSource\r\n{\r\n    private static readonly PermissionDefinition[] All =\r\n    [\r\n        new(\r\n            BPermissions.ItemView,\r\n            ModuleName,\r\n            "View items",\r\n            "List items.",\r\n            AdminDefault: false),\r\n    ];\r\n}\r\n'
+}
+
+permissions_rows='a.thing.delete|A|no|src/Modules/A/A/Application/APermissions.cs
+a.thing.edit|A|yes|src/Modules/A/A/Application/APermissions.cs
+a.thing.view|A|yes|src/Modules/A/A/Application/APermissions.cs
+b.item.view|B|no|src/Modules/B/B/Application/BPermissions.cs'
+
+case_permissions() {
+  make_tree
+  permissions_fixture
+  # A test permission source outside src/Modules is not read.
+  put tests/T/TestPermissionSource.cs 'internal sealed class TestPermissionSource { Define(TestPermissions.Nope, "x", "y"); }'
+  emit_of_tree emit_permissions
+  assert_eq "0" "$status" "permissions: exit code"
+  assert_eq "$permissions_rows"$'\n--' "$combined" "permissions: exact rows (both shapes, absent flag is no, module from the folder, CRLF)"
+  # The one end-to-end run of the permissions shard: the rendered table.
+  generate
+  assert_contains $'Rows: 4\n\n| code | module | admin default | file |\n| --- | --- | --- | --- |\n| a.thing.delete | A | no | src/Modules/A/A/Application/APermissions.cs |' \
+    "$(<"$idx/permissions.md")" "permissions: rendered shard"
+  # A tree without any permission file has no rows and no error.
+  make_tree
+  put src/Modules/A/A/Application/Other.cs 'class Other {}'
+  emit_of_tree emit_permissions
+  assert_eq "0" "$status" "permissions: no permission file: exit code"
+  assert_eq "--" "$combined" "permissions: no permission file: no rows"
+}
+
+# Shapes that would give a wrong or missing permission row with exit 0 fail loudly instead.
+case_permissions_loud() {
+  local src='src/Modules/A/A/Application/APermissionSource.cs' consts='src/Modules/A/A/Application/APermissions.cs'
+  # A source entry whose constant is not declared in any *Permissions.cs.
+  make_tree
+  permissions_fixture
+  put "$src" 'class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        Define(APermissions.View, "View", "d", adminDefault: true),
+        Define(APermissions.Missing, "Missing", "d"),
+    ];
+}'
+  emit_fails "permissions_loud: undeclared constant" "APermissions.Missing in $src" emit_permissions
+  # The same constant in two source entries.
+  put "$src" 'class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        Define(APermissions.View, "View", "d", adminDefault: true),
+        Define(APermissions.View, "View again", "d"),
+    ];
+}'
+  emit_fails "permissions_loud: constant in two entries" "APermissions.View" emit_permissions
+  # Two constants with the same code.
+  permissions_fixture
+  put "$consts" 'internal static class APermissions
+{
+    public const string View = "a.thing.view";
+    public const string Read = "a.thing.view";
+}'
+  emit_fails "permissions_loud: duplicate code" "duplicate permission code a.thing.view" emit_permissions
+  # A record shape the parser does not know (the constant is not the first argument of Define( or new().
+  permissions_fixture
+  put "$src" 'class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        Define(APermissions.View, "View", "d", adminDefault: true),
+        new PermissionDefinition(APermissions.Edit, ModuleName, "Edit", "d", AdminDefault: true),
+    ];
+}'
+  emit_fails "permissions_loud: unknown record shape" "$src" emit_permissions
+  # A positional admin flag, and a flag that is not a literal.
+  put "$src" 'class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        new(APermissions.View, ModuleName, "View", "d", true),
+    ];
+}'
+  emit_fails "permissions_loud: positional flag" "$src" emit_permissions
+  put "$src" 'class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        new(APermissions.View, ModuleName, "View", "d", AdminDefault: isAdmin),
+    ];
+}'
+  emit_fails "permissions_loud: flag not a literal" "$src" emit_permissions
+  # A helper whose flag defaults to true would make an absent flag mean yes.
+  put "$src" 'class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        Define(APermissions.View, "View", "d"),
+    ];
+
+    private static PermissionDefinition Define(string code, string name, string description, bool adminDefault = true) =>
+        new(code, ModuleName, name, description, adminDefault);
+}'
+  emit_fails "permissions_loud: helper default true" "$src" emit_permissions
+  # A constant split over two lines, and a code that is not module.resource.action.
+  permissions_fixture
+  put "$consts" 'internal static class APermissions
+{
+    public const string View = "a.thing.view";
+    public const string Edit =
+        "a.thing.edit";
+}'
+  emit_fails "permissions_loud: split constant" "$consts" emit_permissions
+  put "$consts" 'internal static class APermissions
+{
+    public const string View = "a.thing.view";
+    public const string Edit = "a.edit";
+}'
+  emit_fails "permissions_loud: two-segment code" "$consts" emit_permissions
+  # A source file with no record at all, and a constants file with no constant.
+  permissions_fixture
+  put "$src" 'class APermissionSource { }'
+  emit_fails "permissions_loud: source without records" "$src" emit_permissions
+  permissions_fixture
+  put "$consts" 'internal static class APermissions { }'
+  emit_fails "permissions_loud: constants file without constants" "$consts" emit_permissions
+}
+
+# errors_fixture: module A with the three declaration shapes (literal on the same line, literal on the next line, a const string) and
+# decoys (a doc comment quoting a code, a comma and a parenthesis inside a message, an escaped quote); a building block in CRLF with a
+# qualified factory call, Unavailable and Failure; neutral resx files (one with an XML comment holding a <data> example, one CRLF) and a
+# culture file that is ignored.
+errors_fixture() {
+  put src/Modules/A/A/Domain/AErrors.cs 'internal static class AErrors
+{
+    /// <summary>See <see cref="Busy"/>, code "a.doc".</summary>
+    public static readonly Error Missing = Error.NotFound("a.missing", "Not found, (really).");
+
+    public static readonly Error Busy = Error.Conflict(
+        "a.busy",
+        "Busy, try \"later\" (soon).");
+
+    public const string BusyCode = "a.locked";
+
+    public static Error Locked(Guid id) =>
+        Error.Validation(BusyCode, $"Thing {id} is locked, \"{id}\".") with
+        {
+            Parameters = new Dictionary<string, object?> { ["id"] = id },
+        };
+}'
+  put_raw src/BuildingBlocks/TemplateName.Application.Common/Paging/PagingErrors.cs 'public static class PagingErrors\r\n{\r\n    public static readonly Error Down = SharedKernel.Error.Unavailable("paging.down", "Down.");\r\n\r\n    public static readonly Error Fail = Error.Failure(\r\n        "paging.fail",\r\n        "Failed.");\r\n}\r\n'
+  put src/Modules/A/A/Resources/AErrorMessages.resx '<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    Example: <data name="Name1"><value>this is my long string</value></data>
+  -->
+  <data name="a.missing" xml:space="preserve">
+    <value>Not found.</value>
+  </data>
+  <data name="a.busy" xml:space="preserve">
+    <value>Busy.</value>
+  </data>
+  <data name="a.locked" xml:space="preserve">
+    <value>Locked.</value>
+  </data>
+  <data name="http.404" xml:space="preserve">
+    <value>Not found.</value>
+  </data>
+  <data name="validation.failed" xml:space="preserve">
+    <value>Invalid.</value>
+  </data>
+</root>'
+  put src/Modules/A/A/Resources/AErrorMessages.ms.resx '<root>
+  <data name="ms.only" xml:space="preserve">
+    <value>x</value>
+  </data>
+  <data
+</root>'
+  put_raw src/BuildingBlocks/TemplateName.Web.Common/Resources/CommonErrorMessages.resx '<root>\r\n  <data name="paging.down" xml:space="preserve">\r\n    <value>Down.</value>\r\n  </data>\r\n</root>\r\n'
+}
+
+errors_rows='a.busy|A|409|a.busy|src/Modules/A/A/Domain/AErrors.cs
+a.locked|A|400|a.locked|src/Modules/A/A/Domain/AErrors.cs
+a.missing|A|404|a.missing|src/Modules/A/A/Domain/AErrors.cs
+paging.down|Application.Common|503|paging.down|src/BuildingBlocks/TemplateName.Application.Common/Paging/PagingErrors.cs
+paging.fail|Application.Common|500|-|src/BuildingBlocks/TemplateName.Application.Common/Paging/PagingErrors.cs
+--
+http.404|404|src/Modules/A/A/Resources/AErrorMessages.resx
+validation.failed|-|src/Modules/A/A/Resources/AErrorMessages.resx
+--'
+
+case_errors() {
+  make_tree
+  errors_fixture
+  emit_of_tree emit_errors emit_errors_2
+  assert_eq "0" "$status" "errors: exit code"
+  assert_eq "$errors_rows" "$combined" "errors: exact rows of both tables (three shapes, statuses, building block, culture file ignored)"
+  # emit_errors_2 alone gives the same second table.
+  emit_of_tree emit_errors_2
+  assert_eq "${errors_rows#*--$'\n'}" "$combined" "errors: emit_errors_2 on its own"
+  # The one end-to-end run of the errors shard: both rendered tables and the total.
+  generate
+  local text
+  text="$(<"$idx/errors.md")"
+  assert_contains $'Rows: 7\n\n## Declared codes\n\n| code | module | http | resource key | file |\n| --- | --- | --- | --- | --- |\n| a.busy | A | 409 | a.busy | src/Modules/A/A/Domain/AErrors.cs |' \
+    "$text" "errors: rendered first table"
+  assert_contains $'## Resource-only keys\n\n' "$text" "errors: second heading"
+  assert_contains $'| key | http | resx file |\n| --- | --- | --- |\n| http.404 | 404 | src/Modules/A/A/Resources/AErrorMessages.resx |\n| validation.failed | - | src/Modules/A/A/Resources/AErrorMessages.resx |' \
+    "$text" "errors: rendered second table"
+  # Read correctly too: the parenthesis on the line after the factory name, a constant qualified with the file's own class, a code
+  # argument on the line after a parenthesis that ends a line, and a factory call with one argument.
+  make_tree
+  put src/Modules/C/C/Domain/CErrors.cs 'internal static class CErrors
+{
+    public const string Code = "c.own";
+    public static readonly Error Next = Error.Conflict
+        ("c.next", "m");
+    public static readonly Error Own = Error.Forbidden(CErrors.Code, "m");
+    public static readonly Error One = Error.Unauthorized(
+        "c.one");
+}'
+  emit_of_tree emit_errors
+  assert_eq $'c.next|C|409|-|src/Modules/C/C/Domain/CErrors.cs\nc.one|C|401|-|src/Modules/C/C/Domain/CErrors.cs\nc.own|C|403|-|src/Modules/C/C/Domain/CErrors.cs\n--' \
+    "$combined" "errors: other shapes read correctly"
+  # A tree without error files has no rows and no error.
+  make_tree
+  put src/Modules/A/A/Domain/Other.cs 'class Other {}'
+  emit_of_tree emit_errors emit_errors_2
+  assert_eq "0" "$status" "errors: no error file: exit code"
+  assert_eq $'--\n--' "$combined" "errors: no error file: no rows"
+}
+
+case_errors_zero() {
+  make_tree
+  put src/Modules/A/A/Domain/AErrors.cs 'internal static class AErrors
+{
+    public static readonly Error X = new("a.x", "Message.", ErrorType.Conflict);
+}'
+  emit_fails "errors_zero: a declaration the parser does not know" "src/Modules/A/A/Domain/AErrors.cs" emit_errors
+  put src/Modules/A/A/Domain/AErrors.cs 'internal static class AErrors
+{
+}'
+  emit_fails "errors_zero: no declaration at all" "src/Modules/A/A/Domain/AErrors.cs" emit_errors
+  # The CLI path: exit 2.
+  run_gen --root "$tree" --out "$idx"
+  assert_eq "2" "$status" "errors_zero: generator exit code"
+  assert_contains "src/Modules/A/A/Domain/AErrors.cs" "$err" "errors_zero: generator names the file"
+}
+
+# Shapes that would give a wrong or missing error row with exit 0 fail loudly instead.
+case_errors_loud() {
+  local a='src/Modules/A/A/Domain/AErrors.cs' r='src/Modules/A/A/Resources/AErrorMessages.resx'
+  # A file with parsed declarations and one whose constant cannot be resolved.
+  make_tree
+  errors_fixture
+  put "$a" 'internal static class AErrors
+{
+    public static readonly Error Missing = Error.NotFound("a.missing", "m");
+    public static Error Other() => Error.NotFound(OtherErrors.Code, "m");
+}'
+  emit_fails "errors_loud: unresolved constant" "$a" emit_errors
+  # An interpolated or verbatim code.
+  put "$a" 'internal static class AErrors
+{
+    public static readonly Error Missing = Error.NotFound("a.missing", "m");
+    public static Error Other(string x) => Error.NotFound($"a.{x}", "m");
+}'
+  emit_fails "errors_loud: interpolated code" "$a" emit_errors
+  # A constant qualified with another class is not resolved through a same-named constant of this file.
+  put "$a" 'internal static class AErrors
+{
+    public const string Code = "a.missing";
+    public static readonly Error Missing = Error.NotFound(Code, "m");
+    public static Error Other() => Error.NotFound(OtherErrors.Code, "m");
+}'
+  emit_fails "errors_loud: constant of another class" "OtherErrors.Code of Error.NotFound at line 5 of $a" emit_errors
+  # A factory the status map does not know.
+  put "$a" 'internal static class AErrors
+{
+    public static readonly Error Missing = Error.NotFound("a.missing", "m");
+    public static readonly Error Tea = Error.Teapot("a.tea", "m");
+}'
+  emit_fails "errors_loud: unknown factory" "$a" emit_errors
+  # A code-shaped literal that no Error.<Factory> call declares (another declaration shape).
+  put "$a" 'internal static class AErrors
+{
+    public static readonly Error Missing = Error.NotFound("a.missing", "m");
+    public static readonly Error X = new("a.x", "m", ErrorType.Conflict);
+}'
+  emit_fails "errors_loud: code outside a factory call" "$a" emit_errors
+  # Named arguments are not read.
+  put "$a" 'internal static class AErrors
+{
+    public static readonly Error Missing = Error.NotFound("a.missing", "m");
+    public static readonly Error Busy = Error.Conflict(code: "a.busy", message: "m");
+}'
+  emit_fails "errors_loud: named arguments" "$a" emit_errors
+  # The same code declared twice, in two files and in one.
+  put "$a" 'internal static class AErrors
+{
+    public static readonly Error Missing = Error.NotFound("a.missing", "m");
+}'
+  put src/Modules/A/A/Domain/BErrors.cs 'internal static class BErrors
+{
+    public static readonly Error Missing = Error.NotFound(
+        "a.missing", "m");
+}'
+  emit_fails "errors_loud: duplicate code in two files" "duplicate error code a.missing" emit_errors
+  rm -f "$tree/src/Modules/A/A/Domain/BErrors.cs"
+  put "$a" 'internal static class AErrors
+{
+    public static readonly Error Missing = Error.NotFound("a.missing", "m");
+    public static readonly Error Again = Error.Conflict("a.missing", "m");
+}'
+  emit_fails "errors_loud: duplicate code in one file" "duplicate error code a.missing" emit_errors
+  # A neutral resx entry split over two lines, and a key declared twice.
+  errors_fixture
+  put "$r" '<root>
+  <data
+      name="a.missing" xml:space="preserve">
+    <value>x</value>
+  </data>
+</root>'
+  emit_fails "errors_loud: split resx entry" "$r" emit_errors
+  put "$r" '<root>
+  <data name="a.missing" xml:space="preserve"><value>x</value></data>
+  <data name="a.missing" xml:space="preserve"><value>y</value></data>
+</root>'
+  emit_fails "errors_loud: duplicate resx key" "$r" emit_errors_2
+  put "$r" '<root>
+</root>'
+  emit_fails "errors_loud: neutral resx without keys" "$r" emit_errors
+}
+
 # Each case runs in a subshell so that its tree and variables do not leak into the next.
 # The subshell reports its failures through its exit code, since variables do not cross the boundary.
 run_case() {
@@ -750,12 +1133,15 @@ run_case() {
   if (( rc != 0 )); then failures=$((failures + 1)); fi
 }
 
-for c in \
-  case_usage_errors case_markers_shard case_markers_kinds_and_expressions case_markers_zero_rows case_stub_shards \
-  case_two_table_shard case_atomic_write \
-  case_determinism case_untracked_ignored case_git_file_marker case_find_excludes_build_dirs \
-  case_check_stale case_check_missing_and_unknown case_map_rules case_need_rows \
-  case_routes case_routes_zero case_routes_module_absent case_routes_loud case_routes_shapes; do
+all_cases="case_usage_errors case_markers_shard case_markers_kinds_and_expressions case_markers_zero_rows case_stub_shards
+  case_two_table_shard case_atomic_write
+  case_determinism case_untracked_ignored case_git_file_marker case_find_excludes_build_dirs
+  case_check_stale case_check_missing_and_unknown case_map_rules case_need_rows
+  case_routes case_routes_zero case_routes_module_absent case_routes_loud case_routes_shapes
+  case_permissions case_permissions_loud case_errors case_errors_zero case_errors_loud"
+
+# With arguments, only the named cases run (for iterating on one case); without, all of them.
+for c in ${*:-$all_cases}; do
   run_case "$c"
 done
 

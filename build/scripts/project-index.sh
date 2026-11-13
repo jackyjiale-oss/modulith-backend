@@ -148,10 +148,7 @@ shard_meta() {
   esac
 }
 
-# The six shards below are stubs here (a table with no rows); later tasks give each its parser.
-emit_permissions() { :; }
-emit_errors() { :; }
-emit_errors_2() { :; }
+# The shards below are stubs here (a table with no rows); later tasks give each its parser.
 emit_events() { :; }
 emit_jobs() { :; }
 emit_config() { :; }
@@ -345,6 +342,316 @@ emit_routes() {
   fi
   mapfile -t lines < "$rows_file"
   if (( ${#lines[@]} > 0 )); then printf '%s\n' "${lines[@]}"; fi
+}
+
+# cs_awk_lib: awk functions shared by the permissions and errors parsers.
+#   cs_read(f)    reads a C# file whole (CR removed) into two strings of the same length, so that a position in one is the same position
+#                 in the other: RAW, the text with every // and /* */ comment blanked to spaces (newlines kept), and MASK, RAW with the
+#                 contents of every string and char literal replaced by "_" (the quotes kept). Structure is matched on MASK, so that a
+#                 parenthesis, a comma or a name inside a string or a comment is never read as code; values are taken from RAW at the same
+#                 positions. Regular, verbatim (@"", with "" inside) and interpolated strings are known; an interpolated string holding a
+#                 quote inside a {hole} is not. Returns -1 when the file cannot be read.
+#   line_at(p)    the line number of position p of MASK.
+#   fail(msg)     writes msg to errfile and exits 3 (the shell turns it into exit 2).
+# shellcheck disable=SC2016
+cs_awk_lib='
+function cs_read(f,   line, rc, n, k, c, d, r, m, st) {
+  if (SQ == "") SQ = sprintf("%c", 39)
+  RAW = ""; MASK = ""; st = 0
+  while ((rc = (getline line < f)) > 0) {
+    sub(/\r$/, "", line)
+    n = length(line); r = ""; m = ""
+    for (k = 1; k <= n; k++) {
+      c = substr(line, k, 1); d = substr(line, k + 1, 1)
+      if (st == 0) {
+        if (c == "/" && d == "/") { for (; k <= n; k++) { r = r " "; m = m " " } break }
+        if (c == "/" && d == "*") { r = r "  "; m = m "  "; k++; st = 4; continue }
+        if (c == "\"") st = (substr(line, k - 1, 1) == "@" || substr(line, k - 2, 2) == "@$") ? 2 : 1
+        else if (c == SQ) st = 5
+        r = r c; m = m c
+      } else if (st == 1 || st == 5) {
+        if (c == "\\") { r = r c d; m = m "__"; k++ }
+        else if ((st == 1 && c == "\"") || (st == 5 && c == SQ)) { r = r c; m = m c; st = 0 }
+        else { r = r c; m = m "_" }
+      } else if (st == 2) {
+        if (c == "\"" && d == "\"") { r = r c d; m = m "__"; k++ }
+        else if (c == "\"") { r = r c; m = m c; st = 0 }
+        else { r = r c; m = m "_" }
+      } else {
+        if (c == "*" && d == "/") { r = r "  "; m = m "  "; k++; st = 0 }
+        else { r = r " "; m = m " " }
+      }
+    }
+    # A regular string or a char literal ends at the end of its line; a verbatim string or a block comment may go on.
+    if (st == 1 || st == 5) st = 0
+    RAW = RAW r "\n"; MASK = MASK m "\n"
+  }
+  close(f)
+  return (rc < 0 ? -1 : 0)
+}
+function line_at(p,   s) { s = substr(MASK, 1, p); return gsub(/\n/, "", s) + 1 }
+function fail(msg) { print msg > errfile; failed = 1; exit 3 }
+'
+
+# permissions_awk: one awk run over the tracked file list (stdin) that reads, under src/Modules/<Module>/:
+#   C  *Permissions.cs       the constants: `const string Name = "module.resource.action";`, one per line, keyed by the enclosing class
+#   S  *PermissionSource.cs  the records: a `Define(` or `new(` whose first argument is `XPermissions.Name`, up to its closing parenthesis;
+#                            admin default is yes when `adminDefault: true` or `AdminDefault: true` is inside it, no when the flag is false
+#                            or absent
+# and prints code|module|yes or no|file of the constant, one row per constant (a constant with no record is no).
+# Errors (exit 3, the message in errfile), so that no shape gives a wrong or missing row: a `const` in a constants file that is not that
+# one-line shape; a constants file with no constant or a source file with no record; two constants with the same code; a record whose
+# constant no constants file declares; a constant in two records; a reference to a permission constant that is not the first argument of
+# a record (another record shape); an admin flag that is positional or not a literal true or false; a helper whose adminDefault defaults
+# to true (an absent flag would then mean yes); a file that cannot be read.
+# shellcheck disable=SC2016
+permissions_awk="$cs_awk_lib"'
+function read_constants(i,   f, nl, L, R, j, cls, cnt, ln, nm, code) {
+  f = cfile[i]
+  if (cs_read(f) < 0) fail("permissions: cannot read " f)
+  nl = split(MASK, L, "\n"); split(RAW, R, "\n"); cls = ""; cnt = 0
+  for (j = 1; j <= nl; j++) {
+    if (match(L[j], /(^|[^A-Za-z0-9_])class[ \t]+[A-Za-z_][A-Za-z0-9_]*/)) { cls = substr(L[j], RSTART, RLENGTH); sub(/^.*[ \t]/, "", cls) }
+    if (L[j] !~ /(^|[^A-Za-z0-9_])const([^A-Za-z0-9_]|$)/) continue
+    if (!match(R[j], /const[ \t]+string[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*"[a-z_]+\.[a-z_]+\.[a-z_]+"[ \t]*;/))
+      fail("permissions: cannot read the constant at line " j " of " f " (expected `const string Name = \"module.resource.action\";` on one line)")
+    ln = substr(R[j], RSTART, RLENGTH)
+    nm = ln; sub(/^const[ \t]+string[ \t]+/, "", nm); sub(/[ \t]*=.*$/, "", nm)
+    code = ln; sub(/^[^"]*"/, "", code); sub(/".*$/, "", code)
+    if (cls == "") fail("permissions: the constant " nm " at line " j " of " f " is outside a class")
+    if ((cls "." nm) in pcode) fail("permissions: the constant " cls "." nm " is declared twice: " pfile[cls "." nm] ", " f)
+    if (code in bycode) fail("permissions: duplicate permission code " code " (" bycode[code] " in " pfile[bycode[code]] ", " cls "." nm " in " f ")")
+    pcode[cls "." nm] = code; pfile[cls "." nm] = f; pmod[cls "." nm] = cmod[i]; bycode[code] = cls "." nm
+    cnt++
+  }
+  if (cnt == 0) fail("permissions: no constant parsed in " f " (expected `const string Name = \"module.resource.action\";`)")
+}
+function read_source(i,   f, pos, abs, start, after, tok, depth, k, L, c, rec, flag, recs, total, m) {
+  f = sfile[i]
+  if (cs_read(f) < 0) fail("permissions: cannot read " f)
+  if (MASK ~ /[aA]dminDefault[ \t\n]*=[ \t\n]*true/)
+    fail("permissions: an adminDefault parameter that defaults to true in " f " (an absent flag would mean yes; the parser reads an absent flag as no)")
+  pos = 1; recs = 0; L = length(MASK)
+  while (match(substr(MASK, pos), /(^|[^A-Za-z0-9_])(Define|new)[ \t\n]*\(/)) {
+    start = pos + RSTART - 1 + RLENGTH
+    pos = start
+    after = substr(MASK, start)
+    if (!match(after, /^[ \t\n]*[A-Za-z_][A-Za-z0-9_]*Permissions\.[A-Za-z_][A-Za-z0-9_]*/)) continue
+    tok = substr(after, RSTART, RLENGTH); gsub(/[ \t\n]/, "", tok)
+    depth = 1
+    for (k = start; k <= L && depth > 0; k++) {
+      c = substr(MASK, k, 1)
+      if (c == "(") depth++
+      else if (c == ")") depth--
+    }
+    if (depth > 0) fail("permissions: the record of " tok " at line " line_at(start) " of " f " has no closing parenthesis")
+    rec = substr(MASK, start, k - 1 - start)
+    pos = k
+    if (match(rec, /[aA]dminDefault[ \t\n]*:[ \t\n]*(true|false)([^A-Za-z0-9_]|$)/)) flag = (substr(rec, RSTART, RLENGTH) ~ /true/) ? "yes" : "no"
+    else if (rec ~ /[aA]dminDefault/) fail("permissions: the admin flag of " tok " at line " line_at(start) " of " f " is not a literal true or false")
+    else if (rec ~ /(^|[^A-Za-z0-9_])(true|false)([^A-Za-z0-9_]|$)/) fail("permissions: a positional admin flag in the record of " tok " at line " line_at(start) " of " f " (write AdminDefault: true or adminDefault: true)")
+    else flag = "no"
+    if (!(tok in pcode)) fail("permissions: the constant " tok " in " f " is not declared in any *Permissions.cs file")
+    if (tok in recfile) fail("permissions: " tok " has two records: " recfile[tok] ", " f)
+    recfile[tok] = f; admin[tok] = flag
+    recs++
+  }
+  total = 0; m = MASK
+  while (match(m, /[A-Za-z_][A-Za-z0-9_]*Permissions\.[A-Za-z_][A-Za-z0-9_]*/)) { total++; m = substr(m, RSTART + RLENGTH) }
+  if (total != recs) fail("permissions: " (total - recs) " reference(s) to a permission constant in " f " are not the first argument of a Define(...) or new(...) record (a shape the parser does not know)")
+  if (recs == 0) fail("permissions: no record parsed in " f " (expected Define(XPermissions.Name, ...) or new(XPermissions.Name, ...))")
+}
+{
+  sub(/\r$/, "")
+  n = split($0, seg, "/")
+  if (n < 5 || seg[1] != "src" || seg[2] != "Modules") next
+  if (seg[n] ~ /.Permissions\.cs$/) { nc++; cfile[nc] = $0; cmod[nc] = seg[3] }
+  else if (seg[n] ~ /.PermissionSource\.cs$/) { ns++; sfile[ns] = $0 }
+}
+END {
+  if (failed) exit 3
+  for (i = 1; i <= nc; i++) read_constants(i)
+  for (i = 1; i <= ns; i++) read_source(i)
+  for (key in pcode) print pcode[key] "|" pmod[key] "|" ((key in admin) ? admin[key] : "no") "|" pfile[key]
+}'
+
+# run_awk <label> <program> <rows file> [awk -v assignments...]: runs one awk program over the tracked file list into the rows file; on a
+# failure, exit 2 with the message the program wrote.
+run_awk() {
+  local label="$1" program="$2" rows_file="$3" err_file="$work/$1.awk.err" status=0 msg=""
+  shift 3
+  : > "$err_file"
+  awk -v errfile="$err_file" "$@" "$program" < "$files_cache" > "$rows_file" || status=$?
+  if (( status != 0 )); then
+    [[ -s "$err_file" ]] && read -r msg < "$err_file"
+    fail_parse "${msg:-$label: awk failed (exit $status)}"
+  fi
+}
+
+# emit_permissions: the permissions shard (see permissions_awk); one awk process for the whole tree.
+emit_permissions() {
+  local rows_file="$work/permissions.awk.out" lines=()
+  run_awk permissions "$permissions_awk" "$rows_file"
+  mapfile -t lines < "$rows_file"
+  if (( ${#lines[@]} > 0 )); then printf '%s\n' "${lines[@]}"; fi
+}
+
+# errors_awk: one awk run over the tracked file list (stdin) that reads, under src/:
+#   R  <X>ErrorMessages.resx (neutral: no culture part such as .ms. or .zh-Hans.)   the keys: `<data name="key"` (XML comments skipped)
+#   E  *Errors.cs (modules and building blocks)   the declarations: each `Error.<Factory>(` call; the code is its first argument, a string
+#      literal on the same or a later line, or a `const string` of the same file; the status comes from the factory
+# and prints table 1 (code|module|http|resource key|file; the resource key is the code when a neutral resx has it, else -) on stdout and
+# table 2 (key|http|resx file: the neutral keys that no declaration has; http is NNN for http.NNN, else -) into the file out2. The module
+# is the folder under src/Modules, or the building-block directory under src/BuildingBlocks without its first dotted part.
+# Errors (exit 3, the message in errfile), so that no shape gives a wrong or missing row: a factory the status map does not know; a code
+# argument that is not a plain string literal or a const string of the file (a qualified constant must name a class of the file); a code with a character outside [A-Za-z0-9_.-]; a `const`
+# that is not `const string Name = "literal";`; a code-shaped string literal ("a.b") in an *Errors.cs file that no factory call declares
+# (another declaration shape); an *Errors.cs file with no declaration; the same code declared twice; a neutral resx with no key, a key
+# twice in one file, or a <data element whose name is not on its line; a file that cannot be read.
+# shellcheck disable=SC2016
+errors_awk="$cs_awk_lib"'
+function read_resx(i,   f, line, rc, lineno, incom, p, q, t, piece, key, cnt) {
+  f = rfile[i]; lineno = 0; incom = 0; cnt = 0
+  while ((rc = (getline line < f)) > 0) {
+    lineno++
+    sub(/\r$/, "", line)
+    t = ""
+    while (line != "") {
+      if (incom) {
+        q = index(line, "-->")
+        if (q == 0) line = ""
+        else { line = substr(line, q + 3); incom = 0 }
+      } else {
+        p = index(line, "<!--")
+        if (p == 0) { t = t line; line = "" }
+        else { t = t substr(line, 1, p - 1); line = substr(line, p + 4); incom = 1 }
+      }
+    }
+    while (match(t, /<data([ \t>\/]|$)/)) {
+      piece = substr(t, RSTART)
+      if (!match(piece, /^<data[ \t]+name="[^"]+"/)) fail("errors: cannot read the <data> element at line " lineno " of " f " (expected <data name=\"key\" on one line)")
+      key = substr(piece, 1, RLENGTH); sub(/^[^"]*"/, "", key); sub(/"$/, "", key)
+      if ((f, key) in seen) fail("errors: the key " key " is declared twice in " f)
+      seen[f, key] = 1
+      nk++; rkey[nk] = key; rkfile[nk] = f; haskey[key] = 1
+      cnt++
+      t = substr(piece, RLENGTH + 1)
+    }
+  }
+  if (rc < 0) fail("errors: cannot read " f)
+  close(f)
+  if (cnt == 0) fail("errors: no <data name=\"key\"> entry in the neutral resource file " f)
+}
+function read_errors(i,   f, pos, abs, tok, fac, st, p, a, code, id, nm, decl, at, lit, q) {
+  f = efile[i]; decl = 0
+  if (cs_read(f) < 0) fail("errors: cannot read " f)
+  split("", konst); split("", produced); split("", fclass)
+  a = MASK
+  while (match(a, /(^|[^A-Za-z0-9_])class[ \t\n]+[A-Za-z_][A-Za-z0-9_]*/)) {
+    nm = substr(a, RSTART, RLENGTH); sub(/^.*[ \t\n]/, "", nm); fclass[nm] = 1
+    a = substr(a, RSTART + RLENGTH)
+  }
+  pos = 1
+  while (match(substr(MASK, pos), /(^|[^A-Za-z0-9_])const([^A-Za-z0-9_]|$)/)) {
+    abs = pos + RSTART - 1; if (substr(MASK, abs, 1) != "c") abs++
+    pos = abs + 5
+    a = substr(MASK, abs)
+    if (!match(a, /^const[ \t\n]+string[ \t\n]+[A-Za-z_][A-Za-z0-9_]*[ \t\n]*=[ \t\n]*"_*"[ \t\n]*;/))
+      fail("errors: cannot read the constant at line " line_at(abs) " of " f " (expected `const string Name = \"literal\";`)")
+    nm = substr(a, 1, RLENGTH); sub(/^const[ \t\n]+string[ \t\n]+/, "", nm); sub(/[ \t\n]*=.*$/, "", nm)
+    p = abs + index(a, "\"")
+    lit = substr(RAW, p, index(substr(MASK, p), "\"") - 1)
+    if (nm in konst) fail("errors: the constant " nm " is declared twice in " f)
+    konst[nm] = lit
+  }
+  pos = 1
+  while (match(substr(MASK, pos), /(^|[^A-Za-z0-9_])Error\.[A-Za-z_][A-Za-z0-9_]*[ \t\n]*\(/)) {
+    abs = pos + RSTART - 1; tok = substr(MASK, abs, RLENGTH)
+    pos = abs + RLENGTH
+    at = line_at(abs + 1)
+    fac = tok; sub(/^.*Error\./, "", fac); sub(/[ \t\n]*\($/, "", fac)
+    if (!(fac in status)) fail("errors: unknown factory Error." fac " at line " at " of " f " (known: Validation, Unauthorized, Forbidden, NotFound, Conflict, Failure, Unavailable)")
+    a = substr(MASK, pos); match(a, /^[ \t\n]*/); p = pos + RLENGTH; a = substr(MASK, p)
+    if (match(a, /^"_*"[ \t\n]*[,)]/)) {
+      code = substr(RAW, p + 1, index(substr(a, 2), "\"") - 1)
+    } else if (match(a, /^[A-Za-z_][A-Za-z0-9_.]*[ \t\n]*[,)]/)) {
+      id = substr(a, 1, RLENGTH - 1); gsub(/[ \t\n]/, "", id)
+      nm = id; sub(/^.*\./, "", nm)
+      q = id; if (!sub(/\.[A-Za-z0-9_]*$/, "", q)) q = ""
+      sub(/^.*\./, "", q)
+      if (q != "" && !(q in fclass)) fail("errors: the code " id " of Error." fac " at line " at " of " f " names a class this file does not declare")
+      if (!(nm in konst)) fail("errors: cannot resolve the code " id " of Error." fac " at line " at " of " f " (not a string literal or a const string of the file)")
+      code = konst[nm]
+    } else fail("errors: the code of Error." fac " at line " at " of " f " is not a string literal or a const string of the file")
+    if (code !~ /^[A-Za-z0-9_.-]+$/) fail("errors: the code \"" code "\" of Error." fac " at line " at " of " f " has a character outside [A-Za-z0-9_.-]")
+    if (code in dfile) fail("errors: duplicate error code " code " (" dfile[code] ", " f " line " at ")")
+    dfile[code] = f; produced[code] = 1
+    nd++; dcode[nd] = code; dmod[nd] = emod[i]; dstatus[nd] = status[fac]; dpath[nd] = f
+    decl++
+  }
+  pos = 1
+  while (match(substr(MASK, pos), /"_*"/)) {
+    abs = pos + RSTART - 1; pos = abs + RLENGTH
+    lit = substr(RAW, abs + 1, RLENGTH - 2)
+    if (lit ~ /^[a-z0-9_]+(\.[a-z0-9_]+)+$/ && !(lit in produced))
+      fail("errors: the code-like string \"" lit "\" at line " line_at(abs) " of " f " is not the code of an Error.<Factory>(...) call (a declaration shape the parser does not know)")
+  }
+  if (decl == 0) fail("errors: no error code declaration parsed in " f " (expected Error.<Factory>(\"code\", ...))")
+}
+BEGIN {
+  status["Validation"] = 400; status["Unauthorized"] = 401; status["Forbidden"] = 403; status["NotFound"] = 404
+  status["Conflict"] = 409; status["Failure"] = 500; status["Unavailable"] = 503
+}
+{
+  sub(/\r$/, "")
+  n = split($0, seg, "/")
+  if (n < 3 || seg[1] != "src") next
+  if (seg[n] ~ /^[A-Za-z0-9_]+ErrorMessages\.resx$/) { nr++; rfile[nr] = $0 }
+  else if (seg[n] ~ /.Errors\.cs$/) {
+    ne++; efile[ne] = $0
+    mod = (n >= 4 ? seg[3] : seg[2])
+    if (seg[2] != "Modules") sub(/^[^.]*\./, "", mod)
+    emod[ne] = mod
+  }
+}
+END {
+  if (failed) exit 3
+  for (i = 1; i <= nr; i++) read_resx(i)
+  for (i = 1; i <= ne; i++) read_errors(i)
+  for (d = 1; d <= nd; d++) print dcode[d] "|" dmod[d] "|" dstatus[d] "|" ((dcode[d] in haskey) ? dcode[d] : "-") "|" dpath[d]
+  printf "" > out2
+  for (k = 1; k <= nk; k++) {
+    if (rkey[k] in dfile) continue
+    print rkey[k] "|" (rkey[k] ~ /^http\.[0-9][0-9][0-9]$/ ? substr(rkey[k], 6) : "-") "|" rkfile[k] > out2
+  }
+}'
+
+# errors_pass: runs errors_awk once; table 1 goes to errors.table1, table 2 to errors.table2 (both in work; not errors.rows2, which
+# generate truncates to receive the output of emit_errors_2). errors_done records the run so that emit_errors_2 after emit_errors (as
+# generate calls them, in the same shell) does not parse the tree again.
+errors_done=""
+errors_pass() {
+  run_awk errors "$errors_awk" "$work/errors.table1" -v out2="$work/errors.table2"
+  errors_done="$work"
+}
+
+# emit_errors: table 1 of the errors shard (declared codes).
+emit_errors() {
+  local lines=()
+  errors_pass
+  mapfile -t lines < "$work/errors.table1"
+  if (( ${#lines[@]} > 0 )); then printf '%s\n' "${lines[@]}"; fi
+}
+
+# emit_errors_2: table 2 of the errors shard (resource-only keys), with its note when it has rows.
+emit_errors_2() {
+  local lines=()
+  [[ "$errors_done" == "$work" ]] || errors_pass
+  mapfile -t lines < "$work/errors.table2"
+  if (( ${#lines[@]} > 0 )); then
+    table_note='Neutral resource keys that no `*Errors.cs` file declares: codes set as string constants elsewhere (middleware, exception handlers, validation) or `http.NNN` keys for a bare HTTP status.'
+    printf '%s\n' "${lines[@]}"
+  fi
 }
 
 # scan_markers: "file:line:text" for every line of every file that the whole-line marker rule matches (grep -I skips binary files).
