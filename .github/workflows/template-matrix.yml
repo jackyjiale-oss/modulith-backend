@@ -13,9 +13,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Only a pull request cancels its own earlier run. A push to main keeps running, so the post-merge pair combinations are never lost
+# to the next merge (the same rule as codeql.yml and gitleaks.yml).
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -25,7 +27,7 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
-  # The five single-switch and all-switch combinations, on every pull request.
+  # The five single-switch and all-switch combinations, on every pull request, push to main and manual run.
   template-matrix:
     name: template-matrix (${{ matrix.name }})
     runs-on: ubuntu-latest
