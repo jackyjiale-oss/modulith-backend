@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for project-index.sh (project index design): the CLI, the markers shard, the MAP.md checks and --check.
+# Tests for project-index.sh (project index design): the CLI, the markers and routes shards, the MAP.md checks and --check.
 # Each case builds its own throwaway tree, runs the script on it and checks the files it writes, its output and its exit code.
 #
 # Usage: bash build/scripts/tests/project-index.test.sh
@@ -461,6 +461,162 @@ case_need_rows() {
   assert_contains "routes" "$msg" "need_rows: names the shard"
 }
 
+# routes_fixture [with-b]: a tree with a Host Program.cs that maps module extensions on `api` (/api/v1) and one at the root, and module
+# A: a module file calling the endpoints extension, a root group "a" with a "/" route, a route split over three lines, an anonymous route
+# and a child group extension in another file (CRLF) that takes its prefix from the caller. With "with-b", module B maps a JWKS-like
+# route at the root through a const string, with no handler parameter.
+routes_fixture() {
+  local program='var app = builder.Build();
+var api = app.MapGroup("/api/v1");
+api.MapAModuleEndpoints();'
+  if [[ "${1-}" == "with-b" ]]; then program+=$'\napp.MapBWellKnownEndpoints();'; fi
+  program+=$'\napp.Run();'
+  put src/Host/H/Program.cs "$program"
+  put src/Modules/A/A/AModule.cs 'public static class AModule
+{
+    public static IEndpointRouteBuilder MapAModuleEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapAEndpoints();
+        return app;
+    }
+}'
+  put src/Modules/A/A/Endpoints/AEndpoints.cs 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        // A comment that mentions group.MapPut("ignored", Nothing) is not a route.
+        var group = app.MapGroup("a")
+            .WithTags("A");
+
+        group.MapGet("/", ListAsync).RequirePermission(APermissions.View);
+
+        group.MapPost("/{id:guid}/approve", ApproveAsync)
+            .RequirePermission(APermissions.Approve)
+            .WithIdempotency();
+
+        group.MapPost("login", LoginAsync).AllowAnonymous(); // trailing comment
+
+        group.MapChildEndpoints();
+        return app;
+    }
+
+    /// <summary>Lists.</summary>
+    private static async Task<IResult> ListAsync(
+        [AsParameters] ListRequest request,
+        IQueryHandler<ListAQuery, CursorPage<AItem>> handler,
+        CancellationToken cancellationToken)
+    {
+        return TypedResults.Ok();
+    }
+
+    private static async Task<IResult> ApproveAsync(Guid id, ICommandHandler<ApproveACommand> handler) => TypedResults.NoContent();
+
+    private static async Task<IResult> LoginAsync(ICommandHandler<LoginCommand, LoginResult> handler) => TypedResults.Ok();
+}'
+  put_raw src/Modules/A/A/Endpoints/ChildEndpoints.cs 'internal static class ChildEndpoints\r\n{\r\n    internal static RouteGroupBuilder MapChildEndpoints(this RouteGroupBuilder a)\r\n    {\r\n        var child = a.MapGroup("child");\r\n        child.MapDelete("/{id}", RemoveAsync)\r\n            .RequireAuthorization();\r\n        return a;\r\n    }\r\n\r\n    private static async Task<IResult> RemoveAsync(Guid id, ICommandHandler<RemoveCommand> handler) => TypedResults.NoContent();\r\n}\r\n'
+  if [[ "${1-}" == "with-b" ]]; then
+    put src/Modules/B/B/BModule.cs 'public static class BModule
+{
+    public static IEndpointRouteBuilder MapBWellKnownEndpoints(this IEndpointRouteBuilder app) => app.MapJwksEndpoints();
+}'
+    put src/Modules/B/B/Endpoints/BEndpoints.cs 'internal static class BEndpoints
+{
+    internal const string Route = "/.well-known/jwks.json";
+
+    internal static IEndpointRouteBuilder MapJwksEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapGet(Route, GetKeySet)
+            .AllowAnonymous();
+        return app;
+    }
+
+    private static IResult GetKeySet(ISigningKeyProvider keys) => TypedResults.Ok();
+}'
+  fi
+}
+
+# routes_of_tree: runs emit_routes of the sourced script on the current tree (no full generator run); sets status and combined (the
+# sorted rows, or the error output).
+routes_of_tree() {
+  sourced "root='$tree'; cd '$tree'; prepare_files; emit_routes > \"\$work/routes.out\"; sort \"\$work/routes.out\""
+}
+
+routes_a_rows='A|DELETE|/api/v1/a/child/{id}|RemoveCommand|authenticated|src/Modules/A/A/Endpoints/ChildEndpoints.cs
+A|GET|/api/v1/a|ListAQuery|APermissions.View|src/Modules/A/A/Endpoints/AEndpoints.cs
+A|POST|/api/v1/a/login|LoginCommand|anonymous|src/Modules/A/A/Endpoints/AEndpoints.cs
+A|POST|/api/v1/a/{id:guid}/approve|ApproveACommand|APermissions.Approve|src/Modules/A/A/Endpoints/AEndpoints.cs'
+
+case_routes() {
+  make_tree
+  routes_fixture with-b
+  routes_of_tree
+  assert_eq "0" "$status" "routes: exit code"
+  assert_eq "$routes_a_rows"$'\nB|GET|/.well-known/jwks.json|-|anonymous|src/Modules/B/B/Endpoints/BEndpoints.cs' "$combined" \
+    "routes: exact rows (root route without //, three-line chain, child group prefix from the caller, root-mapped const route)"
+  # The one end-to-end run of the routes shard: the rendered table.
+  generate
+  assert_contains $'Rows: 5\n\n| module | method | route | handler | permission | file |\n| --- | --- | --- | --- | --- | --- |\n| A | DELETE | /api/v1/a/child/{id} | RemoveCommand | authenticated | src/Modules/A/A/Endpoints/ChildEndpoints.cs |' \
+    "$(<"$idx/routes.md")" "routes: rendered shard"
+}
+
+case_routes_zero() {
+  make_tree
+  put src/Host/H/Program.cs $'var api = app.MapGroup("/api/v1");\napi.MapAEndpoints();'
+  put src/Modules/A/A/Endpoints/AEndpoints.cs 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.Map("x", HandleAsync);
+        return app;
+    }
+}'
+  routes_of_tree
+  assert_eq "2" "$status" "routes_zero: exit code"
+  assert_contains "no routes parsed in src/Modules/A/A/Endpoints/AEndpoints.cs" "$combined" "routes_zero: names the file"
+  # A file with some routes and one mapping of an unknown shape fails too, rather than emitting fewer rows.
+  put src/Modules/A/A/Endpoints/AEndpoints.cs 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("x", GetAsync).RequireAuthorization();
+        group.MapMethods("y", ["HEAD"], HeadAsync);
+        return app;
+    }
+}'
+  routes_of_tree
+  assert_eq "2" "$status" "routes_zero: an unknown mapping beside known ones: exit code"
+  assert_contains "src/Modules/A/A/Endpoints/AEndpoints.cs" "$combined" "routes_zero: an unknown mapping: names the file"
+  # An extension that nothing calls has no prefix: a parse error, not a guessed route.
+  put src/Host/H/Program.cs 'var api = app.MapGroup("/api/v1");'
+  put src/Modules/A/A/Endpoints/AEndpoints.cs 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("x", GetAsync).RequireAuthorization();
+        return app;
+    }
+}'
+  routes_of_tree
+  assert_eq "2" "$status" "routes_zero: an uncalled extension: exit code"
+  assert_contains "src/Modules/A/A/Endpoints/AEndpoints.cs" "$combined" "routes_zero: an uncalled extension: names the file"
+}
+
+case_routes_module_absent() {
+  make_tree
+  routes_fixture
+  routes_of_tree
+  assert_eq "0" "$status" "routes_module_absent: exit code"
+  assert_eq "$routes_a_rows" "$combined" "routes_module_absent: only module A rows"
+  # A tree with no endpoint file at all has no rows and no error.
+  make_tree
+  put src/Host/H/Program.cs 'var api = app.MapGroup("/api/v1");'
+  routes_of_tree
+  assert_eq "0" "$status" "routes_module_absent: no endpoint file: exit code"
+  assert_eq "" "$combined" "routes_module_absent: no endpoint file: no rows"
+}
+
 # Each case runs in a subshell so that its tree and variables do not leak into the next.
 # The subshell reports its failures through its exit code, since variables do not cross the boundary.
 run_case() {
@@ -473,7 +629,8 @@ for c in \
   case_usage_errors case_markers_shard case_markers_kinds_and_expressions case_markers_zero_rows case_stub_shards \
   case_two_table_shard case_atomic_write \
   case_determinism case_untracked_ignored case_git_file_marker case_find_excludes_build_dirs \
-  case_check_stale case_check_missing_and_unknown case_map_rules case_need_rows; do
+  case_check_stale case_check_missing_and_unknown case_map_rules case_need_rows \
+  case_routes case_routes_zero case_routes_module_absent; do
   run_case "$c"
 done
 

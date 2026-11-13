@@ -148,8 +148,7 @@ shard_meta() {
   esac
 }
 
-# The seven shards below are stubs here (a table with no rows); later tasks give each its parser.
-emit_routes() { :; }
+# The six shards below are stubs here (a table with no rows); later tasks give each its parser.
 emit_permissions() { :; }
 emit_errors() { :; }
 emit_errors_2() { :; }
@@ -158,6 +157,182 @@ emit_jobs() { :; }
 emit_config() { :; }
 emit_tests() { :; }
 emit_tests_2() { :; }
+
+# routes_awk: one awk run over the tracked file list (stdin, from files_cache) that reads the C# files it needs with getline. Three kinds:
+#   E  src/Modules/<Module>/<Project>/.../Endpoints/*Endpoints.cs   the routes; only these give rows
+#   M  src/Modules/<Module>/<Project>/*Module.cs                    module extensions that call the endpoint extensions
+#   P  src/Host/<Project>/Program.cs                                the host: `var api = app.MapGroup("/api/v1"); api.MapXEndpoints();`
+# Pass 1 (scan_file) reads each file line by line (CR and // comments removed) and records, per scope (a file and the Map...Endpoints
+# extension being read, or the top level of the file): `var X = Y.MapGroup("p")` (group X under Y), `X.MapFooEndpoints()` calls (Foo
+# takes the prefix of X in the caller's scope), `MapFooEndpoints(this T P)` declarations (P is the caller's group), `const string N =
+# "v"`, the first generic argument of the ICommandHandler<...> or IQueryHandler<...> parameter of each method, and each statement (from
+# a line with `.Map` to the line with `;`) holding `X.Map(Get|Post|Put|Patch|Delete)(route, Method)` with its chained
+# RequirePermission(P) / AllowAnonymous() / RequireAuthorization(). Pass 2 (END) resolves each route's prefix through the group and
+# caller chain (the top level of a file is the root, where `app` lives) and prints module|METHOD|route|handler|permission|file.
+# Errors (exit 3, the message in errfile): an endpoint file with MapGroup or a Map...Endpoints call but zero routes; any other .MapX
+# call in an endpoint file (an unknown shape, which would otherwise drop rows silently); a prefix that cannot be resolved.
+# shellcheck disable=SC2016
+routes_awk='
+function strip_comment(s,   k, c, n, inq) {
+  if (index(s, "//") == 0) return s
+  inq = 0; n = length(s)
+  for (k = 1; k <= n; k++) {
+    c = substr(s, k, 1)
+    if (inq && c == "\\") { k++; continue }
+    if (c == "\"") inq = !inq
+    else if (!inq && c == "/" && substr(s, k + 1, 1) == "/") return substr(s, 1, k - 1)
+  }
+  return s
+}
+function first_generic(s,   k, c, depth, out) {
+  depth = 0; out = ""
+  for (k = 1; k <= length(s); k++) {
+    c = substr(s, k, 1)
+    if (c == "<") depth++
+    else if (c == ">") { if (depth == 0) break; depth-- }
+    else if (c == "," && depth == 0) break
+    out = out c
+  }
+  gsub(/[ \t]/, "", out)
+  return out
+}
+function join(a, b,   r) {
+  sub(/^\/+/, "", b)
+  r = (b == "" ? a : a "/" b)
+  gsub(/\/\/+/, "/", r)
+  if (r != "/") sub(/\/$/, "", r)
+  return r
+}
+function unknown(i, what) {
+  if (!(i in unknown_at)) unknown_at[i] = what " at line " lineno
+}
+# process: one statement of file i in scope sc; each .MapX occurrence is handled at its position.
+function process(i, sc, stmt,   rest, before, after, tok, name, recv, x, arg, meth, perm, p, key) {
+  rest = stmt
+  while (match(rest, /\.Map[A-Za-z0-9_]*[(<]/)) {
+    before = substr(rest, 1, RSTART - 1); tok = substr(rest, RSTART, RLENGTH); after = substr(rest, RSTART + RLENGTH)
+    rest = after
+    name = substr(tok, 5, length(tok) - 5)
+    recv = ""
+    if (match(before, /[A-Za-z_][A-Za-z0-9_]*[ \t]*$/)) { recv = substr(before, RSTART, RLENGTH); sub(/[ \t]+$/, "", recv); before = substr(before, 1, RSTART - 1) }
+    if (name == "Group" && substr(tok, length(tok)) == "(") {
+      if (recv != "" && match(after, /^[ \t]*"[^"]*"[ \t]*\)/) && match(before, /[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*$/)) {
+        x = substr(before, RSTART, RLENGTH); sub(/[ \t]*=[ \t]*$/, "", x)
+        match(after, /"[^"]*"/); p = substr(after, RSTART + 1, RLENGTH - 2)
+        key = sc SUBSEP x
+        gpar[key] = recv; gpath[key] = p
+        if (fkind[i] == "E") groups[i]++
+      } else if (fkind[i] == "E") unknown(i, ".MapGroup without `var X = Y.MapGroup(\"literal\")`")
+    } else if (name ~ /Endpoints$/ && substr(tok, length(tok)) == "(") {
+      if (recv == "") { if (fkind[i] == "E") unknown(i, ".Map" name " without a receiver"); continue }
+      if (fkind[i] == "E") groups[i]++
+      if (!(("Map" name) in caller_var)) { caller_scope["Map" name] = sc; caller_var["Map" name] = recv }
+    } else if (name ~ /^(Get|Post|Put|Patch|Delete)$/ && substr(tok, length(tok)) == "(") {
+      if (fkind[i] != "E") continue
+      if (recv == "" || !match(after, /^[ \t]*("[^"]*"|[A-Za-z_][A-Za-z0-9_.]*)[ \t]*,[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\)/)) {
+        unknown(i, ".Map" name " whose arguments are not (route, Method)"); continue
+      }
+      arg = substr(after, RSTART, RLENGTH)
+      meth = arg; sub(/^.*,[ \t]*/, "", meth); sub(/[ \t]*\)$/, "", meth)
+      sub(/[ \t]*,.*$/, "", arg); sub(/^[ \t]+/, "", arg)
+      perm = "-"
+      if (match(after, /RequirePermission\([^)]*\)/)) { perm = substr(after, RSTART + 18, RLENGTH - 19); gsub(/[ \t]/, "", perm) }
+      else if (after ~ /AllowAnonymous\([ \t]*\)/) perm = "anonymous"
+      else if (after ~ /RequireAuthorization\([ \t]*\)/) perm = "authenticated"
+      nr++; rfile[nr] = i; rscope[nr] = sc; rvar[nr] = recv; rverb[nr] = toupper(name); rarg[nr] = arg; rmeth[nr] = meth; rperm[nr] = perm
+      routes[i]++
+    } else if (fkind[i] == "E") unknown(i, ".Map" name)
+  }
+}
+function scan_file(i,   f, line, sc, stmt, m, decl, nm, prm, hk) {
+  f = fname[i]; sc = i SUBSEP ""; scope_ext[sc] = ""; stmt = ""; curm = ""; lineno = 0
+  while ((getline line < f) > 0) {
+    lineno++
+    sub(/\r$/, "", line)
+    line = strip_comment(line)
+    if (line ~ /^[ \t]*$/) continue
+    if (match(line, /const[ \t]+string[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*"[^"]*"/)) {
+      m = substr(line, RSTART, RLENGTH); sub(/^const[ \t]+string[ \t]+/, "", m)
+      nm = m; sub(/[ \t]*=.*$/, "", nm); sub(/^[^"]*"/, "", m); sub(/"$/, "", m)
+      konst[i, nm] = m
+    }
+    if (match(line, /^[ \t]*(public|private|internal|protected)[^=;(]*[ \t][A-Za-z_][A-Za-z0-9_]*[ \t]*\(/)) {
+      m = substr(line, RSTART, RLENGTH); sub(/[ \t]*\($/, "", m); sub(/^.*[ \t]/, "", m)
+      curm = m
+    }
+    if (curm != "" && !((i, curm) in handler) && match(line, /I(Command|Query)Handler</)) handler[i, curm] = first_generic(substr(line, RSTART + RLENGTH))
+    if (match(line, /Map[A-Za-z0-9_]*Endpoints[ \t]*\([ \t]*this[ \t]+[A-Za-z0-9_.<>]+[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\)/)) {
+      decl = substr(line, RSTART, RLENGTH); line = substr(line, RSTART + RLENGTH)
+      nm = decl; sub(/[ \t]*\(.*$/, "", nm)
+      prm = decl; sub(/[ \t]*\)$/, "", prm); sub(/^.*[ \t]/, "", prm)
+      sc = i SUBSEP nm; scope_ext[sc] = nm
+      if (!(nm in ext_param)) { ext_param[nm] = prm; ext_file[nm] = i }
+    }
+    if (stmt == "" && line !~ /\.Map[A-Za-z0-9_]*[(<]/) continue
+    stmt = (stmt == "" ? line : stmt " " line)
+    if (index(line, ";") > 0) { process(i, sc, stmt); stmt = "" }
+  }
+  if (stmt != "") process(i, sc, stmt)
+  close(f)
+}
+# prefix: the route prefix of variable v in scope sc, or the error marker "\001".
+function prefix(sc, v, depth,   key, ext, pp) {
+  if (depth > 40) return "\001"
+  key = sc SUBSEP v
+  if (key in gpar) { pp = prefix(sc, gpar[key], depth + 1); return (pp == "\001" ? pp : join(pp, gpath[key])) }
+  ext = scope_ext[sc]
+  if (ext == "") return ""
+  if (v == ext_param[ext] && (ext in caller_var)) return prefix(caller_scope[ext], caller_var[ext], depth + 1)
+  return "\001"
+}
+function fail(msg) { print msg > errfile; failed = 1; exit 3 }
+{
+  sub(/\r$/, "")
+  n = split($0, seg, "/")
+  kind = ""
+  if (n >= 6 && seg[1] == "src" && seg[2] == "Modules" && seg[n - 1] == "Endpoints" && seg[n] ~ /.Endpoints\.cs$/) kind = "E"
+  else if (n == 5 && seg[1] == "src" && seg[2] == "Modules" && seg[5] ~ /.Module\.cs$/) kind = "M"
+  else if (n == 4 && seg[1] == "src" && seg[2] == "Host" && seg[4] == "Program.cs") kind = "P"
+  if (kind != "") { nf++; fname[nf] = $0; fkind[nf] = kind; fmod[nf] = seg[3] }
+}
+END {
+  if (failed) exit 3
+  for (i = 1; i <= nf; i++) scan_file(i)
+  for (i = 1; i <= nf; i++) {
+    if (fkind[i] != "E" || (i in routes)) continue
+    if ((i in groups) || (i in unknown_at)) fail("no routes parsed in " fname[i] ((i in unknown_at) ? " (" unknown_at[i] ")" : ""))
+  }
+  for (i = 1; i <= nf; i++) if (i in unknown_at) fail("routes: unknown mapping shape in " fname[i] ": " unknown_at[i])
+  for (r = 1; r <= nr; r++) {
+    i = rfile[r]; arg = rarg[r]
+    if (substr(arg, 1, 1) == "\"") arg = substr(arg, 2, length(arg) - 2)
+    else {
+      nm = arg; sub(/^.*\./, "", nm)
+      if (!((i, nm) in konst)) fail("routes: the route constant " arg " is not a const string in " fname[i])
+      arg = konst[i, nm]
+    }
+    p = prefix(rscope[r], rvar[r], 0)
+    if (p == "\001") fail("routes: cannot resolve the group prefix of " rvar[r] " in " fname[i] " (an extension nothing calls, or a receiver the parser does not know)")
+    route = join(p, arg)
+    if (substr(route, 1, 1) != "/") route = "/" route
+    h = ((i, rmeth[r]) in handler) ? handler[i, rmeth[r]] : "-"
+    row = fmod[i] "|" rverb[r] "|" route "|" h "|" rperm[r] "|" fname[i]
+    print row
+  }
+}'
+
+# emit_routes: the routes shard (see routes_awk); one awk process for the whole tree.
+emit_routes() {
+  local rows_file="$work/routes.awk.out" err_file="$work/routes.awk.err" status=0 msg="" lines=()
+  : > "$err_file"
+  awk -v errfile="$err_file" "$routes_awk" < "$files_cache" > "$rows_file" || status=$?
+  if (( status != 0 )); then
+    [[ -s "$err_file" ]] && read -r msg < "$err_file"
+    fail_parse "${msg:-routes: awk failed (exit $status)}"
+  fi
+  mapfile -t lines < "$rows_file"
+  if (( ${#lines[@]} > 0 )); then printf '%s\n' "${lines[@]}"; fi
+}
 
 # scan_markers: "file:line:text" for every line of every file that the whole-line marker rule matches (grep -I skips binary files).
 # The sh wrapper turns grep's "nothing matched" (1) into success for a batch of files, so that any other status is a real failure.
