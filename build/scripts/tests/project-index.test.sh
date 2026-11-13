@@ -617,6 +617,131 @@ case_routes_module_absent() {
   assert_eq "" "$combined" "routes_module_absent: no endpoint file: no rows"
 }
 
+# routes_one_module <endpoints file body> [extra Program.cs lines]: a fresh tree with a Program.cs that maps MapAEndpoints on /api/v1
+# and module A's endpoint file with the given body.
+routes_one_module() {
+  make_tree
+  put src/Host/H/Program.cs $'var api = app.MapGroup("/api/v1");\napi.MapAEndpoints();'"${2:+$'\n'$2}"
+  put src/Modules/A/A/Endpoints/AEndpoints.cs "$1"
+}
+
+# routes_fails <label> <needle>: emit_routes on the current tree exits 2 with a message containing the needle.
+routes_fails() {
+  routes_of_tree
+  assert_eq "2" "$status" "$1: exit code"
+  assert_contains "$2" "$combined" "$1: message"
+}
+
+# Shapes that would give a wrong row with exit 0 fail loudly instead.
+case_routes_loud() {
+  local a='src/Modules/A/A/Endpoints/AEndpoints.cs'
+  # An extension called from two places would have two prefixes.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("x", GetAsync).RequireAuthorization();
+        return app;
+    }
+}' $'var v2 = app.MapGroup("/api/v2");\nv2.MapAEndpoints();'
+  routes_fails "routes_loud: two callers" "extension MapAEndpoints called from two places in src/Host/H/Program.cs"
+  # Two modules declaring an extension with the same name (legal in separate assemblies) would share one prefix.
+  put src/Host/H/Program.cs $'var api = app.MapGroup("/api/v1");\napi.MapAEndpoints();'
+  put src/Modules/C/C/Endpoints/CEndpoints.cs 'internal static class CEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("c", GetAsync).RequireAuthorization();
+        return app;
+    }
+}'
+  routes_fails "routes_loud: duplicate extension name" "extension MapAEndpoints declared twice: $a, src/Modules/C/C/Endpoints/CEndpoints.cs"
+  # Group-level authorization is not read: its routes have no authorization call of their own.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a").RequirePermission(APermissions.View);
+        group.MapGet("/", ListAsync);
+        return app;
+    }
+}'
+  routes_fails "routes_loud: group-level permission" "no authorization call on /api/v1/a in $a"
+  # A route with no authorization call at all.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("x", GetAsync).WithName("X");
+        return app;
+    }
+}'
+  routes_fails "routes_loud: no authorization call" "no authorization call on /api/v1/x in $a"
+  # An extension not named Map...Endpoints is not recognised: its routes must not fall back to the root.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapARoutes(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("x", GetAsync).RequireAuthorization();
+        return app;
+    }
+}' 'api.MapARoutes();'
+  routes_fails "routes_loud: extension not named Map...Endpoints" "cannot resolve the group prefix of group in $a"
+  # The same with the signature split over two lines.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(
+        this IEndpointRouteBuilder app)
+    {
+        app.MapGet("x", GetAsync).RequireAuthorization();
+        return app;
+    }
+}'
+  routes_fails "routes_loud: split extension signature" "cannot resolve the group prefix of app in $a"
+  # A helper method called with a nested group must not inherit the previous extension's scope.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("x", GetAsync).RequireAuthorization();
+        var mfa = group.MapGroup("mfa");
+        MapMfa(mfa);
+        return app;
+    }
+
+    private static void MapMfa(RouteGroupBuilder group)
+    {
+        group.MapPost("verify", VerifyAsync).RequireAuthorization();
+    }
+}'
+  routes_fails "routes_loud: helper method with a nested group" "cannot resolve the group prefix of group in $a"
+}
+
+# A named policy is the permission column; a comma inside a route literal stays in the route.
+case_routes_shapes() {
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("/{code:length(3,8)}", GetAsync).RequireAuthorization("Admin");
+        group.MapGet("/r/{n:range(1,5)}", RangeAsync).AllowAnonymous();
+        return app;
+    }
+
+    private static Task<IResult> GetAsync(string code, IQueryHandler<GetQuery, Item> handler) => null;
+
+    private static Task<IResult> RangeAsync(int n, IQueryHandler<RangeQuery, Item> handler) => null;
+}'
+  routes_of_tree
+  assert_eq "0" "$status" "routes_shapes: exit code"
+  assert_eq 'A|GET|/api/v1/a/r/{n:range(1,5)}|RangeQuery|anonymous|src/Modules/A/A/Endpoints/AEndpoints.cs
+A|GET|/api/v1/a/{code:length(3,8)}|GetQuery|Admin|src/Modules/A/A/Endpoints/AEndpoints.cs' "$combined" \
+    "routes_shapes: policy name and commas inside the route"
+}
+
 # Each case runs in a subshell so that its tree and variables do not leak into the next.
 # The subshell reports its failures through its exit code, since variables do not cross the boundary.
 run_case() {
@@ -630,7 +755,7 @@ for c in \
   case_two_table_shard case_atomic_write \
   case_determinism case_untracked_ignored case_git_file_marker case_find_excludes_build_dirs \
   case_check_stale case_check_missing_and_unknown case_map_rules case_need_rows \
-  case_routes case_routes_zero case_routes_module_absent; do
+  case_routes case_routes_zero case_routes_module_absent case_routes_loud case_routes_shapes; do
   run_case "$c"
 done
 

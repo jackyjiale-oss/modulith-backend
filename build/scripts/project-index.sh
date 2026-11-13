@@ -163,14 +163,17 @@ emit_tests_2() { :; }
 #   M  src/Modules/<Module>/<Project>/*Module.cs                    module extensions that call the endpoint extensions
 #   P  src/Host/<Project>/Program.cs                                the host: `var api = app.MapGroup("/api/v1"); api.MapXEndpoints();`
 # Pass 1 (scan_file) reads each file line by line (CR and // comments removed) and records, per scope (a file and the Map...Endpoints
-# extension being read, or the top level of the file): `var X = Y.MapGroup("p")` (group X under Y), `X.MapFooEndpoints()` calls (Foo
-# takes the prefix of X in the caller's scope), `MapFooEndpoints(this T P)` declarations (P is the caller's group), `const string N =
-# "v"`, the first generic argument of the ICommandHandler<...> or IQueryHandler<...> parameter of each method, and each statement (from
-# a line with `.Map` to the line with `;`) holding `X.Map(Get|Post|Put|Patch|Delete)(route, Method)` with its chained
-# RequirePermission(P) / AllowAnonymous() / RequireAuthorization(). Pass 2 (END) resolves each route's prefix through the group and
-# caller chain (the top level of a file is the root, where `app` lives) and prints module|METHOD|route|handler|permission|file.
-# Errors (exit 3, the message in errfile): an endpoint file with MapGroup or a Map...Endpoints call but zero routes; any other .MapX
-# call in an endpoint file (an unknown shape, which would otherwise drop rows silently); a prefix that cannot be resolved.
+# extension being read, any other method, or the top level of the file): `var X = Y.MapGroup("p")` (group X under Y),
+# `X.MapFooEndpoints()` calls (Foo takes the prefix of X in the caller's scope), `MapFooEndpoints(this T P)` declarations (P is the
+# caller's group), `const string N = "v"`, the first generic argument of the ICommandHandler<...> or IQueryHandler<...> parameter of
+# each method, and each statement (from a line with `.Map` to the line with `;`) holding `X.Map(Get|Post|Put|Patch|Delete)(route,
+# Method)` with its chained RequirePermission(P) / AllowAnonymous() / RequireAuthorization() (authenticated) / RequireAuthorization("N")
+# (the policy N). Pass 2 (END) resolves each route's prefix through the group and caller chain (only the top level of Program.cs is the
+# root, where `app` lives) and prints module|METHOD|route|handler|permission|file.
+# Errors (exit 3, the message in errfile), so that no shape gives a wrong row: an endpoint file with MapGroup or a Map...Endpoints call
+# but zero routes; any other .MapX call in an endpoint file; an extension called from two places or declared in two files; a prefix that
+# cannot be resolved (an extension not named Map...Endpoints or not on one line, a helper method); a route with no authorization call of
+# its own (group-level authorization is not read); a file that cannot be read.
 # shellcheck disable=SC2016
 routes_awk='
 function strip_comment(s,   k, c, n, inq) {
@@ -227,6 +230,7 @@ function process(i, sc, stmt,   rest, before, after, tok, name, recv, x, arg, me
       if (recv == "") { if (fkind[i] == "E") unknown(i, ".Map" name " without a receiver"); continue }
       if (fkind[i] == "E") groups[i]++
       if (!(("Map" name) in caller_var)) { caller_scope["Map" name] = sc; caller_var["Map" name] = recv }
+      else if (caller_scope["Map" name] != sc || caller_var["Map" name] != recv) fail("routes: extension Map" name " called from two places in " fname[i])
     } else if (name ~ /^(Get|Post|Put|Patch|Delete)$/ && substr(tok, length(tok)) == "(") {
       if (fkind[i] != "E") continue
       if (recv == "" || !match(after, /^[ \t]*("[^"]*"|[A-Za-z_][A-Za-z0-9_.]*)[ \t]*,[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\)/)) {
@@ -234,19 +238,22 @@ function process(i, sc, stmt,   rest, before, after, tok, name, recv, x, arg, me
       }
       arg = substr(after, RSTART, RLENGTH)
       meth = arg; sub(/^.*,[ \t]*/, "", meth); sub(/[ \t]*\)$/, "", meth)
-      sub(/[ \t]*,.*$/, "", arg); sub(/^[ \t]+/, "", arg)
+      match(arg, /^[ \t]*("[^"]*"|[A-Za-z_][A-Za-z0-9_.]*)/); arg = substr(arg, RSTART, RLENGTH); sub(/^[ \t]+/, "", arg)
       perm = "-"
       if (match(after, /RequirePermission\([^)]*\)/)) { perm = substr(after, RSTART + 18, RLENGTH - 19); gsub(/[ \t]/, "", perm) }
       else if (after ~ /AllowAnonymous\([ \t]*\)/) perm = "anonymous"
-      else if (after ~ /RequireAuthorization\([ \t]*\)/) perm = "authenticated"
+      else if (match(after, /RequireAuthorization\([^)]*\)/)) {
+        perm = substr(after, RSTART + 21, RLENGTH - 22); gsub(/[ \t"]/, "", perm)
+        if (perm == "") perm = "authenticated"
+      }
       nr++; rfile[nr] = i; rscope[nr] = sc; rvar[nr] = recv; rverb[nr] = toupper(name); rarg[nr] = arg; rmeth[nr] = meth; rperm[nr] = perm
       routes[i]++
     } else if (fkind[i] == "E") unknown(i, ".Map" name)
   }
 }
-function scan_file(i,   f, line, sc, stmt, m, decl, nm, prm, hk) {
-  f = fname[i]; sc = i SUBSEP ""; scope_ext[sc] = ""; stmt = ""; curm = ""; lineno = 0
-  while ((getline line < f) > 0) {
+function scan_file(i,   f, line, sc, stmt, m, decl, nm, prm, rc) {
+  f = fname[i]; sc = i SUBSEP ""; scope_ext[sc] = ""; scope_file[sc] = i; stmt = ""; curm = ""; lineno = 0
+  while ((rc = (getline line < f)) > 0) {
     lineno++
     sub(/\r$/, "", line)
     line = strip_comment(line)
@@ -259,19 +266,23 @@ function scan_file(i,   f, line, sc, stmt, m, decl, nm, prm, hk) {
     if (match(line, /^[ \t]*(public|private|internal|protected)[^=;(]*[ \t][A-Za-z_][A-Za-z0-9_]*[ \t]*\(/)) {
       m = substr(line, RSTART, RLENGTH); sub(/[ \t]*\($/, "", m); sub(/^.*[ \t]/, "", m)
       curm = m
+      # A method starts a scope of its own: a helper is not part of the extension above it (the extension branch below overrides it).
+      sc = i SUBSEP "m:" m; scope_ext[sc] = ""; scope_file[sc] = i
     }
     if (curm != "" && !((i, curm) in handler) && match(line, /I(Command|Query)Handler</)) handler[i, curm] = first_generic(substr(line, RSTART + RLENGTH))
     if (match(line, /Map[A-Za-z0-9_]*Endpoints[ \t]*\([ \t]*this[ \t]+[A-Za-z0-9_.<>]+[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\)/)) {
       decl = substr(line, RSTART, RLENGTH); line = substr(line, RSTART + RLENGTH)
       nm = decl; sub(/[ \t]*\(.*$/, "", nm)
       prm = decl; sub(/[ \t]*\)$/, "", prm); sub(/^.*[ \t]/, "", prm)
-      sc = i SUBSEP nm; scope_ext[sc] = nm
+      sc = i SUBSEP nm; scope_ext[sc] = nm; scope_file[sc] = i
       if (!(nm in ext_param)) { ext_param[nm] = prm; ext_file[nm] = i }
+      else if (ext_file[nm] != i) fail("routes: extension " nm " declared twice: " fname[ext_file[nm]] ", " fname[i])
     }
     if (stmt == "" && line !~ /\.Map[A-Za-z0-9_]*[(<]/) continue
     stmt = (stmt == "" ? line : stmt " " line)
     if (index(line, ";") > 0) { process(i, sc, stmt); stmt = "" }
   }
+  if (rc < 0) fail("routes: cannot read " f)
   if (stmt != "") process(i, sc, stmt)
   close(f)
 }
@@ -281,7 +292,8 @@ function prefix(sc, v, depth,   key, ext, pp) {
   key = sc SUBSEP v
   if (key in gpar) { pp = prefix(sc, gpar[key], depth + 1); return (pp == "\001" ? pp : join(pp, gpath[key])) }
   ext = scope_ext[sc]
-  if (ext == "") return ""
+  # Only the top level of the host (Program.cs, where `app` lives) is the root; any other scope without an extension is unknown.
+  if (ext == "") return (fkind[scope_file[sc]] == "P" ? "" : "\001")
   if (v == ext_param[ext] && (ext in caller_var)) return prefix(caller_scope[ext], caller_var[ext], depth + 1)
   return "\001"
 }
@@ -315,6 +327,7 @@ END {
     if (p == "\001") fail("routes: cannot resolve the group prefix of " rvar[r] " in " fname[i] " (an extension nothing calls, or a receiver the parser does not know)")
     route = join(p, arg)
     if (substr(route, 1, 1) != "/") route = "/" route
+    if (rperm[r] == "-") fail("routes: no authorization call on " route " in " fname[i] " (RequirePermission, AllowAnonymous or RequireAuthorization on the route itself; group-level authorization is not read)")
     h = ((i, rmeth[r]) in handler) ? handler[i, rmeth[r]] : "-"
     row = fmod[i] "|" rverb[r] "|" route "|" h "|" rperm[r] "|" fname[i]
     print row
