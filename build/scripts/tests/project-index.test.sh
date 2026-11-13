@@ -2,9 +2,13 @@
 # Tests for project-index.sh (project index design): the CLI, the markers, routes, permissions and errors shards, the MAP.md checks and --check.
 # Each case builds its own throwaway tree, runs the script on it and checks the files it writes, its output and its exit code.
 #
-# Usage: bash build/scripts/tests/project-index.test.sh [case_name...]   (no argument: every case)
+# Usage: bash build/scripts/tests/project-index.test.sh [case_name...]
+#   no argument   run every registered case (the list at the end of this file)
+#   case_name...  run only these cases, in this order (for iterating on one case); each must be a registered case name, else the
+#                 script runs nothing and exits 2 with "unknown case: <name>"
 set -euo pipefail
 
+test_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 scripts_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 gen="$scripts_dir/project-index.sh"
 
@@ -917,6 +921,110 @@ case_permissions_loud() {
   permissions_fixture
   put "$consts" 'internal static class APermissions { }'
   emit_fails "permissions_loud: constants file without constants" "$consts" emit_permissions
+  # An unqualified constant under `using static`, and an aliased class, are not records: their admin flag would be lost.
+  permissions_fixture
+  put "$src" 'using static A.APermissions;
+
+class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        Define(APermissions.Edit, "Edit", "d"),
+        Define(View, "View", "d", adminDefault: true),
+    ];
+}'
+  emit_fails "permissions_loud: using static" "admin default flag(s) outside a parsed permission record in $src" emit_permissions
+  put "$src" 'using P = A.APermissions;
+
+class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        Define(APermissions.Edit, "Edit", "d"),
+        new(P.View, ModuleName, "View", "d", AdminDefault: true),
+    ];
+}'
+  emit_fails "permissions_loud: aliased class" "admin default flag(s) outside a parsed permission record in $src" emit_permissions
+  # `with { AdminDefault = true }` is a shape the parser does not know (not a parameter default).
+  put "$src" 'class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        Define(APermissions.View, "View", "d") with { AdminDefault = true },
+    ];
+}'
+  emit_fails "permissions_loud: with expression" "AdminDefault assigned with = at line 5 of $src" emit_permissions
+  # A renamed or moved source file: the module has constants and no *PermissionSource.cs.
+  permissions_fixture
+  rm -f "$tree/$src"
+  put src/Modules/A/A/Application/AAccessSource.cs 'class AAccessSource { }'
+  emit_fails "permissions_loud: no source file" "module A has the constants file $consts but no *PermissionSource.cs" emit_permissions
+  # A module whose source names only another module's constants: no record names its own.
+  permissions_fixture
+  put src/Modules/B/B/Application/BPermissions.cs 'internal static class BPermissions
+{
+    public const string ItemView = "b.item.view";
+    public const string ItemEdit = "b.item.edit";
+}'
+  put "$src" 'class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        Define(BPermissions.ItemEdit, "Edit", "d", adminDefault: true),
+    ];
+}'
+  emit_fails "permissions_loud: no record for the module" "module A has the constants file $consts but no parsed record" emit_permissions
+  # A code in a `static readonly string` (not a const) is not read: it fails.
+  permissions_fixture
+  put "$consts" 'internal static class APermissions
+{
+    public const string View = "a.thing.view"; public const string Edit = "a.thing.edit";
+    public static readonly string Delete = "a.thing.delete";
+}'
+  emit_fails "permissions_loud: static readonly code" "\"a.thing.delete\" at line 4 of $consts" emit_permissions
+  # A constants file outside Application/ is not read, so a source naming its class fails.
+  permissions_fixture
+  put src/Modules/A/A/Domain/RolePermissions.cs 'internal static class RolePermissions
+{
+    public const string Admin = "a.role.admin";
+}'
+  put "$src" 'class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        Define(APermissions.View, "View", "d", adminDefault: true),
+        Define(RolePermissions.Admin, "Admin", "d"),
+    ];
+}'
+  emit_fails "permissions_loud: class outside Application" "the class RolePermissions of RolePermissions.Admin in $src is not declared" emit_permissions
+}
+
+# Shapes read correctly: two constants on one line; a *Permissions.cs outside Application/ (any content) is not a constants file.
+case_permissions_shapes() {
+  make_tree
+  permissions_fixture
+  put src/Modules/A/A/Application/APermissions.cs 'internal static class APermissions
+{
+    public const string View = "a.thing.view"; public const string Edit = "a.thing.edit";
+    public const string Delete = "a.thing.delete";
+}'
+  put src/Modules/A/A/Domain/RolePermissions.cs 'internal static class RolePermissions
+{
+    public static readonly string[] All = ["a.role.admin"];
+    public const int Count = 1;
+}'
+  emit_of_tree emit_permissions
+  assert_eq "0" "$status" "permissions_shapes: exit code"
+  assert_eq "$permissions_rows"$'\n--' "$combined" "permissions_shapes: two constants on one line, Domain/RolePermissions.cs ignored"
+}
+
+# The runner refuses a case name it does not know rather than passing without running it.
+case_unknown_case_name() {
+  local rc=0 msg
+  msg="$(bash "$test_script" case_permissions_shapes case_bogus 2>&1)" || rc=$?
+  assert_eq "2" "$rc" "unknown_case_name: exit code"
+  assert_contains "unknown case: case_bogus" "$msg" "unknown_case_name: names the case"
+  assert_not_contains "permissions_shapes" "$msg" "unknown_case_name: nothing ran"
 }
 
 # errors_fixture: module A with the three declaration shapes (literal on the same line, literal on the next line, a const string) and
@@ -1123,6 +1231,20 @@ case_errors_loud() {
   put "$r" '<root>
 </root>'
   emit_fails "errors_loud: neutral resx without keys" "$r" emit_errors
+  # An unknown declaration shape with a hyphenated or an uppercase code still fails (same charset as a code).
+  errors_fixture
+  put "$a" 'internal static class AErrors
+{
+    public static readonly Error Missing = Error.NotFound("a.missing", "m");
+    public static readonly Error Y = new("a.y-z", "m", ErrorType.Conflict);
+}'
+  emit_fails "errors_loud: hyphenated code in another shape" "\"a.y-z\" at line 4 of $a" emit_errors
+  put "$a" 'internal static class AErrors
+{
+    public static readonly Error Missing = Error.NotFound("a.missing", "m");
+    public static readonly Error U = Create("A.Upper", "m");
+}'
+  emit_fails "errors_loud: uppercase code in another shape" "\"A.Upper\" at line 4 of $a" emit_errors
 }
 
 # Each case runs in a subshell so that its tree and variables do not leak into the next.
@@ -1138,9 +1260,17 @@ all_cases="case_usage_errors case_markers_shard case_markers_kinds_and_expressio
   case_determinism case_untracked_ignored case_git_file_marker case_find_excludes_build_dirs
   case_check_stale case_check_missing_and_unknown case_map_rules case_need_rows
   case_routes case_routes_zero case_routes_module_absent case_routes_loud case_routes_shapes
-  case_permissions case_permissions_loud case_errors case_errors_zero case_errors_loud"
+  case_permissions case_permissions_loud case_permissions_shapes case_errors case_errors_zero case_errors_loud case_unknown_case_name"
 
-# With arguments, only the named cases run (for iterating on one case); without, all of them.
+# With arguments, only the named cases run (for iterating on one case); without, all of them. Every argument is checked against the
+# registered list before anything runs: run_case ignores set -e, so a misspelled name would otherwise print "command not found" and pass.
+registered=" ${all_cases//$'\n'/ } "
+for c in "$@"; do
+  if [[ -z "$c" || "$registered" != *" $c "* ]]; then
+    echo "project-index: unknown case: $c" >&2
+    exit 2
+  fi
+done
 for c in ${*:-$all_cases}; do
   run_case "$c"
 done

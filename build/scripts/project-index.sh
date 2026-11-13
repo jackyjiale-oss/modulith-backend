@@ -393,45 +393,71 @@ function line_at(p,   s) { s = substr(MASK, 1, p); return gsub(/\n/, "", s) + 1 
 function fail(msg) { print msg > errfile; failed = 1; exit 3 }
 '
 
-# permissions_awk: one awk run over the tracked file list (stdin) that reads, under src/Modules/<Module>/:
-#   C  *Permissions.cs       the constants: `const string Name = "module.resource.action";`, one per line, keyed by the enclosing class
-#   S  *PermissionSource.cs  the records: a `Define(` or `new(` whose first argument is `XPermissions.Name`, up to its closing parenthesis;
-#                            admin default is yes when `adminDefault: true` or `AdminDefault: true` is inside it, no when the flag is false
-#                            or absent
-# and prints code|module|yes or no|file of the constant, one row per constant (a constant with no record is no).
+# permissions_awk: one awk run over the tracked file list (stdin) that reads:
+#   C  src/Modules/<Module>/<Project>/Application/*Permissions.cs   the constants: `const string Name = "module.resource.action";`, each
+#                                                                  on one line, keyed by the enclosing class
+#   S  src/Modules/<Module>/.../*PermissionSource.cs                the records: a `Define(` or `new(` whose first argument is
+#      `XPermissions.Name`, up to its closing parenthesis; admin default is yes when `adminDefault: true` or `AdminDefault: true` is
+#      inside it, no when the flag is false or absent
+# and prints code|module|yes or no|file of the constant, one row per constant (a constant with no record is no, when its module has
+# records).
 # Errors (exit 3, the message in errfile), so that no shape gives a wrong or missing row: a `const` in a constants file that is not that
-# one-line shape; a constants file with no constant or a source file with no record; two constants with the same code; a record whose
-# constant no constants file declares; a constant in two records; a reference to a permission constant that is not the first argument of
-# a record (another record shape); an admin flag that is positional or not a literal true or false; a helper whose adminDefault defaults
-# to true (an absent flag would then mean yes); a file that cannot be read.
+# one-line shape, or a code-shaped string literal there that is not such a constant (a `static readonly string`, a property); a
+# constants file with no constant or a source file with no record; two constants with the same code; a record whose class or constant no
+# constants file declares; a constant in two records; a reference to a permission constant that is not the first argument of a record
+# (another record shape); an `adminDefault:` flag outside a parsed record (an unqualified constant under `using static`, an alias); an
+# admin flag that is positional or not a literal true or false; `AdminDefault = ...` anywhere other than a helper parameter defaulting
+# to false (a parameter defaulting to true, `with { AdminDefault = true }`); a module with constants and no source file, or with
+# constants and no record that names them; a file that cannot be read.
 # shellcheck disable=SC2016
 permissions_awk="$cs_awk_lib"'
-function read_constants(i,   f, nl, L, R, j, cls, cnt, ln, nm, code) {
+function read_constants(i,   f, nl, L, R, j, cls, cnt, ln, nm, code, pos, abs, a, lit) {
   f = cfile[i]
   if (cs_read(f) < 0) fail("permissions: cannot read " f)
   nl = split(MASK, L, "\n"); split(RAW, R, "\n"); cls = ""; cnt = 0
+  split("", fcodes)
   for (j = 1; j <= nl; j++) {
-    if (match(L[j], /(^|[^A-Za-z0-9_])class[ \t]+[A-Za-z_][A-Za-z0-9_]*/)) { cls = substr(L[j], RSTART, RLENGTH); sub(/^.*[ \t]/, "", cls) }
-    if (L[j] !~ /(^|[^A-Za-z0-9_])const([^A-Za-z0-9_]|$)/) continue
-    if (!match(R[j], /const[ \t]+string[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*"[a-z_]+\.[a-z_]+\.[a-z_]+"[ \t]*;/))
-      fail("permissions: cannot read the constant at line " j " of " f " (expected `const string Name = \"module.resource.action\";` on one line)")
-    ln = substr(R[j], RSTART, RLENGTH)
-    nm = ln; sub(/^const[ \t]+string[ \t]+/, "", nm); sub(/[ \t]*=.*$/, "", nm)
-    code = ln; sub(/^[^"]*"/, "", code); sub(/".*$/, "", code)
-    if (cls == "") fail("permissions: the constant " nm " at line " j " of " f " is outside a class")
-    if ((cls "." nm) in pcode) fail("permissions: the constant " cls "." nm " is declared twice: " pfile[cls "." nm] ", " f)
-    if (code in bycode) fail("permissions: duplicate permission code " code " (" bycode[code] " in " pfile[bycode[code]] ", " cls "." nm " in " f ")")
-    pcode[cls "." nm] = code; pfile[cls "." nm] = f; pmod[cls "." nm] = cmod[i]; bycode[code] = cls "." nm
-    cnt++
+    if (match(L[j], /(^|[^A-Za-z0-9_])class[ \t]+[A-Za-z_][A-Za-z0-9_]*/)) { cls = substr(L[j], RSTART, RLENGTH); sub(/^.*[ \t]/, "", cls); classes[cls] = 1 }
+    pos = 1
+    while (match(substr(L[j], pos), /(^|[^A-Za-z0-9_])const([^A-Za-z0-9_]|$)/)) {
+      abs = pos + RSTART - 1; if (substr(L[j], abs, 1) != "c") abs++
+      pos = abs + 5
+      a = substr(R[j], abs)
+      if (!match(a, /^const[ \t]+string[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*"[a-z_]+\.[a-z_]+\.[a-z_]+"[ \t]*;/))
+        fail("permissions: cannot read the constant at line " j " of " f " (expected `const string Name = \"module.resource.action\";` on one line)")
+      ln = substr(a, 1, RLENGTH); pos = abs + RLENGTH
+      nm = ln; sub(/^const[ \t]+string[ \t]+/, "", nm); sub(/[ \t]*=.*$/, "", nm)
+      code = ln; sub(/^[^"]*"/, "", code); sub(/".*$/, "", code)
+      if (cls == "") fail("permissions: the constant " nm " at line " j " of " f " is outside a class")
+      if ((cls "." nm) in pcode) fail("permissions: the constant " cls "." nm " is declared twice: " pfile[cls "." nm] ", " f)
+      if (code in bycode) fail("permissions: duplicate permission code " code " (" bycode[code] " in " pfile[bycode[code]] ", " cls "." nm " in " f ")")
+      pcode[cls "." nm] = code; pfile[cls "." nm] = f; pmod[cls "." nm] = cmod[i]; bycode[code] = cls "." nm; fcodes[code] = 1
+      cnt++
+    }
+    pos = 1
+    while (match(substr(L[j], pos), /"_*"/)) {
+      abs = pos + RSTART - 1; pos = abs + RLENGTH
+      lit = substr(R[j], abs + 1, RLENGTH - 2)
+      if (lit ~ /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$/ && !(lit in fcodes))
+        fail("permissions: the code-like string \"" lit "\" at line " j " of " f " is not a `const string Name = \"module.resource.action\";` constant (a shape the parser does not know)")
+    }
   }
   if (cnt == 0) fail("permissions: no constant parsed in " f " (expected `const string Name = \"module.resource.action\";`)")
 }
-function read_source(i,   f, pos, abs, start, after, tok, depth, k, L, c, rec, flag, recs, total, m) {
+function read_source(i,   f, pos, abs, start, after, tok, cls, depth, k, L, c, rec, flag, recs, total, m, flags, pre, val) {
   f = sfile[i]
   if (cs_read(f) < 0) fail("permissions: cannot read " f)
-  if (MASK ~ /[aA]dminDefault[ \t\n]*=[ \t\n]*true/)
-    fail("permissions: an adminDefault parameter that defaults to true in " f " (an absent flag would mean yes; the parser reads an absent flag as no)")
-  pos = 1; recs = 0; L = length(MASK)
+  pos = 1
+  while (match(substr(MASK, pos), /[aA]dminDefault[ \t\n]*=[^=>]/)) {
+    abs = pos + RSTART - 1; pos = abs + RLENGTH - 1
+    pre = substr(MASK, 1, abs - 1); val = substr(MASK, pos)
+    if (pre ~ /(^|[^A-Za-z0-9_])bool[ \t\n]+$/) {
+      if (val ~ /^[ \t\n]*false([^A-Za-z0-9_]|$)/) continue
+      fail("permissions: an adminDefault parameter that does not default to false at line " line_at(abs) " of " f " (an absent flag would not mean no; the parser reads an absent flag as no)")
+    }
+    fail("permissions: AdminDefault assigned with = at line " line_at(abs) " of " f " (for example `with { AdminDefault = true }`): a shape the parser does not know; pass AdminDefault: true in the record")
+  }
+  pos = 1; recs = 0; flags = 0; L = length(MASK)
   while (match(substr(MASK, pos), /(^|[^A-Za-z0-9_])(Define|new)[ \t\n]*\(/)) {
     start = pos + RSTART - 1 + RLENGTH
     pos = start
@@ -447,15 +473,22 @@ function read_source(i,   f, pos, abs, start, after, tok, depth, k, L, c, rec, f
     if (depth > 0) fail("permissions: the record of " tok " at line " line_at(start) " of " f " has no closing parenthesis")
     rec = substr(MASK, start, k - 1 - start)
     pos = k
+    m = rec
+    while (match(m, /[aA]dminDefault[ \t\n]*:/)) { flags++; m = substr(m, RSTART + RLENGTH) }
     if (match(rec, /[aA]dminDefault[ \t\n]*:[ \t\n]*(true|false)([^A-Za-z0-9_]|$)/)) flag = (substr(rec, RSTART, RLENGTH) ~ /true/) ? "yes" : "no"
     else if (rec ~ /[aA]dminDefault/) fail("permissions: the admin flag of " tok " at line " line_at(start) " of " f " is not a literal true or false")
     else if (rec ~ /(^|[^A-Za-z0-9_])(true|false)([^A-Za-z0-9_]|$)/) fail("permissions: a positional admin flag in the record of " tok " at line " line_at(start) " of " f " (write AdminDefault: true or adminDefault: true)")
     else flag = "no"
+    cls = tok; sub(/\..*$/, "", cls)
+    if (!(cls in classes)) fail("permissions: the class " cls " of " tok " in " f " is not declared in any src/Modules/*/*/Application/*Permissions.cs file")
     if (!(tok in pcode)) fail("permissions: the constant " tok " in " f " is not declared in any *Permissions.cs file")
     if (tok in recfile) fail("permissions: " tok " has two records: " recfile[tok] ", " f)
-    recfile[tok] = f; admin[tok] = flag
+    recfile[tok] = f; admin[tok] = flag; recmod[pmod[tok]]++
     recs++
   }
+  total = 0; m = MASK
+  while (match(m, /[aA]dminDefault[ \t\n]*:/)) { total++; m = substr(m, RSTART + RLENGTH) }
+  if (total != flags) fail("permissions: " (total - flags) " admin default flag(s) outside a parsed permission record in " f " (the first argument of Define(...) or new(...) must be XPermissions.Name, not an unqualified or aliased constant)")
   total = 0; m = MASK
   while (match(m, /[A-Za-z_][A-Za-z0-9_]*Permissions\.[A-Za-z_][A-Za-z0-9_]*/)) { total++; m = substr(m, RSTART + RLENGTH) }
   if (total != recs) fail("permissions: " (total - recs) " reference(s) to a permission constant in " f " are not the first argument of a Define(...) or new(...) record (a shape the parser does not know)")
@@ -465,13 +498,20 @@ function read_source(i,   f, pos, abs, start, after, tok, depth, k, L, c, rec, f
   sub(/\r$/, "")
   n = split($0, seg, "/")
   if (n < 5 || seg[1] != "src" || seg[2] != "Modules") next
-  if (seg[n] ~ /.Permissions\.cs$/) { nc++; cfile[nc] = $0; cmod[nc] = seg[3] }
-  else if (seg[n] ~ /.PermissionSource\.cs$/) { ns++; sfile[ns] = $0 }
+  if (n == 6 && seg[5] == "Application" && seg[n] ~ /.Permissions\.cs$/) {
+    nc++; cfile[nc] = $0; cmod[nc] = seg[3]
+    if (!(seg[3] in modfile)) modfile[seg[3]] = $0
+  }
+  else if (seg[n] ~ /.PermissionSource\.cs$/) { ns++; sfile[ns] = $0; srcmod[seg[3]] = 1 }
 }
 END {
   if (failed) exit 3
   for (i = 1; i <= nc; i++) read_constants(i)
   for (i = 1; i <= ns; i++) read_source(i)
+  for (mod in modfile) {
+    if (!(mod in srcmod)) fail("permissions: module " mod " has the constants file " modfile[mod] " but no *PermissionSource.cs (every admin default would read no)")
+    if (!(mod in recmod)) fail("permissions: module " mod " has the constants file " modfile[mod] " but no parsed record names its constants (every admin default would read no)")
+  }
   for (key in pcode) print pcode[key] "|" pmod[key] "|" ((key in admin) ? admin[key] : "no") "|" pfile[key]
 }'
 
@@ -504,9 +544,10 @@ emit_permissions() {
 # table 2 (key|http|resx file: the neutral keys that no declaration has; http is NNN for http.NNN, else -) into the file out2. The module
 # is the folder under src/Modules, or the building-block directory under src/BuildingBlocks without its first dotted part.
 # Errors (exit 3, the message in errfile), so that no shape gives a wrong or missing row: a factory the status map does not know; a code
-# argument that is not a plain string literal or a const string of the file (a qualified constant must name a class of the file); a code with a character outside [A-Za-z0-9_.-]; a `const`
-# that is not `const string Name = "literal";`; a code-shaped string literal ("a.b") in an *Errors.cs file that no factory call declares
-# (another declaration shape); an *Errors.cs file with no declaration; the same code declared twice; a neutral resx with no key, a key
+# argument that is not a plain string literal or a const string of the file (a qualified constant must name a class of the file); a
+# code with a character outside [A-Za-z0-9_.-]; a `const` that is not `const string Name = "literal";`; a code-shaped string literal
+# (dotted parts of [A-Za-z0-9_-], the same charset as a code) in an *Errors.cs file that no factory call declares (another declaration
+# shape); an *Errors.cs file with no declaration; the same code declared twice; a neutral resx with no key, a key
 # twice in one file, or a <data element whose name is not on its line; a file that cannot be read.
 # shellcheck disable=SC2016
 errors_awk="$cs_awk_lib"'
@@ -593,7 +634,7 @@ function read_errors(i,   f, pos, abs, tok, fac, st, p, a, code, id, nm, decl, a
   while (match(substr(MASK, pos), /"_*"/)) {
     abs = pos + RSTART - 1; pos = abs + RLENGTH
     lit = substr(RAW, abs + 1, RLENGTH - 2)
-    if (lit ~ /^[a-z0-9_]+(\.[a-z0-9_]+)+$/ && !(lit in produced))
+    if (lit ~ /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$/ && !(lit in produced))
       fail("errors: the code-like string \"" lit "\" at line " line_at(abs) " of " f " is not the code of an Error.<Factory>(...) call (a declaration shape the parser does not know)")
   }
   if (decl == 0) fail("errors: no error code declaration parsed in " f " (expected Error.<Factory>(\"code\", ...))")
