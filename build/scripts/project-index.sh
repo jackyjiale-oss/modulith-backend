@@ -149,8 +149,6 @@ shard_meta() {
 }
 
 # The shards below are stubs here (a table with no rows); later tasks give each its parser.
-emit_events() { :; }
-emit_jobs() { :; }
 emit_config() { :; }
 emit_tests() { :; }
 emit_tests_2() { :; }
@@ -349,13 +347,14 @@ emit_routes() {
 #                 in the other: RAW, the text with every // and /* */ comment blanked to spaces (newlines kept), and MASK, RAW with the
 #                 contents of every string and char literal replaced by "_" (the quotes kept). Structure is matched on MASK, so that a
 #                 parenthesis, a comma or a name inside a string or a comment is never read as code; values are taken from RAW at the same
-#                 positions. Regular, verbatim (@"", with "" inside) and interpolated strings are known; an interpolated string holding a
-#                 quote inside a {hole} is not. Returns -1 when the file cannot be read.
+#                 positions. Regular, verbatim (@"", with "" inside), raw ("""...""", over lines, closed by as many quotes as opened
+#                 it) and interpolated strings are known; an interpolated string holding a quote inside a {hole} is not. Returns -1
+#                 when the file cannot be read.
 #   line_at(p)    the line number of position p of MASK.
 #   fail(msg)     writes msg to errfile and exits 3 (the shell turns it into exit 2).
 # shellcheck disable=SC2016
 cs_awk_lib='
-function cs_read(f,   line, rc, n, k, c, d, r, m, st) {
+function cs_read(f,   line, rc, n, k, c, d, r, m, st, q, rq) {
   if (SQ == "") SQ = sprintf("%c", 39)
   RAW = ""; MASK = ""; st = 0
   while ((rc = (getline line < f)) > 0) {
@@ -366,6 +365,10 @@ function cs_read(f,   line, rc, n, k, c, d, r, m, st) {
       if (st == 0) {
         if (c == "/" && d == "/") { for (; k <= n; k++) { r = r " "; m = m " " } break }
         if (c == "/" && d == "*") { r = r "  "; m = m "  "; k++; st = 4; continue }
+        if (c == "\"" && substr(line, k, 3) == "\"\"\"" && substr(line, k - 1, 1) != "@") {
+          for (q = k; substr(line, q, 1) == "\""; q++) ;
+          rq = substr(line, k, q - k); r = r rq; m = m rq; k = q - 1; st = 6; continue
+        }
         if (c == "\"") st = (substr(line, k - 1, 1) == "@" || substr(line, k - 2, 2) == "@$") ? 2 : 1
         else if (c == SQ) st = 5
         r = r c; m = m c
@@ -376,6 +379,9 @@ function cs_read(f,   line, rc, n, k, c, d, r, m, st) {
       } else if (st == 2) {
         if (c == "\"" && d == "\"") { r = r c d; m = m "__"; k++ }
         else if (c == "\"") { r = r c; m = m c; st = 0 }
+        else { r = r c; m = m "_" }
+      } else if (st == 6) {
+        if (c == "\"" && substr(line, k, length(rq)) == rq) { r = r rq; m = m rq; k += length(rq) - 1; st = 0 }
         else { r = r c; m = m "_" }
       } else {
         if (c == "*" && d == "/") { r = r "  "; m = m "  "; k++; st = 0 }
@@ -693,6 +699,399 @@ emit_errors_2() {
     table_note='Neutral resource keys that no `*Errors.cs` file declares: codes set as string constants elsewhere (middleware, exception handlers, validation) or `http.NNN` keys for a bare HTTP status.'
     printf '%s\n' "${lines[@]}"
   fi
+}
+
+# types_awk_lib: the type reader shared by the events and jobs parsers (with cs_awk_lib). The main rule of each program keeps the C# files
+# under src/ (fname[1..nf]); the program seeds S (search tokens) and T (root types) in BEGIN, then calls load_texts() and grow():
+#   load_texts()    reads the raw text of every file once into TXT (one awk process; choosing the files to parse costs no process)
+#   grow()          parses every file whose raw text holds a token of S: cs_read, parse_types, then the program's on_read(i). A type
+#                   whose base list names a type of T is a member: its name joins T and S, so that a class deriving from a job base class
+#                   two levels down is found, and the files naming it are parsed. Repeats until nothing new is found.
+#   parse_types(i)  every class, record, struct and interface declaration of file i (on MASK): tname, tkind, tgen (generic), tabs
+#                   (abstract), tfile, tbs and tbe (the braces of the body; 0 for a declaration ending with ";"), tbases (the base list
+#                   after the name, its type parameters and its primary constructor, up to the body, a ";" or "where") and theads
+#                   (" A B ": the last name segment of each base, without its type arguments)
+#   base_items(b, items), item_head(s), item_arg(s), last_name(s)   the bases of a base list (split at top-level commas), the name of
+#                   one, its type argument (last segment when it is a name, else the text) and the last segment of a qualified name
+#   module_of(f)    the folder under src/Modules, or the building-block directory under src/BuildingBlocks without its first dotted part
+#   MASKS[i], RAWS[i]  the cs_read strings of each parsed file (done[i] set); set MASK (and RAW) to them before line_at
+# shellcheck disable=SC2016
+types_awk_lib='
+function module_of(f,   n, seg, mod) {
+  n = split(f, seg, "/")
+  mod = (n >= 4 ? seg[3] : seg[2])
+  if (seg[2] != "Modules") sub(/^[^.]*\./, "", mod)
+  return mod
+}
+function skipws(p,   L) { L = length(MASK); while (p <= L && substr(MASK, p, 1) ~ /[ \t\n]/) p++; return p }
+function close_of(p, o, c,   L, d, k, ch) {
+  L = length(MASK); d = 0
+  for (k = p; k <= L; k++) {
+    ch = substr(MASK, k, 1)
+    if (ch == o) d++
+    else if (ch == c) { d--; if (d == 0) return k }
+  }
+  return 0
+}
+function base_items(b, items,   n, k, c, pd, ad, cur, L) {
+  split("", items); n = 0; pd = 0; ad = 0; cur = ""; L = length(b)
+  for (k = 1; k <= L; k++) {
+    c = substr(b, k, 1)
+    if (c == "(") pd++
+    else if (c == ")") pd--
+    else if (pd == 0 && c == "<") ad++
+    else if (pd == 0 && c == ">") ad--
+    if (c == "," && pd == 0 && ad == 0) { items[++n] = cur; cur = "" } else cur = cur c
+  }
+  if (cur ~ /[^ \t\n]/) items[++n] = cur
+  return n
+}
+function last_name(s) { gsub(/[ \t\n]/, "", s); sub(/^global::/, "", s); sub(/^.*\./, "", s); return s }
+function item_head(s) {
+  sub(/^[ \t\n]+/, "", s); sub(/^global::/, "", s)
+  if (!match(s, /^[A-Za-z_][A-Za-z0-9_]*([ \t\n]*\.[ \t\n]*[A-Za-z_][A-Za-z0-9_]*)*/)) return ""
+  return last_name(substr(s, 1, RLENGTH))
+}
+function item_arg(s,   p, k, d, c, L, a) {
+  p = index(s, "<"); if (p == 0) return ""
+  d = 0; L = length(s)
+  for (k = p; k <= L; k++) { c = substr(s, k, 1); if (c == "<") d++; else if (c == ">") { d--; if (d == 0) break } }
+  a = substr(s, p + 1, k - p - 1); gsub(/[ \t\n]/, "", a); sub(/^global::/, "", a)
+  if (a ~ /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/) sub(/^.*\./, "", a)
+  return a
+}
+function parse_types(i,   L, pos, abs, tok, kw, nm, p, q, c, pd, ad, bases, gen, bs, be, k, pre, n, items, w, heads) {
+  L = length(MASK); pos = 1
+  while (match(substr(MASK, pos), /(^|[^A-Za-z0-9_.@])(class|record|struct|interface)[ \t\n]+[A-Za-z_][A-Za-z0-9_]*/)) {
+    abs = pos + RSTART - 1; tok = substr(MASK, abs, RLENGTH)
+    if (tok !~ /^(class|record|struct|interface)/) { abs++; tok = substr(tok, 2) }
+    kw = tok; sub(/[ \t\n].*$/, "", kw)
+    nm = tok; sub(/^.*[ \t\n]/, "", nm)
+    # "record class X" and "record struct X": read the declaration again from the second keyword.
+    if (nm == "class" || nm == "struct") { pos = abs + length(kw); continue }
+    p = skipws(abs + length(tok)); pos = p
+    gen = 0
+    if (substr(MASK, p, 1) == "<") { q = close_of(p, "<", ">"); if (q == 0) continue; gen = 1; p = skipws(q + 1) }
+    if (substr(MASK, p, 1) == "(") { q = close_of(p, "(", ")"); if (q == 0) continue; p = skipws(q + 1) }
+    bases = ""
+    if (substr(MASK, p, 1) == ":") {
+      pd = 0; ad = 0
+      for (q = p + 1; q <= L; q++) {
+        c = substr(MASK, q, 1)
+        if (c == "(") pd++
+        else if (c == ")") pd--
+        else if (pd == 0 && c == "<") ad++
+        else if (pd == 0 && c == ">") ad--
+        else if (pd == 0 && ad == 0 && (c == "{" || c == ";")) break
+        else if (pd == 0 && ad == 0 && c == "w" && substr(MASK, q, 6) ~ /^where[ \t\n]/ && substr(MASK, q - 1, 1) ~ /[ \t\n]/) break
+      }
+      bases = substr(MASK, p + 1, q - p - 1); p = q
+    } else if (substr(MASK, p, 1) !~ /[{;]/ && substr(MASK, p, 6) !~ /^where[ \t\n]/) continue
+    # Not a declaration ("foreach (var record in records)") unless a base list, a body, a ";" or a where clause follows.
+    for (q = p; q <= L && substr(MASK, q, 1) !~ /[{;]/; q++) ;
+    bs = 0; be = 0
+    if (q <= L && substr(MASK, q, 1) == "{") {
+      bs = q; be = close_of(q, "{", "}")
+      if (be == 0) fail(label ": cannot find the closing brace of " nm " in " fname[i])
+    }
+    k = abs - 1
+    while (k > 0 && substr(MASK, k, 1) !~ /[;{}\]]/) k--
+    pre = substr(MASK, k + 1, abs - k - 1)
+    nt++; tname[nt] = nm; tkind[nt] = kw; tgen[nt] = gen; tfile[nt] = i; tbs[nt] = bs; tbe[nt] = be; tbases[nt] = bases
+    tabs[nt] = (pre ~ /(^|[^A-Za-z0-9_])abstract([^A-Za-z0-9_]|$)/)
+    heads = " "
+    n = base_items(bases, items)
+    for (w = 1; w <= n; w++) heads = heads item_head(items[w]) " "
+    theads[nt] = heads
+  }
+}
+function load_texts(   i, line, rc, t) {
+  for (i = 1; i <= nf; i++) {
+    t = ""
+    while ((rc = (getline line < fname[i])) > 0) t = t line "\n"
+    if (rc < 0) fail(label ": cannot read " fname[i])
+    close(fname[i]); TXT[i] = t
+  }
+}
+function parse_file(i) {
+  done[i] = 1
+  if (cs_read(fname[i]) < 0) fail(label ": cannot read " fname[i])
+  MASKS[i] = MASK; RAWS[i] = RAW
+  parse_types(i)
+  on_read(i)
+}
+function grow(   changed, more, i, s, k, n, w, h) {
+  do {
+    changed = 0
+    for (i = 1; i <= nf; i++) {
+      if (i in done) continue
+      for (s in S) if (index(TXT[i], s)) { parse_file(i); changed = 1; break }
+    }
+    do {
+      more = 0
+      for (k = 1; k <= nt; k++) {
+        if (k in member) continue
+        n = split(theads[k], h, " ")
+        for (w = 1; w <= n; w++) if (h[w] in T) { member[k] = 1; T[tname[k]] = 1; S[tname[k]] = 1; more = 1; changed = 1; break }
+      }
+    } while (more)
+  } while (changed)
+}
+{
+  sub(/\r$/, "")
+  if ($0 ~ /^src\/.*\.cs$/) { nf++; fname[nf] = $0 }
+}
+'
+
+# events_awk: one awk run over the tracked file list (stdin) that reads the C# files under src/ (types_awk_lib; seeds: IIntegrationEvent
+# and PublishAsync) and prints event|publishers|handlers, one row per integration event:
+#   event       a concrete class or record whose base list names IIntegrationEvent (or another event type), on any number of lines
+#   publishers  each `PublishAsync(new <Event>(` call (the `new` may be on the next line; the event name may be qualified), as
+#               "Module (file)", distinct, sorted, joined with ", "; "-" when none (an event nothing publishes is legal)
+#   handlers    each class whose base list holds IIntegrationEventHandler<Event> (the base list may start on a later line), the same way
+# Errors (exit 3, the message in errfile), so that no shape gives a wrong or missing row: an event declared twice; a file named
+# <X>IntegrationEvent.cs with no event X read in it, or <X>IntegrationEventHandler.cs with no handler class X; a handler of a type that
+# is not a declared event (a generic handler, a test-only event); an IIntegrationEventHandler<Event> reference outside a parsed handler's
+# base list (a manual registration); a PublishAsync that is not `PublishAsync(new <Event>(` and not a `Task PublishAsync<T>(`
+# declaration (a variable, an explicit type argument), or that publishes a type that is not a declared event; a `new <Event>(` that is
+# not the first argument of a PublishAsync (another publishing path); a file that cannot be read.
+# shellcheck disable=SC2016
+events_awk="$cs_awk_lib$types_awk_lib"'
+function on_read(i) { return }
+function add(kind, key, val) {
+  if ((kind, key, val) in LS) return
+  LS[kind, key, val] = 1; LN[kind, key]++; LV[kind, key, LN[kind, key]] = val
+}
+function joined(kind, key,   n, k, j, t, a, out) {
+  n = LN[kind, key] + 0
+  if (n == 0) return "-"
+  for (k = 1; k <= n; k++) a[k] = LV[kind, key, k]
+  for (k = 2; k <= n; k++) { t = a[k]; for (j = k - 1; j >= 1 && a[j] > t; j--) a[j + 1] = a[j]; a[j + 1] = t }
+  out = a[1]
+  for (k = 2; k <= n; k++) out = out ", " a[k]
+  return out
+}
+BEGIN { label = "events"; S["IIntegrationEvent"] = 1; S["PublishAsync"] = 1; T["IIntegrationEvent"] = 1 }
+END {
+  if (failed) exit 3
+  load_texts(); grow()
+  for (k = 1; k <= nt; k++) {
+    if (!(k in member) || tabs[k] || tkind[k] == "interface") continue
+    nm = tname[k]
+    if (nm in ev) fail("events: the integration event " nm " is declared twice: " fname[tfile[ev[nm]]] ", " fname[tfile[k]])
+    ev[nm] = k; declared[tfile[k], nm] = 1
+  }
+  for (k = 1; k <= nt; k++) {
+    if (tkind[k] == "interface" || tbases[k] == "") continue
+    n = base_items(tbases[k], items)
+    for (w = 1; w <= n; w++) {
+      if (item_head(items[w]) != "IIntegrationEventHandler") continue
+      a = item_arg(items[w]); i = tfile[k]
+      if (!(a in ev)) fail("events: the handler " tname[k] " in " fname[i] " handles " (a == "" ? "a type the parser cannot read" : a) ", which is not an integration event declared under src/ (record X(...) : IIntegrationEvent)")
+      add("h", a, module_of(fname[i]) " (" fname[i] ")")
+      hrefs[i]++; handles[i, tname[k]] = 1
+    }
+  }
+  for (i = 1; i <= nf; i++) {
+    b = fname[i]; sub(/^.*\//, "", b); sub(/\.cs$/, "", b)
+    if (b ~ /IntegrationEvent$/ && b != "IIntegrationEvent" && !((i, b) in declared))
+      fail("events: " fname[i] " is named like an integration event, but the parser read no `record " b "(...) : IIntegrationEvent` in it")
+    if (b ~ /IntegrationEventHandler$/ && b != "IIntegrationEventHandler" && !((i, b) in handles))
+      fail("events: " fname[i] " is named like an integration event handler, but the parser read no `class " b " : IIntegrationEventHandler<Event>` in it")
+  }
+  for (i = 1; i <= nf; i++) {
+    if (!(i in done)) continue
+    MASK = MASKS[i]; m = MASK; cnt = 0
+    while (match(m, /(^|[^A-Za-z0-9_])IIntegrationEventHandler[ \t\n]*<[ \t\n]*(global::)?[A-Za-z_][A-Za-z0-9_.]*/)) {
+      t = substr(m, RSTART, RLENGTH); m = substr(m, RSTART + RLENGTH)
+      sub(/^.*</, "", t)
+      if (last_name(t) in ev) cnt++
+    }
+    if (cnt != hrefs[i] + 0) fail("events: " (cnt - hrefs[i]) " reference(s) to IIntegrationEventHandler<Event> in " fname[i] " outside the base list of a handler class the parser read (a registration or a handler shape it does not know)")
+    pos = 1
+    while (match(substr(MASK, pos), /(^|[^A-Za-z0-9_])PublishAsync([^A-Za-z0-9_]|$)/)) {
+      abs = pos + RSTART - 1; if (substr(MASK, abs, 1) != "P") abs++
+      pos = abs + 12
+      a = substr(MASK, pos)
+      if (match(a, /^[ \t\n]*\([ \t\n]*new[ \t\n]+(global::)?[A-Za-z_][A-Za-z0-9_.]*[ \t\n]*\(/)) {
+        t = substr(a, 1, RLENGTH); np = pos + index(t, "new") - 1
+        sub(/[ \t\n]*\($/, "", t); sub(/^.*new[ \t\n]+/, "", t); t = last_name(t)
+        if (!(t in ev)) fail("events: PublishAsync at line " line_at(abs) " of " fname[i] " publishes " t ", which is not an integration event declared under src/ (record X(...) : IIntegrationEvent)")
+        add("p", t, module_of(fname[i]) " (" fname[i] ")"); used[i, np] = 1
+        continue
+      }
+      pre = substr(MASK, (abs > 80 ? abs - 80 : 1), (abs > 80 ? 80 : abs - 1))
+      if (pre ~ /(^|[^A-Za-z0-9_])(Value)?Task[ \t\n]+$/ && a ~ /^[ \t\n]*<[ \t\n]*[A-Za-z_][A-Za-z0-9_]*[ \t\n]*>[ \t\n]*\(/) continue
+      fail("events: cannot tell which event PublishAsync at line " line_at(abs) " of " fname[i] " publishes (expected PublishAsync(new XIntegrationEvent(...), ...))")
+    }
+    pos = 1
+    while (match(substr(MASK, pos), /(^|[^A-Za-z0-9_.])new[ \t\n]+(global::)?[A-Za-z_][A-Za-z0-9_.]*[ \t\n]*[({]/)) {
+      abs = pos + RSTART - 1; t = substr(MASK, abs, RLENGTH)
+      if (substr(MASK, abs, 1) != "n") abs++
+      pos = abs + 3
+      sub(/[ \t\n]*[({]$/, "", t); sub(/^.*new[ \t\n]+/, "", t); t = last_name(t)
+      if ((t in ev) && !((i, abs) in used)) fail("events: " t " is created at line " line_at(abs) " of " fname[i] " outside a PublishAsync(new " t "(...)) call (a publishing shape the parser does not know)")
+    }
+  }
+  for (nm in ev) print nm "|" joined("p", nm) "|" joined("h", nm)
+}'
+
+# emit_events: the events shard (see events_awk); one awk process for the whole tree.
+emit_events() {
+  local rows_file="$work/events.awk.out" lines=()
+  run_awk events "$events_awk" "$rows_file"
+  mapfile -t lines < "$rows_file"
+  if (( ${#lines[@]} > 0 )); then printf '%s\n' "${lines[@]}"; fi
+}
+
+# jobs_awk: one awk run over the tracked file list (stdin) that reads the C# files under src/ (types_awk_lib; seeds: IRecurringJob,
+# AddRecurringJob, AddOutbox, AddInbox) and prints job|module|config keys|file, one row per job name:
+#   a job class    a concrete class whose base list names IRecurringJob or another job class (BatchedCleanupJob), at any depth; its Name
+#                  is `string Name => "Literal";`, `string Name => Id;` with `const string Id = "Literal";` in the file, or, for a
+#                  generic job, `string Name => ContextName + "Suffix";`
+#   a registration `AddRecurringJob<X>()` (X non-generic): one row, module of the registering file, file of the class; or
+#                  `AddRecurringJob<G<P>>()` inside an extension method `W<P>(this IServiceCollection ...)`: each call `W<CtxDbContext>(`
+#                  anywhere gives the job <Ctx><Suffix> (the context name without DbContext, as ContextNameOf does), module of the calling
+#                  file, file of G (AddOutbox<AuthDbContext> gives AuthOutboxCleanup)
+#   config keys    Jobs:{Name}:Enabled, Jobs:{Name}:Interval (RecurringJobOptions)
+# Errors (exit 3, the message in errfile), so that no shape gives a wrong or missing row: an AddRecurringJob that is not one of the two
+# shapes (typeof, arguments, a generic job outside such an extension method); a registration of a class that is not a job class, of an
+# abstract class, or of a class registered twice; a concrete job class that nothing registers; a Name the parser cannot read (nameof, a
+# constant of another class or not declared once in the file, an initializer, two Name properties), or with a character outside
+# [A-Za-z0-9_.-]; two job classes with one class name, or two jobs with one name; a call of such an extension method that is not
+# `W<XDbContext>(`, or whose context does not end in DbContext; an AddOutbox<...> or AddInbox<...> call with no such extension method
+# found (P5 names both); a file that cannot be read.
+# shellcheck disable=SC2016
+jobs_awk="$cs_awk_lib$types_awk_lib"'
+function on_read(i,   pos, abs, a, t, rest, g, arg, re, off, wpos, wtok, w, q, L, bend, at) {
+  pos = 1
+  while (match(substr(MASK, pos), /(^|[^A-Za-z0-9_])AddRecurringJob([^A-Za-z0-9_]|$)/)) {
+    abs = pos + RSTART - 1; if (substr(MASK, abs, 1) != "A") abs++
+    pos = abs + 15
+    at = "line " line_at(abs) " of " fname[i]
+    a = substr(MASK, pos)
+    if (!match(a, /^[ \t\n]*<[ \t\n]*(global::)?[A-Za-z_][A-Za-z0-9_.]*[ \t\n]*(<[ \t\n]*[A-Za-z_][A-Za-z0-9_]*[ \t\n]*>[ \t\n]*)?>[ \t\n]*\(/))
+      fail("jobs: cannot read the registration AddRecurringJob at " at " (expected services.AddRecurringJob<XJob>())")
+    t = substr(a, 1, RLENGTH); rest = substr(a, RLENGTH + 1)
+    # The declaration AddRecurringJob<TJob>(this IServiceCollection services) is not a registration.
+    if (rest ~ /^[ \t\n]*this[ \t\n]/) continue
+    if (rest !~ /^[ \t\n]*\)/) fail("jobs: the registration AddRecurringJob at " at " has arguments (expected services.AddRecurringJob<XJob>())")
+    gsub(/[ \t\n]/, "", t); sub(/^</, "", t); sub(/>\($/, "", t); sub(/^global::/, "", t)
+    arg = ""
+    if (index(t, "<")) { arg = t; sub(/^[^<]*</, "", arg); sub(/>$/, "", arg); sub(/<.*$/, "", t) }
+    g = t; sub(/^.*\./, "", g)
+    nreg++; rg[nreg] = g; rarg[nreg] = arg; rat[nreg] = at; rfi[nreg] = i
+    if (arg == "") continue
+    # A generic job: the extension method W<arg>(this IServiceCollection ...) whose body holds the registration.
+    re = "[A-Za-z_][A-Za-z0-9_]*[ \t\n]*<[ \t\n]*" arg "[ \t\n]*>[ \t\n]*[(][ \t\n]*this[ \t\n]+IServiceCollection[^A-Za-z0-9_]"
+    off = 0; wpos = 0; wtok = ""
+    while (off < abs - 1 && match(substr(MASK, off + 1, abs - off - 1), re)) { wpos = off + RSTART; wtok = substr(MASK, wpos, RLENGTH); off = wpos + RLENGTH - 1 }
+    if (wtok == "") fail("jobs: the generic job " g "<" arg "> is registered at " at " outside an extension method X<" arg ">(this IServiceCollection ...) (a registration shape the parser does not know)")
+    w = wtok; sub(/[ \t\n]*<.*$/, "", w)
+    L = length(MASK); q = wpos + length(wtok)
+    while (q <= L && substr(MASK, q, 1) != "{" && substr(MASK, q, 1) != ";") q++
+    bend = (q <= L && substr(MASK, q, 1) == "{") ? close_of(q, "{", "}") : q
+    if (q > L || abs < wpos || abs > bend) fail("jobs: the generic job " g "<" arg "> is registered at " at " outside the body of " w "<" arg ">(this IServiceCollection ...) (a registration shape the parser does not know)")
+    if ((w in wrap) && (wrap[w] != g || wfi[w] != i || wat[w] != wpos)) fail("jobs: " w " registers two generic jobs, or is declared twice (" fname[wfi[w]] ", " fname[i] ")")
+    wrap[w] = g; wfi[w] = i; wat[w] = wpos; wdecl[i, wpos] = 1; S[w] = 1
+  }
+}
+function const_of(k, id,   i, re, m, cnt, pos, abs, p) {
+  i = tfile[k]
+  re = "(^|[^A-Za-z0-9_])const[ \t\n]+string[ \t\n]+" id "[ \t\n]*=[ \t\n]*\"_*\"[ \t\n]*;"
+  pos = 1; cnt = 0
+  while (match(substr(MASK, pos), re)) { cnt++; abs = pos + RSTART - 1; m = substr(MASK, abs, RLENGTH); pos = abs + RLENGTH }
+  if (cnt != 1) fail("jobs: cannot read the Name of " tname[k] " in " fname[i] ": " id " is " (cnt ? "declared " cnt " times" : "not a `const string " id " = \"literal\";` of the file"))
+  p = abs + index(m, "\"")
+  return substr(RAW, p, index(substr(MASK, p), "\"") - 1)
+}
+function job_name(k,   i, body, pos, n, at, tok, e, q, em, er, len, v, where) {
+  i = tfile[k]; MASK = MASKS[i]; RAW = RAWS[i]
+  if (tbs[k] == 0) fail("jobs: the job class " tname[k] " in " fname[i] " has no body")
+  body = substr(MASK, tbs[k], tbe[k] - tbs[k] + 1)
+  pos = 1; n = 0
+  while (match(substr(body, pos), /(^|[^A-Za-z0-9_])string[ \t\n]+Name[ \t\n]*(=>|[{=;])/)) {
+    n++; at = pos + RSTART - 1; tok = substr(body, at, RLENGTH); e = at + RLENGTH; pos = e
+  }
+  if (n == 0) fail("jobs: cannot find `string Name =>` in the job class " tname[k] " of " fname[i] " (a Name the parser cannot read)")
+  where = "line " line_at(tbs[k] + at + index(tok, "Name") - 2) " of " fname[i]
+  if (n > 1) fail("jobs: the job class " tname[k] " declares Name " n " times (the last at " where ")")
+  if (tok !~ /=>$/) fail("jobs: cannot read the Name of " tname[k] " at " where " (expected Name => ..., not a property with a body or an initializer)")
+  q = index(substr(body, e), ";")
+  if (q == 0) fail("jobs: cannot read the Name of " tname[k] " at " where " (no ; after it)")
+  em = substr(body, e, q - 1); er = substr(RAW, tbs[k] + e - 1, q - 1)
+  match(em, /^[ \t\n]*/); em = substr(em, RLENGTH + 1); er = substr(er, RLENGTH + 1)
+  match(em, /[ \t\n]*$/); len = RSTART - 1; em = substr(em, 1, len); er = substr(er, 1, len)
+  if (!tgen[k] && em ~ /^"_*"$/) v = substr(er, 2, length(er) - 2)
+  else if (!tgen[k] && em ~ /^[A-Za-z_][A-Za-z0-9_]*$/ && em != "ContextName") v = const_of(k, em)
+  else if (tgen[k] && em ~ /^ContextName[ \t\n]*\+[ \t\n]*"_*"$/) { v = er; sub(/^[^"]*"/, "", v); sub(/"$/, "", v) }
+  else fail("jobs: cannot read the Name of " tname[k] " at " where " (expected Name => \"Literal\" or Name => Id with a const string Id of the file; in a generic job, Name => ContextName + \"Suffix\")")
+  if (v !~ /^[A-Za-z0-9_.-]+$/) fail("jobs: the Name \"" v "\" of " tname[k] " at " where " has a character outside [A-Za-z0-9_.-]")
+  if (tgen[k]) jsuf[k] = v; else jname[k] = v
+}
+function addrow(name, mod, file, at) {
+  if (name in rowat) fail("jobs: two jobs named " name " (" rowat[name] ", " at ")")
+  rowat[name] = at
+  print name "|" mod "|Jobs:" name ":Enabled, Jobs:" name ":Interval|" file
+}
+BEGIN { label = "jobs"; S["IRecurringJob"] = 1; S["AddRecurringJob"] = 1; S["AddOutbox"] = 1; S["AddInbox"] = 1; T["IRecurringJob"] = 1 }
+END {
+  if (failed) exit 3
+  load_texts(); grow()
+  for (k = 1; k <= nt; k++) {
+    if (!(k in member) || tkind[k] == "interface") continue
+    if (tname[k] in job) fail("jobs: two job classes named " tname[k] ": " fname[tfile[job[tname[k]]]] ", " fname[tfile[k]])
+    job[tname[k]] = k
+    if (!tabs[k]) job_name(k)
+  }
+  for (r = 1; r <= nreg; r++) {
+    g = rg[r]; at = rat[r]
+    if (!(g in job)) fail("jobs: AddRecurringJob<" g "> at " at " names no class under src/ that implements IRecurringJob")
+    k = job[g]
+    if (tabs[k]) fail("jobs: AddRecurringJob<" g "> at " at " registers an abstract class")
+    if ((rarg[r] != "") != (tgen[k] != 0)) fail("jobs: AddRecurringJob<" g "> at " at ": the type arguments do not match the declaration of " g " in " fname[tfile[k]])
+    if (k in reg) fail("jobs: " g " is registered twice (" reg[k] ", " at ")")
+    reg[k] = at
+    if (rarg[r] == "") addrow(jname[k], module_of(fname[rfi[r]]), fname[tfile[k]], at)
+  }
+  split("AddOutbox AddInbox", hw, " ")
+  for (h = 1; h <= 2; h++) {
+    if (hw[h] in wrap) continue
+    for (i = 1; i <= nf; i++)
+      if ((i in done) && match(MASKS[i], "(^|[^A-Za-z0-9_])" hw[h] "[ \t\n]*<"))
+        fail("jobs: " hw[h] "<...> is called in " fname[i] " but no " hw[h] "<TContext>(this IServiceCollection ...) that registers a generic job with AddRecurringJob was found under src/")
+  }
+  for (k = 1; k <= nt; k++)
+    if ((k in member) && tkind[k] != "interface" && !tabs[k] && !(k in reg))
+      fail("jobs: the job class " tname[k] " in " fname[tfile[k]] " is not registered with services.AddRecurringJob<" tname[k] ">() anywhere under src/ (a registration shape the parser does not know?)")
+  for (i = 1; i <= nf; i++) {
+    if (!(i in done)) continue
+    MASK = MASKS[i]
+    for (w in wrap) {
+      re = "(^|[^A-Za-z0-9_])" w "([^A-Za-z0-9_]|$)"
+      pos = 1
+      while (match(substr(MASK, pos), re)) {
+        abs = pos + RSTART - 1; if (substr(MASK, abs, length(w)) != w) abs++
+        pos = abs + length(w)
+        if ((i, abs) in wdecl) continue
+        at = "line " line_at(abs) " of " fname[i]
+        a = substr(MASK, pos)
+        if (!match(a, /^[ \t\n]*<[ \t\n]*(global::)?[A-Za-z_][A-Za-z0-9_.]*[ \t\n]*>[ \t\n]*\(/)) fail("jobs: cannot read the call of " w " at " at " (expected " w "<XDbContext>(...))")
+        t = substr(a, 1, RLENGTH); sub(/^[ \t\n]*</, "", t); sub(/>[ \t\n]*\($/, "", t); t = last_name(t)
+        k = job[wrap[w]]
+        if (t !~ /^[A-Za-z_][A-Za-z0-9_]*DbContext$/ || t == "DbContext") fail("jobs: the context " t " of " w " at " at " does not end in DbContext, so the name of its job (the context name without DbContext, then " jsuf[k] ") is not known")
+        addrow(substr(t, 1, length(t) - 9) jsuf[k], module_of(fname[i]), fname[tfile[k]], at)
+      }
+    }
+  }
+}'
+
+# emit_jobs: the jobs shard (see jobs_awk); one awk process for the whole tree.
+emit_jobs() {
+  local rows_file="$work/jobs.awk.out" lines=()
+  run_awk jobs "$jobs_awk" "$rows_file"
+  mapfile -t lines < "$rows_file"
+  if (( ${#lines[@]} > 0 )); then printf '%s\n' "${lines[@]}"; fi
 }
 
 # scan_markers: "file:line:text" for every line of every file that the whole-line marker rule matches (grep -I skips binary files).

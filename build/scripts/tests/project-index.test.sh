@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Tests for project-index.sh (project index design): the CLI, the markers, routes, permissions and errors shards, the MAP.md checks and --check.
+# Tests for project-index.sh (project index design): the CLI, the markers, routes, permissions, errors, events and jobs shards, the MAP.md
+# checks and --check.
 # Each case builds its own throwaway tree, runs the script on it and checks the files it writes, its output and its exit code.
 #
 # Usage: bash build/scripts/tests/project-index.test.sh [case_name...]
@@ -1247,6 +1248,466 @@ case_errors_loud() {
   emit_fails "errors_loud: uppercase code in another shape" "\"A.Upper\" at line 4 of $a" emit_errors
 }
 
+# events_fixture: the plumbing of the tree (the root interface, the publisher and handler interfaces, an in-process publisher with a
+# generic PublishAsync declaration and casts to IIntegrationEventHandler<TEvent>); three events in module A's contracts (a one-line
+# record, a multi-line record with a comma, a parenthesis and the base list inside a string default, and a CRLF record whose base list is
+# on the next line); a publisher in module A (a multi-line call and a qualified one-line call) and one in a building block in CRLF (two
+# calls of the same event); a handler in module B whose base list is on the line after the primary constructor, a handler in module C
+# with a qualified event behind another interface; decoys in comments, a /* */ block and strings; a handler and an event under tests/.
+events_fixture() {
+  put src/BuildingBlocks/TemplateName.SharedKernel/IIntegrationEvent.cs 'namespace X;
+
+/// <summary>Every integration event, for example <c>record FakeIntegrationEvent(Guid Id) : IIntegrationEvent;</c>.</summary>
+public interface IIntegrationEvent
+{
+    Guid Id { get; }
+}'
+  put src/BuildingBlocks/TemplateName.Application.Common/Messaging/IIntegrationEventPublisher.cs 'public interface IIntegrationEventPublisher
+{
+    Task PublishAsync<TEvent>(TEvent integrationEvent, CancellationToken cancellationToken)
+        where TEvent : IIntegrationEvent;
+}'
+  put src/BuildingBlocks/TemplateName.Application.Common/Messaging/IIntegrationEventHandler.cs 'public interface IIntegrationEventHandler<in TEvent>
+    where TEvent : IIntegrationEvent
+{
+    Task HandleAsync(TEvent integrationEvent, CancellationToken cancellationToken);
+}'
+  put src/BuildingBlocks/TemplateName.Infrastructure.Common/Messaging/InProcessPublisher.cs 'internal sealed class InProcessPublisher(IServiceProvider provider) : IIntegrationEventPublisher
+{
+    public async Task PublishAsync<TEvent>(TEvent integrationEvent, CancellationToken cancellationToken)
+        where TEvent : IIntegrationEvent
+    {
+        var handler = (IIntegrationEventHandler<TEvent>)provider.GetRequiredService(typeof(IIntegrationEventHandler<TEvent>));
+        await handler.HandleAsync(integrationEvent, cancellationToken);
+    }
+}'
+  put src/Modules/A/A.Contracts/IntegrationEvents/ThingHappenedIntegrationEvent.cs 'namespace A.Contracts.IntegrationEvents;
+
+/// <summary>A thing happened; not <c>record FakeIntegrationEvent(Guid Id) : IIntegrationEvent;</c>.</summary>
+public sealed record ThingHappenedIntegrationEvent(Guid Id, DateTimeOffset OccurredAt) : IIntegrationEvent;'
+  put src/Modules/A/A.Contracts/IntegrationEvents/ThingDoneIntegrationEvent.cs 'namespace A.Contracts.IntegrationEvents;
+
+/* An old shape, kept as a note:
+public sealed record ThingUndoneIntegrationEvent(Guid Id) : IIntegrationEvent;
+*/
+public sealed record ThingDoneIntegrationEvent(
+    Guid Id,
+    DateTimeOffset OccurredAt,
+    string Note = "a (note), with ) : IIntegrationEvent;") : IIntegrationEvent;'
+  put_raw src/Modules/A/A.Contracts/IntegrationEvents/QuietIntegrationEvent.cs 'public sealed record QuietIntegrationEvent(Guid Id)\r\n    : TemplateName.SharedKernel.IIntegrationEvent;\r\n'
+  put src/Modules/A/A/Application/PublishThing.cs 'internal sealed class PublishThing(IIntegrationEventPublisher publisher)
+{
+    // publisher.PublishAsync(new GhostIntegrationEvent(Guid.Empty), ct) is a comment, not a call.
+    private const string Text = "publisher.PublishAsync(new GhostIntegrationEvent(";
+
+    public Task Happened(CancellationToken ct)
+        => publisher.PublishAsync(
+            new ThingHappenedIntegrationEvent(
+                Guid.NewGuid(),
+                DateTimeOffset.UnixEpoch),
+            ct);
+
+    public Task Done(CancellationToken ct) => publisher.PublishAsync(new A.Contracts.IntegrationEvents.ThingDoneIntegrationEvent(Guid.NewGuid(), DateTimeOffset.UnixEpoch, "x"), ct);
+}'
+  put_raw src/BuildingBlocks/TemplateName.Infrastructure.Common/Things/PublishDone.cs 'internal sealed class PublishDone(IIntegrationEventPublisher publisher)\r\n{\r\n    public async Task Run(CancellationToken ct)\r\n    {\r\n        await publisher.PublishAsync(\r\n            new ThingDoneIntegrationEvent(Guid.NewGuid(), DateTimeOffset.UnixEpoch, "one"),\r\n            ct);\r\n        await publisher.PublishAsync(new ThingDoneIntegrationEvent(Guid.NewGuid(), DateTimeOffset.UnixEpoch, "two"), ct);\r\n    }\r\n}\r\n'
+  put src/Modules/B/B/Application/OnThing.cs 'internal sealed class OnThing(
+    IUnitOfWork unitOfWork)
+    : IIntegrationEventHandler<ThingHappenedIntegrationEvent>
+{
+    // class OnGhost : IIntegrationEventHandler<GhostIntegrationEvent> is a comment.
+    public Task HandleAsync(ThingHappenedIntegrationEvent integrationEvent, CancellationToken cancellationToken) => Task.CompletedTask;
+}'
+  put src/Modules/C/C/Application/OnThingAgain.cs 'internal sealed class OnThingAgain(ILogger<OnThingAgain> logger, Func<int, bool> check)
+    : IDisposable,
+      IIntegrationEventHandler<A.Contracts.IntegrationEvents.ThingDoneIntegrationEvent>
+{
+    public void Dispose() { }
+}'
+  put tests/B.Tests/FakeHandler.cs 'internal sealed class FakeHandler : IIntegrationEventHandler<TestOnlyIntegrationEvent> { }
+public sealed record TestOnlyIntegrationEvent(Guid Id) : IIntegrationEvent;'
+}
+
+events_rows='QuietIntegrationEvent|-|-
+ThingDoneIntegrationEvent|A (src/Modules/A/A/Application/PublishThing.cs), Infrastructure.Common (src/BuildingBlocks/TemplateName.Infrastructure.Common/Things/PublishDone.cs)|C (src/Modules/C/C/Application/OnThingAgain.cs)
+ThingHappenedIntegrationEvent|A (src/Modules/A/A/Application/PublishThing.cs)|B (src/Modules/B/B/Application/OnThing.cs)'
+
+case_events() {
+  make_tree
+  events_fixture
+  emit_of_tree emit_events
+  assert_eq "0" "$status" "events: exit code"
+  assert_eq "$events_rows"$'\n--' "$combined" "events: exact rows (record shapes, publishers, handlers, - when none, tests/ ignored)"
+  # The one end-to-end run of the events shard: the rendered table.
+  generate
+  assert_contains $'Rows: 3\n\n| event | publisher | handlers |\n| --- | --- | --- |\n| QuietIntegrationEvent | - | - |\n| ThingDoneIntegrationEvent | A (src/Modules/A/A/Application/PublishThing.cs), Infrastructure.Common (src/BuildingBlocks/TemplateName.Infrastructure.Common/Things/PublishDone.cs) | C (src/Modules/C/C/Application/OnThingAgain.cs) |' \
+    "$(<"$idx/events.md")" "events: rendered shard"
+  # Two handlers of one event in two modules are joined in order; a handler of two events gives an entry for each.
+  put src/Modules/D/D/Application/OnBoth.cs 'internal sealed class OnBoth : IIntegrationEventHandler<ThingHappenedIntegrationEvent>, IIntegrationEventHandler<QuietIntegrationEvent>
+{
+}'
+  emit_of_tree emit_events
+  assert_eq 'QuietIntegrationEvent|-|D (src/Modules/D/D/Application/OnBoth.cs)
+ThingDoneIntegrationEvent|A (src/Modules/A/A/Application/PublishThing.cs), Infrastructure.Common (src/BuildingBlocks/TemplateName.Infrastructure.Common/Things/PublishDone.cs)|C (src/Modules/C/C/Application/OnThingAgain.cs)
+ThingHappenedIntegrationEvent|A (src/Modules/A/A/Application/PublishThing.cs)|B (src/Modules/B/B/Application/OnThing.cs), D (src/Modules/D/D/Application/OnBoth.cs)
+--' "$combined" "events: several handlers joined, one class handling two events"
+  # A tree without any event has no rows and no error.
+  make_tree
+  put src/Modules/A/A/Application/Other.cs 'class Other {}'
+  emit_of_tree emit_events
+  assert_eq "0" "$status" "events: no event: exit code"
+  assert_eq "--" "$combined" "events: no event: no rows"
+}
+
+case_events_zero() {
+  make_tree
+  put src/Modules/A/A.Contracts/IntegrationEvents/ThingHappenedIntegrationEvent.cs 'public sealed record ThingHappenedIntegrationEvent(Guid Id) : IEvent;'
+  emit_fails "events_zero: an event file the parser cannot read" "src/Modules/A/A.Contracts/IntegrationEvents/ThingHappenedIntegrationEvent.cs" emit_events
+  # The CLI path: exit 2.
+  run_gen --root "$tree" --out "$idx"
+  assert_eq "2" "$status" "events_zero: generator exit code"
+  assert_contains "src/Modules/A/A.Contracts/IntegrationEvents/ThingHappenedIntegrationEvent.cs" "$err" "events_zero: generator names the file"
+}
+
+# Shapes that would give a wrong or missing event row with exit 0 fail loudly instead.
+case_events_loud() {
+  local p='src/Modules/A/A/Application/PublishThing.cs'
+  # A published type that is not a declared event.
+  make_tree
+  events_fixture
+  put "$p" 'internal sealed class PublishThing(IIntegrationEventPublisher publisher)
+{
+    public Task Happened(CancellationToken ct) => publisher.PublishAsync(new ThingHappenedIntegrationEvent(Guid.NewGuid(), default), ct);
+    public Task Ghost(CancellationToken ct) => publisher.PublishAsync(new GhostIntegrationEvent(Guid.NewGuid()), ct);
+}'
+  emit_fails "events_loud: unknown published event" "GhostIntegrationEvent, which is not an integration event declared under src/" emit_events
+  assert_contains "$p" "$combined" "events_loud: unknown published event names the file"
+  # A variable passed to PublishAsync: the event cannot be told.
+  put "$p" 'internal sealed class PublishThing(IIntegrationEventPublisher publisher)
+{
+    public Task Happened(CancellationToken ct)
+    {
+        var e = new ThingHappenedIntegrationEvent(Guid.NewGuid(), default);
+        return publisher.PublishAsync(e, ct);
+    }
+}'
+  emit_fails "events_loud: a variable published" "$p" emit_events
+  # An explicit type argument.
+  put "$p" 'internal sealed class PublishThing(IIntegrationEventPublisher publisher)
+{
+    public Task Happened(ThingHappenedIntegrationEvent e, CancellationToken ct) => publisher.PublishAsync<ThingHappenedIntegrationEvent>(e, ct);
+}'
+  emit_fails "events_loud: an explicit type argument" "$p" emit_events
+  # An event created outside a PublishAsync call (another publishing path) in a file without PublishAsync.
+  events_fixture
+  put src/Modules/A/A/Application/Enqueue.cs 'internal sealed class Enqueue(IOutbox outbox)
+{
+    public void Run() => outbox.Add(new ThingHappenedIntegrationEvent(Guid.Empty, default));
+}'
+  emit_fails "events_loud: an event created outside PublishAsync" "ThingHappenedIntegrationEvent is created at line 3 of src/Modules/A/A/Application/Enqueue.cs" emit_events
+  rm -f "$tree/src/Modules/A/A/Application/Enqueue.cs"
+  # A handler of a type that is not a declared event.
+  put src/Modules/B/B/Application/OnGhost.cs 'internal sealed class OnGhost
+    : IIntegrationEventHandler<GhostIntegrationEvent>
+{
+}'
+  emit_fails "events_loud: a handler of an unknown event" "src/Modules/B/B/Application/OnGhost.cs" emit_events
+  rm -f "$tree/src/Modules/B/B/Application/OnGhost.cs"
+  # A handler reference outside a class base list (a manual registration).
+  put src/Modules/B/B/BModule.cs 'public static class BModule
+{
+    public static void Add(IServiceCollection services) => services.AddScoped<IIntegrationEventHandler<ThingHappenedIntegrationEvent>, OnThing>();
+}'
+  emit_fails "events_loud: a handler reference outside a base list" "src/Modules/B/B/BModule.cs" emit_events
+  rm -f "$tree/src/Modules/B/B/BModule.cs"
+  # A handler file whose class the parser does not see as a handler (a base class in between).
+  put src/Modules/B/B/Application/ThingHappenedIntegrationEventHandler.cs 'internal sealed class ThingHappenedIntegrationEventHandler : HandlerBase<ThingHappenedIntegrationEvent>
+{
+}'
+  emit_fails "events_loud: a handler file with no parsed handler" "src/Modules/B/B/Application/ThingHappenedIntegrationEventHandler.cs" emit_events
+  rm -f "$tree/src/Modules/B/B/Application/ThingHappenedIntegrationEventHandler.cs"
+  # The same event declared twice.
+  put src/Modules/D/D.Contracts/ThingHappenedIntegrationEvent.cs 'public sealed record ThingHappenedIntegrationEvent(Guid Id) : IIntegrationEvent;'
+  emit_fails "events_loud: an event declared twice" "the integration event ThingHappenedIntegrationEvent is declared twice" emit_events
+  rm -f "$tree/src/Modules/D/D.Contracts/ThingHappenedIntegrationEvent.cs"
+  # An event file that declares another name.
+  put_raw src/Modules/A/A.Contracts/IntegrationEvents/QuietIntegrationEvent.cs 'public sealed record QuieterIntegrationEvent(Guid Id) : IIntegrationEvent;\r\n'
+  emit_fails "events_loud: an event file declaring another name" "src/Modules/A/A.Contracts/IntegrationEvents/QuietIntegrationEvent.cs" emit_events
+}
+
+# jobs_fixture: the plumbing of the tree (IRecurringJob, the abstract BatchedCleanupJob, the AddRecurringJob declaration and
+# AddRecurringJobScheduler, the generic outbox and inbox cleanup jobs with Name => ContextName + "Suffix" and a raw string holding a fake
+# Name, and the AddOutbox and AddInbox extensions that register them, one over two lines); module A registers RefreshJob (Name => JobName,
+# a const of the file, a decoy Name in a string) and KeysJob (CRLF, Name => "literal", a chained call on the next line) and calls
+# AddOutbox<AxDbContext>; module B calls AddInbox<BxDbContext>; decoys in comments, a /* */ block and a string; a job under tests/.
+jobs_fixture() {
+  local ic='src/BuildingBlocks/TemplateName.Infrastructure.Common'
+  put "$ic/Jobs/IRecurringJob.cs" '/// <summary>Registered with <c>AddRecurringJob</c>; for example <c>class GhostJob : IRecurringJob</c>.</summary>
+public interface IRecurringJob
+{
+    string Name { get; }
+}'
+  put "$ic/Jobs/BatchedCleanupJob.cs" 'public abstract class BatchedCleanupJob(
+    DbContext context,
+    TimeProvider timeProvider) : IRecurringJob
+{
+    public abstract string Name { get; }
+
+    protected static string ContextNameOf(Type contextType) => contextType.Name;
+}'
+  put "$ic/Jobs/JobServiceCollectionExtensions.cs" 'public static class JobServiceCollectionExtensions
+{
+    /// <summary>Registers a job: <c>services.AddRecurringJob&lt;GhostJob&gt;()</c>.</summary>
+    public static IServiceCollection AddRecurringJob<TJob>(this IServiceCollection services)
+        where TJob : class, IRecurringJob
+    {
+        services.AddRecurringJobScheduler();
+        return services;
+    }
+
+    internal static IServiceCollection AddRecurringJobScheduler(this IServiceCollection services) => services;
+}'
+  put "$ic/Outbox/OutboxCleanupJob.cs" 'internal sealed class OutboxCleanupJob<TContext>(
+    TContext context,
+    TimeProvider timeProvider)
+    : BatchedCleanupJob(context, timeProvider)
+    where TContext : DbContext
+{
+    private const string DeleteSql = """
+        DELETE TOP (@Batch) FROM {outbox} WHERE Name = "x" AND Note = '\''public override string Name => "Fake";'\''
+        """;
+
+    private static readonly string ContextName = ContextNameOf(typeof(TContext));
+
+    public override string Name => ContextName + "OutboxCleanup";
+}'
+  put "$ic/Inbox/InboxCleanupJob.cs" 'internal sealed class InboxCleanupJob<TContext>(TContext context, TimeProvider timeProvider)
+    : BatchedCleanupJob(context, timeProvider) where TContext : DbContext
+{
+    private static readonly string ContextName = ContextNameOf(typeof(TContext));
+
+    public override string Name => ContextName + "InboxCleanup";
+}'
+  put "$ic/Outbox/OutboxServiceCollectionExtensions.cs" 'public static class OutboxServiceCollectionExtensions
+{
+    public static IServiceCollection AddOutbox<TContext>(this IServiceCollection services, Assembly domainEventsAssembly)
+        where TContext : DbContext
+    {
+        services.AddSingleton<OutboxDispatcher<TContext>>();
+        services.AddRecurringJob<OutboxCleanupJob<TContext>>();
+        return services;
+    }
+}'
+  put "$ic/Inbox/InboxServiceCollectionExtensions.cs" 'public static class InboxServiceCollectionExtensions
+{
+    /// <summary>Call it as <c>services.AddInbox&lt;GhostDbContext&gt;()</c>.</summary>
+    public static IServiceCollection AddInbox<TContext>(this IServiceCollection services)
+        where TContext : DbContext
+    {
+        services.AddRecurringJob<
+            InboxCleanupJob<TContext>>();
+        return services;
+    }
+}'
+  put src/Modules/A/A/AModule.cs 'public static class AModule
+{
+    public static IServiceCollection AddA(this IServiceCollection services)
+    {
+        services.AddOutbox<AxDbContext>(typeof(AModule).Assembly);
+        // services.AddRecurringJob<GhostJob>();
+        /* services.AddInbox<GhostDbContext>(); */
+        var note = "services.AddRecurringJob<GhostJob>();";
+        services.AddRecurringJob<RefreshJob>();
+        services
+            .AddRecurringJob<KeysJob>();
+        return services;
+    }
+}'
+  put src/Modules/A/A/Infrastructure/RefreshJob.cs 'internal sealed class RefreshJob(
+    ADbContext context,
+    TimeProvider timeProvider)
+    : BatchedCleanupJob(context, timeProvider)
+{
+    internal const string JobName = "ARefreshCleanup";
+
+    private const string Note = "public override string Name => \"Fake\";";
+
+    public override string Name => JobName;
+}'
+  put_raw src/Modules/A/A/Infrastructure/KeysJob.cs 'internal sealed class KeysJob(ADbContext context, TimeProvider timeProvider) : BatchedCleanupJob(context, timeProvider)\r\n{\r\n    public override string Name => "AKeysCleanup";\r\n}\r\n'
+  put src/Modules/B/B/BModule.cs 'public static class BModule
+{
+    public static IServiceCollection AddB(this IServiceCollection services)
+    {
+        services.AddInbox<BxDbContext>();
+        return services;
+    }
+}'
+  put tests/A.Tests/FakeJob.cs 'internal sealed class FakeJob : IRecurringJob { public string Name => GetType().Name; }'
+}
+
+jobs_rows='AKeysCleanup|A|Jobs:AKeysCleanup:Enabled, Jobs:AKeysCleanup:Interval|src/Modules/A/A/Infrastructure/KeysJob.cs
+ARefreshCleanup|A|Jobs:ARefreshCleanup:Enabled, Jobs:ARefreshCleanup:Interval|src/Modules/A/A/Infrastructure/RefreshJob.cs
+AxOutboxCleanup|A|Jobs:AxOutboxCleanup:Enabled, Jobs:AxOutboxCleanup:Interval|src/BuildingBlocks/TemplateName.Infrastructure.Common/Outbox/OutboxCleanupJob.cs
+BxInboxCleanup|B|Jobs:BxInboxCleanup:Enabled, Jobs:BxInboxCleanup:Interval|src/BuildingBlocks/TemplateName.Infrastructure.Common/Inbox/InboxCleanupJob.cs'
+
+case_jobs() {
+  make_tree
+  jobs_fixture
+  emit_of_tree emit_jobs
+  assert_eq "0" "$status" "jobs: exit code"
+  assert_eq "$jobs_rows"$'\n--' "$combined" "jobs: exact rows (JobName const, literal, outbox and inbox per context, tests/ ignored)"
+  # The one end-to-end run of the jobs shard: the rendered table.
+  generate
+  assert_contains $'Rows: 4\n\n| job | module | config keys | file |\n| --- | --- | --- | --- |\n| AKeysCleanup | A | Jobs:AKeysCleanup:Enabled, Jobs:AKeysCleanup:Interval | src/Modules/A/A/Infrastructure/KeysJob.cs |' \
+    "$(<"$idx/jobs.md")" "jobs: rendered shard"
+  # A job of a building block registered there, a second context on the same extension, a job deriving from a job class two levels down.
+  put src/BuildingBlocks/TemplateName.Infrastructure.Common/InfrastructureServiceCollectionExtensions.cs 'public static class InfrastructureServiceCollectionExtensions
+{
+    public static IServiceCollection AddInfrastructureCommon(this IServiceCollection services)
+    {
+        services.AddRecurringJob<IdempotencyCleanupJob>();
+        return services;
+    }
+}'
+  put src/BuildingBlocks/TemplateName.Infrastructure.Common/Idempotency/IdempotencyCleanupJob.cs 'internal sealed class IdempotencyCleanupJob(DbContext context, TimeProvider timeProvider)
+    : BatchedCleanupJob(context, timeProvider)
+{
+    public override string Name => "IdempotencyKeysCleanup";
+}'
+  put src/Modules/C/C/CModule.cs 'public static class CModule
+{
+    public static IServiceCollection AddC(this IServiceCollection services)
+    {
+        services.AddOutbox<CDbContext>(typeof(CModule).Assembly);
+        services.AddRecurringJob<DeepJob>();
+        return services;
+    }
+}'
+  put src/Modules/C/C/Infrastructure/DeepJob.cs 'internal abstract class MiddleJob(DbContext context) : BatchedCleanupJob(context, TimeProvider.System)
+{
+}
+
+internal sealed class DeepJob(CDbContext context) : MiddleJob(context)
+{
+    public override string Name => "CDeepCleanup";
+}'
+  emit_of_tree emit_jobs
+  assert_eq "$jobs_rows"$'\nCDeepCleanup|C|Jobs:CDeepCleanup:Enabled, Jobs:CDeepCleanup:Interval|src/Modules/C/C/Infrastructure/DeepJob.cs\nCOutboxCleanup|C|Jobs:COutboxCleanup:Enabled, Jobs:COutboxCleanup:Interval|src/BuildingBlocks/TemplateName.Infrastructure.Common/Outbox/OutboxCleanupJob.cs\nIdempotencyKeysCleanup|Infrastructure.Common|Jobs:IdempotencyKeysCleanup:Enabled, Jobs:IdempotencyKeysCleanup:Interval|src/BuildingBlocks/TemplateName.Infrastructure.Common/Idempotency/IdempotencyCleanupJob.cs\n--' \
+    "$combined" "jobs: building-block job, second context, a job two levels down"
+  # A tree without any job has no rows and no error.
+  make_tree
+  put src/Modules/A/A/Application/Other.cs 'class Other {}'
+  emit_of_tree emit_jobs
+  assert_eq "0" "$status" "jobs: no job: exit code"
+  assert_eq "--" "$combined" "jobs: no job: no rows"
+}
+
+case_jobs_zero() {
+  make_tree
+  put src/Modules/A/A/AModule.cs 'public static class AModule
+{
+    public static IServiceCollection AddA(this IServiceCollection services) => services.AddRecurringJob<OnlyJob>();
+}'
+  put src/Modules/A/A/Infrastructure/OnlyJob.cs 'internal sealed class OnlyJob : IRecurringJob
+{
+    public string Name => GetType().Name;
+}'
+  emit_fails "jobs_zero: a job whose name the parser cannot read" "src/Modules/A/A/Infrastructure/OnlyJob.cs" emit_jobs
+  # The CLI path: exit 2.
+  run_gen --root "$tree" --out "$idx"
+  assert_eq "2" "$status" "jobs_zero: generator exit code"
+  assert_contains "src/Modules/A/A/Infrastructure/OnlyJob.cs" "$err" "jobs_zero: generator names the file"
+}
+
+# Shapes that would give a wrong or missing job row with exit 0 fail loudly instead.
+case_jobs_loud() {
+  local m='src/Modules/A/A/AModule.cs' r='src/Modules/A/A/Infrastructure/RefreshJob.cs' k='src/Modules/A/A/Infrastructure/KeysJob.cs'
+  local ob='src/BuildingBlocks/TemplateName.Infrastructure.Common/Outbox/OutboxServiceCollectionExtensions.cs'
+  # A Name the parser cannot resolve.
+  make_tree
+  jobs_fixture
+  put "$r" 'internal sealed class RefreshJob(ADbContext context) : BatchedCleanupJob(context, TimeProvider.System)
+{
+    public override string Name => nameof(RefreshJob);
+}'
+  emit_fails "jobs_loud: an unresolved Name" "cannot read the Name of RefreshJob at line 3 of $r" emit_jobs
+  # A constant of another class, and a Name set with an initializer.
+  put "$r" 'internal sealed class RefreshJob(ADbContext context) : BatchedCleanupJob(context, TimeProvider.System)
+{
+    public override string Name => Names.Refresh;
+}'
+  emit_fails "jobs_loud: a constant of another class" "$r" emit_jobs
+  put "$r" 'internal sealed class RefreshJob(ADbContext context) : BatchedCleanupJob(context, TimeProvider.System)
+{
+    public override string Name { get; } = "ARefreshCleanup";
+}'
+  emit_fails "jobs_loud: a Name initializer" "$r" emit_jobs
+  put "$r" 'internal sealed class RefreshJob(ADbContext context) : BatchedCleanupJob(context, TimeProvider.System)
+{
+    public override string Name => JobName;
+}'
+  emit_fails "jobs_loud: a JobName constant the file does not declare" "$r" emit_jobs
+  # Two jobs with the same name.
+  jobs_fixture
+  put_raw "$k" 'internal sealed class KeysJob(ADbContext context) : BatchedCleanupJob(context, TimeProvider.System)\r\n{\r\n    public override string Name => "ARefreshCleanup";\r\n}\r\n'
+  emit_fails "jobs_loud: two jobs with one name" "two jobs named ARefreshCleanup" emit_jobs
+  # A job class that nothing registers (the source without the wiring).
+  jobs_fixture
+  put src/Modules/A/A/Infrastructure/OrphanJob.cs 'internal sealed class OrphanJob(ADbContext context)
+    : BatchedCleanupJob(context, TimeProvider.System)
+{
+    public override string Name => "AOrphanCleanup";
+}'
+  emit_fails "jobs_loud: an unregistered job class" "src/Modules/A/A/Infrastructure/OrphanJob.cs" emit_jobs
+  rm -f "$tree/src/Modules/A/A/Infrastructure/OrphanJob.cs"
+  # A registration of a class that no file declares (the wiring without the source).
+  put "$m" 'public static class AModule
+{
+    public static IServiceCollection AddA(this IServiceCollection services)
+    {
+        services.AddRecurringJob<RefreshJob>();
+        services.AddRecurringJob<KeysJob>();
+        services.AddRecurringJob<MissingJob>();
+        return services;
+    }
+}'
+  emit_fails "jobs_loud: a registration of an unknown class" "AddRecurringJob<MissingJob> at line 7 of $m" emit_jobs
+  # A registration shape the parser does not know.
+  put "$m" 'public static class AModule
+{
+    public static IServiceCollection AddA(this IServiceCollection services)
+    {
+        services.AddRecurringJob<KeysJob>();
+        services.AddRecurringJob(typeof(RefreshJob));
+        return services;
+    }
+}'
+  emit_fails "jobs_loud: an unknown registration shape" "line 6 of $m" emit_jobs
+  # A generic job registered outside an extension method with a type parameter.
+  put "$m" 'public static class AModule
+{
+    public static IServiceCollection AddA(this IServiceCollection services)
+    {
+        services.AddRecurringJob<RefreshJob>();
+        services.AddRecurringJob<KeysJob>();
+        services.AddRecurringJob<OutboxCleanupJob<AxDbContext>>();
+        return services;
+    }
+}'
+  emit_fails "jobs_loud: a generic job registered directly" "line 7 of $m" emit_jobs
+  # A context whose name does not end in DbContext.
+  jobs_fixture
+  put src/Modules/B/B/BModule.cs 'public static class BModule
+{
+    public static IServiceCollection AddB(this IServiceCollection services) => services.AddInbox<BxContext>();
+}'
+  emit_fails "jobs_loud: a context not ending in DbContext" "src/Modules/B/B/BModule.cs" emit_jobs
+  # AddOutbox called but the extension that registers its job is not found.
+  jobs_fixture
+  rm -f "$tree/$ob"
+  emit_fails "jobs_loud: AddOutbox without its extension" "AddOutbox<...> is called in $m" emit_jobs
+}
+
 # Each case runs in a subshell so that its tree and variables do not leak into the next.
 # The subshell reports its failures through its exit code, since variables do not cross the boundary.
 run_case() {
@@ -1260,7 +1721,8 @@ all_cases="case_usage_errors case_markers_shard case_markers_kinds_and_expressio
   case_determinism case_untracked_ignored case_git_file_marker case_find_excludes_build_dirs
   case_check_stale case_check_missing_and_unknown case_map_rules case_need_rows
   case_routes case_routes_zero case_routes_module_absent case_routes_loud case_routes_shapes
-  case_permissions case_permissions_loud case_permissions_shapes case_errors case_errors_zero case_errors_loud case_unknown_case_name"
+  case_permissions case_permissions_loud case_permissions_shapes case_errors case_errors_zero case_errors_loud
+  case_events case_events_zero case_events_loud case_jobs case_jobs_zero case_jobs_loud case_unknown_case_name"
 
 # With arguments, only the named cases run (for iterating on one case); without, all of them. Every argument is checked against the
 # registered list before anything runs: run_case ignores set -e, so a misspelled name would otherwise print "command not found" and pass.
