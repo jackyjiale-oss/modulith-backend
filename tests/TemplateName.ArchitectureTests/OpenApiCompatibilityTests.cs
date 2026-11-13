@@ -8,8 +8,10 @@ namespace TemplateName.ArchitectureTests;
 /// </summary>
 public sealed class OpenApiCompatibilityTests : IDisposable
 {
+    //#if (notifications && includeSample)
     private const string Snapshot = "tests/TemplateName.IntegrationTests/Documentation/OpenApiSnapshotTests.OpenApi_document_matches_snapshot.verified.json";
 
+    //#endif
     private const string Items = "/api/v1/items";
 
     private const string Get = "GET /api/v1/items";
@@ -339,6 +341,7 @@ public sealed class OpenApiCompatibilityTests : IDisposable
         report.Compatible.ShouldBeEmpty();
     }
 
+    //#if (notifications && includeSample)
     /// <summary>The committed snapshot, so the classifier is proven quiet on the document the host really emits.</summary>
     [Fact]
     public void Identical_documents_have_no_changes()
@@ -351,6 +354,7 @@ public sealed class OpenApiCompatibilityTests : IDisposable
         report.Compatible.ShouldBeEmpty();
     }
 
+    //#endif
     [Fact]
     public void Recursive_schema_terminates()
     {

@@ -59,6 +59,15 @@ dotnet new modulith-backend -n Acme.Hr
 cd Acme.Hr
 ```
 
+Three options leave a part out; with none of them the project is the whole template: `--notifications false` (the Notifications module), `--includeSample false` (the Sample module) and `--caching memory` (the optional Redis project). What a project gives up with one of them:
+
+- the tests that need the removed part are removed with it, so the project tests less;
+- without Notifications or Sample there is no committed OpenAPI snapshot, so no breaking-change gate until the project adds its own snapshot test;
+- the lock files of the API and the three test projects are not generated: run `dotnet restore` once and commit them;
+- without Notifications, Auth's verification and reset codes have no consumer until the project adds one.
+
+The generated project's `README.md` (section "Switches") and [ADR 0035](docs/adr/0035-template-switches-by-engine-conditionals.md) say more.
+
 From here the generated project's own `README.md` takes over. `dotnet new uninstall .` (from the repository folder) removes the template again.
 
 ## Run the backend

@@ -5,18 +5,24 @@
     <Project Path="src/BuildingBlocks/TemplateName.Application.Common/TemplateName.Application.Common.csproj" />
     <Project Path="src/BuildingBlocks/TemplateName.Infrastructure.Common/TemplateName.Infrastructure.Common.csproj" />
     <Project Path="src/BuildingBlocks/TemplateName.Web.Common/TemplateName.Web.Common.csproj" />
+    <!--#if (caching == "redis")-->
     <Project Path="src/BuildingBlocks/TemplateName.Platform.Redis/TemplateName.Platform.Redis.csproj" />
+    <!--#endif-->
   </Folder>
+  <!--#if (includeSample)-->
   <Folder Name="/src/Modules/Sample/">
     <Project Path="src/Modules/Sample/TemplateName.Modules.Sample/TemplateName.Modules.Sample.csproj" />
   </Folder>
+  <!--#endif-->
   <Folder Name="/src/Modules/Auth/">
     <Project Path="src/Modules/Auth/TemplateName.Modules.Auth/TemplateName.Modules.Auth.csproj" />
     <Project Path="src/Modules/Auth/TemplateName.Modules.Auth.Contracts/TemplateName.Modules.Auth.Contracts.csproj" />
   </Folder>
+  <!--#if (notifications)-->
   <Folder Name="/src/Modules/Notifications/">
     <Project Path="src/Modules/Notifications/TemplateName.Modules.Notifications/TemplateName.Modules.Notifications.csproj" />
   </Folder>
+  <!--#endif-->
   <Folder Name="/src/Modules/Audit/">
     <Project Path="src/Modules/Audit/TemplateName.Modules.Audit/TemplateName.Modules.Audit.csproj" />
   </Folder>

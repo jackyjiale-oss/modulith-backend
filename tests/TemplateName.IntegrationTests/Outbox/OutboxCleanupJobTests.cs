@@ -32,7 +32,15 @@ public sealed class OutboxCleanupJobTests(IntegrationTestWebAppFactory factory) 
             .Where(job => job.Name.EndsWith("OutboxCleanup", StringComparison.Ordinal))
             .ToDictionary(job => job.Name, job => job.DefaultInterval);
 
-        jobs.Keys.ShouldBe(["AuthOutboxCleanup", "SampleOutboxCleanup", JobName], ignoreOrder: true);
+        jobs.Keys.ShouldBe(
+            [
+                "AuthOutboxCleanup",
+                //#if (includeSample)
+                "SampleOutboxCleanup",
+                //#endif
+                JobName,
+            ],
+            ignoreOrder: true);
         jobs.Values.ShouldAllBe(interval => interval == TimeSpan.FromDays(1));
     }
 

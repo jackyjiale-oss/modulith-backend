@@ -1,5 +1,7 @@
+//#if (includeSample)
 using System.Net;
 using System.Net.Http.Json;
+//#endif
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -7,16 +9,20 @@ using TemplateName.Infrastructure.Common.Idempotency;
 using TemplateName.Infrastructure.Common.Jobs;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.IntegrationTests.Infrastructure;
+//#if (includeSample)
 using TemplateName.Modules.Sample.Endpoints;
+//#endif
 
 namespace TemplateName.IntegrationTests.Idempotency;
 
 public sealed class IdempotencyCleanupJobTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)
 {
     private const string JobName = "IdempotencyKeysCleanup";
+    //#if (includeSample)
     private const string SubmitRoute = "/api/v1/sample/leave-requests";
     private const string KeyHeader = "Idempotency-Key";
     private const string ReplayedHeader = "Idempotency-Replayed";
+    //#endif
     private const string Key = "submit-leave-request-1";
 
     private DateTime Now => Factory.Time.GetUtcNow().UtcDateTime;
@@ -138,6 +144,7 @@ public sealed class IdempotencyCleanupJobTests(IntegrationTestWebAppFactory fact
         (await KeysAsync()).ShouldBeEmpty();
     }
 
+    //#if (includeSample)
     [Fact]
     public async Task Request_with_a_deleted_key_runs_again()
     {
@@ -177,6 +184,7 @@ public sealed class IdempotencyCleanupJobTests(IntegrationTestWebAppFactory fact
         second.Headers.Location.ShouldBe(first.Headers.Location);
     }
 
+    //#endif
     [Fact]
     public async Task Cleanup_predicate_uses_the_ExpiresAt_index()
     {
@@ -219,6 +227,7 @@ public sealed class IdempotencyCleanupJobTests(IntegrationTestWebAppFactory fact
         return await CreateJob(scope, batchSize, maxBatchesPerRun, retention ?? new RetentionOptions()).RunAsync(Ct);
     }
 
+    //#if (includeSample)
     private async Task<HttpResponseMessage> PostAsync(SubmitLeaveRequestRequest request)
     {
         using var message = new HttpRequestMessage(HttpMethod.Post, SubmitRoute) { Content = JsonContent.Create(request) };
@@ -226,6 +235,7 @@ public sealed class IdempotencyCleanupJobTests(IntegrationTestWebAppFactory fact
         return await Client.SendAsync(message, Ct);
     }
 
+    //#endif
     private static IdempotencyRecord NewRecord(string key, DateTime expiresAt, bool completed, string scope) => new()
     {
         Scope = scope,

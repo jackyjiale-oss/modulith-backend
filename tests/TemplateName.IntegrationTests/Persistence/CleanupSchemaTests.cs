@@ -19,8 +19,12 @@ public sealed class CleanupSchemaTests(IntegrationTestWebAppFactory factory)
     {
         { "platform.IdempotencyKeys", "ExpiresAt", false },
         { "auth.OutboxMessages", "ProcessedAt", true },
+        //#if (includeSample)
         { "sample.OutboxMessages", "ProcessedAt", true },
+        //#endif
+        //#if (notifications)
         { "notify.InboxMessages", "ProcessedAt", false },
+        //#endif
         { "auth.VerificationCodes", "ExpiresAt", false },
         { "auth.RefreshTokens", "ExpiresAt", false },
         { "auth.UserSessions", "ExpiresAt", false },
@@ -29,9 +33,11 @@ public sealed class CleanupSchemaTests(IntegrationTestWebAppFactory factory)
         { "auth.TrustedDevices", "ExpiresAt", false },
         { "auth.TrustedDevices", "RevokedAt", true },
         { "auth.AuthAuditLogs", "OccurredAt", false },
+        //#if (notifications)
         { "notify.HubTickets", "ExpiresAt", false },
         { "notify.Notifications", "CreatedAt", false },
         { "notify.InAppNotifications", "CreatedAt", false },
+        //#endif
     };
 
     [Theory]

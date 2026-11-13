@@ -9,7 +9,7 @@ dotnet TemplateName.Api.dll migrate          # from a publish folder
 docker run --rm -e ConnectionStrings__Database <image> migrate
 ```
 
-`migrate` is a first argument of the API binary, recognised exactly (`migrate`, lower case, first); any other argument runs the normal web host. It builds the host, so every module's registrations are known, calls `MigrateModuleDatabasesAsync` (the same code path as development and the tests), and exits **without starting the host**: no Kestrel, outbox dispatcher, scheduler or delivery worker runs, and nothing is seeded. The first start of the API afterwards seeds the roles, permissions and, when configured, the first administrator.
+`migrate` is a first argument of the API binary, recognised exactly (`migrate`, lower case, first); any other argument runs the normal web host. It builds the host, so every module's registrations are known, calls `MigrateModuleDatabasesAsync` (the same code path as development and the tests), and exits **without starting the host**: no Kestrel, outbox dispatcher, scheduler or other background service runs, and nothing is seeded. The first start of the API afterwards seeds the roles, permissions and, when configured, the first administrator.
 
 - **Exit code** 0 on success, 1 on any failure (no connection string, a login that is refused, a DDL failure, an unreachable server, a cancellation). A failure is logged at Error with the exception; the log never holds the connection string, though SqlClient's message may name the server and the login.
 - **Order**: `platform` first, then each module in registration order, each with its own history table in its own schema. A context that is not part of the migrations (`includeInMigrations: false`) is skipped.

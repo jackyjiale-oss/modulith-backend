@@ -1,6 +1,10 @@
 # Documentation
 
-Everything about how this service is built and run. Documents are part of the definition of done: a change to an endpoint, error code, event, table, configuration key or pipeline step updates the matching page in the same pull request ([`CONTRIBUTING.md`](../CONTRIBUTING.md), Section 4). Tests fail when a module or building block has no page, a module page misses a required section or an error code, an ADR is missing from the lists below, or a mapped endpoint is not documented (`DocumentationTests` in the architecture tests, `EndpointDocumentationTests` in the integration tests), or an API version is served without a row in the version register ([`api-compatibility.md`](api-compatibility.md), `ApiVersionRegisterTests`); `OpenApiSnapshotTests` fail on any change to the OpenAPI document (ADR 0011), and on a pull request the breaking-change gate (`OpenApiBaselineTests`) fails a breaking one unless the title carries `!` (ADR 0031).
+Everything about how this service is built and run. Documents are part of the definition of done: a change to an endpoint, error code, event, table, configuration key or pipeline step updates the matching page in the same pull request ([`CONTRIBUTING.md`](../CONTRIBUTING.md), Section 4). Tests fail when a module or building block has no page, a module page misses a required section or an error code, an ADR is missing from the lists below, or a mapped endpoint is not documented (`DocumentationTests` in the architecture tests, `EndpointDocumentationTests` in the integration tests).
+<!--#if (notifications && includeSample)-->
+They also fail when an API version is served without a row in the version register ([`api-compatibility.md`](api-compatibility.md), `ApiVersionRegisterTests`), and `OpenApiSnapshotTests` fail on any change to the OpenAPI document (ADR 0011).
+<!--#endif-->
+On a pull request whose base branch has a committed OpenAPI snapshot, the breaking-change gate (`OpenApiBaselineTests`) fails a breaking change unless the title carries `!` (ADR 0031).
 
 ## Start here
 
@@ -23,16 +27,22 @@ Everything about how this service is built and run. Documents are part of the de
 | [`building-blocks/application-common.md`](building-blocks/application-common.md) | `Application.Common`: handlers and decorators, current user, error messages, cursor pagination |
 | [`building-blocks/infrastructure-common.md`](building-blocks/infrastructure-common.md) | `Infrastructure.Common`: module `DbContext`s, migrations, outbox, inbox, recurring jobs and cleanup, idempotency, caching provider, HTTP resilience |
 | [`building-blocks/web-common.md`](building-blocks/web-common.md) | `Web.Common`: ProblemDetails, HTTP security, localization, observability |
+<!--#if (caching == "redis")-->
 | [`building-blocks/platform-redis.md`](building-blocks/platform-redis.md) | `Platform.Redis` (optional, host only): Redis as the shared cache level, the shared rate limiter and the SignalR backplane, with a circuit and a readiness check |
+<!--#endif-->
 
 ## Modules
 
 | Document | Module |
 |---|---|
 | [`modules/auth.md`](modules/auth.md) | Auth: registration, sign-in, social login (Google, Apple, Microsoft, Facebook, generic OpenID Connect), tokens, sessions, passwords, two-step verification (TOTP, recovery codes, step-up, trusted devices), roles, permissions and the audit log |
+<!--#if (notifications)-->
 | [`modules/notifications.md`](modules/notifications.md) | Notifications: every email and in-app message, from Auth's integration events to SMTP, the inbox and the SignalR hub; templates, preferences, quiet hours, delivery worker, administration |
+<!--#endif-->
 | [`modules/audit.md`](modules/audit.md) | Audit: the audit trail of field changes (who changed what, from which value to which), fed by every module's outbox, the admin trail list, optional retention |
+<!--#if (includeSample)-->
 | [`modules/sample.md`](modules/sample.md) | Sample: leave requests, the worked example of every pattern |
+<!--#endif-->
 | [`modules/_template.md`](modules/_template.md) | The required outline; copy it to `modules/{module}.md` when you add a module |
 
 ## Deployment
@@ -67,15 +77,21 @@ Everything about how this service is built and run. Documents are part of the de
 | [0016](adr/0016-server-side-permissions-with-per-user-cache.md) | Server-side permissions with a per-user cache |
 | [0017](adr/0017-outbox-secrets-protected-with-data-protection.md) | Single-use tokens in outbox events protected with Data Protection |
 | [0018](adr/0018-in-process-integration-events-with-inbox.md) | In-process integration events with a per-consumer inbox |
+<!--#if (notifications)-->
 | [0019](adr/0019-embedded-scriban-notification-templates.md) | Notification templates as Scriban files embedded in the declaring assembly |
+<!--#endif-->
 | [0020](adr/0020-secrets-in-cross-module-events.md) | Single-use links cross module boundaries encrypted |
+<!--#if (notifications)-->
 | [0021](adr/0021-signalr-hub-tickets.md) | SignalR hub authenticated by single-use tickets, never a JWT in the query string |
+<!--#endif-->
 | [0022](adr/0022-totp-secrets-and-replay-protection.md) | Own RFC 6238 TOTP with a monotonic replay guard, an Auth-only secret purpose and 80-bit recovery codes |
 | [0023](adr/0023-step-up-through-auth-time-and-amr.md) | Step-up through a fresh `auth_time` and `amr` in the access token, checked by `StepUpPolicy` |
 | [0024](adr/0024-mfa-challenge-as-a-hashed-server-side-token.md) | The sign-in challenge is an opaque token over a hashed server-side row, with wrong codes counted on it and in the lockout |
 | [0025](adr/0025-trusted-devices-bound-to-the-security-stamp.md) | Trusted devices are hashed bearer tokens bound to the security stamp, skipping the challenge only (`amr` `pwd`) |
 | [0026](adr/0026-recurring-jobs-on-our-own-scheduler.md) | Recurring jobs run on our own scheduler with a SQL lease, not Hangfire |
+<!--#if (caching == "redis")-->
 | [0027](adr/0027-optional-redis-through-one-project.md) | Optional Redis through one project referenced only by the host (cache second level, rate limiter, backplane), degraded not down when Redis fails, our own fixed-window limiter, Valkey in compose |
+<!--#endif-->
 | [0028](adr/0028-retention-policy-and-the-inbox-window.md) | Retention per kind of data in bounded delete batches, dead letters kept, and an inbox window that outlasts outbox redelivery |
 | [0029](adr/0029-standard-http-resilience-pipelines.md) | Standard HTTP resilience pipelines from `Microsoft.Extensions.Http.Resilience`, named and bound from `Resilience:Pipelines`, with a breaker and the `hibp` budget |
 | [0030](adr/0030-audit-trail-through-the-owning-modules-outbox.md) | Audit trail through the owning module's outbox: `[Audited]` entities, one change set per save, consumed by the Audit module through its inbox; both logs kept, a delete window and no archive |
@@ -83,5 +99,6 @@ Everything about how this service is built and run. Documents are part of the de
 | [0032](adr/0032-external-login-by-client-posted-proof.md) | External login by a client-posted proof: the client runs the provider step and posts an ID token (or Facebook's access token), one OpenID Connect verifier with presets and a Facebook adapter and no client secret, strict linking by verified email, the MFA challenge still applies (`fed`, no trusted device), the backend issues every token, step-up by provider proof for password-less accounts |
 | [0033](adr/0033-delivery-pipeline.md) | Delivery pipeline: a chiseled-extra non-root image with a `healthcheck` mode, a `migrate` mode on the same connection-string key, reusable workflows (a green push to `main` goes to staging, a release to production behind reviewers), one verification script for CI and CD, dormant deploy jobs behind one roll-out hook, an IIS script that migrates first and rolls back its files, the gitleaks CLI instead of the Action (licence), CodeQL on by default, a guard that keeps the template repository from publishing |
 | [0034](adr/0034-maintenance-mode-for-contract-phase-releases.md) | Maintenance mode for contract-phase releases: a production release that adds a `[ContractMigration]` since the previous `v*` tag is detected and runs with a maintenance page up before `migrate` (a `maintenance` input of `auto`, `on` or `off` overrides it, a forced `off` only warns), the page stays up and nothing is restored when a later step fails, one shared three-language page (`app_offline.htm` on IIS), and a project-owned `build/deploy/maintenance.sh` hook for Docker that fails until written |
+| [0035](adr/0035-template-switches-by-engine-conditionals.md) | Template switches by engine conditionals: three generation switches (`notifications`, `includeSample`, `caching`), marker comments in the all-on repository (only on-only regions, never an `#else`), tests dropped with their module and nothing refactored onto test seams, the OpenAPI snapshot and four lock files not generated in a reduced project, a dead-reference check, and a matrix of eight combinations (the three pairs only on pushes to `main`) |
 
 A new decision gets the next number: `adr/NNNN-kebab-title.md`, in the same format, listed here and in the architecture overview.

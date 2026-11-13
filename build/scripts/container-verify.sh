@@ -39,23 +39,34 @@
 # image's HEALTHCHECK sends Host 127.0.0.1:<port>) and localhost. Host filtering answers 400 to any other Host, so steps 4 and 5
 # (the HEALTHCHECK and the curl to 127.0.0.1) prove that this documented shape keeps the probes working.
 # Everything else starts in Production with the defaults of appsettings.json, read from the options classes and the module
-# registrations (AddInfrastructureCommon, AddHttpSecurity, AddAuthModule, AddNotificationsModule, AddAuditModule, AddPlatformRedis):
+# registrations (AddInfrastructureCommon, AddHttpSecurity, AddAuthModule, AddAuditModule):
+#if (notifications)
+#   - AddNotificationsModule reads the Notifications section the same way;
+#endif
+#if (caching == "redis")
+#   - AddPlatformRedis registers nothing while Caching:Provider is memory (the default, below);
+#endif
 #   - the only environment-dependent checks in src/ are the signing key (above), HSTS plus HTTPS redirection outside Development
 #     (with no https port configured, UseHttpsRedirection only logs a warning and passes the request on; HSTS acts on https requests
 #     only; the Dockerfile says not to set an https port), OpenAPI and Scalar (not mapped in Production) and the log format;
 #   - Auth:Links: the localhost defaults pass (absolute http(s) with {token}); a real deployment sets its front-end URLs;
+#if (notifications)
 #   - Notifications:Email: host localhost and no username pass; SMTP is reached only for a pending email delivery, none here;
 #     no key may exist under Auth:Email (LegacyEmailSettingsCheck);
+#endif
 #   - Cors (empty list), ForwardedHeaders (empty lists), RateLimiting, Outbox, Idempotency, Retention, Jobs, Caching (memory, so no
 #     Redis), Localization, Auth:Password/Verification/RefreshToken/Lockout/Mfa/StepUp/Retention, Auth:External (every provider
-#     disabled), Notifications:Templates/Delivery/Hub/Retention, Audit: valid defaults;
+#     disabled), Audit: valid defaults;
+#if (notifications)
+#   - Notifications:Templates/Delivery/Hub/Retention: valid defaults;
+#endif
 #   - Data Protection: the key ring is kept in auth.DataProtectionKeys (made by `migrate`), not on the container's file system;
 #   - Auth:Seed:RunOnStartup (on by default) seeds roles and permissions before the host starts, so the database must be migrated
 #     first (step 2); with Auth:Seed:AdminEmail/AdminPassword empty no administrator is created;
 #   - OTEL_EXPORTER_OTLP_ENDPOINT unset: no exporter.
 # The integration test HostTests.Scalar_is_not_mapped_in_production starts Production with the same files plus a signing key.
-# Not ruled out without running the image: that test switches the outbox dispatcher, the recurring jobs and the delivery worker
-# off and skips the seeding, while the container runs all of them; a background service that throws stops the host (and fails
+# Not ruled out without running the image: that test switches the outbox dispatcher, the recurring jobs and the other background
+# services off and skips the seeding, while the container runs all of them; a background service that throws stops the host (and fails
 # step 4 here, with the logs printed).
 set -euo pipefail
 

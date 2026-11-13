@@ -2,9 +2,11 @@ namespace TemplateName.ArchitectureTests;
 
 public sealed class ApiVersionRegisterTests
 {
+    //#if (notifications && includeSample)
     private const string Page = "api-compatibility.md";
     private const string Snapshot = "tests/TemplateName.IntegrationTests/Documentation/OpenApiSnapshotTests.OpenApi_document_matches_snapshot.verified.json";
 
+    //#endif
     [Fact]
     public void Parse_reads_the_register_rows()
     {
@@ -99,6 +101,7 @@ public sealed class ApiVersionRegisterTests
 
         violations.ShouldHaveSingleItem().ShouldContain("Soonish");
     }
+    //#if (notifications && includeSample)
 
     [Fact]
     public void Register_matches_the_committed_openapi_snapshot()
@@ -110,4 +113,5 @@ public sealed class ApiVersionRegisterTests
         served.ShouldNotBeEmpty();
         ApiVersionRegister.Violations(register, served).ShouldBeEmpty();
     }
+    //#endif
 }

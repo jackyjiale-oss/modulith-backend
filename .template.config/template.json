@@ -15,6 +15,38 @@
   "guids": [
     "98fe211a-0cbf-4e56-bc38-acafb05bfb77"
   ],
+  "symbols": {
+    "notifications": {
+      "type": "parameter",
+      "datatype": "bool",
+      "defaultValue": "true",
+      "description": "Include the Notifications module (email and in-app notifications, the SignalR hub)."
+    },
+    "includeSample": {
+      "type": "parameter",
+      "datatype": "bool",
+      "defaultValue": "true",
+      "description": "Include the Sample module, the worked example of a module (leave requests)."
+    },
+    "caching": {
+      "type": "parameter",
+      "datatype": "choice",
+      "defaultValue": "redis",
+      "description": "The cache and coordination provider the project starts with.",
+      "choices": [
+        { "choice": "redis", "description": "Redis through the Platform.Redis building block." },
+        { "choice": "memory", "description": "In-memory only; the Platform.Redis project is not generated." }
+      ]
+    }
+  },
+  "SpecialCustomOperations": {
+    "docs/architecture/overview.md": {
+      "operations": [
+        { "type": "conditional", "configuration": { "if": ["<!--#if"], "else": ["<!--#else"], "elseif": ["<!--#elseif"], "endif": ["<!--#endif"], "trim": "true", "wholeLine": "true", "evaluator": "C++" } },
+        { "type": "conditional", "configuration": { "if": ["%%#if"], "else": ["%%#else"], "elseif": ["%%#elseif"], "endif": ["%%#endif"], "trim": "true", "wholeLine": "true", "evaluator": "C++" } }
+      ]
+    }
+  },
   "sources": [
     {
       "source": "./",
@@ -41,6 +73,9 @@
         "build/scripts/configure-github-repo.sh",
         "build/scripts/template-smoke.sh",
         "build/scripts/path-guard-check.sh",
+        "build/scripts/dead-reference-check.sh",
+        "build/scripts/tests/dead-reference-check.test.sh",
+        ".github/workflows/template-matrix.yml",
         "README.md",
         "CHANGELOG.md",
         "CLAUDE.md",
@@ -48,6 +83,69 @@
         "Version.props",
         "**/*.received.*",
         "build/template-content/**"
+      ],
+      "modifiers": [
+        {
+          "condition": "(!notifications || !includeSample || caching == \"memory\")",
+          "exclude": [
+            "src/Host/TemplateName.Api/packages.lock.json",
+            "tests/TemplateName.UnitTests/packages.lock.json",
+            "tests/TemplateName.ArchitectureTests/packages.lock.json",
+            "tests/TemplateName.IntegrationTests/packages.lock.json"
+          ]
+        },
+        {
+          "condition": "(caching == \"memory\")",
+          "exclude": [
+            "src/BuildingBlocks/TemplateName.Platform.Redis/**",
+            "tests/TemplateName.IntegrationTests/Redis/**",
+            "tests/TemplateName.UnitTests/Platform/**",
+            "tests/TemplateName.IntegrationTests/Infrastructure/ValkeyFixture.cs",
+            "docs/building-blocks/platform-redis.md",
+            "docs/adr/0027-optional-redis-through-one-project.md"
+          ]
+        },
+        {
+          "condition": "(caching == \"redis\")",
+          "exclude": [
+            "tests/TemplateName.IntegrationTests/Caching/CachingProviderWithoutRedisTests.cs"
+          ]
+        },
+        {
+          "condition": "(!includeSample)",
+          "exclude": [
+            "src/Modules/Sample/**",
+            "tests/TemplateName.UnitTests/Sample/**",
+            "tests/TemplateName.IntegrationTests/Sample/**",
+            "tests/TemplateName.IntegrationTests/Idempotency/IdempotencyTests.cs",
+            "tests/TemplateName.UnitTests/Localization/ErrorMessageLocalizerTests.cs",
+            "docs/modules/sample.md"
+          ]
+        },
+        {
+          "condition": "(!notifications)",
+          "exclude": [
+            "src/Modules/Notifications/**",
+            "tests/TemplateName.UnitTests/Notifications/**",
+            "tests/TemplateName.IntegrationTests/Notifications/**",
+            "tests/TemplateName.IntegrationTests/Infrastructure/RecordingEmailSender.cs",
+            "tests/TemplateName.IntegrationTests/Infrastructure/RecordingInAppNotificationPusher.cs",
+            "tests/TemplateName.IntegrationTests/Infrastructure/NotificationHubClient.cs",
+            "tests/TemplateName.IntegrationTests/Auth/AuthFlowTests.cs",
+            "tests/TemplateName.IntegrationTests/Auth/MfaFlowTests.cs",
+            "tests/TemplateName.IntegrationTests/Redis/RedisBackplaneTests.cs",
+            "docs/modules/notifications.md",
+            "docs/adr/0019-embedded-scriban-notification-templates.md",
+            "docs/adr/0021-signalr-hub-tickets.md"
+          ]
+        },
+        {
+          "condition": "(!notifications || !includeSample)",
+          "exclude": [
+            "tests/TemplateName.IntegrationTests/Documentation/OpenApiSnapshotTests.OpenApi_document_matches_snapshot.verified.json",
+            "tests/TemplateName.IntegrationTests/Documentation/OpenApiSnapshotTests.cs"
+          ]
+        }
       ]
     },
     {

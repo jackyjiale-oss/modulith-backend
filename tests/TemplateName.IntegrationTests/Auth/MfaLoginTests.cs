@@ -184,10 +184,12 @@ public sealed class MfaLoginTests(IntegrationTestWebAppFactory factory) : Integr
         var audits = await AuditEventsAsync();
         audits.Count(type => type == AuthAuditEvents.MfaFailed).ShouldBe(6);
         audits.Count(type => type == AuthAuditEvents.LockedOut).ShouldBe(1);
+        //#if (notifications)
 
         // The owner is told once.
         await DispatchNotificationsAsync();
         Factory.EmailSender.Sent.Where(message => message.To == Email).ShouldHaveSingleItem().Subject.ShouldBe("Your account is temporarily locked");
+        //#endif
 
         // After the lockout, the password and a code sign in again, and the count starts over.
         Factory.Time.Advance(LockoutDuration);

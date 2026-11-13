@@ -104,7 +104,7 @@ The list endpoint returns the cursor-pagination codes (declared in `PaginationEr
 
 | Event | Kind | Raised when | Handlers |
 |---|---|---|---|
-| `LeaveRequestSubmittedDomainEvent(LeaveRequestId, EmployeeId)` | Domain | A request is submitted | `LeaveRequestSubmittedDomainEventHandler` (logs; the Notifications plan replaces it with a notification) |
+| `LeaveRequestSubmittedDomainEvent(LeaveRequestId, EmployeeId)` | Domain | A request is submitted | `LeaveRequestSubmittedDomainEventHandler` (logs; a project replaces it with its own reaction) |
 | `LeaveRequestApprovedDomainEvent(LeaveRequestId, ApproverId)` | Domain | A request is approved | None yet |
 
 Domain events are written to `sample.OutboxMessages` in the same save as the aggregate and dispatched by the outbox (ADR 0007). The module publishes no integration events of its own; the same outbox also carries the audit change sets of `LeaveRequest` (`EntityChangesRecordedDomainEvent`), which a handler registered by the host publishes as `EntityChangesRecordedIntegrationEvent` for the [Audit module](audit.md#events).
@@ -175,7 +175,10 @@ dotnet ef migrations add {Verb}{What} \
 - Integration tests, `tests/TemplateName.IntegrationTests/Localization/`: `LocalizationTests` (signed in with a saved locale the API does not support, so `Accept-Language` decides) reads Sample errors in Malay, Simplified Chinese (from `zh-CN`) and English fallback, and checks that `code`, `params` and enum values stay unlocalized and that validation messages are translated.
 - Architecture tests, `TranslationTests`: every `LeaveRequestErrors` code has an English message, and the translations have the same keys and placeholders.
 - Integration tests, `tests/TemplateName.IntegrationTests/Idempotency/`: `IdempotencyTests` drives `Idempotency-Key` through the submit endpoint: replay (including a stored 400), key reuse with another body, invalid, empty, repeated and expired keys, a key still in progress, concurrent duplicates running once, 5xx responses (thrown or returned) not being stored, an abandoned key reusable after its in-progress lease, and a superseded request unable to store over or release the new owner's key.
-- Documentation and contract: `DocumentationTests` (architecture tests) check that this page exists, keeps the required sections and lists every `LeaveRequestErrors` code; `EndpointDocumentationTests` check that every mapped `/api/v1/sample/…` route appears above as `METHOD /route`; `OpenApiSnapshotTests` pin the endpoints' OpenAPI description (ADR 0011).
+- Documentation and contract: `DocumentationTests` (architecture tests) check that this page exists, keeps the required sections and lists every `LeaveRequestErrors` code; `EndpointDocumentationTests` check that every mapped `/api/v1/sample/…` route appears above as `METHOD /route`.
+<!--#if (notifications)-->
+  `OpenApiSnapshotTests` pin the endpoints' OpenAPI description (ADR 0011).
+<!--#endif-->
 
 ## Changelog
 

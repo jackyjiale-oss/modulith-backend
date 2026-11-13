@@ -5,11 +5,17 @@
     <ProjectReference Include="..\..\src\BuildingBlocks\TemplateName.Application.Common\TemplateName.Application.Common.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\TemplateName.Infrastructure.Common\TemplateName.Infrastructure.Common.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\TemplateName.Web.Common\TemplateName.Web.Common.csproj" />
+    <!--#if (caching == "redis")-->
     <ProjectReference Include="..\..\src\BuildingBlocks\TemplateName.Platform.Redis\TemplateName.Platform.Redis.csproj" />
+    <!--#endif-->
     <ProjectReference Include="..\..\src\Modules\Auth\TemplateName.Modules.Auth\TemplateName.Modules.Auth.csproj" />
     <ProjectReference Include="..\..\src\Modules\Auth\TemplateName.Modules.Auth.Contracts\TemplateName.Modules.Auth.Contracts.csproj" />
+    <!--#if (notifications)-->
     <ProjectReference Include="..\..\src\Modules\Notifications\TemplateName.Modules.Notifications\TemplateName.Modules.Notifications.csproj" />
+    <!--#endif-->
+    <!--#if (includeSample)-->
     <ProjectReference Include="..\..\src\Modules\Sample\TemplateName.Modules.Sample\TemplateName.Modules.Sample.csproj" />
+    <!--#endif-->
     <ProjectReference Include="..\..\src\Modules\Audit\TemplateName.Modules.Audit\TemplateName.Modules.Audit.csproj" />
     <ProjectReference Include="..\..\src\Host\TemplateName.Api\TemplateName.Api.csproj" />
   </ItemGroup>

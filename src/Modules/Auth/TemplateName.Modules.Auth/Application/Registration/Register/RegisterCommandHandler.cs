@@ -15,7 +15,7 @@ namespace TemplateName.Modules.Auth.Application.Registration.Register;
 /// <summary>
 /// Registers an account without revealing whether the address is taken: the caller gets the same answer either way, and the password
 /// is hashed before the address is looked up, so both paths pay the hashing cost. A new account gets the <c>User</c> role and an
-/// email-confirmation code; an existing one only records the attempt, whose event emails its owner. Two registrations of one new address
+/// email-confirmation code; an existing one only records the attempt, whose event carries a notice for its owner. Two registrations of one new address
 /// at the same moment both pass the lookup; the unique email index lets one insert win and the other is answered as for a known address.
 /// </summary>
 internal sealed class RegisterCommandHandler(

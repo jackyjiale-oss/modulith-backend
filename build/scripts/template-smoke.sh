@@ -2,17 +2,71 @@
 # Template smoke test: installs this repository as a `dotnet new` template, generates a project
 # from it, checks the generated files, then builds it and runs its unit and architecture tests.
 #
-# Usage: bash build/scripts/template-smoke.sh
+# Usage: bash build/scripts/template-smoke.sh [--notifications true|false] [--includeSample true|false] [--caching redis|memory]
+#                                             [--integration] [--generate-only] [--output DIR]
+#   --notifications, --includeSample, --caching  the template switches, passed to `dotnet new` (defaults: true, true, redis).
+#   --integration   also run the integration tests (they need Docker); without it only the unit and architecture tests run.
+#   --generate-only stop after the generation checks (about 7 minutes); no restore, build or tests. The full smoke takes 5 to 15 minutes.
+#   --output DIR    keep the generated project in DIR, an absolute path that must not exist (use a short path such as C:/w/g1 on Windows).
+# With no arguments it generates with every switch on, builds and runs the unit and architecture tests.
 #
-# Integration tests are not run here (they need Docker); CI runs them in the build-test job.
+# CI runs the integration tests of the default project in the build-test job; --integration is for a machine with Docker.
 # Every `dotnet new` call uses a private template hive inside the temporary directory, so the user's global
 # template cache is never touched; deleting the temporary directory removes the installed template too.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 project_name="Acme.Smoke"
+
+notifications="true"
+include_sample="true"
+caching="redis"
+run_integration=false
+generate_only=false
+output_dir=""
+
+usage_error() {
+  echo "template-smoke: $1" >&2
+  echo "usage: template-smoke.sh [--notifications true|false] [--includeSample true|false] [--caching redis|memory] [--integration] [--generate-only] [--output DIR]" >&2
+  exit 2
+}
+
+while (( $# > 0 )); do
+  case "$1" in
+    --notifications | --includeSample | --caching | --output)
+      (( $# >= 2 )) || usage_error "$1 needs a value"
+      case "$1" in
+        --notifications) notifications="$2" ;;
+        --includeSample) include_sample="$2" ;;
+        --caching) caching="$2" ;;
+        --output) output_dir="$2" ;;
+      esac
+      shift 2
+      ;;
+    --integration) run_integration=true; shift ;;
+    --generate-only) generate_only=true; shift ;;
+    *) usage_error "unknown argument '$1'" ;;
+  esac
+done
+case "$notifications" in true | false) ;; *) usage_error "--notifications must be 'true' or 'false', got '$notifications'" ;; esac
+case "$include_sample" in true | false) ;; *) usage_error "--includeSample must be 'true' or 'false', got '$include_sample'" ;; esac
+case "$caching" in redis | memory) ;; *) usage_error "--caching must be 'redis' or 'memory', got '$caching'" ;; esac
+# The project is generated after `cd "$repo_root"`, so a relative path would land inside the checkout.
+absolute_path='^(/|[A-Za-z]:[/\\])'
+if [[ -n "$output_dir" && ! "$output_dir" =~ $absolute_path ]]; then
+  usage_error "--output $output_dir must be an absolute path"
+fi
+if [[ -n "$output_dir" && -e "$output_dir" ]]; then
+  usage_error "--output $output_dir already exists; give a directory that does not exist"
+fi
+all_on=true
+if [[ "$notifications" != "true" || "$include_sample" != "true" || "$caching" != "redis" ]]; then
+  all_on=false
+fi
+
 tmp="$(mktemp -d)"
 out="$tmp/$project_name"
+if [[ -n "$output_dir" ]]; then out="$output_dir"; fi
 hive="$tmp/hive"
 
 cleanup() {
@@ -37,12 +91,16 @@ step() {
 step "Checking the Windows path-length guard in the template itself"
 bash "$repo_root/build/scripts/path-guard-check.sh" "$repo_root"
 
+step "Testing the dead-reference check (its own test)"
+bash "$repo_root/build/scripts/tests/dead-reference-check.test.sh"
+
 step "Installing the template from $repo_root (private hive $hive)"
 cd "$repo_root"
 dotnet new install . --force --debug:custom-hive "$hive"
 
-step "Generating $project_name"
-dotnet new modulith-backend -n "$project_name" -o "$out" --debug:custom-hive "$hive"
+step "Generating $project_name (notifications=$notifications, includeSample=$include_sample, caching=$caching) into $out"
+dotnet new modulith-backend -n "$project_name" -o "$out" --debug:custom-hive "$hive" \
+  --notifications "$notifications" --includeSample "$include_sample" --caching "$caching"
 
 step "Checking that no placeholder is left"
 leftover_content="$(grep -rIil "TemplateName" "$out" --exclude-dir=bin --exclude-dir=obj || true)"
@@ -150,6 +208,9 @@ for forbidden in \
   build/scripts/configure-github-repo.sh \
   build/scripts/template-smoke.sh \
   build/scripts/path-guard-check.sh \
+  build/scripts/dead-reference-check.sh \
+  build/scripts/tests/dead-reference-check.test.sh \
+  .github/workflows/template-matrix.yml \
   .template.config \
   .superpowers \
   .vs \
@@ -178,6 +239,113 @@ if [[ -f "$out/README.md" ]] && ! grep -qF "TN0001" "$out/README.md"; then
   fail "README.md does not document the TN0001 long-path error"
 fi
 
+step "Checking that no template marker is left in the generated files"
+# A conditional marker of the template engine ("#if", "#elseif", "#else", "#endif" after //, <!-- or %% (the Mermaid comment style used in
+# docs/architecture/overview.md), or at the start of a line) that survives generation means the engine did not process it.
+# Every file type is searched, not only code.
+leftover_markers="$(grep -rInE --exclude-dir=bin --exclude-dir=obj --exclude-dir=.git \
+  -e '(//|<!--|%%|^[[:space:]]*)#(if|elseif|else|endif)([[:space:]]|\(|-->|$)' "$out" || true)"
+if [[ -n "$leftover_markers" ]]; then
+  fail "template conditional markers are left in the generated files:"$'\n'"$leftover_markers"
+fi
+
+if [[ "$all_on" == "true" ]]; then
+  step "Checking that the all-on project is the template source without its marker lines"
+  # The engine reads an unknown symbol (a typo such as "notfications") as false, and it also reads a plain C# "#if" or a marker
+  # quoted inside a line: any of them would silently drop content from every generation. So each generated file must equal its
+  # source (the build/template-content/ file that replaces it, else the same path with the placeholder put back) with the whole
+  # marker lines deleted and the placeholder renamed as the engine does. The UserSecretsId GUID is new in each generation (above).
+  marker_line='^[[:space:]]*(\/\/|<!--|%%)?#(if|elseif|else|endif)([[:space:]]|\(|-->|$)'
+  while IFS= read -r -d '' generated; do
+    relative="${generated#"$out"/}"
+    source="$repo_root/build/template-content/$relative"
+    [[ -f "$source" ]] || source="$repo_root/${relative//"$project_name"/TemplateName}"
+    printf '%s\t%s\n' "$generated" "$source"
+  done < <(find "$out" -type f -not -path '*/bin/*' -not -path '*/obj/*' -print0) > "$tmp/drift-pairs.tsv"
+  # One awk process for all files (a sed per file takes minutes on Windows); prints "generated<TAB>source<TAB>where" per mismatch.
+  drift="$(MARKER="$marker_line" awk -F '\t' -v name="$project_name" -v lower="${project_name,,}" '
+    function next_expected(   line) {
+      while ((getline line < $2) > 0) if (line !~ ENVIRON["MARKER"]) {
+        gsub(/TemplateName/, name, line); gsub(/templatename/, lower, line); expected = line; return 1 }
+      return 0 }
+    { if ((getline probe < $2) < 0) { print $1 "\t" $2 "\tno source file"; next } close($2); n = 0; bad = 0
+      while (!bad && (getline actual < $1) > 0) { n++
+        if (!next_expected() || (actual != expected && !(actual ~ /<UserSecretsId>/ && expected ~ /<UserSecretsId>/))) bad = 1 }
+      if (!bad && next_expected()) { n++; bad = 1 }
+      close($1); close($2); if (bad) print $1 "\t" $2 "\tfirst difference at line " n }' "$tmp/drift-pairs.tsv")"
+  while IFS=$'\t' read -r generated source where; do
+    [[ -n "$generated" ]] || continue
+    excerpt="$(diff <(sed -E -e "/$marker_line/d" -e "s/TemplateName/$project_name/g; s/templatename/${project_name,,}/g" "$source" 2> /dev/null) \
+      "$generated" | head -n 8 || true)"
+    fail "${generated#"$out"/} is not ${source#"$repo_root"/} without its marker lines ($where):"$'\n'"$excerpt"
+  done <<< "$drift"
+
+  # The file list, the other way: a tracked file missing from the all-on project must be left out by an unconditional exclude of
+  # template.json, or by the one modifier meant to apply with every switch on ((caching == "redis"): files only a memory project has).
+  # A file that any other modifier left out means a condition is true with every switch on (a typo'd symbol, say).
+  mapfile -t all_on_excludes < <(awk '/"modifiers"/ { modifiers = 1 } /"condition"/ { condition = $0 }
+    /"exclude": \[/ { listing = 1; next } listing && /\]/ { listing = 0; next }
+    listing && (!modifiers || condition ~ /\(caching == \\"redis\\"\)/) { gsub(/^[ \t]*"|",?[ \t\r]*$/, ""); print }' \
+    "$repo_root/.template.config/template.json")
+  while IFS= read -r tracked; do
+    [[ -e "$out/${tracked//TemplateName/$project_name}" ]] && continue
+    excluded=false
+    for pattern in "${all_on_excludes[@]}"; do
+      # The engine's "**/" also matches no folder at all; a bash pattern's "*" already crosses "/".
+      if [[ "$pattern" == '**/'* ]]; then rest="${pattern#'**/'}"; rest="${rest//'**'/*}"; [[ "$tracked" == $rest || "$tracked" == */$rest ]] && excluded=true
+      else [[ "$tracked" == ${pattern//'**'/*} ]] && excluded=true; fi
+      [[ "$excluded" == true ]] && break
+    done
+    [[ "$excluded" == true ]] || fail "$tracked is tracked but not generated with every switch on, and no unconditional exclude of template.json leaves it out"
+  done < <(git -C "$repo_root" ls-files)
+fi
+
+step "Checking which parts of the template were generated"
+# expect_part <kept: true|false> <description> <path relative to the project>...: each path exists when the part is kept and does not when removed.
+expect_part() {
+  local kept="$1" description="$2" path
+  shift 2
+  for path in "$@"; do
+    if [[ "$kept" == "true" && ! -e "$out/$path" ]]; then
+      fail "$description: $path is missing"
+    elif [[ "$kept" == "false" && -e "$out/$path" ]]; then
+      fail "$description: $path must not be generated"
+    fi
+  done
+}
+expect_part "$notifications" "notifications=$notifications" \
+  src/Modules/Notifications \
+  "tests/$project_name.UnitTests/Notifications" \
+  "tests/$project_name.IntegrationTests/Notifications" \
+  docs/modules/notifications.md \
+  docs/adr/0019-embedded-scriban-notification-templates.md \
+  docs/adr/0021-signalr-hub-tickets.md
+expect_part "$include_sample" "includeSample=$include_sample" \
+  src/Modules/Sample \
+  "tests/$project_name.UnitTests/Sample" \
+  "tests/$project_name.IntegrationTests/Sample" \
+  docs/modules/sample.md
+redis_kept=true
+if [[ "$caching" == "memory" ]]; then redis_kept=false; fi
+expect_part "$redis_kept" "caching=$caching" \
+  "src/BuildingBlocks/$project_name.Platform.Redis" \
+  "tests/$project_name.IntegrationTests/Redis" \
+  "tests/$project_name.UnitTests/Platform" \
+  docs/building-blocks/platform-redis.md \
+  docs/adr/0027-optional-redis-through-one-project.md
+# The OpenAPI snapshot describes every endpoint of the default project; with a module removed it would be wrong, so it is not generated.
+snapshot_kept=false
+if [[ "$notifications" == "true" && "$include_sample" == "true" ]]; then snapshot_kept=true; fi
+expect_part "$snapshot_kept" "OpenAPI snapshot (notifications=$notifications, includeSample=$include_sample)" \
+  "tests/$project_name.IntegrationTests/Documentation/OpenApiSnapshotTests.OpenApi_document_matches_snapshot.verified.json"
+
+step "Checking that nothing refers to a part that was left out"
+dead_status=0
+dead_output="$(bash "$repo_root/build/scripts/dead-reference-check.sh" "$out" "$notifications" "$include_sample" "$caching")" || dead_status=$?
+if (( dead_status != 0 )); then
+  fail "dead-reference-check.sh exited $dead_status; the generated project still refers to a removed part:"$'\n'"$dead_output"
+fi
+
 step "Checking relative links in the generated documents"
 # Markdown links ](target) to files in the project; web links and in-page anchors are skipped, #anchors are not checked.
 link_count=0
@@ -197,9 +365,47 @@ if (( failures > 0 )); then
   exit 1
 fi
 
-step "Restoring (locked mode) and checking the Windows path-length guard in $project_name"
+if [[ "$generate_only" == "true" ]]; then
+  echo
+  echo "template-smoke: passed (generate only)"
+  exit 0
+fi
+
 cd "$out"
-dotnet restore --locked-mode
+if [[ "$all_on" == "true" ]]; then
+  step "Restoring (locked mode) and checking the Windows path-length guard in $project_name"
+  dotnet restore --locked-mode
+else
+  # With a switch off, the template leaves out the four lock files whose packages depend on the switches (the lock-file modifier in
+  # template.json). The first restore writes them; it must write exactly those four and change none that the template ships.
+  step "Restoring $project_name (a switch is off: the four lock files that depend on it are written now)"
+  # "hash  path" per lock file; the sed drops the "*" that sha256sum prints before the name in binary mode on Windows.
+  lock_hashes() {
+    find . -name packages.lock.json -not -path '*/bin/*' -not -path '*/obj/*' -print0 | sort -z | xargs -0 sha256sum | sed -E 's/^([0-9a-f]+) [ *]/\1  /'
+  }
+  lock_before="$(lock_hashes)"
+  dotnet restore
+  lock_after="$(lock_hashes)"
+  lock_expected="$(printf '%s\n' \
+    "./src/Host/$project_name.Api/packages.lock.json" \
+    "./tests/$project_name.UnitTests/packages.lock.json" \
+    "./tests/$project_name.ArchitectureTests/packages.lock.json" \
+    "./tests/$project_name.IntegrationTests/packages.lock.json" | sort)"
+  lock_new="$(comm -13 <(awk '{print $2}' <<< "$lock_before" | sort) <(awk '{print $2}' <<< "$lock_after" | sort))"
+  # Lines (hash and path) that existed before and are gone after: a lock file that changed or was removed.
+  lock_changed="$(comm -23 <(sort <<< "$lock_before") <(sort <<< "$lock_after"))"
+  if [[ "$lock_new" != "$lock_expected" ]]; then
+    echo "FAIL: restore wrote these new lock files:"$'\n'"$lock_new"$'\n'"expected exactly:"$'\n'"$lock_expected" >&2
+    exit 1
+  fi
+  if [[ -n "$lock_changed" ]]; then
+    echo "FAIL: restore changed or removed lock files that the template ships:"$'\n'"$lock_changed" >&2
+    exit 1
+  fi
+  echo "Restore wrote exactly the four expected lock files and changed none that the template ships"
+  dotnet restore --locked-mode
+  step "Checking the Windows path-length guard in $project_name"
+fi
 bash "$repo_root/build/scripts/path-guard-check.sh" "$out"
 
 step "Building $project_name"
@@ -208,6 +414,10 @@ dotnet build --no-restore -c Release
 step "Running the unit and architecture tests"
 dotnet test --project "tests/$project_name.UnitTests" --no-build -c Release
 dotnet test --project "tests/$project_name.ArchitectureTests" --no-build -c Release
+if [[ "$run_integration" == "true" ]]; then
+  step "Running the integration tests (Docker needed)"
+  dotnet test --project "tests/$project_name.IntegrationTests" --no-build -c Release
+fi
 
 echo
 echo "template-smoke: passed"

@@ -13,11 +13,15 @@ using TemplateName.Modules.Auth.Application;
 using TemplateName.Modules.Auth.Domain.Roles;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+//#if (notifications)
 using TemplateName.Modules.Notifications.Infrastructure.Persistence;
+//#endif
+//#if (includeSample)
 using TemplateName.Modules.Sample.Application;
 using TemplateName.Modules.Sample.Domain.LeaveRequests;
 using TemplateName.Modules.Sample.Endpoints;
 using TemplateName.Modules.Sample.Infrastructure.Persistence;
+//#endif
 using TemplateName.SharedKernel.Auditing;
 
 namespace TemplateName.IntegrationTests.Audit;
@@ -29,15 +33,20 @@ namespace TemplateName.IntegrationTests.Audit;
 /// </summary>
 public sealed class AuditTrailEndToEndTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)
 {
+    //#if (includeSample)
     private const string LeaveRequestsRoute = "/api/v1/sample/leave-requests";
+    //#endif
     private const string RolesRoute = "/api/v1/admin/auth/roles";
     private const string UsersRoute = "/api/v1/admin/auth/users";
     private const string LoginRoute = "/api/v1/auth/login";
+    //#if (includeSample)
     private const string TrailsRoute = "/api/v1/admin/audit/trails";
     private const string TraceIdHeader = "X-Trace-Id";
+    //#endif
 
     private static readonly string AuditRowType = typeof(EntityChangesRecordedDomainEvent).FullName!;
 
+    //#if (includeSample)
     [Fact]
     public async Task Submitting_and_approving_a_leave_request_writes_two_change_sets_with_the_caller_and_the_trace()
     {
@@ -121,6 +130,7 @@ public sealed class AuditTrailEndToEndTests(IntegrationTestWebAppFactory factory
         trails.Single(trail => trail.Action == EntityChangeAction.SoftDeleted).Changes.ShouldBe("{}");
     }
 
+    //#endif
     [Fact]
     public async Task Changing_a_role_s_permissions_writes_created_and_deleted_grants_with_composite_ids()
     {
@@ -265,6 +275,7 @@ public sealed class AuditTrailEndToEndTests(IntegrationTestWebAppFactory factory
         (await AuthAuditRowCountAsync(unprocessedOnly: true)).ShouldBe(0);
     }
 
+    //#if (includeSample)
     [Fact]
     public async Task Two_stale_approvals_of_one_leave_request_leave_exactly_one_Updated_trail()
     {
@@ -290,6 +301,7 @@ public sealed class AuditTrailEndToEndTests(IntegrationTestWebAppFactory factory
         approver.ShouldBe(firstCopy.ApproverId!.Value);
     }
 
+    //#endif
     [Fact]
     public async Task Every_context_with_an_audited_entity_maps_the_outbox()
     {
@@ -297,8 +309,12 @@ public sealed class AuditTrailEndToEndTests(IntegrationTestWebAppFactory factory
         DbContext[] contexts =
         [
             scope.ServiceProvider.GetRequiredService<AuthDbContext>(),
+            //#if (includeSample)
             scope.ServiceProvider.GetRequiredService<SampleDbContext>(),
+            //#endif
+            //#if (notifications)
             scope.ServiceProvider.GetRequiredService<NotificationsDbContext>(),
+            //#endif
             scope.ServiceProvider.GetRequiredService<AuditDbContext>(),
         ];
 
@@ -306,7 +322,14 @@ public sealed class AuditTrailEndToEndTests(IntegrationTestWebAppFactory factory
             .Where(context => context.Model.GetEntityTypes().Any(entityType => entityType.ClrType.IsDefined(typeof(AuditedAttribute), inherit: false)))
             .ToList();
 
-        auditing.Select(context => context.GetType()).ShouldBe([typeof(AuthDbContext), typeof(SampleDbContext)], ignoreOrder: true);
+        auditing.Select(context => context.GetType()).ShouldBe(
+            [
+                typeof(AuthDbContext),
+                //#if (includeSample)
+                typeof(SampleDbContext),
+                //#endif
+            ],
+            ignoreOrder: true);
         auditing.ShouldAllBe(context => context.Model.FindEntityType(typeof(OutboxMessage)) != null);
     }
 
@@ -327,6 +350,7 @@ public sealed class AuditTrailEndToEndTests(IntegrationTestWebAppFactory factory
         throw new InvalidOperationException($"The {typeof(TContext).Name} outbox was still being dispatched after {MaxRounds} rounds.");
     }
 
+    //#if (includeSample)
     private async Task<Guid> AddLeaveRequestAsync()
     {
         await using var scope = Factory.Services.CreateAsyncScope();
@@ -337,6 +361,7 @@ public sealed class AuditTrailEndToEndTests(IntegrationTestWebAppFactory factory
         return leaveRequest.Id;
     }
 
+    //#endif
     private async Task SetPermissionsAsync(Guid roleId, params Guid[] permissionIds)
     {
         using var response = await Client.PutAsJsonAsync($"{RolesRoute}/{roleId}/permissions", new { permissionIds }, Ct);

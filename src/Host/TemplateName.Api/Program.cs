@@ -10,9 +10,15 @@ using TemplateName.Infrastructure.Common.Idempotency;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Audit;
 using TemplateName.Modules.Auth;
+//#if (notifications)
 using TemplateName.Modules.Notifications;
+//#endif
+//#if (includeSample)
 using TemplateName.Modules.Sample;
+//#endif
+//#if (caching == "redis")
 using TemplateName.Platform.Redis;
+//#endif
 using TemplateName.Web.Common;
 using TemplateName.Web.Common.Localization;
 using TemplateName.Web.Common.Observability;
@@ -48,14 +54,20 @@ builder.Services.AddHttpSecurity(builder.Configuration);
 builder.Services.AddPermissionAuthorization();
 // Module registrations
 builder.Services.AddAuthModule(builder.Configuration);
+//#if (notifications)
 builder.Services.AddNotificationsModule(builder.Configuration);
+//#endif
+//#if (includeSample)
 builder.Services.AddSampleModule();
+//#endif
 // Consumes the change sets every module's outbox publishes (EntityChangesRecordedIntegrationEvent); any position among the modules works.
 builder.Services.AddAuditModule(builder.Configuration);
+//#if (caching == "redis")
 // Optional Redis (Caching:Provider = redis; a no-op otherwise, ADR 0027): the HybridCache second level, the readiness check "redis", the
 // Redis rate limiter (it replaces the in-memory IFixedWindowLimiterFactory of AddHttpSecurity) and the SignalR backplane. After
 // AddInfrastructureCommon and AddHealthChecks. A solution without Redis deletes this line and the TemplateName.Platform.Redis project.
 builder.Services.AddPlatformRedis(builder.Configuration);
+//#endif
 
 // Kestrel binds only its endpoints from the "Kestrel" section; bind Limits (e.g. MaxRequestBodySize) lazily so test overrides apply.
 builder.Services.AddOptions<KestrelServerOptions>().Configure<IConfiguration>((options, configuration) => configuration.GetSection("Kestrel").Bind(options));
@@ -66,7 +78,7 @@ builder.Services.AddApplicationDecorators();
 var app = builder.Build();
 
 // The migrate mode (ADR 0006): the built host knows every module's context, but it is never started, so no Kestrel, outbox dispatcher,
-// scheduler or delivery worker runs. Disposing the host flushes the logs before the process exits.
+// scheduler or other background service runs. Disposing the host flushes the logs before the process exits.
 if (HostCommand.Parse(args) == HostCommandKind.Migrate)
 {
     await using (app)
@@ -143,9 +155,13 @@ if (!app.Environment.IsProduction())
 var api = app.MapGroup("/api/v1");
 api.MapAuthEndpoints();
 app.MapAuthWellKnownEndpoints();
+//#if (notifications)
 api.MapNotificationsEndpoints();
 app.MapNotificationsHub();
+//#endif
+//#if (includeSample)
 api.MapSampleEndpoints();
+//#endif
 api.MapAuditEndpoints();
 
 app.Run();

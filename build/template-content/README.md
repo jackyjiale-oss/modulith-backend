@@ -19,7 +19,7 @@ Windows stops at 260 characters per path unless long paths are enabled. The long
 
 ```bash
 cp .env.example .env                 # then set your own SQL_SA_PASSWORD
-docker compose up -d                 # SQL Server, the Aspire dashboard and Mailpit
+docker compose up -d                 # the local services of docker-compose.yml
 git init                             # skip if this folder is already a repository
 git config core.hooksPath .githooks  # commit-message check (CONTRIBUTING.md)
 chmod +x .githooks/commit-msg        # the hook must be executable (harmless on Windows)
@@ -36,27 +36,75 @@ SQL Server needs several seconds on its first start: if the API stops at the mig
 
 Local development settings are not committed: `appsettings.Development.json` is git-ignored. The two settings above that are not secrets (`Database:ApplyMigrationsOnStartup` and `Auth:Seed:AdminEmail`) can live in such a local file instead of user secrets, along with `"OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4317"` (the Aspire dashboard) and a Serilog `MinimumLevel:Default` of `Debug`.
 
-With these settings the API applies the module migrations on startup and seeds the roles, the permissions and the first administrator, `admin@localhost.test`, with the password you set above (12 to 128 characters; choose your own and never commit it). Sign in as that administrator with `POST /api/v1/auth/login` in Scalar and send the returned `accessToken` as a bearer token. Remove `Auth:Seed:AdminPassword` from user secrets after the first start. Emails (account confirmation, password reset, security notices) are not delivered anywhere locally: Mailpit catches them, rendered in the recipient's language (`en`, `ms` or `zh-Hans`, the `locale` sent on registration), and its inbox is at <http://localhost:8025>. The Notifications module sends them in the background, so an email arrives a few seconds after the request (the Auth outbox and the delivery worker each poll every 5 seconds: two polling intervals, about 10 s, plus processing). Signed in, `GET /api/v1/notifications/inbox` lists the user's in-app notifications (a password change creates one, and an email), `GET /api/v1/notifications/inbox/unread-count` counts the unread ones, and a browser opens the SignalR hub at `/hubs/notifications` with a single-use ticket from `POST /api/v1/notifications/hub-tickets` to receive new ones live (client example: [`docs/modules/notifications.md`](docs/modules/notifications.md#realtime-hub)). The SMTP settings are `Notifications:Email:*` (they were `Auth:Email:*` in earlier versions: the API refuses to start while the old section is set).
+With these settings the API applies the module migrations on startup and seeds the roles, the permissions and the first administrator, `admin@localhost.test`, with the password you set above (12 to 128 characters; choose your own and never commit it). Sign in as that administrator with `POST /api/v1/auth/login` in Scalar and send the returned `accessToken` as a bearer token. Remove `Auth:Seed:AdminPassword` from user secrets after the first start.
+<!--#if (notifications)-->
+Docker Compose starts SQL Server, the Aspire dashboard and Mailpit. Emails (account confirmation, password reset, security notices) are not delivered anywhere locally: Mailpit catches them, rendered in the recipient's language (`en`, `ms` or `zh-Hans`, the `locale` sent on registration), and its inbox is at <http://localhost:8025>. The Notifications module sends them in the background, so an email arrives a few seconds after the request (the Auth outbox and the delivery worker each poll every 5 seconds: two polling intervals, about 10 s, plus processing). Signed in, `GET /api/v1/notifications/inbox` lists the user's in-app notifications (a password change creates one, and an email), `GET /api/v1/notifications/inbox/unread-count` counts the unread ones, and a browser opens the SignalR hub at `/hubs/notifications` with a single-use ticket from `POST /api/v1/notifications/hub-tickets` to receive new ones live (client example: [`docs/modules/notifications.md`](docs/modules/notifications.md#realtime-hub)). The SMTP settings are `Notifications:Email:*` (they were `Auth:Email:*` in earlier versions: the API refuses to start while the old section is set).
+<!--#endif-->
+
+A project generated with `--notifications false` has no consumer for Auth's integration events; add your own to deliver verification and reset codes.
 
 | What | URL |
 |---|---|
 | API reference (Scalar) | <https://localhost:5001/scalar/v1> |
 | Health (readiness) | <https://localhost:5001/health/ready> |
 | Aspire dashboard (logs, traces, metrics) | <http://localhost:18888> |
+<!--#if (notifications)-->
 | Mailpit inbox (emails the API sends) | <http://localhost:8025> |
+<!--#endif-->
 
-**Optional: Redis.** By default the permission cache, the rate-limit counters and the SignalR pushes live in the memory of one instance, and nothing needs Redis. To share them across instances, start the Valkey service (a Redis-compatible server, behind the compose profile `redis`) and switch the provider on: `docker compose --profile redis up -d`, then `Caching__Provider=redis ConnectionStrings__Redis=localhost:6379 dotnet run --project src/Host/TemplateName.Api`. With Redis down the API keeps serving from the database and `/health/ready` answers 200 `Degraded` ([`docs/building-blocks/platform-redis.md`](docs/building-blocks/platform-redis.md)).
+<!--#if (caching == "redis")-->
+**Optional: Redis.** By default the permission cache and the rate-limit counters
+<!--#if (notifications)-->
+(and the SignalR pushes)
+<!--#endif-->
+live in the memory of one instance, and nothing needs Redis. To share them across instances, start the Valkey service (a Redis-compatible server, behind the compose profile `redis`) and switch the provider on: `docker compose --profile redis up -d`, then `Caching__Provider=redis ConnectionStrings__Redis=localhost:6379 dotnet run --project src/Host/TemplateName.Api`. With Redis down the API keeps serving from the database and `/health/ready` answers 200 `Degraded` ([`docs/building-blocks/platform-redis.md`](docs/building-blocks/platform-redis.md)).
 
+<!--#endif-->
 ## Modules
 
 | Module | Document |
 |---|---|
 | Auth (sign-in, social login, tokens, sessions, two-step verification with recovery codes, step-up and trusted devices, roles, permissions, audit log) | [`docs/modules/auth.md`](docs/modules/auth.md) |
+<!--#if (notifications)-->
 | Notifications (every email and in-app message, the inbox, the SignalR hub, preferences, quiet hours) | [`docs/modules/notifications.md`](docs/modules/notifications.md) |
+<!--#endif-->
 | Audit (the audit trail of field changes: who changed what, from which value to which, `GET /api/v1/admin/audit/trails`) | [`docs/modules/audit.md`](docs/modules/audit.md) |
+<!--#if (includeSample)-->
 | Sample (leave requests) | [`docs/modules/sample.md`](docs/modules/sample.md) |
+<!--#endif-->
 
 A new module gets its own page, copied from [`docs/modules/_template.md`](docs/modules/_template.md).
+
+## Switches
+
+Three switches choose the parts of the template when a project is generated. Each is on by default, so `dotnet new modulith-backend -n Acme.Hr` generates everything. To leave parts out, pass any of them:
+
+```bash
+dotnet new modulith-backend -n Acme.Hr --notifications false --includeSample false --caching memory
+```
+
+| Switch | What it removes |
+|---|---|
+| `--notifications false` | the Notifications module (`src/Modules/Notifications`), its tests, its page, its SignalR hub and the Mailpit service of `docker-compose.yml` |
+| `--includeSample false` | the Sample module (`src/Modules/Sample`), its tests, its page, and the tests that run through it |
+| `--caching memory` | `Platform.Redis` (the optional Redis project), its tests, its page, the Valkey service of `docker-compose.yml`, the `Caching:Redis` settings and the Redis packages (`StackExchange.Redis`, `Microsoft.Extensions.Caching.StackExchangeRedis`, `Microsoft.AspNetCore.SignalR.StackExchangeRedis`) |
+
+`--caching memory` does not change the runtime default: `Caching:Provider` is `memory` either way. A project generated with `--caching memory` that sets `Caching:Provider` to `redis` refuses to start, and the message names `AddPlatformRedis`.
+
+A project generated with `--notifications false` keeps Auth as it is: Auth still publishes its integration events, and nothing consumes them. Add your own consumer to deliver verification and reset codes.
+
+Tests that need a removed part are removed with it; nothing is rewritten to stand in for them.
+
+- With `--notifications false`, the integration tests that read a token from the recorded email (the confirmation and password-reset flows) are gone.
+- With `--includeSample false`, the project has no integration test of the idempotency middleware, of `ErrorMessageLocalizer`, of the localization of validation errors by `Accept-Language`, or of the HTTP audit-trail route with its trace id: all of them ran through Sample.
+- With `--caching memory`, the Redis integration tests and the Platform unit tests (limiter, health check, backplane, resilient cache) are gone.
+- With `--notifications false` or `--includeSample false`, the OpenAPI snapshot (`OpenApiSnapshotTests` and its `verified.json`) is not generated, because one file lists every route. The breaking-change gate of [`docs/api-compatibility.md`](docs/api-compatibility.md) then has no baseline and only warns.
+
+A project generated with any of `--notifications false`, `--includeSample false` or `--caching memory` has no `packages.lock.json` in the host project and the three test projects, because their contents depend on the switches. Run `dotnet restore` once after generating, then commit the four lock files; until then CI's `dotnet restore --locked-mode` fails on the missing lock files, and the Docker build fails before its restore, at the `COPY` of the API's `packages.lock.json`.
+
+The template's own checks of these projects are narrower than their CI: for each combination it generates the project, builds it and runs its tests. The 80 % coverage gate, the `dotnet format` check, the image build and the licence job of a project generated with `--notifications false`, `--includeSample false` or `--caching memory` have not been run by the template, so the first push of such a project should be watched, and tests added if the coverage gate fails.
+
+The decision and its costs are in [ADR 0035](docs/adr/0035-template-switches-by-engine-conditionals.md).
 
 ## Testing
 
@@ -92,10 +140,16 @@ A new module creates `Resources/{Module}ErrorMessages.cs` (an empty `internal se
 
 ### Adding a paged list endpoint
 
-List endpoints page by cursor (keyset), never by offset (ADR 0010). Clients send `pageSize` (default 20, max 100), `cursor`, `sort` (`-createdAt`, `startDate,-createdAt`) and `includeTotalCount`, and get `{ items, pageSize, nextCursor, previousCursor, totalCount? }`. The Sample module's `GET /api/v1/sample/leave-requests` (`Application/LeaveRequests/List/`) is the worked example.
+List endpoints page by cursor (keyset), never by offset (ADR 0010). Clients send `pageSize` (default 20, max 100), `cursor`, `sort` (`-createdAt`, `startDate,-createdAt`) and `includeTotalCount`, and get `{ items, pageSize, nextCursor, previousCursor, totalCount? }`.
+<!--#if (includeSample)-->
+The Sample module's `GET /api/v1/sample/leave-requests` (`Application/LeaveRequests/List/`) is the worked example.
+<!--#endif-->
 
 1. **Allow-list the sort fields.** Add `{Aggregates}SortFields` next to the query: one `SortField(apiName, "[Column]", typeof(T))` per sortable field (camelCase API name, a bracketed column constant, a non-nullable column), the `Id` tie-breaker, `Allowed` and `Default`. Column names are written into SQL, so they are only ever these constants, never request text.
-2. **Index every allowed sort.** In the entity configuration add one index per sort, `(filter columns…, SortColumn, Id)`, for example `HasIndex(x => new { x.EmployeeId, x.CreatedAt, x.Id })`, then generate a migration with `dotnet ef migrations add` (see the module page). Migration review checks that each allowed sort has its index. Combinations without one (a multi-term sort such as `startDate,-createdAt`, or a filter that does not lead the sort's index, such as `employeeId` with `sort=startDate` in the Sample module) fall back to a scan plus a top-N sort: allow-list only covered sorts, or add the index.
+2. **Index every allowed sort.** In the entity configuration add one index per sort, `(filter columns…, SortColumn, Id)`, for example `HasIndex(x => new { x.EmployeeId, x.CreatedAt, x.Id })`, then generate a migration with `dotnet ef migrations add` (see the module page). Migration review checks that each allowed sort has its index. Combinations without one (a multi-term sort such as `startDate,-createdAt`, or a filter that does not lead the sort's index, such as `employeeId` with `sort=startDate`) fall back to a scan plus a top-N sort: allow-list only covered sorts, or add the index.
+   <!--#if (includeSample)-->
+   The second example is from the Sample module.
+   <!--#endif-->
 3. **Write the query, validator and handler.** `List{Aggregates}Query(filters…, CursorPageRequest Page) : IQuery<CursorPage<{Item}Response>>`; the validator checks `Page.PageSize` is 1 to `CursorPageRequest.MaxPageSize` (`.OverridePropertyName("PageSize")`, so the error key is `pageSize`). The handler:
    - parses the sort with `SortSpecification.Parse(page.Sort, Allowed, Id, Default)`;
    - hashes the canonical filter text with `CursorCodec.ComputeFilterHash("employeeId=…;status=…")` and, when a cursor was sent, decodes it with `CursorCodec.Decode(cursor, sort, filterHash)` (return the error on failure);
@@ -110,7 +164,10 @@ The index is [`docs/README.md`](docs/README.md).
 
 - [`docs/architecture/overview.md`](docs/architecture/overview.md): module map, request lifecycle, data ownership, decisions
 - [`docs/services/api.md`](docs/services/api.md): pipeline, every configuration section with defaults, health, environments, migrations
-- [`docs/building-blocks/`](docs/building-blocks/): SharedKernel, Application.Common, Infrastructure.Common, Web.Common, Platform.Redis (optional)
+- [`docs/building-blocks/`](docs/building-blocks/): SharedKernel, Application.Common, Infrastructure.Common, Web.Common
+  <!--#if (caching == "redis")-->
+  and Platform.Redis (optional)
+  <!--#endif-->
 - [`docs/modules/`](docs/modules/): one page per module
 - [`docs/adr/`](docs/adr/): architecture decisions
 - [`docs/coding-conventions.md`](docs/coding-conventions.md): naming, files and code style

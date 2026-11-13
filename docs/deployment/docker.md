@@ -35,7 +35,11 @@ docker run -d --name api -p 8080:8080 \
   api:local
 ```
 
-`-e NAME` with no value takes the value from your shell, so the secret is on no command line and in no file. The settings above are the minimum for Production; the full list of keys and their defaults is [`services/api.md`](../services/api.md#configuration), and the front-end URLs in `Auth:Links`, the SMTP settings in `Notifications:Email`, `AllowedHosts`, `Cors` and `ForwardedHeaders` are what a real deployment sets as well. The signing key is an EC P-256 private key in PEM ([Auth: access tokens](../modules/auth.md#access-tokens)).
+`-e NAME` with no value takes the value from your shell, so the secret is on no command line and in no file. The settings above are the minimum for Production; the full list of keys and their defaults is [`services/api.md`](../services/api.md#configuration), and the front-end URLs in `Auth:Links`,
+<!--#if (notifications)-->
+the SMTP settings in `Notifications:Email`,
+<!--#endif-->
+`AllowedHosts`, `Cors` and `ForwardedHeaders` are what a real deployment sets as well. The signing key is an EC P-256 private key in PEM ([Auth: access tokens](../modules/auth.md#access-tokens)).
 
 **Port.** The image listens on HTTP 8080 only: `ASPNETCORE_HTTP_PORTS=8080`, `EXPOSE 8080`. TLS ends at the proxy or load balancer. To change the port set **`ASPNETCORE_HTTP_PORTS`**, not `ASPNETCORE_URLS`: the health check reads only the first port number of `ASPNETCORE_HTTP_PORTS` (8080 when it is unset or holds no port number), so a port set only through `ASPNETCORE_URLS` leaves the container reported unhealthy.
 
@@ -47,7 +51,7 @@ docker run -d --name api -p 8080:8080 \
 
 ## The health check
 
-The image declares `HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3`, running `dotnet TemplateName.Api.dll healthcheck`. That mode builds no host and makes one GET to `http://127.0.0.1:<port>/health/live` with a 3 second timeout; it prints one line (`healthy (200)`, `unhealthy (503)`, `unhealthy (307)` for a redirect, which it does not follow, `unhealthy (400)` when `AllowedHosts` leaves out `127.0.0.1`, `unhealthy (TaskCanceledException)`) and exits 0 on a 2xx and 1 otherwise. It probes `/health/live`, which checks nothing but that the process answers, so a database outage does not make Docker or an orchestrator restart healthy containers. Use `/health/ready` (the database, and Redis when enabled) for a load balancer and for the smoke test after a deploy ([`services/api.md`](../services/api.md#health)).
+The image declares `HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3`, running `dotnet TemplateName.Api.dll healthcheck`. That mode builds no host and makes one GET to `http://127.0.0.1:<port>/health/live` with a 3 second timeout; it prints one line (`healthy (200)`, `unhealthy (503)`, `unhealthy (307)` for a redirect, which it does not follow, `unhealthy (400)` when `AllowedHosts` leaves out `127.0.0.1`, `unhealthy (TaskCanceledException)`) and exits 0 on a 2xx and 1 otherwise. It probes `/health/live`, which checks nothing but that the process answers, so a database outage does not make Docker or an orchestrator restart healthy containers. Use `/health/ready` (the readiness checks, the database among them) for a load balancer and for the smoke test after a deploy ([`services/api.md`](../services/api.md#health)).
 
 An orchestrator that has its own probes (Kubernetes) points them at `/health/live` and `/health/ready` and may ignore the image's `HEALTHCHECK`.
 
@@ -65,7 +69,7 @@ bash build/scripts/container-verify.sh api:local      # or ghcr.io/<owner>/<repo
 
 It needs `docker`, `openssl`, `curl` and `timeout` (GNU coreutils; on macOS Homebrew installs it as `gtimeout`, so put coreutils' `gnubin` on `PATH` or alias it), and takes a few minutes (`VERIFY_TIMEOUT`, default 120 seconds per wait). It generates an SA password and a signing key for the run and writes neither to a file. Seven checks: start a throwaway SQL Server on a private network; run `migrate` twice (the first retried while the server starts, each attempt stopped when it outlasts what is left of the wait); start the image in Production with the minimum configuration; wait for the image's own `HEALTHCHECK` to say `healthy`; call `/health/ready` and expect 200; assert the configured user is not root; remove every container and the network, printing the logs first on a failure. Everything it creates carries the label `container-verify=<pid>-<random>` (so two runs on one daemon do not remove each other's objects); `docker ps -a --filter label=container-verify` and `docker network ls --filter label=container-verify` should print nothing afterwards (a `SIGKILL` cannot be cleaned up by the script; remove what it leaves with those filters).
 
-What the script cannot rule out: it starts the image against an empty database, so the outbox, the recurring jobs, the delivery worker and the seeding run but have nothing to do, and a problem that appears only with data is not seen. The integration tests that start Production switch those services off.
+What the script cannot rule out: it starts the image against an empty database, so the outbox, the recurring jobs, the other background services and the seeding run but have nothing to do, and a problem that appears only with data is not seen. The integration tests that start Production switch those services off.
 
 ## The maintenance hook
 

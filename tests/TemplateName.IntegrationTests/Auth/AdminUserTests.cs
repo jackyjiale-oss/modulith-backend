@@ -12,7 +12,9 @@ using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Infrastructure.Authorization;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+//#if (notifications)
 using TemplateName.Modules.Notifications.Application;
+//#endif
 
 namespace TemplateName.IntegrationTests.Auth;
 
@@ -24,11 +26,15 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
 {
     private const string UsersRoute = "/api/v1/admin/auth/users";
     private const string RefreshRoute = "/api/v1/auth/token/refresh";
+    //#if (notifications)
     private const string ResetRoute = "/api/v1/auth/password/reset";
+    //#endif
     private const string Password = AuthTestHarness.Password;
+    //#if (notifications)
     private const string NewPassword = "a brand new passphrase";
     private const string AccountCreatedMalaySubject = "Akaun anda sedia: tetapkan kata laluan anda";
     private const string ForcedResetSubject = "An administrator asked you to set a new password";
+    //#endif
 
     private static readonly string[] AllUserPermissions =
     [
@@ -245,6 +251,7 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
         (await QueryAsync(context => context.Set<User>().SingleAsync(user => user.Id == actor.UserId, Ct))).Status.ShouldBe(UserStatus.Active);
     }
 
+    //#if (notifications)
     [Fact]
     public async Task Admin_created_user_receives_a_set_password_email_and_can_log_in_after_reset()
     {
@@ -297,6 +304,7 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
         body.GetProperty("roles").EnumerateArray().Select(role => role.GetProperty("name").GetString()).ShouldBe([SystemRoles.User]);
     }
 
+    //#endif
     [Fact]
     public async Task Concurrent_creates_of_one_address_yield_one_account_and_never_a_500()
     {
@@ -360,6 +368,7 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
         (await QueryAsync(context => context.Set<User>().CountAsync(user => user.NormalizedEmail == "A@EXAMPLE.COM", Ct))).ShouldBe(0);
     }
 
+    //#if (notifications)
     [Fact]
     public async Task Force_password_reset_revokes_sessions_and_sends_email()
     {
@@ -392,6 +401,7 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
         await LoginAsync("target@example.com", NewPassword);
     }
 
+    //#endif
     [Fact]
     public async Task Revoke_sessions_ends_every_session_of_the_user()
     {
@@ -418,14 +428,16 @@ public sealed class AdminUserTests(IntegrationTestWebAppFactory factory) : Admin
     [Fact]
     public async Task Assigning_a_role_grants_access_on_the_next_request()
     {
-        // The actor holds every permission of Admin (the Auth defaults and the Notifications ones the role is flagged to get), so it may
-        // grant the role (the grant rule).
+        // The actor holds every permission of Admin (the Auth defaults and those of the other modules the role is flagged to get), so it
+        // may grant the role (the grant rule).
         await SignInAsync(
             [
                 AuthPermissions.UserAssignRoles,
                 .. AuthSeeder.AdminDefaultPermissions,
+                //#if (notifications)
                 NotificationsPermissions.DeliveryView,
                 NotificationsPermissions.DeliveryRetry,
+                //#endif
             ],
             AuthTestHarness.DefaultLocale);
         var target = await CreateUserAsync("target@example.com");

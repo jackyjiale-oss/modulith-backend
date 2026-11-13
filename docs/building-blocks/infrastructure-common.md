@@ -19,7 +19,7 @@ Code: `src/BuildingBlocks/TemplateName.Infrastructure.Common/`.
 | `services.AddOutbox<TContext>(domainEventsAssembly)` | Registers the outbox of `TContext`: the event-type map (every `IDomainEvent` in the assembly), a singleton `OutboxDispatcher<TContext>` and `OutboxBackgroundService<TContext>`. |
 | `OutboxDispatcher<TContext>.ProcessBatchAsync(cancellationToken)` | Claims and dispatches one batch; returns the number claimed. Tests call it directly with `Outbox:Enabled = false`. |
 | `modelBuilder.ApplyInbox()` | Maps `InboxMessages` (`MessageId`, `Consumer` up to 400 characters, `ProcessedAt`; primary key `PK_InboxMessages` on `MessageId`, `Consumer`, 816 bytes, under SQL Server's 900-byte clustered key limit) into the context's default schema; call after `HasDefaultSchema`. |
-| `services.AddInbox<TContext>()` | Registers `Inbox<TContext>` as scoped and the daily job `{Context}InboxCleanup` (`NotificationsInboxCleanup`) that deletes rows processed more than `Retention:Inbox` ago. |
+| `services.AddInbox<TContext>()` | Registers `Inbox<TContext>` as scoped and the daily job `{Context}InboxCleanup` (`AuditInboxCleanup`) that deletes rows processed more than `Retention:Inbox` ago. |
 | `Inbox<TContext>` | `HasProcessedAsync(messageId, consumer, cancellationToken)`; `Record(messageId, consumer)` stages the row for the caller's own save; static `IsDuplicate(DbUpdateException)` is true only for SQL Server error 2627 or 2601 on `PK_InboxMessages`. |
 | `InboxMessage` | The inbox row; `ConsumerMaxLength` 400 (longer names are rejected by `Inbox<TContext>` with `ArgumentOutOfRangeException`). |
 | `OutboxRetryPolicy.NextAttemptAt(attemptCount, utcNow, maxAttempts)` | 5 s, 30 s, 2 min and 10 min after attempts 1 to 4, then 1 h; `null` (abandon) once `maxAttempts` is reached. `RetryWindow(maxAttempts)` is the span of those delays: 12 min 35 s for the default 5, one more hour for each attempt above 5. |
@@ -49,10 +49,14 @@ Error codes (messages in `Resources/InfrastructureErrorMessages.resx`, `.ms.resx
 
 ## Caching
 
-`Caching:Provider` decides where `HybridCache` keeps its entries (ADR 0027). This building block owns the setting, so a host without the optional Redis project still honours it:
+`Caching:Provider` decides where `HybridCache` keeps its entries. This building block owns the setting, so a host without the optional Redis project still honours it:
 
 - **`memory`** (the default): `HybridCache` in memory per instance; nothing else is needed.
-- **`redis`**: Redis as the shared second level. The host must call `AddPlatformRedis` from [`TemplateName.Platform.Redis`](platform-redis.md), which registers the distributed cache; a host that does not fails on start (`Caching:Provider is redis, but no distributed cache is registered`) rather than caching in memory only without saying so.
+- **`redis`**: Redis as the shared second level. The host must register the distributed cache; a host that does not fails on start (`Caching:Provider is redis, but no distributed cache is registered`) rather than caching in memory only without saying so.
+  <!--#if (caching == "redis")-->
+  `AddPlatformRedis` from [`TemplateName.Platform.Redis`](platform-redis.md) registers it (ADR 0027).
+  <!--#endif-->
+  A project generated with `--caching memory` has no `Platform.Redis` project: to use `Caching:Provider=redis` later it has to add the project back, and until it does the host refuses to start and says so.
 - **`none`**: no cache, for diagnosing. A `PostConfigure` of `HybridCacheOptions` adds `DisableLocalCache | DisableDistributedCache` to `DefaultEntryOptions.Flags`. HybridCache uses the default flags for every entry whose own options set no `Flags`, so an entry whose caller passes its own expirations (the Auth permission set does) is still read from its source every time (`Caching/CachingProviderTests.Provider_none_makes_every_permission_read_hit_the_database`). An entry that sets its own `Flags` is not covered; only the Auth module's spent provider nonces (`auth:ext-nonce:*`) do, on purpose: they are a security record, not a cache, so `none` must not switch their cross-instance layer off. (Single use within one instance does not rest on `HybridCache` at all: the Auth module's own atomic in-process gate guarantees it whatever `Caching:Provider` says; [Auth module](../modules/auth.md#configuration).)
 
 A value other than the three (any case) fails on start. `HybridCache` itself is registered by the module that uses it (`AddHybridCache`, Auth today).
@@ -114,8 +118,15 @@ A cleanup deletes what has outlived its retention (ADR 0028). The building block
 - **Bounded.** The job repeats its `DELETE TOP (@Batch)` statement with `@Batch = Retention:BatchSize` (1000) and `@Cutoff = now - retention` until a batch deletes fewer rows than `@Batch` or `Jobs:MaxBatchesPerRun` (100) batches have run. A backlog drains over several runs; each batch is its own transaction.
 - **Strictly older.** A row goes only when its age column is before the cutoff, so a row exactly at the retention stays until the next run. `now` is `TimeProvider`.
 - **Off.** A retention of `null` (an empty value in configuration) or zero turns the job off: a run returns `JobResult(0)`. The scheduler's own `Jobs:{Name}:Enabled = false` stops it altogether.
-- **Upgrading an existing deployment.** A job without a state row is due at once (`NextRunAt = now`), so the first start of a version that brings these jobs runs every cleanup straight away, and each job deletes up to `Jobs:MaxBatchesPerRun` × `Retention:BatchSize` rows on that first run (100 × 1000 = 100,000 by default), then as much again at every later run until its backlog is gone. If data older than the default retentions must be kept, set the retention values first (`Retention:*`, `Auth:Retention:*`, `Notifications:Retention:*`; empty or zero keeps the data) or `Jobs:{Name}:Enabled=false` for the job, **before** upgrading.
-- **Names.** PascalCase, without dots: `{Context}OutboxCleanup` and `{Context}InboxCleanup` where `{Context}` is the context's name without `DbContext` (`AuthOutboxCleanup`, `SampleOutboxCleanup`, `NotificationsInboxCleanup`), and `IdempotencyKeysCleanup`.
+- **Upgrading an existing deployment.** A job without a state row is due at once (`NextRunAt = now`), so the first start of a version that brings these jobs runs every cleanup straight away, and each job deletes up to `Jobs:MaxBatchesPerRun` × `Retention:BatchSize` rows on that first run (100 × 1000 = 100,000 by default), then as much again at every later run until its backlog is gone. If data older than the default retentions must be kept, set the retention values first (`Retention:*` and each module's own, such as `Auth:Retention:*`; empty or zero keeps the data) or `Jobs:{Name}:Enabled=false` for the job, **before** upgrading.
+- **Names.** PascalCase, without dots: `{Context}OutboxCleanup` and `{Context}InboxCleanup` where `{Context}` is the context's name without `DbContext` (`AuthOutboxCleanup`,
+  <!--#if (includeSample)-->
+  `SampleOutboxCleanup`,
+  <!--#endif-->
+  <!--#if (notifications)-->
+  `NotificationsInboxCleanup`,
+  <!--#endif-->
+  `AuditInboxCleanup`), and `IdempotencyKeysCleanup`.
 - **Outbox cleanup.** `AddOutbox<TContext>()` also registers `OutboxCleanupJob<TContext>` (daily). Each batch deletes `OutboxMessages` with `ProcessedAt < cutoff` and the `OutboxMessageConsumers` of those messages in the same transaction (no foreign key joins the tables, so nothing cascades). The predicate is served by the filtered index on `ProcessedAt` (`WHERE ProcessedAt IS NOT NULL`); a test reads the statement's execution plan.
 - **Dead letters stay.** Pending messages and abandoned ones (`ProcessedAt IS NULL`, `AttemptCount >= Outbox:MaxAttempts`) are never deleted. After every run, whether or not the retention is on, the job sets the gauge `platform.outbox.abandoned{context}` (meter `TemplateName.Platform`; `context` is the context's name without `DbContext`) to the number of abandoned messages. The value is set on the instance that ran the job and reported only until that job's next run should have replaced it: the job's interval (`Jobs:{Name}:Interval`, else its daily default) plus `Jobs:LeaseDuration` and `Jobs:TickInterval`. After that the instance reports nothing for the context, so an instance that did not run the job lately, or whose last run threw before it counted, never repeats an old count (`OutboxAbandonedGaugeTests`). Across instances, take the maximum of the most recent reports per `context` (for example `max by (context) (platform_outbox_abandoned)`), never the sum: each report is the whole count, not a share of it, and an instance that did not run the job reports nothing. Alert on that maximum being above zero.
 - **Inbox cleanup.** `AddInbox<TContext>()` also registers `InboxCleanupJob<TContext>` (daily), which deletes `InboxMessages` with `ProcessedAt < cutoff`, `cutoff = now - Retention:Inbox` (7 days by default, so a row processed exactly 7 days ago stays until the next run). The predicate is served by the index on `ProcessedAt`; a test reads the statement's execution plan. A retention of `null` or zero turns it off; the consumers of the module keep working, the table just grows.
@@ -194,7 +205,11 @@ A pipeline name that is not built in starts from the `external-default` values. 
 
 **Metrics.** Polly's meter `Polly` is exported with the host's OpenTelemetry metrics (`AddObservability` adds it next to `TemplateName.Platform`, when an OTLP endpoint is set): the retry, breaker and timeout events and the attempt and pipeline durations, tagged with the pipeline and strategy names (`{pipeline}-retry`, `{pipeline}-breaker`, `{pipeline}-total-timeout`, `{pipeline}-attempt-timeout`).
 
-**Not covered.** MailKit SMTP is not HTTP; the email delivery worker keeps its own retry and dead-letter schedule. No pipeline exists yet for an SMS or an email provider (nothing calls one); the next section shows how to add it.
+**Not covered.**
+<!--#if (notifications)-->
+MailKit SMTP is not HTTP; the email delivery worker keeps its own retry and dead-letter schedule.
+<!--#endif-->
+No pipeline exists yet for an SMS or an email provider (nothing calls one); the next section shows how to add it.
 
 ### Add a pipeline for a new provider
 

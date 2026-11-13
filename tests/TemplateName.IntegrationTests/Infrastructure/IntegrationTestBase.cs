@@ -4,15 +4,20 @@ using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.Modules.Auth;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
+//#if (notifications)
 using TemplateName.Modules.Notifications.Infrastructure.Deliveries;
+//#endif
 
 namespace TemplateName.IntegrationTests.Infrastructure;
 
 /// <summary>
 /// Base class for tests that call the running API through <see cref="Client"/>. Each test starts with empty databases seeded with the
 /// Auth module's system roles and the permissions every module declares, the clock at its start instant, an anonymous client and user,
-/// no extra declared permissions, no recorded domain or integration events, emails or in-app pushes, and handlers and an email
-/// transport that neither fail nor wait. Only the Data Protection key ring (<c>auth.DataProtectionKeys</c>) is kept from earlier tests,
+/// no extra declared permissions, no recorded domain or integration events, and handlers that neither fail nor wait.
+//#if (notifications)
+/// No recorded emails or in-app pushes either, and an email transport that neither fails nor waits.
+//#endif
+/// Only the Data Protection key ring (<c>auth.DataProtectionKeys</c>) is kept from earlier tests,
 /// because the hosts keep it in memory.
 /// </summary>
 public abstract class IntegrationTestBase(IntegrationTestWebAppFactory factory) : IAsyncLifetime
@@ -38,8 +43,10 @@ public abstract class IntegrationTestBase(IntegrationTestWebAppFactory factory) 
         Factory.EventRecorder.Clear();
         Factory.IntegrationEvents.Clear();
         Factory.MessageContextRecorder.Clear();
+        //#if (notifications)
         Factory.EmailSender.Clear();
         Factory.InAppPusher.Reset();
+        //#endif
         Factory.FlakySwitch.Reset();
         Factory.HandlerGate.Reset();
     }
@@ -51,9 +58,12 @@ public abstract class IntegrationTestBase(IntegrationTestWebAppFactory factory) 
     }
 
     /// <summary>
-    /// Runs what the background services would: the Auth outbox dispatcher (which publishes Auth's integration events to the
-    /// Notifications consumers), then the Notifications delivery worker, again and again until neither finds anything due. The clock does
-    /// not move, so a delivery rescheduled after a failure, or deferred by quiet hours, waits for the test to move it.
+    /// Runs what the background services would: the Auth outbox dispatcher, which publishes Auth's integration events to their consumers,
+    //#if (notifications)
+    /// then the Notifications delivery worker,
+    //#endif
+    /// again and again until nothing is due. The clock does not move, so a message or a delivery rescheduled after a failure, or
+    /// deferred by quiet hours, waits for the test to move it.
     /// </summary>
     protected Task DispatchNotificationsAsync() => DispatchNotificationsAsync(Factory.Services);
 
@@ -67,13 +77,21 @@ public abstract class IntegrationTestBase(IntegrationTestWebAppFactory factory) 
 
         const int MaxRounds = 100;
         var outbox = services.GetRequiredService<OutboxDispatcher<AuthDbContext>>();
+        //#if (notifications)
         var deliveries = services.GetRequiredService<DeliveryDispatcher>();
+        //#endif
 
         for (var round = 0; round < MaxRounds; round++)
         {
             var published = await outbox.ProcessBatchAsync(Ct);
+            //#if (notifications)
             var delivered = await deliveries.ProcessBatchAsync(Ct);
-            if (published == 0 && delivered == 0)
+            //#endif
+            if (published == 0
+                //#if (notifications)
+                && delivered == 0
+                //#endif
+                )
             {
                 return;
             }

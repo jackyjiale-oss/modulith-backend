@@ -31,6 +31,7 @@ public sealed class LayeringTests
         result.IsSuccessful.ShouldBeTrue(string.Join(", ", result.FailingTypeNames ?? []));
     }
 
+    //#if (caching == "redis")
     [Fact]
     public void Only_the_host_references_Platform_Redis()
     {
@@ -55,6 +56,7 @@ public sealed class LayeringTests
         referencingProjects.ShouldBe([api]);
     }
 
+    //#endif
     [Theory]
     [MemberData(nameof(Assemblies.ModuleNames), MemberType = typeof(Assemblies))]
     public void Module_domain_does_not_depend_on_other_layers_or_frameworks(string moduleName)

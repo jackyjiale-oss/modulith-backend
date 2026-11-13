@@ -52,7 +52,10 @@ The environment of a .NET host that is not told otherwise is `Production`, and t
 
 ## Health checks wired to the load balancer or monitor
 
-`/health/live` (the process answers) and `/health/ready` (a check per database schema, and Redis when enabled) exist, are anonymous and exempt from rate limiting. The image's `HEALTHCHECK` probes `/health/live`, `container-verify.sh` and the CD smoke test call `/health/ready`, and the IIS script polls the URL you give it. **Yours:** point the load balancer or uptime monitor at `/health/ready` (a database outage then takes the instance out of rotation) and alert on it. With Redis down `/health/ready` answers 200 `Degraded`, by design ([`services/api.md`](../services/api.md#health)).
+`/health/live` (the process answers) and `/health/ready` (the readiness checks: one per database schema, and any other check tagged `ready`) exist, are anonymous and exempt from rate limiting. The image's `HEALTHCHECK` probes `/health/live`, `container-verify.sh` and the CD smoke test call `/health/ready`, and the IIS script polls the URL you give it. **Yours:** point the load balancer or uptime monitor at `/health/ready` (a database outage then takes the instance out of rotation) and alert on it.
+<!--#if (caching == "redis")-->
+With Redis down `/health/ready` answers 200 `Degraded`, by design ([`services/api.md`](../services/api.md#health)).
+<!--#endif-->
 
 ## Log level Information, and masking
 
@@ -65,7 +68,11 @@ Nothing in the template takes or tests a backup. **Yours:** schedule database ba
 ## Also before the first release
 
 - [ ] Every item above has an owner and a date.
-- [ ] `Auth:Links`, `Notifications:Email`, `Cors:AllowedOrigins` and the other environment-specific settings name your real hosts; the defaults point at `localhost`.
+- [ ] `Auth:Links`,
+  <!--#if (notifications)-->
+  `Notifications:Email`,
+  <!--#endif-->
+  `Cors:AllowedOrigins` and the other environment-specific settings name your real hosts; the defaults point at `localhost`.
 - [ ] The runtime database login has no DDL rights, and the migration login exists only as the environment secret.
 - [ ] `build/deploy/maintenance.html` carries your brand and contact; `maintenance.sh` is written, and its `on` passes `/health/live` and `/health/ready` through to the API ([`docker.md`](docker.md#the-maintenance-hook)). A release in maintenance mode fails before `migrate` without the hook. Until a release has completed its production deploy, later releases are dispatched by hand with `maintenance: on` ([`README.md`](README.md#maintenance-mode)).
 - [ ] `roll-out.sh` is written, `DEPLOY_ENABLED` is set only after it is, and `production` (ideally `staging` too) has required reviewers.

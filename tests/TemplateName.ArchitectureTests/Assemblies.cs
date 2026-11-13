@@ -6,11 +6,17 @@ using TemplateName.Modules.Audit;
 using TemplateName.Modules.Auth;
 using TemplateName.Modules.Auth.Contracts.Users;
 using TemplateName.Modules.Auth.Resources;
+//#if (notifications)
 using TemplateName.Modules.Notifications;
 using TemplateName.Modules.Notifications.Resources;
+//#endif
+//#if (includeSample)
 using TemplateName.Modules.Sample;
 using TemplateName.Modules.Sample.Resources;
+//#endif
+//#if (caching == "redis")
 using TemplateName.Platform.Redis;
+//#endif
 using TemplateName.SharedKernel;
 using TemplateName.Web.Common.Resources;
 using TemplateName.Web.Common.Results;
@@ -31,17 +37,23 @@ public static class Assemblies
 
     public static Assembly WebCommon { get; } = typeof(ResultExtensions).Assembly;
 
+    //#if (caching == "redis")
     /// <summary>The optional Redis project (ADR 0027): only the host may reference it, so removing it removes its packages.</summary>
     public static Assembly PlatformRedis { get; } = typeof(RedisCachingOptions).Assembly;
 
+    //#endif
     public static Assembly Api { get; } = typeof(Program).Assembly;
 
     /// <summary>One entry per business module; each is the module's own assembly (never a <c>.Contracts</c> assembly).</summary>
     public static IReadOnlyList<Assembly> Modules { get; } =
     [
         typeof(AuthModule).Assembly,
+        //#if (notifications)
         typeof(NotificationsModule).Assembly,
+        //#endif
+        //#if (includeSample)
         typeof(SampleModule).Assembly,
+        //#endif
         typeof(AuditModule).Assembly,
     ];
 
@@ -58,7 +70,9 @@ public static class Assemblies
         ApplicationCommon,
         InfrastructureCommon,
         WebCommon,
+        //#if (caching == "redis")
         PlatformRedis,
+        //#endif
     ];
 
     /// <summary>The marker class of every <c>*ErrorMessages</c> resource set (neutral English plus one <c>.resx</c> per translation).</summary>
@@ -67,8 +81,12 @@ public static class Assemblies
         typeof(CommonErrorMessages),
         typeof(InfrastructureErrorMessages),
         typeof(AuthErrorMessages),
+        //#if (notifications)
         typeof(NotificationsErrorMessages),
+        //#endif
+        //#if (includeSample)
         typeof(SampleErrorMessages),
+        //#endif
     ];
 
     /// <summary>

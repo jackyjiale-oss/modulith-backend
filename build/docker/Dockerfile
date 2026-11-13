@@ -20,11 +20,17 @@ COPY src/BuildingBlocks/TemplateName.SharedKernel/TemplateName.SharedKernel.cspr
 COPY src/BuildingBlocks/TemplateName.Application.Common/TemplateName.Application.Common.csproj src/BuildingBlocks/TemplateName.Application.Common/packages.lock.json src/BuildingBlocks/TemplateName.Application.Common/
 COPY src/BuildingBlocks/TemplateName.Infrastructure.Common/TemplateName.Infrastructure.Common.csproj src/BuildingBlocks/TemplateName.Infrastructure.Common/packages.lock.json src/BuildingBlocks/TemplateName.Infrastructure.Common/
 COPY src/BuildingBlocks/TemplateName.Web.Common/TemplateName.Web.Common.csproj src/BuildingBlocks/TemplateName.Web.Common/packages.lock.json src/BuildingBlocks/TemplateName.Web.Common/
+#if (caching == "redis")
 COPY src/BuildingBlocks/TemplateName.Platform.Redis/TemplateName.Platform.Redis.csproj src/BuildingBlocks/TemplateName.Platform.Redis/packages.lock.json src/BuildingBlocks/TemplateName.Platform.Redis/
+#endif
 COPY src/Modules/Auth/TemplateName.Modules.Auth.Contracts/TemplateName.Modules.Auth.Contracts.csproj src/Modules/Auth/TemplateName.Modules.Auth.Contracts/packages.lock.json src/Modules/Auth/TemplateName.Modules.Auth.Contracts/
 COPY src/Modules/Auth/TemplateName.Modules.Auth/TemplateName.Modules.Auth.csproj src/Modules/Auth/TemplateName.Modules.Auth/packages.lock.json src/Modules/Auth/TemplateName.Modules.Auth/
+#if (notifications)
 COPY src/Modules/Notifications/TemplateName.Modules.Notifications/TemplateName.Modules.Notifications.csproj src/Modules/Notifications/TemplateName.Modules.Notifications/packages.lock.json src/Modules/Notifications/TemplateName.Modules.Notifications/
+#endif
+#if (includeSample)
 COPY src/Modules/Sample/TemplateName.Modules.Sample/TemplateName.Modules.Sample.csproj src/Modules/Sample/TemplateName.Modules.Sample/packages.lock.json src/Modules/Sample/TemplateName.Modules.Sample/
+#endif
 COPY src/Modules/Audit/TemplateName.Modules.Audit/TemplateName.Modules.Audit.csproj src/Modules/Audit/TemplateName.Modules.Audit/packages.lock.json src/Modules/Audit/TemplateName.Modules.Audit/
 COPY src/Host/TemplateName.Api/TemplateName.Api.csproj src/Host/TemplateName.Api/packages.lock.json src/Host/TemplateName.Api/
 RUN dotnet restore src/Host/TemplateName.Api/TemplateName.Api.csproj --locked-mode

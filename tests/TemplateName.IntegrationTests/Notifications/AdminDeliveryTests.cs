@@ -14,7 +14,9 @@ using TemplateName.Modules.Notifications.Domain.Deliveries;
 using TemplateName.Modules.Notifications.Domain.Notifications;
 using TemplateName.Modules.Notifications.Infrastructure.Deliveries;
 using TemplateName.Modules.Notifications.Infrastructure.Persistence;
+//#if (includeSample)
 using TemplateName.Modules.Sample.Application;
+//#endif
 
 namespace TemplateName.IntegrationTests.Notifications;
 
@@ -31,7 +33,14 @@ public sealed class AdminDeliveryTests(IntegrationTestWebAppFactory factory) : A
 
     private static readonly string[] EveryPermission =
     [
-        .. new IPermissionSource[] { new AuthPermissionSource(), new SamplePermissionSource(), new NotificationsPermissionSource() }
+        .. new IPermissionSource[]
+            {
+                new AuthPermissionSource(),
+                //#if (includeSample)
+                new SamplePermissionSource(),
+                //#endif
+                new NotificationsPermissionSource(),
+            }
             .SelectMany(source => source.Permissions)
             .Select(permission => permission.Code),
     ];

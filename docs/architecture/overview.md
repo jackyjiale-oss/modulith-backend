@@ -10,8 +10,12 @@ flowchart TD
 
     subgraph Modules["Business modules (internal by default)"]
         Auth["TemplateName.Modules.Auth<br/>Domain · Application · Infrastructure · Endpoints"]
+        %%#if (notifications)
         Notifications["TemplateName.Modules.Notifications<br/>Domain · Application · Infrastructure · Endpoints"]
+        %%#endif
+        %%#if (includeSample)
         Sample["TemplateName.Modules.Sample<br/>Domain · Application · Infrastructure · Endpoints"]
+        %%#endif
         Audit["TemplateName.Modules.Audit<br/>Domain · Application · Infrastructure · Endpoints"]
         Contracts["TemplateName.Modules.{Module}.Contracts<br/>integration events, public interfaces<br/>(Auth today)"]
     end
@@ -21,53 +25,86 @@ flowchart TD
         Infra["Infrastructure.Common<br/>persistence, outbox, inbox, jobs, idempotency, HTTP resilience"]
         App["Application.Common<br/>handlers, decorators, pagination, messages"]
         Kernel["SharedKernel<br/>Result, Error, Entity, AggregateRoot"]
+        %%#if (caching == "redis")
         Redis["Platform.Redis (optional)<br/>Redis cache level, rate limiter, SignalR backplane"]
+        %%#endif
     end
 
     Api --> Auth
+    %%#if (notifications)
     Api --> Notifications
+    %%#endif
+    %%#if (includeSample)
     Api --> Sample
+    %%#endif
     Api --> Audit
     Api --> Web
     Api --> Infra
     Api --> App
+    %%#if (caching == "redis")
     Api -. "Caching:Provider = redis" .-> Redis
+    %%#endif
     Auth -. "other modules only via" .-> Contracts
+    %%#if (includeSample)
     Sample -. "other modules only via" .-> Contracts
+    %%#endif
+    %%#if (notifications)
     Notifications -. "reads Auth only via" .-> Contracts
+    %%#endif
     Auth --> Web
     Auth --> Infra
     Auth --> App
     Auth --> Kernel
+    %%#if (notifications)
     Notifications --> Web
     Notifications --> Infra
     Notifications --> App
     Notifications --> Kernel
+    %%#endif
     Audit --> Web
     Audit --> Infra
     Audit --> App
     Audit --> Kernel
+    %%#if (includeSample)
     Sample --> Web
     Sample --> Infra
     Sample --> App
     Sample --> Kernel
+    %%#endif
     Web --> App
     Infra --> App
     Web --> Kernel
     Infra --> Kernel
     App --> Kernel
+    %%#if (caching == "redis")
     Redis --> Infra
     Redis --> Web
+    %%#endif
 ```
 
 - **Host** (`src/Host/TemplateName.Api`, [`docs/services/api.md`](../services/api.md)) wires the building blocks and modules in `Program.cs`: services, the middleware pipeline, health checks, OpenAPI and the `/api/v1` route group.
-- **Modules** (`src/Modules/{Module}`, one document per module under [`docs/modules/`](../modules/)) are two projects: `TemplateName.Modules.{Module}` with `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/` and `Resources/` folders (a module that declares notification types also has `Templates/`, its embedded notification templates), and `TemplateName.Modules.{Module}.Contracts`, the only project another module may reference (ADR 0001). A module with nothing to offer other modules ships one project only (Notifications and Audit), and one that defines no error code has no `Resources/` folder (Audit). The entry point `{Module}Module` (`Add{Module}Module`, `Map{Module}Endpoints`) is the only public type.
-- **Auth** ([`docs/modules/auth.md`](../modules/auth.md)) is the identity module: users, sessions, roles, permissions and the audit log in the `auth` schema, with the sign-in, token, password and administration endpoints, social login (the client posts a Google, Apple, Microsoft, Facebook or generic OpenID Connect proof and the backend verifies it and issues its own tokens; ADR 0032, [setup guide](../social-login-setup.md)), and two-step verification (an authenticator app with single-use recovery codes, a step-up before sensitive actions, trusted devices and an administrator's reset; ADRs 0022 to 0025). It implements `IPermissionChecker` for the whole host; no other module references it (its `TemplateName.Modules.Auth.Contracts` project holds its integration events and `IUserContactDirectory`; Auth publishes the events from its outbox, and the Notifications module consumes them).
+- **Modules** (`src/Modules/{Module}`, one document per module under [`docs/modules/`](../modules/)) are two projects: `TemplateName.Modules.{Module}` with `Domain/`, `Application/`, `Infrastructure/`, `Endpoints/` and `Resources/` folders, and `TemplateName.Modules.{Module}.Contracts`, the only project another module may reference (ADR 0001).
+  <!--#if (notifications)-->
+  A module that declares notification types also has `Templates/`, its embedded notification templates. Notifications ships one project only.
+  <!--#endif-->
+  A module with nothing to offer other modules ships one project only (Audit), and one that defines no error code has no `Resources/` folder (Audit). The entry point `{Module}Module` (`Add{Module}Module`, `Map{Module}Endpoints`) is the only public type.
+- **Auth** ([`docs/modules/auth.md`](../modules/auth.md)) is the identity module: users, sessions, roles, permissions and the audit log in the `auth` schema, with the sign-in, token, password and administration endpoints, social login (the client posts a Google, Apple, Microsoft, Facebook or generic OpenID Connect proof and the backend verifies it and issues its own tokens; ADR 0032, [setup guide](../social-login-setup.md)), and two-step verification (an authenticator app with single-use recovery codes, a step-up before sensitive actions, trusted devices and an administrator's reset; ADRs 0022 to 0025). It implements `IPermissionChecker` for the whole host; no other module references it (its `TemplateName.Modules.Auth.Contracts` project holds its integration events and `IUserContactDirectory`; Auth publishes the events from its outbox).
+  <!--#if (notifications)-->
+  The Notifications module consumes them.
+  <!--#endif-->
+<!--#if (notifications)-->
 - **Notifications** ([`docs/modules/notifications.md`](../modules/notifications.md)) is the module through which every message the template sends goes (Auth sends no email itself): it consumes the integration events other modules publish and renders and delivers them by email and in-app in the recipient's language. It holds the code-defined notification type catalog with its embedded templates, the recipient culture and time zone rules, its `notify` schema, the consumers of Auth's integration events (which create notification and delivery rows through its inbox), the delivery worker with the email (SMTP, `Notifications:Email`) and in-app channels, the inbox, preference and hub-ticket APIs, the SignalR hub (`/hubs/notifications`) that pushes new in-app notifications, and the administrator's delivery list and retry. It references `TemplateName.Modules.Auth.Contracts` only, never the Auth module, and no module references it.
+<!--#endif-->
 - **Audit** ([`docs/modules/audit.md`](../modules/audit.md)) keeps the audit trail: who changed which field of which record, from which value to which, in the `audit` schema, read through `GET /api/v1/admin/audit/trails`. It is one project with no `.Contracts` project (it offers nothing to other modules), no `Resources/` folder and no error code. It references no module and no module references it: an entity marked `[Audited]` in any module has its changes written, in the same save, to that module's own outbox, and the Audit module consumes them as `EntityChangesRecordedIntegrationEvent` (defined in `Application.Common`) through its inbox. Auth's security log (`auth.AuthAuditLogs`) is a different log and stays in Auth (ADR 0030).
-- **Building blocks** ([`shared-kernel`](../building-blocks/shared-kernel.md), [`application-common`](../building-blocks/application-common.md), [`infrastructure-common`](../building-blocks/infrastructure-common.md), [`web-common`](../building-blocks/web-common.md)) hold everything every module needs. [`platform-redis`](../building-blocks/platform-redis.md) is the exception: an optional project only the host references, active with `Caching:Provider = redis`, that a solution without Redis deletes (ADR 0027).
+- **Building blocks** ([`shared-kernel`](../building-blocks/shared-kernel.md), [`application-common`](../building-blocks/application-common.md), [`infrastructure-common`](../building-blocks/infrastructure-common.md), [`web-common`](../building-blocks/web-common.md)) hold everything every module needs.
+  <!--#if (caching == "redis")-->
+  [`platform-redis`](../building-blocks/platform-redis.md) is the exception: an optional project only the host references, active with `Caching:Provider = redis`, that a solution without Redis deletes (ADR 0027).
+  <!--#endif-->
 
-The arrows are project references, and architecture tests (`tests/TemplateName.ArchitectureTests`) enforce them: SharedKernel has no dependencies; Application.Common does not depend on Infrastructure.Common or Web.Common; a module's `Domain` depends on nothing but SharedKernel; its `Application` does not depend on its `Infrastructure` or `Endpoints`; no module references another module except its `.Contracts`; and only the host references Platform.Redis.
+The arrows are project references, and architecture tests (`tests/TemplateName.ArchitectureTests`) enforce them: SharedKernel has no dependencies; Application.Common does not depend on Infrastructure.Common or Web.Common; a module's `Domain` depends on nothing but SharedKernel; its `Application` does not depend on its `Infrastructure` or `Endpoints`; no module references another module except its `.Contracts`.
+<!--#if (caching == "redis")-->
+Only the host references Platform.Redis.
+<!--#endif-->
 
 ## Request lifecycle
 
@@ -81,9 +118,16 @@ flowchart LR
     AuthZ --> Idem["11 Idempotency-Key"] --> EP["12 Endpoint"]
 ```
 
-**Authentication and authorization.** Every endpoint requires a signed-in user unless it says `.AllowAnonymous()` (the fallback policy). Authentication (slot 1a) validates the `Authorization: Bearer` access token, an ES256 JWT the Auth module issued, with no database read; a missing or invalid token leaves the request anonymous and never fails there. It runs before localization so the token's saved `locale` claim picks the response language ahead of `Accept-Language` (ADR 0009). Authorization (slot 10) runs after routing and the rate limiter: an endpoint with `.RequirePermission(code)` asks `IPermissionChecker`, which the Auth module implements over a per-user set cached for 30 seconds, because permissions are never carried in the token (ADR 0016). Anonymous callers get 401 and signed-in callers without the permission 403, both as ProblemDetails, and both are counted by the rate limiter. Other modules declare their permissions with `IPermissionSource` and depend only on `Application.Common`'s `IPermissionChecker` and `ICurrentUser`, never on the Auth module; the Sample module's `LeaveRequestEndpoints` is the example. A sensitive action asks for a fresh identity through the token's `auth_time` and `amr` claims (a step-up, ADR 0023), again with no database read. Details: [Auth module](../modules/auth.md#access-tokens), [Auth: Multi-factor authentication](../modules/auth.md#multi-factor-authentication) and [`docs/services/api.md`](../services/api.md#pipeline).
+**Authentication and authorization.** Every endpoint requires a signed-in user unless it says `.AllowAnonymous()` (the fallback policy). Authentication (slot 1a) validates the `Authorization: Bearer` access token, an ES256 JWT the Auth module issued, with no database read; a missing or invalid token leaves the request anonymous and never fails there. It runs before localization so the token's saved `locale` claim picks the response language ahead of `Accept-Language` (ADR 0009). Authorization (slot 10) runs after routing and the rate limiter: an endpoint with `.RequirePermission(code)` asks `IPermissionChecker`, which the Auth module implements over a per-user set cached for 30 seconds, because permissions are never carried in the token (ADR 0016). Anonymous callers get 401 and signed-in callers without the permission 403, both as ProblemDetails, and both are counted by the rate limiter. Other modules declare their permissions with `IPermissionSource` and depend only on `Application.Common`'s `IPermissionChecker` and `ICurrentUser`, never on the Auth module.
+<!--#if (includeSample)-->
+The Sample module's `LeaveRequestEndpoints` is the example.
+<!--#endif-->
+A sensitive action asks for a fresh identity through the token's `auth_time` and `amr` claims (a step-up, ADR 0023), again with no database read. Details: [Auth module](../modules/auth.md#access-tokens), [Auth: Multi-factor authentication](../modules/auth.md#multi-factor-authentication) and [`docs/services/api.md`](../services/api.md#pipeline).
 
-Inside an endpoint (the Sample module's `LeaveRequestEndpoints` is the worked example):
+<!--#if (includeSample)-->
+The Sample module's `LeaveRequestEndpoints` is the worked example.
+<!--#endif-->
+Inside an endpoint:
 
 1. The endpoint binds the body or query (malformed input throws, and the exception handler answers `400 request.malformed`), builds a command or query record and calls the injected `ICommandHandler<…>` or `IQueryHandler<…>`.
 2. The handler is wrapped by the decorators: logging (outermost) then validation. Validation failures return `400 validation.failed` with camel-cased field `errors` without reaching the handler (ADR 0005).
@@ -97,10 +141,19 @@ Inside an endpoint (the Sample module's `LeaveRequestEndpoints` is the worked ex
 Work that does not belong to a request runs in hosted services of the API process, and each takes its work under a SQL lease, so a second instance joins in without a second process and without doing the same work twice:
 
 - **Outbox dispatchers**, one per module context with an outbox, publish saved domain events (ADR 0007).
+<!--#if (notifications)-->
 - **The delivery worker** of the Notifications module sends emails and writes the in-app inbox ([Notifications](../modules/notifications.md#background-processing)).
-- **The recurring-job scheduler** (`RecurringJobBackgroundService`, ADR 0026) runs the jobs that `AddRecurringJob` registered, one instance at a time per job, and records each run in `platform.JobStates`. Today every job is a cleanup that deletes what has outlived its retention in bounded batches: the outbox and inbox of each context, `platform.IdempotencyKeys`, and the Auth, Notifications and Audit tables ([`infrastructure-common`](../building-blocks/infrastructure-common.md#cleanup-jobs), ADR 0028).
+<!--#endif-->
+- **The recurring-job scheduler** (`RecurringJobBackgroundService`, ADR 0026) runs the jobs that `AddRecurringJob` registered, one instance at a time per job, and records each run in `platform.JobStates`. Today every job is a cleanup that deletes what has outlived its retention in bounded batches: the outbox and inbox of each context, `platform.IdempotencyKeys`, and the modules' own tables ([`infrastructure-common`](../building-blocks/infrastructure-common.md#cleanup-jobs), ADR 0028).
 
-State that is shared between instances is per instance by default: the permission cache, the rate-limit counters, the SignalR pushes. With `Caching:Provider = redis` the optional Platform.Redis project shares them, and the API serves from the database, degraded, when Redis fails (ADR 0027). Outbound HTTP calls go through named resilience pipelines with a timeout, retries and a circuit breaker (ADR 0029).
+State that is shared between instances is per instance by default: the permission cache and the rate-limit counters.
+<!--#if (notifications)-->
+So are the SignalR pushes.
+<!--#endif-->
+<!--#if (caching == "redis")-->
+With `Caching:Provider = redis` the optional Platform.Redis project shares them, and the API serves from the database, degraded, when Redis fails (ADR 0027).
+<!--#endif-->
+Outbound HTTP calls go through named resilience pipelines with a timeout, retries and a circuit breaker (ADR 0029).
 
 ## Data ownership
 
@@ -110,15 +163,31 @@ One SQL Server database, one schema per owner, each with its own `__EFMigrations
 |---|---|---|---|---|
 | `platform` | Infrastructure.Common (building block) | `PlatformDbContext` | `IdempotencyKeys`, `JobStates` | `src/BuildingBlocks/TemplateName.Infrastructure.Common/Idempotency/Migrations/` |
 | `auth` | Auth module | `AuthDbContext` | `Users`, `PasswordHistory`, `UserRoles`, `Roles`, `Permissions`, `RolePermissions`, `UserExternalLogins`, `UserSessions`, `RefreshTokens`, `VerificationCodes`, `UserMfaMethods`, `RecoveryCodes`, `MfaChallenges`, `TrustedDevices`, `AuthAuditLogs`, `DataProtectionKeys`, `OutboxMessages`, `OutboxMessageConsumers` | `src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Persistence/Migrations/` |
+<!--#if (notifications)-->
 | `notify` | Notifications module | `NotificationsDbContext` | `Notifications`, `Deliveries`, `InAppNotifications`, `UserPreferences`, `UserSettings`, `HubTickets`, `InboxMessages` (no outbox) | `src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Persistence/Migrations/` |
+<!--#endif-->
+<!--#if (includeSample)-->
 | `sample` | Sample module | `SampleDbContext` | `LeaveRequests`, `OutboxMessages`, `OutboxMessageConsumers` | `src/Modules/Sample/TemplateName.Modules.Sample/Infrastructure/Persistence/Migrations/` |
+<!--#endif-->
 | `audit` | Audit module | `AuditDbContext` | `AuditTrails`, `InboxMessages` (no outbox) | `src/Modules/Audit/TemplateName.Modules.Audit/Infrastructure/Persistence/Migrations/` |
 
 `MigrateModuleDatabasesAsync` applies every registered context's migrations in registration order (`platform` first, because `AddInfrastructureCommon` registers it before any module). The tables of each module are described in its document; `platform.IdempotencyKeys` in [`infrastructure-common`](../building-blocks/infrastructure-common.md#idempotency) and `platform.JobStates` under [recurring jobs](../building-blocks/infrastructure-common.md#recurring-jobs).
 
 ## Cross-module communication
 
-There are four modules today (Sample, Auth, Notifications and Audit). Auth's outbox handlers turn ten domain events into the integration events of `TemplateName.Modules.Auth.Contracts`, which also holds `IUserContactDirectory` (see [`docs/modules/auth.md`](../modules/auth.md#events)); Notifications references that project only and consumes the events through its inbox (see [`docs/modules/notifications.md`](../modules/notifications.md#events)). Sample uses neither. The Audit module is fed differently: its input event, `EntityChangesRecordedIntegrationEvent`, is defined in `Application.Common` (not in a module's contracts, because every module's outbox publishes it and Audit must not reference every module's contracts), and every module's outbox runs one handler for it, registered once for the host. A contracts project references only `TemplateName.SharedKernel` and holds only public sealed records, enums and interfaces (`ContractsTests`). One message, from the endpoint to the recipient:
+<!--#if (includeSample && notifications)-->
+There are four modules today (Sample, Auth, Notifications and Audit).
+<!--#endif-->
+Auth's outbox handlers turn ten domain events into the integration events of `TemplateName.Modules.Auth.Contracts`, which also holds `IUserContactDirectory` (see [`docs/modules/auth.md`](../modules/auth.md#events)).
+<!--#if (notifications)-->
+Notifications references that project only and consumes the events through its inbox (see [`docs/modules/notifications.md`](../modules/notifications.md#events)).
+<!--#endif-->
+<!--#if (includeSample)-->
+Sample uses neither.
+<!--#endif-->
+The Audit module is fed differently: its input event, `EntityChangesRecordedIntegrationEvent`, is defined in `Application.Common` (not in a module's contracts, because every module's outbox publishes it and Audit must not reference every module's contracts), and every module's outbox runs one handler for it, registered once for the host. A contracts project references only `TemplateName.SharedKernel` and holds only public sealed records, enums and interfaces (`ContractsTests`).
+<!--#if (notifications)-->
+One message, from the endpoint to the recipient:
 
 ```mermaid
 flowchart LR
@@ -130,6 +199,7 @@ flowchart LR
     Rows -->|"delivery worker"| In["In-app channel<br/>notify.InAppNotifications"]
     In -->|"push, best effort"| Hub["SignalR hub<br/>/hubs/notifications"]
 ```
+<!--#endif-->
 
 The rules for when a boundary is crossed:
 
@@ -159,15 +229,21 @@ The rules for when a boundary is crossed:
 | [0016](../adr/0016-server-side-permissions-with-per-user-cache.md) | Server-side permissions with a per-user cache |
 | [0017](../adr/0017-outbox-secrets-protected-with-data-protection.md) | Single-use tokens in outbox events protected with Data Protection |
 | [0018](../adr/0018-in-process-integration-events-with-inbox.md) | In-process integration events with a per-consumer inbox |
+<!--#if (notifications)-->
 | [0019](../adr/0019-embedded-scriban-notification-templates.md) | Notification templates as Scriban files embedded in the declaring assembly |
+<!--#endif-->
 | [0020](../adr/0020-secrets-in-cross-module-events.md) | Single-use links cross module boundaries encrypted |
+<!--#if (notifications)-->
 | [0021](../adr/0021-signalr-hub-tickets.md) | SignalR hub authenticated by single-use tickets, never a JWT in the query string |
+<!--#endif-->
 | [0022](../adr/0022-totp-secrets-and-replay-protection.md) | Own RFC 6238 TOTP with a monotonic replay guard, an Auth-only secret purpose and 80-bit recovery codes |
 | [0023](../adr/0023-step-up-through-auth-time-and-amr.md) | Step-up through a fresh `auth_time` and `amr` in the access token, checked by `StepUpPolicy` |
 | [0024](../adr/0024-mfa-challenge-as-a-hashed-server-side-token.md) | The sign-in challenge is an opaque token over a hashed server-side row, with wrong codes counted on it and in the lockout |
 | [0025](../adr/0025-trusted-devices-bound-to-the-security-stamp.md) | Trusted devices are hashed bearer tokens bound to the security stamp, skipping the challenge only (`amr` `pwd`) |
 | [0026](../adr/0026-recurring-jobs-on-our-own-scheduler.md) | Recurring jobs run on our own scheduler with a SQL lease, not Hangfire |
+<!--#if (caching == "redis")-->
 | [0027](../adr/0027-optional-redis-through-one-project.md) | Optional Redis through one project referenced only by the host (cache second level, rate limiter, backplane), degraded not down when Redis fails, our own fixed-window limiter, Valkey in compose |
+<!--#endif-->
 | [0028](../adr/0028-retention-policy-and-the-inbox-window.md) | Retention per kind of data in bounded delete batches, dead letters kept, and an inbox window that outlasts outbox redelivery |
 | [0029](../adr/0029-standard-http-resilience-pipelines.md) | Standard HTTP resilience pipelines from `Microsoft.Extensions.Http.Resilience`, named and bound from `Resilience:Pipelines`, with a breaker and the `hibp` budget |
 | [0030](../adr/0030-audit-trail-through-the-owning-modules-outbox.md) | Audit trail through the owning module's outbox: `[Audited]` entities, one change set per save, consumed by the Audit module through its inbox; both logs kept, a delete window and no archive |
@@ -175,3 +251,4 @@ The rules for when a boundary is crossed:
 | [0032](../adr/0032-external-login-by-client-posted-proof.md) | External login by a client-posted proof: the client runs the provider step and posts an ID token (or Facebook's access token), one OpenID Connect verifier with presets and a Facebook adapter and no client secret, strict linking by verified email, the MFA challenge still applies (`fed`, no trusted device), the backend issues every token, step-up by provider proof for password-less accounts |
 | [0033](../adr/0033-delivery-pipeline.md) | Delivery pipeline: a chiseled-extra non-root image with a `healthcheck` mode, a `migrate` mode on the same connection-string key, reusable workflows (a green push to `main` goes to staging, a release to production behind reviewers), one verification script for CI and CD, dormant deploy jobs behind one roll-out hook, an IIS script that migrates first and rolls back its files, the gitleaks CLI instead of the Action (licence), CodeQL on by default, a guard that keeps the template repository from publishing |
 | [0034](../adr/0034-maintenance-mode-for-contract-phase-releases.md) | Maintenance mode for contract-phase releases: a production release that adds a `[ContractMigration]` since the previous `v*` tag is detected and runs with a maintenance page up before `migrate` (a `maintenance` input of `auto`, `on` or `off` overrides it, a forced `off` only warns), the page stays up and nothing is restored when a later step fails, one shared three-language page (`app_offline.htm` on IIS), and a project-owned `build/deploy/maintenance.sh` hook for Docker that fails until written |
+| [0035](../adr/0035-template-switches-by-engine-conditionals.md) | Template switches by engine conditionals: three generation switches (`notifications`, `includeSample`, `caching`), marker comments in the all-on repository (only on-only regions, never an `#else`), tests dropped with their module and nothing refactored onto test seams, the OpenAPI snapshot and four lock files not generated in a reduced project, a dead-reference check, and a matrix of eight combinations (the three pairs only on pushes to `main`) |
