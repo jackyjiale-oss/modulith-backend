@@ -210,7 +210,10 @@ for forbidden in \
   build/scripts/path-guard-check.sh \
   build/scripts/dead-reference-check.sh \
   build/scripts/tests/dead-reference-check.test.sh \
+  build/scripts/project-index.sh \
+  build/scripts/tests/project-index.test.sh \
   .github/workflows/template-matrix.yml \
+  .github/workflows/project-index.yml \
   .template.config \
   .superpowers \
   .vs \

@@ -1,0 +1,40 @@
+name: Project index
+
+# Template-repository-only: .template.config/template.json leaves this file out of generated projects.
+# Runs the project-index generator's own test, then checks that the committed index in docs/superpowers/index/ is current.
+# Actions use their latest major tag so Dependabot can update them.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Only a pull request cancels its own earlier run (the same rule as template-matrix.yml).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  project-index:
+    name: project-index
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Test the generator
+        run: bash build/scripts/tests/project-index.test.sh
+
+      - name: Check the index is current
+        run: bash build/scripts/project-index.sh --check
