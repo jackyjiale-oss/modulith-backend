@@ -2,7 +2,8 @@ name: Template matrix
 
 # Template-repository-only: .template.config/template.json leaves this file out of generated projects.
 # Generates the template with each combination of the three switches (notifications, includeSample, caching) and runs the
-# smoke test with its integration tests, so a project that turns a switch off still builds and passes (switches design, section 5).
+# smoke test with its integration tests and the quality gates of the generated project's CI (formatting, 80 % line coverage, licences),
+# so a project that turns a switch off still builds and passes (switches design, section 5).
 # The all-on `template-smoke` job in ci.yml stays the fast required check; the `all-on` leg here is additional.
 # Actions use their latest major tag so Dependabot can update them.
 
@@ -61,7 +62,7 @@ jobs:
           SWITCHES: ${{ matrix.switches }}
         run: |
           read -r -a args <<< "$SWITCHES"
-          bash build/scripts/template-smoke.sh --integration "${args[@]}"
+          bash build/scripts/template-smoke.sh --integration --gates "${args[@]}"
 
   # The pair combinations, which take the longest to find a problem and so run only after merge or on demand.
   template-matrix-pairs:
@@ -93,4 +94,4 @@ jobs:
           SWITCHES: ${{ matrix.switches }}
         run: |
           read -r -a args <<< "$SWITCHES"
-          bash build/scripts/template-smoke.sh --integration "${args[@]}"
+          bash build/scripts/template-smoke.sh --integration --gates "${args[@]}"

@@ -3,9 +3,12 @@
 # from it, checks the generated files, then builds it and runs its unit and architecture tests.
 #
 # Usage: bash build/scripts/template-smoke.sh [--notifications true|false] [--includeSample true|false] [--caching redis|memory]
-#                                             [--integration] [--generate-only] [--output DIR]
+#                                             [--integration] [--gates] [--generate-only] [--output DIR]
 #   --notifications, --includeSample, --caching  the template switches, passed to `dotnet new` (defaults: true, true, redis).
 #   --integration   also run the integration tests (they need Docker); without it only the unit and architecture tests run.
+#   --gates         also run the quality gates of the generated project's CI (ci.yml): `dotnet format --verify-no-changes`, the tests
+#                   with coverage and the 80 % line-coverage gate, and the licence check. The coverage covers the tests that ran, so
+#                   without --integration it is a lower bound of what CI measures.
 #   --generate-only stop after the generation checks (about 7 minutes); no restore, build or tests. The full smoke takes 5 to 15 minutes.
 #   --output DIR    keep the generated project in DIR, an absolute path that must not exist (use a short path such as C:/w/g1 on Windows).
 # With no arguments it generates with every switch on, builds and runs the unit and architecture tests.
@@ -22,12 +25,13 @@ notifications="true"
 include_sample="true"
 caching="redis"
 run_integration=false
+run_gates=false
 generate_only=false
 output_dir=""
 
 usage_error() {
   echo "template-smoke: $1" >&2
-  echo "usage: template-smoke.sh [--notifications true|false] [--includeSample true|false] [--caching redis|memory] [--integration] [--generate-only] [--output DIR]" >&2
+  echo "usage: template-smoke.sh [--notifications true|false] [--includeSample true|false] [--caching redis|memory] [--integration] [--gates] [--generate-only] [--output DIR]" >&2
   exit 2
 }
 
@@ -44,6 +48,7 @@ while (( $# > 0 )); do
       shift 2
       ;;
     --integration) run_integration=true; shift ;;
+    --gates) run_gates=true; shift ;;
     --generate-only) generate_only=true; shift ;;
     *) usage_error "unknown argument '$1'" ;;
   esac
@@ -411,15 +416,49 @@ else
 fi
 bash "$repo_root/build/scripts/path-guard-check.sh" "$out"
 
+# The gates are those of the generated project's ci.yml (build-test and licenses jobs), run in the same order and with the same options.
+if [[ "$run_gates" == "true" ]]; then
+  step "Checking formatting"
+  dotnet format --verify-no-changes --no-restore
+fi
+
 step "Building $project_name"
 dotnet build --no-restore -c Release
 
+# With --gates every test project runs with coverage (coverage.testconfig.json) and writes its report to TestResults, as ci.yml does.
+test_options=(--no-build -c Release)
+if [[ "$run_gates" == "true" ]]; then
+  test_options+=(--config-file coverage.testconfig.json --coverlet --results-directory TestResults)
+fi
+
 step "Running the unit and architecture tests"
-dotnet test --project "tests/$project_name.UnitTests" --no-build -c Release
-dotnet test --project "tests/$project_name.ArchitectureTests" --no-build -c Release
+dotnet test --project "tests/$project_name.UnitTests" "${test_options[@]}"
+dotnet test --project "tests/$project_name.ArchitectureTests" "${test_options[@]}"
 if [[ "$run_integration" == "true" ]]; then
   step "Running the integration tests (Docker needed)"
-  dotnet test --project "tests/$project_name.IntegrationTests" --no-build -c Release
+  dotnet test --project "tests/$project_name.IntegrationTests" "${test_options[@]}"
+fi
+
+if [[ "$run_gates" == "true" ]]; then
+  step "Coverage gate (80 % line)"
+  dotnet tool restore
+  dotnet reportgenerator "-reports:TestResults/**/*.cobertura.*.xml" "-targetdir:coverage" "-reporttypes:JsonSummary"
+  # The first "linecoverage" in Summary.json is the summary's (the file is pretty-printed, one property per line); no jq needed.
+  line="$(sed -n 's/^ *"linecoverage": *\([0-9.]*\),\{0,1\}$/\1/p' coverage/Summary.json | head -n 1)"
+  [[ -n "$line" ]] || { echo "FAIL: coverage/Summary.json has no line coverage" >&2; exit 1; }
+  echo "Line coverage on the gated namespaces: ${line} %"
+  if ! awk -v value="$line" 'BEGIN { exit !(value + 0 >= 80) }'; then
+    echo "FAIL: line coverage ${line} % is below 80 %" >&2
+    exit 1
+  fi
+
+  step "Checking dependency licences"
+  dotnet nuget-license -i "$project_name.slnx" -t \
+    -a build/licenses/allowed-licenses.json \
+    -mapping build/licenses/license-url-mappings.json \
+    -override build/licenses/package-overrides.json \
+    -ignore build/licenses/ignored-packages.json \
+    -err
 fi
 
 echo
