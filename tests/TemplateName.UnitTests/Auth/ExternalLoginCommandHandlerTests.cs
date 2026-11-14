@@ -363,6 +363,25 @@ public sealed class ExternalLoginCommandHandlerTests
     }
 
     [Fact]
+    public async Task Identity_linked_between_the_two_lookups_signs_in_the_user_that_now_holds_it()
+    {
+        // A simultaneous first sign-in with the same proof committed after the lookup by identity and before the lookup by email:
+        // the account found by email already holds exactly this identity, so it is a sign-in, not a link and not a refusal.
+        var winner = LinkedUser();
+        _users.GetByExternalLoginAsync("google", Subject, Arg.Any<CancellationToken>()).Returns((User?)null);
+        _users.GetByNormalizedEmailAsync("ALICE@EXAMPLE.COM", Arg.Any<CancellationToken>()).Returns(winner);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        _addedSessions.ShouldHaveSingleItem().UserId.ShouldBe(winner.Id);
+        winner.ExternalLogins.ShouldHaveSingleItem().LastUsedAt.ShouldBe(Now);
+        _addedUsers.ShouldBeEmpty();
+        await _unitOfWork.DidNotReceive().SaveChangesUnlessDuplicateAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>());
+        _metrics.Received(1).RecordExternalLogin(Google, ExternalLoginOutcome.Succeeded);
+    }
+
+    [Fact]
     public async Task No_account_with_sign_up_on_registers_a_confirmed_passwordless_user_and_signs_in()
     {
         var result = await _sut.HandleAsync(Command() with { DisplayName = "  Alice Body  ", Locale = "ms" }, Ct);
