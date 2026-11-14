@@ -116,6 +116,14 @@ internal sealed class ExternalLoginCommandHandler(
         var existing = await users.GetByNormalizedEmailAsync(normalizedEmail, cancellationToken);
         if (existing is not null)
         {
+            // A simultaneous first sign-in with this proof may have committed between the lookup by identity above and this one: the
+            // account then holds exactly this identity and is signed in, as the loser of a lost save is (ContinueAfterLostRaceAsync).
+            if (existing.ExternalLogins.Any(login =>
+                    login.Provider == provider.Name && string.Equals(login.Subject, identity.Subject, StringComparison.Ordinal)))
+            {
+                return await StartAsync(existing, attempt, cancellationToken);
+            }
+
             return await LinkAsync(existing, email, normalizedEmail, attempt, cancellationToken);
         }
 
