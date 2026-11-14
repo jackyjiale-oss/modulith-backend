@@ -16,11 +16,12 @@ resolved by regenerating, never by hand. This file is hand-written: keep it to s
 - `src/Modules/<Name>/TemplateName.Modules.<Name>.Contracts/`: only for a module with something to offer others (integration events,
   public interfaces); the only project another module may reference.
 - `src/BuildingBlocks/`: shared projects (SharedKernel, Application.Common, Infrastructure.Common, Web.Common, Platform.Redis).
-- `src/Host/`: the API host; `src/Host/TemplateName.Api/Program.cs` maps every module on the `/api/v1` group;
-  `src/Host/TemplateName.Api/appsettings.json` holds every configuration section.
+- `src/Host/`: the API host; `src/Host/TemplateName.Api/Program.cs` maps the module endpoints on the `/api/v1` group;
+  root exceptions: JWKS, and the SignalR hub (`MapNotificationsHub` in `NotificationsModule.cs`, not in `routes.md`);
+  `src/Host/TemplateName.Api/appsettings.json` holds the sections with shipped values, not every section (see `config.md` below).
 - `tests/`: three projects, `TemplateName.UnitTests`, `TemplateName.IntegrationTests` (Docker) and `TemplateName.ArchitectureTests`
   (flat); a first-level folder is named after a module or an area (`tests/<Project>/<Module>/`).
-- `build/scripts/`: maintenance scripts (template smoke, dead-reference check, commit-message check, this generator); their tests in
+- `build/scripts/`: maintenance scripts (for example the template smoke, dead-reference check, commit-message check, this generator); their tests in
   `build/scripts/tests/`.
 - `.github/workflows/`: CI, CodeQL, secret scan, pull-request title, delivery, release and the template matrix.
 - `docs/`: `docs/README.md` indexes every document; one page per module in `docs/modules/`, per building block in
@@ -33,7 +34,7 @@ resolved by regenerating, never by hand. This file is hand-written: keep it to s
 | Routes | `Endpoints/<X>Endpoints.cs`, an extension `Map<X>Endpoints`; each route calls `RequirePermission`, `AllowAnonymous` or `RequireAuthorization` itself |
 | Use case | `Application/<Aggregates>/<UseCase>/`: `<Verb><What>Command.cs` or `...Query.cs`, its `...Handler.cs` and `...Validator.cs` |
 | Permissions | `Application/<Module>Permissions.cs` (constants `module.resource.action`) and `Application/<Module>PermissionSource.cs` (definitions, `AdminDefault`) |
-| Error codes | `Domain/<Aggregate>/<X>Errors.cs` in a module (`Error.<Factory>("module.code", ...)`); text in `Resources/<Module>ErrorMessages.resx`, `.ms.resx`, `.zh-Hans.resx` |
+| Error codes | `Domain/<Aggregate>/<X>Errors.cs` in a module (`Error.<Factory>("code", ...)`; codes dotted, snake_case, usually module-prefixed); text in `Resources/<Module>ErrorMessages.resx`, `.ms.resx`, `.zh-Hans.resx` |
 | Integration events | `record <X>IntegrationEvent` in `TemplateName.Modules.<Module>.Contracts/IntegrationEvents/`; handlers implement `IIntegrationEventHandler<X>` |
 | Recurring jobs | `Infrastructure/Retention/<X>CleanupJob.cs`, subclasses of `BatchedCleanupJob` (an `IRecurringJob`), registered with `AddRecurringJob<T>()`; `AddOutbox<>()` and `AddInbox<>()` add one cleanup job each |
 | Options | a class with `const string SectionName = "Section:Sub"`, bound from `appsettings.json` |
@@ -48,7 +49,7 @@ resolved by regenerating, never by hand. This file is hand-written: keep it to s
 | error code to its resource key | `errors.md` table "Declared codes": code, module, http, resource key, file | module doc `## Error codes` |
 | event to its publisher and consumers | `events.md`: event, publisher (module and file), handlers (module and file) | module doc `## Events`; `docs/architecture/overview.md` `## Cross-module communication` |
 | job to its configuration keys | `jobs.md`: job, module, config keys, file | `docs/building-blocks/infrastructure-common.md` `## Recurring jobs`; module doc `## Configuration` |
-| configuration section to its owner and doc | `config.md`: section, owner, documented in | `docs/services/api.md` `## Configuration`; module or building-block doc `## Configuration` |
+| configuration section to its owner and doc | `config.md`: section, owner, documented in (only the Host `appsettings.json` top-level sections; others: see below) | `docs/services/api.md` `## Configuration`; module or building-block doc `## Configuration` |
 | module to its test folder | `tests.md` table "Folders": test project, folder, source area; table "Name pairs": source, test | module doc `## Testing` |
 | files that carry switch markers | `markers.md`: file, kinds, expressions | `docs/adr/0035-template-switches-by-engine-conditionals.md` |
 
@@ -68,8 +69,12 @@ resolved by regenerating, never by hand. This file is hand-written: keep it to s
   neutral resource keys with no `*Errors.cs` declaration (set as constants elsewhere, or `http.NNN`).
 - `events.md`: a publisher in a building block (the audit trail event) is shown with the building block's name.
 - `jobs.md`: module is the module that registers the job; file is the job class, which for Outbox and Inbox cleanup rows is the
-  shared generic class in `src/BuildingBlocks/TemplateName.Infrastructure.Common/`. Keys are `Jobs:<Name>:Enabled` and `:Interval`.
-- `config.md`: owner is the project declaring the `SectionName` (Host for `Serilog`, `AllowedHosts`, `Kestrel`).
+  shared generic class in `src/BuildingBlocks/TemplateName.Infrastructure.Common/`. Keys are `Jobs:<Name>:Enabled` and `:Interval`;
+  `Jobs:Enabled` (the scheduler's global switch) set to `false` stops every job.
+- `config.md`: lists only the top-level sections of `src/Host/TemplateName.Api/appsettings.json`; owner is the project declaring
+  the `SectionName` (Host for `Serilog`, `AllowedHosts`, `Kestrel`). A section with no entry there (for example `Retention`,
+  `Resilience`, `Audit:Retention`) is found by grepping `SectionName = "` (the declaring `*Options` class names the owner) and in
+  `docs/services/api.md` `## Configuration`.
 - `tests.md`: name pairs are partial (only basenames that occur once on each side; the line above the table says how many were
   skipped); `Rows:` counts the rows of both tables.
 - `markers.md`: one row per file; kinds are the comment forms, expressions the switch conditions.
@@ -84,10 +89,13 @@ resolved by regenerating, never by hand. This file is hand-written: keep it to s
   by `tests/TemplateName.ArchitectureTests/DocumentationTests.cs`; every route is enforced in the module docs by
   `tests/TemplateName.IntegrationTests/Documentation/EndpointDocumentationTests.cs`.
 - The generator fails (exit 2, naming the file) on a shape it cannot read, never emitting a short table. Known unsupported shapes:
-  - group-level route authorization (put `RequirePermission`, `AllowAnonymous` or `RequireAuthorization` on each route);
-  - a helper method without an access modifier in an endpoints file;
+  - a route with no authorization call of its own: group-level authorization is not read (put `RequirePermission`,
+    `AllowAnonymous` or `RequireAuthorization` on each route); when every route also has its own call, a group-level one is ignored silently;
   - generic wrapper chains around `AddOutbox<>` or `AddInbox<>`;
   - an event published as `PublishAsync(new(...))` (target-typed), with an object initializer, or through a variable;
   - an event handler reached through a base class or a derived interface (name the concrete handler);
   - a `SectionName` that is not a plain `const string` literal;
   - a permission or error code that is not a plain string literal or a `const string`.
+- NOT detected (silent, wrong rows): a route-mapping helper method without an access modifier in an endpoints file is read in the
+  scope of the extension above it and can get a wrong route prefix; declare such helpers `private static` (then a shape the
+  generator cannot resolve fails loudly).
