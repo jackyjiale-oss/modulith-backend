@@ -211,7 +211,7 @@ case_stub_shards() {
   assert_contains $'\n| section | owner | documented in |\n' "$(<"$idx/config.md")" "stub_shards: config header"
   assert_eq $'Rows: 0\n\n## Declared codes\n\n| code | module | http | resource key | file |\n| --- | --- | --- | --- | --- |\n\n## Resource-only keys\n\n| key | http | resx file |\n| --- | --- | --- |' \
     "$(tail -n +5 "$idx/errors.md")" "stub_shards: errors shows both tables"
-  assert_eq $'Rows: 0\n\n## Folders\n\n| test project | folder | source area | files |\n| --- | --- | --- | --- |\n\n## Name pairs\n\n| source | test |\n| --- | --- |' \
+  assert_eq $'Rows: 0\n\n## Folders\n\n| test project | folder | source area |\n| --- | --- | --- |\n\n## Name pairs\n\n| source | test |\n| --- | --- |' \
     "$(tail -n +5 "$idx/tests.md")" "stub_shards: tests shows both tables"
 }
 
@@ -310,6 +310,34 @@ case_untracked_ignored() {
   generate
   assert_eq "| tracked.cs | //#if | notifications |" "$(rows markers)" "untracked_ignored: only the tracked file is listed"
   assert_contains "Rows: 1" "$(cat "$idx/markers.md")" "untracked_ignored: row count"
+}
+
+# Write mode warns once on stderr about untracked files under src/, tests/ or docs/ (they are not read); the shards and the exit
+# code stay the same, and --check or a fully tracked tree gives no warning.
+case_untracked_warning() {
+  local with without
+  make_tree
+  make_git_tree
+  put src/Modules/A/A/Tracked.cs "$(printf '//#if (notifications)\n//#endif')"
+  must git -C "$tree" add src
+  put src/Modules/A/A/New.cs "$(printf '//#if (includeSample)\n//#endif')"
+  run_gen --root "$tree" --out "$idx"
+  assert_eq "0" "$status" "untracked_warning: exit code"
+  assert_contains "warning: 1 untracked file(s) under src/, tests/ or docs/ ignored" "$err" "untracked_warning: the warning"
+  assert_contains "src/Modules/A/A/New.cs; stage them first (git add)" "$err" "untracked_warning: names the file and git add"
+  assert_eq "1" "$(printf '%s\n' "$err" | grep -c 'warning')" "untracked_warning: one line per run"
+  assert_eq "| src/Modules/A/A/Tracked.cs | //#if | notifications |" "$(rows markers)" "untracked_warning: the untracked file has no row"
+  with="$(cat "$idx"/*.md)"
+  write_map
+  run_gen --check --root "$tree" --out "$idx"
+  assert_eq "0" "$status" "untracked_warning: --check exit code (stderr: $err)"
+  assert_not_contains "untracked" "$err" "untracked_warning: no warning in --check"
+  rm -f "$tree/src/Modules/A/A/New.cs" "$idx/MAP.md"
+  run_gen --root "$tree" --out "$idx"
+  without="$(cat "$idx"/*.md)"
+  assert_eq "0" "$status" "untracked_warning: tracked only: exit code"
+  assert_not_contains "untracked" "$err" "untracked_warning: tracked only: no warning"
+  assert_eq "$without" "$with" "untracked_warning: the shards are the same with and without the warning"
 }
 
 case_git_file_marker() {
@@ -562,6 +590,34 @@ case_routes() {
   generate
   assert_contains $'Rows: 5\n\n| module | method | route | handler | permission | file |\n| --- | --- | --- | --- | --- | --- |\n| A | DELETE | /api/v1/a/child/{id} | RemoveCommand | authenticated | src/Modules/A/A/Endpoints/ChildEndpoints.cs |' \
     "$(<"$idx/routes.md")" "routes: rendered shard"
+  # An endpoints file in a subfolder of Endpoints is read like the others; a request type beside it (no Map extension) is no error.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("x", GetAsync).RequireAuthorization();
+        group.MapAdminEndpoints();
+        return app;
+    }
+}'
+  put src/Modules/A/A/Endpoints/Admin/AdminEndpoints.cs 'internal static class AdminEndpoints
+{
+    internal static RouteGroupBuilder MapAdminEndpoints(this RouteGroupBuilder group)
+    {
+        var admin = group.MapGroup("admin");
+        admin.MapPost("users", CreateAsync).RequirePermission(APermissions.Admin);
+        return group;
+    }
+
+    private static Task<IResult> CreateAsync(ICommandHandler<CreateUserCommand> handler) => null;
+}'
+  put src/Modules/A/A/Endpoints/Admin/CreateUserRequest.cs 'public sealed record CreateUserRequest(string Name);'
+  routes_of_tree
+  assert_eq "0" "$status" "routes: nested endpoints folder: exit code"
+  assert_eq 'A|GET|/api/v1/a/x|-|authenticated|src/Modules/A/A/Endpoints/AEndpoints.cs
+A|POST|/api/v1/a/admin/users|CreateUserCommand|APermissions.Admin|src/Modules/A/A/Endpoints/Admin/AdminEndpoints.cs' "$combined" \
+    "routes: nested endpoints folder: both rows"
 }
 
 case_routes_zero() {
@@ -671,7 +727,30 @@ case_routes_loud() {
         return app;
     }
 }'
-  routes_fails "routes_loud: group-level permission" "no authorization call on /api/v1/a in $a"
+  routes_fails "routes_loud: group-level permission" "group-level authorization is not read in $a"
+  # The same when every route also has its own call: the group-level call would be ignored silently. A chained statement counts.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a")
+            .WithTags("A")
+            .RequireAuthorization();
+        group.MapGet("/", ListAsync).RequirePermission(APermissions.View);
+        return app;
+    }
+}'
+  routes_fails "routes_loud: group-level authorization beside route-level calls" "group-level authorization is not read in $a"
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a").AllowAnonymous();
+        group.MapGet("/", ListAsync).AllowAnonymous();
+        return app;
+    }
+}'
+  routes_fails "routes_loud: group-level AllowAnonymous" "group-level authorization is not read in $a"
   # A route with no authorization call at all.
   routes_one_module 'internal static class AEndpoints
 {
@@ -722,6 +801,64 @@ case_routes_loud() {
     }
 }'
   routes_fails "routes_loud: helper method with a nested group" "cannot resolve the group prefix of group in $a"
+  # A lambda policy would garble the permission cell.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("x", GetAsync).RequireAuthorization(p => p.RequireRole("x"));
+        app.MapGet("y", GetAsync).RequireAuthorization("Admin");
+        return app;
+    }
+}'
+  routes_fails "routes_loud: lambda policy" "unknown mapping shape in $a: an authorization argument that is not a constant or a policy name"
+  # A Map...Endpoints extension declared in a file the parser does not read: its routes would be missing.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("x", GetAsync).RequireAuthorization();
+        group.MapAdminEndpoints();
+        return app;
+    }
+}'
+  put src/Modules/A/A/Infrastructure/AdminRouting.cs 'internal static class AdminRouting
+{
+    internal static RouteGroupBuilder MapAdminEndpoints(this RouteGroupBuilder group)
+    {
+        group.MapGet("admin", AdminAsync).RequireAuthorization();
+        return group;
+    }
+}'
+  routes_fails "routes_loud: a called extension declared in no file read" \
+    "extension MapAdminEndpoints is called in $a but declared in no file the parser reads"
+  # A route-mapping extension in an Endpoints folder file not named *Endpoints.cs (one line, then a split signature).
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("x", GetAsync).RequireAuthorization();
+        return app;
+    }
+}'
+  put src/Modules/A/A/Endpoints/AdminRoutes.cs 'internal static class AdminRoutes
+{
+    internal static RouteGroupBuilder MapAdminRoutes(this RouteGroupBuilder group)
+    {
+        group.MapGet("admin", AdminAsync).RequireAuthorization();
+        return group;
+    }
+}'
+  routes_fails "routes_loud: a route-mapping extension in a file not named *Endpoints.cs" \
+    "src/Modules/A/A/Endpoints/AdminRoutes.cs declares a route-mapping extension but is not named *Endpoints.cs"
+  put src/Modules/A/A/Endpoints/AdminRoutes.cs 'internal static class AdminRoutes
+{
+    internal static IEndpointRouteBuilder MapAdmin(
+        this IEndpointRouteBuilder app) => app;
+}'
+  routes_fails "routes_loud: the same with a split signature" \
+    "src/Modules/A/A/Endpoints/AdminRoutes.cs declares a route-mapping extension but is not named *Endpoints.cs"
 }
 
 # A named policy is the permission column; a comma inside a route literal stays in the route.
@@ -733,6 +870,8 @@ case_routes_shapes() {
         var group = app.MapGroup("a");
         group.MapGet("/{code:length(3,8)}", GetAsync).RequireAuthorization("Admin");
         group.MapGet("/r/{n:range(1,5)}", RangeAsync).AllowAnonymous();
+        group.MapGet("/p", PairAsync).RequireAuthorization("P1", "P2");
+        group.MapGet("/c", ConstAsync).RequireAuthorization(AuthPolicies.Admin);
         return app;
     }
 
@@ -742,9 +881,11 @@ case_routes_shapes() {
 }'
   routes_of_tree
   assert_eq "0" "$status" "routes_shapes: exit code"
-  assert_eq 'A|GET|/api/v1/a/r/{n:range(1,5)}|RangeQuery|anonymous|src/Modules/A/A/Endpoints/AEndpoints.cs
+  assert_eq 'A|GET|/api/v1/a/c|-|AuthPolicies.Admin|src/Modules/A/A/Endpoints/AEndpoints.cs
+A|GET|/api/v1/a/p|-|P1,P2|src/Modules/A/A/Endpoints/AEndpoints.cs
+A|GET|/api/v1/a/r/{n:range(1,5)}|RangeQuery|anonymous|src/Modules/A/A/Endpoints/AEndpoints.cs
 A|GET|/api/v1/a/{code:length(3,8)}|GetQuery|Admin|src/Modules/A/A/Endpoints/AEndpoints.cs' "$combined" \
-    "routes_shapes: policy name and commas inside the route"
+    "routes_shapes: policy names (one, two, a constant) and commas inside the route"
 }
 
 # emit_of_tree <emit function...>: runs the emit functions of the sourced script on the current tree, one after the other (no full
@@ -1934,12 +2075,12 @@ tests_fixture() {
   put tests/T.ArchitectureTests/NamingTests.cs 'class NamingTests {}'
 }
 
-tests_rows='T.ArchitectureTests|(flat)|-|2
-T.UnitTests|(root)|-|1
-T.UnitTests|Auth|Auth|2
-T.UnitTests|Odd|cross-cutting|1
-T.UnitTests|Redis|Redis|1
-T.UnitTests|Web|Web.Common|1'
+tests_rows='T.ArchitectureTests|(flat)|-
+T.UnitTests|(root)|-
+T.UnitTests|Auth|Auth
+T.UnitTests|Odd|cross-cutting
+T.UnitTests|Redis|Redis
+T.UnitTests|Web|Web.Common'
 
 case_tests_folders() {
   make_tree
@@ -1986,7 +2127,8 @@ src/Modules/Auth/Auth/Application/Login/Login.cs|tests/T.UnitTests/Auth/Login/Lo
   assert_contains "2 names that occur more than once" "$(printf '%s\n' "$combined" | tail -n 1)" "tests_pairs: the note counts the skipped names"
   # The one end-to-end run of the tests shard: both tables, the note above the second, Rows over both.
   generate
-  assert_contains $'Rows: 11\n\n## Folders\n\n| test project | folder | source area | files |' "$(<"$idx/tests.md")" "tests_pairs: rendered Rows over both tables"
+  assert_contains $'Rows: 11\n\n## Folders\n\n| test project | folder | source area |\n| --- | --- | --- |\n| T.ArchitectureTests | (root) | - |\n| T.ArchitectureTests | Auth | Auth |' \
+    "$(<"$idx/tests.md")" "tests_pairs: rendered Rows over both tables, no files column"
   assert_contains $'## Name pairs\n\nPairs `Foo.cs`' "$(<"$idx/tests.md")" "tests_pairs: rendered note above the pairs"
 }
 
@@ -2031,7 +2173,7 @@ case_real_tree() {
 
 all_cases="case_usage_errors case_markers_shard case_markers_kinds_and_expressions case_markers_zero_rows case_stub_shards
   case_two_table_shard case_atomic_write
-  case_determinism case_untracked_ignored case_git_file_marker case_find_excludes_build_dirs
+  case_determinism case_untracked_ignored case_untracked_warning case_git_file_marker case_find_excludes_build_dirs
   case_check_stale case_check_missing_and_unknown case_map_rules case_need_rows
   case_routes case_routes_zero case_routes_module_absent case_routes_loud case_routes_shapes
   case_permissions case_permissions_loud case_permissions_shapes case_errors case_errors_zero case_errors_loud

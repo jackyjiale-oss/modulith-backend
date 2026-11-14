@@ -4,7 +4,8 @@
 # It reads the tree it is run in and hard-codes no module name. MAP.md in the same directory is hand-written; --check keeps it honest.
 #
 # Usage: bash build/scripts/project-index.sh [--check] [--root DIR] [--out DIR]
-#   no argument  rewrite every shard in --out
+#   no argument  rewrite every shard in --out; in a git tree, warn on stderr when src/, tests/ or docs/ hold untracked files (only
+#                tracked files are read: stage new files first)
 #   --check      rewrite nothing: generate into a temporary directory with the same code, compare it byte for byte with --out and check
 #                MAP.md (it exists, every repository path it names exists, it names every shard, at most 120 lines)
 #   --root DIR   the tree to read (default: two levels above this script)
@@ -141,7 +142,7 @@ shard_meta() {
     config) title_text="Configuration sections"; header_text="section|owner|documented in" ;;
     tests)
       title_text="Tests"
-      heading1="Folders"; header_text="test project|folder|source area|files"
+      heading1="Folders"; header_text="test project|folder|source area"
       heading2="Name pairs"; header2_text="source|test" ;;
     markers) title_text="Template switch markers"; header_text="file|kinds|expressions" ;;
     *) fail "no title or header for shard $1" ;;
@@ -149,7 +150,7 @@ shard_meta() {
 }
 
 # routes_awk: one awk run over the tracked file list (stdin, from files_cache) that reads the C# files it needs with getline. Three kinds:
-#   E  src/Modules/<Module>/<Project>/.../Endpoints/*Endpoints.cs   the routes; only these give rows
+#   E  src/Modules/<Module>/<Project>/.../Endpoints/**/*Endpoints.cs  the routes, at any depth below Endpoints; only these give rows
 #   M  src/Modules/<Module>/<Project>/*Module.cs                    module extensions that call the endpoint extensions
 #   P  src/Host/<Project>/Program.cs                                the host: `var api = app.MapGroup("/api/v1"); api.MapXEndpoints();`
 # Pass 1 (scan_file) reads each file line by line (CR and // comments removed) and records, per scope (a file and the Map...Endpoints
@@ -163,7 +164,10 @@ shard_meta() {
 # Errors (exit 3, the message in errfile), so that no shape gives a wrong row: an endpoint file with MapGroup or a Map...Endpoints call
 # but zero routes; any other .MapX call in an endpoint file; an extension called from two places or declared in two files; a prefix that
 # cannot be resolved (an extension not named Map...Endpoints or not on one line, a helper method); a route with no authorization call of
-# its own (group-level authorization is not read); a file that cannot be read.
+# its own; a MapGroup statement carrying RequireAuthorization, RequirePermission or AllowAnonymous (group-level authorization is not
+# read); an authorization argument that is not a constant or a policy name (a lambda policy); a Map...Endpoints extension called but
+# declared in no file read here; another .cs file under an Endpoints folder that declares a Map... extension on RouteGroupBuilder or
+# IEndpointRouteBuilder (not named *Endpoints.cs, so not read); a file that cannot be read.
 # shellcheck disable=SC2016
 routes_awk='
 function strip_comment(s,   k, c, n, inq) {
@@ -209,6 +213,9 @@ function process(i, sc, stmt,   rest, before, after, tok, name, recv, x, arg, me
     recv = ""
     if (match(before, /[A-Za-z_][A-Za-z0-9_]*[ \t]*$/)) { recv = substr(before, RSTART, RLENGTH); sub(/[ \t]+$/, "", recv); before = substr(before, 1, RSTART - 1) }
     if (name == "Group" && substr(tok, length(tok)) == "(") {
+      # Any MapGroup statement, whatever its shape: an authorization call on a group would be ignored.
+      if (after ~ /(RequireAuthorization|RequirePermission|AllowAnonymous)[ \t]*[(<]/)
+        fail("routes: group-level authorization is not read in " fname[i] " (a MapGroup statement with RequireAuthorization, RequirePermission or AllowAnonymous): put the authorization call on each route")
       if (recv != "" && match(after, /^[ \t]*"[^"]*"[ \t]*\)/) && match(before, /[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*$/)) {
         x = substr(before, RSTART, RLENGTH); sub(/[ \t]*=[ \t]*$/, "", x)
         match(after, /"[^"]*"/); p = substr(after, RSTART + 1, RLENGTH - 2)
@@ -235,6 +242,12 @@ function process(i, sc, stmt,   rest, before, after, tok, name, recv, x, arg, me
       else if (match(after, /RequireAuthorization\([^)]*\)/)) {
         perm = substr(after, RSTART + 21, RLENGTH - 22); gsub(/[ \t"]/, "", perm)
         if (perm == "") perm = "authenticated"
+      }
+      # A permission constant or a policy name (quotes removed), or several separated by commas; a lambda policy or any other
+      # expression would garble the cell.
+      p = perm; gsub(/"/, "", p)
+      if (perm != "-" && perm != "anonymous" && perm != "authenticated" && p !~ /^[A-Za-z0-9_.]+(,[A-Za-z0-9_.]+)*$/) {
+        unknown(i, "an authorization argument that is not a constant or a policy name (" perm ")"); continue
       }
       nr++; rfile[nr] = i; rscope[nr] = sc; rvar[nr] = recv; rverb[nr] = toupper(name); rarg[nr] = arg; rmeth[nr] = meth; rperm[nr] = perm
       routes[i]++
@@ -288,17 +301,36 @@ function prefix(sc, v, depth,   key, ext, pp) {
   return "\001"
 }
 function fail(msg) { print msg > errfile; failed = 1; exit 3 }
+# check_other: a .cs file under an Endpoints folder that is not named *Endpoints.cs must not declare a route-mapping extension (its
+# routes would be skipped): a `Map...(this RouteGroupBuilder|IEndpointRouteBuilder ...)` signature, on one line or split after `(`.
+function check_other(f,   line, prev, rc) {
+  prev = ""
+  while ((rc = (getline line < f)) > 0) {
+    sub(/\r$/, "", line)
+    line = strip_comment(line)
+    if ((prev " " line) ~ /Map[A-Za-z0-9_]*[ \t]*\([ \t]*this[ \t]+(RouteGroupBuilder|IEndpointRouteBuilder)([ \t]|$)/)
+      fail("routes: " f " declares a route-mapping extension but is not named *Endpoints.cs (its routes would be skipped): rename it <X>Endpoints.cs")
+    prev = line
+  }
+  if (rc < 0) fail("routes: cannot read " f)
+  close(f)
+}
 {
   sub(/\r$/, "")
   n = split($0, seg, "/")
   kind = ""
-  if (n >= 6 && seg[1] == "src" && seg[2] == "Modules" && seg[n - 1] == "Endpoints" && seg[n] ~ /.Endpoints\.cs$/) kind = "E"
+  # Any depth below an Endpoints folder of a module project: src/Modules/<Module>/<Project>/.../Endpoints/**/<X>Endpoints.cs.
+  inep = 0
+  if (n >= 6 && seg[1] == "src" && seg[2] == "Modules" && seg[n] ~ /\.cs$/) for (k = 5; k < n; k++) if (seg[k] == "Endpoints") inep = 1
+  if (inep && seg[n] ~ /.Endpoints\.cs$/) kind = "E"
+  else if (inep) { nother++; oname[nother] = $0 }
   else if (n == 5 && seg[1] == "src" && seg[2] == "Modules" && seg[5] ~ /.Module\.cs$/) kind = "M"
   else if (n == 4 && seg[1] == "src" && seg[2] == "Host" && seg[4] == "Program.cs") kind = "P"
   if (kind != "") { nf++; fname[nf] = $0; fkind[nf] = kind; fmod[nf] = seg[3] }
 }
 END {
   if (failed) exit 3
+  for (i = 1; i <= nother; i++) check_other(oname[i])
   for (i = 1; i <= nf; i++) scan_file(i)
   for (i = 1; i <= nf; i++) {
     if (fkind[i] != "E" || (i in routes)) continue
@@ -322,6 +354,10 @@ END {
     row = fmod[i] "|" rverb[r] "|" route "|" h "|" rperm[r] "|" fname[i]
     print row
   }
+  # A called extension declared in no file read here (an endpoints file the filter does not take, a split signature) has routes
+  # nobody listed.
+  for (nm in caller_var) if (!(nm in ext_param))
+    fail("routes: extension " nm " is called in " fname[scope_file[caller_scope[nm]]] " but declared in no file the parser reads (src/Modules/*/*/Endpoints/**/*Endpoints.cs, src/Modules/*/*/*Module.cs, src/Host/*/Program.cs, signature on one line)")
 }'
 
 # emit_routes: the routes shard (see routes_awk); one awk process for the whole tree.
@@ -798,7 +834,7 @@ function parse_types(i,   L, pos, abs, tok, kw, nm, p, q, c, pd, ad, bases, gen,
       if (be == 0) fail(label ": cannot find the closing brace of " nm " in " fname[i])
     }
     k = abs - 1
-    while (k > 0 && substr(MASK, k, 1) !~ /[;{}\]]/) k--
+    while (k > 0 && substr(MASK, k, 1) !~ /[];{}]/) k--
     pre = substr(MASK, k + 1, abs - k - 1)
     nt++; tname[nt] = nm; tkind[nt] = kw; tgen[nt] = gen; tparams[nt] = tp; tfile[nt] = i; tbs[nt] = bs; tbe[nt] = be; tbases[nt] = bases
     tabs[nt] = (pre ~ /(^|[^A-Za-z0-9_])abstract([^A-Za-z0-9_]|$)/)
@@ -1228,7 +1264,7 @@ function read_owners(f,   pos, abs, from, pre, after, at, p, val, first) {
     pre = substr(MASK, from, abs - from); after = substr(MASK, pos, 200)
     # A use, not a declaration: X.SectionName, or SectionName followed by anything but =, =>, { or ; (and not after a type name).
     if (pre ~ /\.[ \t\n]*$/) continue
-    if (pre !~ /(^|[^A-Za-z0-9_])(string|String|var)[ \t\n]+$/ && after !~ /^[ \t\n]*(=[^=>]|=>|\{|;)/) continue
+    if (pre !~ /(^|[^A-Za-z0-9_])(string|String|var)[ \t\n]+$/ && after !~ /^[ \t\n]*(=[^=>]|=>|[{]|;)/) continue
     at = line_at(abs)
     if (pre !~ /(^|[^A-Za-z0-9_])const[ \t\n]+string[ \t\n]+$/ || !match(after, /^[ \t\n]*=[ \t\n]*"_*"[ \t\n]*;/))
       fail("config: cannot read the SectionName at line " at " of " f " (expected `const string SectionName = \"Section:Sub\";`; a static readonly field, a property, a concatenation, an interpolated or a verbatim string is not read)")
@@ -1285,11 +1321,11 @@ emit_config() {
 }
 
 # tests_awk: one awk run over the tracked file list (stdin; no file is opened) that prints:
-#   table 1 (stdout)  test project|folder|source area|files: per tests/<Project>/ and per first-level folder of it, the number of .cs
-#                     files in it at any depth; the loose .cs files of a project are a row (root), or (flat) when the project has no
-#                     folder (source area -). The source area is the module when src/Modules/<Folder> exists, else the one building
-#                     block under src/BuildingBlocks whose directory name contains .<Folder>. or ends .<Folder> (without its first dotted
-#                     part), else cross-cutting
+#   table 1 (stdout)  test project|folder|source area: per tests/<Project>/, each first-level folder of it holding a .cs file at any
+#                     depth; loose .cs files of a project give a row (root), or (flat) when the project has no folder (source area -).
+#                     No file count: it would change on every added test file. The source area is the module when
+#                     src/Modules/<Folder> exists, else the one building block under src/BuildingBlocks whose directory name contains
+#                     .<Folder>. or ends .<Folder> (without its first dotted part), else cross-cutting
 #   table 2 (out2)    source|test: src/**/Foo.cs (not under a Migrations folder) with tests/**/FooTests.cs, when Foo.cs occurs once under
 #                     src/ and FooTests.cs once under tests/
 #   out3              "<test .cs files> <names skipped>": the names with both a source and a test file of which one occurs more than once
@@ -1323,16 +1359,16 @@ function area_of(fold, where,   d, hit, cnt, list) {
     proj = seg[2]; ntests++
     if (n == 3) loose[proj]++
     else {
-      if (!((proj, seg[3]) in fcount)) { nfo++; fproj[nfo] = proj; ffold[nfo] = seg[3] }
-      fcount[proj, seg[3]]++; hasfold[proj] = 1
+      if (!((proj, seg[3]) in fseen)) { nfo++; fproj[nfo] = proj; ffold[nfo] = seg[3]; fseen[proj, seg[3]] = 1 }
+      hasfold[proj] = 1
     }
     if (seg[n] ~ /.Tests\.cs$/) { base = seg[n]; sub(/Tests\.cs$/, "", base); tcount[base]++; tpath[base] = $0 }
   }
 }
 END {
   if (failed) exit 3
-  for (k = 1; k <= nfo; k++) print fproj[k] "|" ffold[k] "|" area_of(ffold[k], "tests/" fproj[k] "/" ffold[k]) "|" fcount[fproj[k], ffold[k]]
-  for (p in loose) print p "|" ((p in hasfold) ? "(root)" : "(flat)") "|-|" loose[p]
+  for (k = 1; k <= nfo; k++) print fproj[k] "|" ffold[k] "|" area_of(ffold[k], "tests/" fproj[k] "/" ffold[k])
+  for (p in loose) print p "|" ((p in hasfold) ? "(root)" : "(flat)") "|-"
   printf "" > out2
   skipped = 0
   for (b in tcount) {
@@ -1340,7 +1376,7 @@ END {
     if (tcount[b] > 1 || scount[b] > 1) { skipped++; continue }
     print spath[b] "|" tpath[b] > out2
   }
-  print (ntests + 0) " " skipped > out3
+  print ntests + 0, skipped > out3
 }'
 
 # tests_pass: runs tests_awk once; table 1 goes to tests.table1, table 2 to tests.table2, the counts to tests.counts (see errors_pass).
@@ -1563,7 +1599,21 @@ main() {
     generate
     mkdir -p "$out"
     cp "$shard_dir"/*.md "$out"/
+    warn_untracked
   fi
+}
+
+# warn_untracked: in the write mode of a git tree, one stderr line when src/, tests/ or docs/ hold files git does not track (and does
+# not ignore): the generator reads tracked files only, so such a file is missing from the shards just written, and the project-index
+# check fails once it is committed. Changes neither the shards nor the exit code.
+warn_untracked() {
+  local paths=() shown
+  [[ -e "$root/.git" ]] || return 0
+  mapfile -t paths < <(git -C "$root" ls-files --others --exclude-standard -- src tests docs 2> /dev/null || true)
+  (( ${#paths[@]} > 0 )) || return 0
+  shown="${paths[*]:0:3}"
+  if (( ${#paths[@]} > 3 )); then shown+=" ..."; fi
+  echo "project-index: warning: ${#paths[@]} untracked file(s) under src/, tests/ or docs/ ignored (the generator reads tracked files only): $shown; stage them first (git add), then regenerate" >&2
 }
 
 # Run main only when executed; the tests source this file to call need_rows, check_map, main and the shard functions.

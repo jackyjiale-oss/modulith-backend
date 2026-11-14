@@ -6,35 +6,35 @@ Rows: 210
 
 ## Folders
 
-| test project | folder | source area | files |
-| --- | --- | --- | --- |
-| TemplateName.ArchitectureTests | (flat) | - | 18 |
-| TemplateName.IntegrationTests | Audit | Audit | 5 |
-| TemplateName.IntegrationTests | Auth | Auth | 33 |
-| TemplateName.IntegrationTests | Caching | cross-cutting | 2 |
-| TemplateName.IntegrationTests | Documentation | cross-cutting | 5 |
-| TemplateName.IntegrationTests | Host | cross-cutting | 5 |
-| TemplateName.IntegrationTests | Idempotency | cross-cutting | 2 |
-| TemplateName.IntegrationTests | Inbox | cross-cutting | 2 |
-| TemplateName.IntegrationTests | Infrastructure | Infrastructure.Common | 28 |
-| TemplateName.IntegrationTests | Jobs | cross-cutting | 4 |
-| TemplateName.IntegrationTests | Localization | cross-cutting | 1 |
-| TemplateName.IntegrationTests | Notifications | Notifications | 14 |
-| TemplateName.IntegrationTests | Outbox | cross-cutting | 12 |
-| TemplateName.IntegrationTests | Persistence | cross-cutting | 8 |
-| TemplateName.IntegrationTests | Redis | Platform.Redis | 6 |
-| TemplateName.IntegrationTests | Sample | Sample | 4 |
-| TemplateName.UnitTests | Application | Application.Common | 20 |
-| TemplateName.UnitTests | Audit | Audit | 3 |
-| TemplateName.UnitTests | Auth | Auth | 102 |
-| TemplateName.UnitTests | Infrastructure | Infrastructure.Common | 18 |
-| TemplateName.UnitTests | Localization | cross-cutting | 3 |
-| TemplateName.UnitTests | Notifications | Notifications | 47 |
-| TemplateName.UnitTests | Pagination | cross-cutting | 4 |
-| TemplateName.UnitTests | Platform | Platform.Redis | 8 |
-| TemplateName.UnitTests | Sample | Sample | 7 |
-| TemplateName.UnitTests | SharedKernel | SharedKernel | 5 |
-| TemplateName.UnitTests | Web | Web.Common | 18 |
+| test project | folder | source area |
+| --- | --- | --- |
+| TemplateName.ArchitectureTests | (flat) | - |
+| TemplateName.IntegrationTests | Audit | Audit |
+| TemplateName.IntegrationTests | Auth | Auth |
+| TemplateName.IntegrationTests | Caching | cross-cutting |
+| TemplateName.IntegrationTests | Documentation | cross-cutting |
+| TemplateName.IntegrationTests | Host | cross-cutting |
+| TemplateName.IntegrationTests | Idempotency | cross-cutting |
+| TemplateName.IntegrationTests | Inbox | cross-cutting |
+| TemplateName.IntegrationTests | Infrastructure | Infrastructure.Common |
+| TemplateName.IntegrationTests | Jobs | cross-cutting |
+| TemplateName.IntegrationTests | Localization | cross-cutting |
+| TemplateName.IntegrationTests | Notifications | Notifications |
+| TemplateName.IntegrationTests | Outbox | cross-cutting |
+| TemplateName.IntegrationTests | Persistence | cross-cutting |
+| TemplateName.IntegrationTests | Redis | Platform.Redis |
+| TemplateName.IntegrationTests | Sample | Sample |
+| TemplateName.UnitTests | Application | Application.Common |
+| TemplateName.UnitTests | Audit | Audit |
+| TemplateName.UnitTests | Auth | Auth |
+| TemplateName.UnitTests | Infrastructure | Infrastructure.Common |
+| TemplateName.UnitTests | Localization | cross-cutting |
+| TemplateName.UnitTests | Notifications | Notifications |
+| TemplateName.UnitTests | Pagination | cross-cutting |
+| TemplateName.UnitTests | Platform | Platform.Redis |
+| TemplateName.UnitTests | Sample | Sample |
+| TemplateName.UnitTests | SharedKernel | SharedKernel |
+| TemplateName.UnitTests | Web | Web.Common |
 
 ## Name pairs
 
