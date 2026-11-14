@@ -7,4 +7,5 @@
 - Run `bash build/scripts/template-smoke.sh` after changing anything that ships.
 - Switch markers (`//#if (notifications)`, `<!--#if (includeSample)-->` and the like, ADR 0035) are comments in the all-on tree: only on-only regions, never an `#else`. A sentence or line naming a removable part sits on its own marked line.
 - After changing a marked region, run the smoke with each switch off as well: `bash build/scripts/template-smoke.sh --notifications false`, then `--includeSample false`, then `--caching memory`.
+- After changing a route, permission, error code, integration event, recurring job, configuration key, test folder or switch marker, run `bash build/scripts/project-index.sh` and commit the result; the `project-index` check fails when the index is stale. Start a lookup at `docs/superpowers/index/MAP.md`.
 - `BACKEND_TEMPLATE_BLUEPRINT.md` and `docs/blueprint-review.md` are the spec; the review wins.
