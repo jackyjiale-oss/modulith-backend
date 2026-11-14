@@ -365,7 +365,8 @@ function cs_read(f,   line, rc, n, k, c, d, r, m, st, q, rq) {
       if (st == 0) {
         if (c == "/" && d == "/") { for (; k <= n; k++) { r = r " "; m = m " " } break }
         if (c == "/" && d == "*") { r = r "  "; m = m "  "; k++; st = 4; continue }
-        if (c == "\"" && substr(line, k, 3) == "\"\"\"" && substr(line, k - 1, 1) != "@") {
+        # Not after @ or @$: @"""x""..." and @$"""x""..." are verbatim strings that begin with an escaped quote.
+        if (c == "\"" && substr(line, k, 3) == "\"\"\"" && substr(line, k - 1, 1) != "@" && substr(line, k - 2, 2) != "@$") {
           for (q = k; substr(line, q, 1) == "\""; q++) ;
           rq = substr(line, k, q - k); r = r rq; m = m rq; k = q - 1; st = 6; continue
         }
@@ -707,7 +708,8 @@ emit_errors_2() {
 #   grow()          parses every file whose raw text holds a token of S: cs_read, parse_types, then the program's on_read(i). A type
 #                   whose base list names a type of T is a member: its name joins T and S, so that a class deriving from a job base class
 #                   two levels down is found, and the files naming it are parsed. Repeats until nothing new is found.
-#   parse_types(i)  every class, record, struct and interface declaration of file i (on MASK): tname, tkind, tgen (generic), tabs
+#   parse_types(i)  every class, record, struct and interface declaration of file i (on MASK): tname, tkind, tgen (generic), tparams
+#                   (" T U ": its type parameters, without in/out), tabs
 #                   (abstract), tfile, tbs and tbe (the braces of the body; 0 for a declaration ending with ";"), tbases (the base list
 #                   after the name, its type parameters and its primary constructor, up to the body, a ";" or "where") and theads
 #                   (" A B ": the last name segment of each base, without its type arguments)
@@ -760,7 +762,7 @@ function item_arg(s,   p, k, d, c, L, a) {
   if (a ~ /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/) sub(/^.*\./, "", a)
   return a
 }
-function parse_types(i,   L, pos, abs, tok, kw, nm, p, q, c, pd, ad, bases, gen, bs, be, k, pre, n, items, w, heads) {
+function parse_types(i,   L, pos, abs, tok, kw, nm, p, q, c, pd, ad, bases, gen, bs, be, k, pre, n, items, w, heads, tp, tps) {
   L = length(MASK); pos = 1
   while (match(substr(MASK, pos), /(^|[^A-Za-z0-9_.@])(class|record|struct|interface)[ \t\n]+[A-Za-z_][A-Za-z0-9_]*/)) {
     abs = pos + RSTART - 1; tok = substr(MASK, abs, RLENGTH)
@@ -771,7 +773,13 @@ function parse_types(i,   L, pos, abs, tok, kw, nm, p, q, c, pd, ad, bases, gen,
     if (nm == "class" || nm == "struct") { pos = abs + length(kw); continue }
     p = skipws(abs + length(tok)); pos = p
     gen = 0
-    if (substr(MASK, p, 1) == "<") { q = close_of(p, "<", ">"); if (q == 0) continue; gen = 1; p = skipws(q + 1) }
+    tp = " "
+    if (substr(MASK, p, 1) == "<") {
+      q = close_of(p, "<", ">"); if (q == 0) continue; gen = 1
+      tps = substr(MASK, p + 1, q - p - 1); gsub(/[ \t\n,]+/, " ", tps); n = split(tps, items, " ")
+      for (w = 1; w <= n; w++) if (items[w] != "in" && items[w] != "out") tp = tp items[w] " "
+      p = skipws(q + 1)
+    }
     if (substr(MASK, p, 1) == "(") { q = close_of(p, "(", ")"); if (q == 0) continue; p = skipws(q + 1) }
     bases = ""
     if (substr(MASK, p, 1) == ":") {
@@ -797,7 +805,7 @@ function parse_types(i,   L, pos, abs, tok, kw, nm, p, q, c, pd, ad, bases, gen,
     k = abs - 1
     while (k > 0 && substr(MASK, k, 1) !~ /[;{}\]]/) k--
     pre = substr(MASK, k + 1, abs - k - 1)
-    nt++; tname[nt] = nm; tkind[nt] = kw; tgen[nt] = gen; tfile[nt] = i; tbs[nt] = bs; tbe[nt] = be; tbases[nt] = bases
+    nt++; tname[nt] = nm; tkind[nt] = kw; tgen[nt] = gen; tparams[nt] = tp; tfile[nt] = i; tbs[nt] = bs; tbe[nt] = be; tbases[nt] = bases
     tabs[nt] = (pre ~ /(^|[^A-Za-z0-9_])abstract([^A-Za-z0-9_]|$)/)
     heads = " "
     n = base_items(bases, items)
@@ -850,8 +858,10 @@ function grow(   changed, more, i, s, k, n, w, h) {
 #               "Module (file)", distinct, sorted, joined with ", "; "-" when none (an event nothing publishes is legal)
 #   handlers    each class whose base list holds IIntegrationEventHandler<Event> (the base list may start on a later line), the same way
 # Errors (exit 3, the message in errfile), so that no shape gives a wrong or missing row: an event declared twice; a file named
-# <X>IntegrationEvent.cs with no event X read in it, or <X>IntegrationEventHandler.cs with no handler class X; a handler of a type that
-# is not a declared event (a generic handler, a test-only event); an IIntegrationEventHandler<Event> reference outside a parsed handler's
+# <X>IntegrationEvent.cs or <X>IntegrationEventHandler.cs that declares no type X, or whose X is a concrete class or record the parser
+# did not read as an event (or a handler) (an abstract base or an interface X is fine); a class deriving from a generic handler base
+# (`Base<TEvent> : IIntegrationEventHandler<TEvent>`); a handler of a type that is not a declared event (a test-only event); an
+# IIntegrationEventHandler<Event> reference outside a parsed handler's
 # base list (a manual registration); a PublishAsync that is not `PublishAsync(new <Event>(` and not a `Task PublishAsync<T>(`
 # declaration (a variable, an explicit type argument), or that publishes a type that is not a declared event; a `new <Event>(` that is
 # not the first argument of a PublishAsync (another publishing path); a file that cannot be read.
@@ -874,8 +884,15 @@ function joined(kind, key,   n, k, j, t, a, out) {
 BEGIN { label = "events"; S["IIntegrationEvent"] = 1; S["PublishAsync"] = 1; T["IIntegrationEvent"] = 1 }
 END {
   if (failed) exit 3
-  load_texts(); grow()
+  load_texts()
+  # A file named like an event or a handler is always parsed, so that the file-name rules below see what it declares.
+  for (i = 1; i <= nf; i++) {
+    b = fname[i]; sub(/^.*\//, "", b); sub(/\.cs$/, "", b); fbase[i] = b
+    if (b ~ /IntegrationEvent(Handler)?$/) parse_file(i)
+  }
+  grow()
   for (k = 1; k <= nt; k++) {
+    if (!((tfile[k], tname[k]) in tdecl)) tdecl[tfile[k], tname[k]] = k
     if (!(k in member) || tabs[k] || tkind[k] == "interface") continue
     nm = tname[k]
     if (nm in ev) fail("events: the integration event " nm " is declared twice: " fname[tfile[ev[nm]]] ", " fname[tfile[k]])
@@ -887,17 +904,32 @@ END {
     for (w = 1; w <= n; w++) {
       if (item_head(items[w]) != "IIntegrationEventHandler") continue
       a = item_arg(items[w]); i = tfile[k]
+      # A generic handler base (IIntegrationEventHandler<TEvent> with TEvent its own type parameter) handles no event itself.
+      if (index(tparams[k], " " a " ")) { hbase[tname[k]] = k; continue }
       if (!(a in ev)) fail("events: the handler " tname[k] " in " fname[i] " handles " (a == "" ? "a type the parser cannot read" : a) ", which is not an integration event declared under src/ (record X(...) : IIntegrationEvent)")
       add("h", a, module_of(fname[i]) " (" fname[i] ")")
       hrefs[i]++; handles[i, tname[k]] = 1
     }
   }
+  # A class deriving from a generic handler base handles an event the parser does not read.
+  for (k = 1; k <= nt; k++) {
+    n = split(theads[k], h, " ")
+    for (w = 1; w <= n; w++)
+      if ((h[w] in hbase) && !(k in hbase))
+        fail("events: " tname[k] " in " fname[tfile[k]] " derives from the generic handler base " h[w] " (" fname[tfile[hbase[h[w]]]] "): the parser reads only handlers that implement IIntegrationEventHandler<Event> themselves")
+  }
+  # A file named <X>IntegrationEvent.cs or <X>IntegrationEventHandler.cs declares a type X (an abstract base or an interface is fine); a
+  # concrete class or record X there must be an event (or a handler) the parser read.
   for (i = 1; i <= nf; i++) {
-    b = fname[i]; sub(/^.*\//, "", b); sub(/\.cs$/, "", b)
-    if (b ~ /IntegrationEvent$/ && b != "IIntegrationEvent" && !((i, b) in declared))
-      fail("events: " fname[i] " is named like an integration event, but the parser read no `record " b "(...) : IIntegrationEvent` in it")
-    if (b ~ /IntegrationEventHandler$/ && b != "IIntegrationEventHandler" && !((i, b) in handles))
-      fail("events: " fname[i] " is named like an integration event handler, but the parser read no `class " b " : IIntegrationEventHandler<Event>` in it")
+    b = fbase[i]
+    if (b !~ /IntegrationEvent(Handler)?$/) continue
+    if (!((i, b) in tdecl)) fail("events: " fname[i] " is named like an integration event or handler but declares no type named " b " (rename the file or declare a type named " b ")")
+    k = tdecl[i, b]
+    if (tabs[k] || tkind[k] == "interface" || (k in hbase)) continue
+    if (b ~ /IntegrationEvent$/ && !((i, b) in declared))
+      fail("events: " fname[i] " declares " b ", but the parser read no IIntegrationEvent in its base list (expected record " b "(...) : IIntegrationEvent)")
+    if (b ~ /IntegrationEventHandler$/ && !((i, b) in handles))
+      fail("events: " fname[i] " declares " b ", but the parser read no IIntegrationEventHandler<Event> in its base list (expected class " b " : IIntegrationEventHandler<Event>)")
   }
   for (i = 1; i <= nf; i++) {
     if (!(i in done)) continue

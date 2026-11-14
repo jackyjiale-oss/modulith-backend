@@ -782,6 +782,7 @@ internal static class APermissions
   put src/Modules/A/A/Application/APermissionSource.cs 'internal sealed class APermissionSource : IPermissionSource
 {
     private const string ModuleName = "a";
+    private static readonly string Verbatim = @$"""x"" y";
 
     // A comment naming APermissions.Delete with AdminDefault: true is not a record.
     private static readonly PermissionDefinition[] All =
@@ -1036,6 +1037,7 @@ errors_fixture() {
   put src/Modules/A/A/Domain/AErrors.cs 'internal static class AErrors
 {
     /// <summary>See <see cref="Busy"/>, code "a.doc".</summary>
+    private static readonly string Verbatim = @$"""x"" y";
     public static readonly Error Missing = Error.NotFound("a.missing", "Not found, (really).");
 
     public static readonly Error Busy = Error.Conflict(
@@ -1299,6 +1301,10 @@ public sealed record ThingDoneIntegrationEvent(
 {
     // publisher.PublishAsync(new GhostIntegrationEvent(Guid.Empty), ct) is a comment, not a call.
     private const string Text = "publisher.PublishAsync(new GhostIntegrationEvent(";
+    private static readonly string Verbatim2 = $@"""x"" y";
+    private static readonly string Raw = $"""a "quoted" {Text}""";
+    private static readonly string Raw2 = $$"""a "quoted" {{Text}}""";
+    private static readonly string Verbatim = @$"""x"" y";
 
     public Task Happened(CancellationToken ct)
         => publisher.PublishAsync(
@@ -1350,6 +1356,24 @@ case_events() {
 ThingDoneIntegrationEvent|A (src/Modules/A/A/Application/PublishThing.cs), Infrastructure.Common (src/BuildingBlocks/TemplateName.Infrastructure.Common/Things/PublishDone.cs)|C (src/Modules/C/C/Application/OnThingAgain.cs)
 ThingHappenedIntegrationEvent|A (src/Modules/A/A/Application/PublishThing.cs)|B (src/Modules/B/B/Application/OnThing.cs), D (src/Modules/D/D/Application/OnBoth.cs)
 --' "$combined" "events: several handlers joined, one class handling two events"
+  # Files named like events or handlers that declare an abstract base or an interface of that name pass and give no row.
+  rm -f "$tree/src/Modules/D/D/Application/OnBoth.cs"
+  put src/Modules/A/A.Contracts/IntegrationEvents/BaseIntegrationEvent.cs 'public abstract record BaseIntegrationEvent(Guid Id) : IIntegrationEvent;'
+  put src/Modules/A/A.Contracts/IntegrationEvents/IAuthIntegrationEvent.cs 'public interface IAuthIntegrationEvent : IIntegrationEvent
+{
+    Guid UserId { get; }
+}'
+  put src/Modules/B/B/Application/BaseIntegrationEventHandler.cs 'internal abstract class BaseIntegrationEventHandler<TEvent> : IIntegrationEventHandler<TEvent>
+    where TEvent : IIntegrationEvent
+{
+}'
+  put src/Modules/B/B/Application/IAuthIntegrationEventHandler.cs 'public interface IAuthIntegrationEventHandler<in TEvent> : IIntegrationEventHandler<TEvent>
+    where TEvent : IAuthIntegrationEvent
+{
+}'
+  emit_of_tree emit_events
+  assert_eq "0" "$status" "events: base and interface files: exit code"
+  assert_eq "$events_rows"$'\n--' "$combined" "events: base and interface files: no row, no error"
   # A tree without any event has no rows and no error.
   make_tree
   put src/Modules/A/A/Application/Other.cs 'class Other {}'
@@ -1432,6 +1456,16 @@ case_events_loud() {
   # An event file that declares another name.
   put_raw src/Modules/A/A.Contracts/IntegrationEvents/QuietIntegrationEvent.cs 'public sealed record QuieterIntegrationEvent(Guid Id) : IIntegrationEvent;\r\n'
   emit_fails "events_loud: an event file declaring another name" "src/Modules/A/A.Contracts/IntegrationEvents/QuietIntegrationEvent.cs" emit_events
+  assert_contains "rename the file or declare a type named QuietIntegrationEvent" "$combined" "events_loud: an event file declaring another name: says what was expected"
+  # A class deriving from a generic handler base handles an event the parser cannot read.
+  events_fixture
+  put src/Modules/B/B/Application/BaseIntegrationEventHandler.cs 'internal abstract class BaseIntegrationEventHandler<TEvent> : IIntegrationEventHandler<TEvent>
+{
+}'
+  put src/Modules/B/B/Application/OnQuiet.cs 'internal sealed class OnQuiet : BaseIntegrationEventHandler<QuietIntegrationEvent>
+{
+}'
+  emit_fails "events_loud: a handler through a generic base" "OnQuiet in src/Modules/B/B/Application/OnQuiet.cs derives from the generic handler base" emit_events
 }
 
 # jobs_fixture: the plumbing of the tree (IRecurringJob, the abstract BatchedCleanupJob, the AddRecurringJob declaration and
