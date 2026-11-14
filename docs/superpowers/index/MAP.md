@@ -22,7 +22,7 @@ lists of names).
 - `src/Host/`: the API host; `src/Host/TemplateName.Api/Program.cs` maps the module endpoints on the `/api/v1` group;
   root exceptions: JWKS, and the SignalR hub (`MapNotificationsHub` in `NotificationsModule.cs`). `routes.md` lists only the routes
   of the module `*Endpoints.cs` files; the host-level mappings (health `MapHealthChecks`, `MapOpenApi`, `MapScalarApiReference` and
-  the hub) are in `src/Host/TemplateName.Api/Program.cs` only;
+  the hub) are called from `src/Host/TemplateName.Api/Program.cs`;
   `src/Host/TemplateName.Api/appsettings.json` holds the sections with shipped values, not every section (see `config.md` below).
 - `tests/`: three projects, `TemplateName.UnitTests`, `TemplateName.IntegrationTests` (Docker) and `TemplateName.ArchitectureTests`
   (flat); a first-level folder is named after a module or an area (`tests/<Project>/<Module>/`).
@@ -108,3 +108,7 @@ lists of names).
 - NOT detected (silent, wrong rows): a route-mapping helper method without an access modifier in an endpoints file is read in the
   scope of the extension above it and can get a wrong route prefix; declare helpers `private static`: the generator then fails
   with exit 2 instead of emitting a wrong prefix.
+- NOT detected (silent, missing or incomplete rows): group authorization set in a separate statement after the group is created
+  (`g.RequireAuthorization(...)` or `g.RequirePermission(...)` on the group variable) when every route also has its own call: the
+  permission column then omits the group's requirement; a route-mapping extension that is NOT named `Map...Endpoints` and is called
+  from a `<Name>Module.cs` or `Program.cs` file is ignored, so its routes are missing from `routes.md` (name extensions `Map<X>Endpoints`).
