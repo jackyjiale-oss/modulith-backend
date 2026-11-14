@@ -2014,6 +2014,21 @@ run_case() {
   if (( rc != 0 )); then failures=$((failures + 1)); fi
 }
 
+# case_real_tree: the committed index of this repository. --check passes (one generator run), MAP.md is at most 120 lines and every
+# shard at most 400. The repository root comes from this file's location, not from the working directory.
+case_real_tree() {
+  local repo name n
+  repo="$(cd "$scripts_dir/../.." && pwd)"
+  run_gen --check --root "$repo"
+  assert_eq "0" "$status" "real tree: --check exit code (stderr: $err)"
+  n="$(wc -l < "$repo/docs/superpowers/index/MAP.md" || echo 999999)"
+  assert_eq "yes" "$( (( n <= 120 )) && echo yes || echo "no, $n lines")" "real tree: MAP.md at most 120 lines"
+  for name in $shards; do
+    n="$(wc -l < "$repo/docs/superpowers/index/$name.md" || echo 999999)"
+    assert_eq "yes" "$( (( n <= 400 )) && echo yes || echo "no, $n lines")" "real tree: $name.md at most 400 lines"
+  done
+}
+
 all_cases="case_usage_errors case_markers_shard case_markers_kinds_and_expressions case_markers_zero_rows case_stub_shards
   case_two_table_shard case_atomic_write
   case_determinism case_untracked_ignored case_git_file_marker case_find_excludes_build_dirs
@@ -2021,7 +2036,7 @@ all_cases="case_usage_errors case_markers_shard case_markers_kinds_and_expressio
   case_routes case_routes_zero case_routes_module_absent case_routes_loud case_routes_shapes
   case_permissions case_permissions_loud case_permissions_shapes case_errors case_errors_zero case_errors_loud
   case_events case_events_zero case_events_loud case_jobs case_jobs_zero case_jobs_loud
-  case_config case_config_loud case_tests_folders case_tests_pairs case_tests_loud case_unknown_case_name"
+  case_config case_config_loud case_tests_folders case_tests_pairs case_tests_loud case_unknown_case_name case_real_tree"
 
 # With arguments, only the named cases run (for iterating on one case); without, all of them. Every argument is checked against the
 # registered list before anything runs: run_case ignores set -e, so a misspelled name would otherwise print "command not found" and pass.
