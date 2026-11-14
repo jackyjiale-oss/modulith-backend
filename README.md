@@ -163,7 +163,7 @@ These are about the template repository only and are not generated:
 - [`BACKEND_TEMPLATE_BLUEPRINT.md`](BACKEND_TEMPLATE_BLUEPRINT.md): the original blueprint
 - [`docs/blueprint-review.md`](docs/blueprint-review.md): the review of the blueprint; it wins where they differ
 - [`docs/superpowers/`](docs/superpowers/): the design specs and implementation plans
-- [`docs/superpowers/index/`](docs/superpowers/index/MAP.md): the generated code map (routes, permissions, error codes, events, jobs, configuration, tests, switch markers); start at `MAP.md`
+- [`docs/superpowers/index/`](docs/superpowers/index/MAP.md): the code map (a hand-written `MAP.md` plus generated shards: routes, permissions, error codes, events, jobs, configuration, tests, switch markers); start at `MAP.md`
 - [`docs/repository-management.md`](docs/repository-management.md): repository settings, branch protection and releases
 - [`SECURITY.md`](SECURITY.md): reporting a vulnerability
 
