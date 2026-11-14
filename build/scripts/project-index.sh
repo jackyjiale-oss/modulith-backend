@@ -891,6 +891,9 @@ END {
     if (b ~ /IntegrationEvent(Handler)?$/) parse_file(i)
   }
   grow()
+  # Read the files that name a handler type too, so that a class deriving from one (refused below) is seen.
+  for (k = 1; k <= nt; k++) if (index(tbases[k], "IIntegrationEventHandler")) S[tname[k]] = 1
+  grow()
   for (k = 1; k <= nt; k++) {
     if (!((tfile[k], tname[k]) in tdecl)) tdecl[tfile[k], tname[k]] = k
     if (!(k in member) || tabs[k] || tkind[k] == "interface") continue
@@ -899,25 +902,34 @@ END {
     ev[nm] = k; declared[tfile[k], nm] = 1
   }
   for (k = 1; k <= nt; k++) {
-    if (tkind[k] == "interface" || tbases[k] == "") continue
+    if (tbases[k] == "") continue
     n = base_items(tbases[k], items)
     for (w = 1; w <= n; w++) {
       if (item_head(items[w]) != "IIntegrationEventHandler") continue
       a = item_arg(items[w]); i = tfile[k]
-      # A generic handler base (IIntegrationEventHandler<TEvent> with TEvent its own type parameter) handles no event itself.
+      # A generic handler base, class or interface (IIntegrationEventHandler<TEvent> with TEvent its own type parameter), handles no
+      # event itself; a class deriving from it is refused below.
       if (index(tparams[k], " " a " ")) { hbase[tname[k]] = k; continue }
+      # A non-generic interface over a declared event is left to the reference count below (its reference is not a parsed handler).
+      if (tkind[k] == "interface") continue
       if (!(a in ev)) fail("events: the handler " tname[k] " in " fname[i] " handles " (a == "" ? "a type the parser cannot read" : a) ", which is not an integration event declared under src/ (record X(...) : IIntegrationEvent)")
       add("h", a, module_of(fname[i]) " (" fname[i] ")")
-      hrefs[i]++; handles[i, tname[k]] = 1
+      hrefs[i]++; handles[i, tname[k]] = 1; hclass[tname[k]] = k
     }
   }
-  # A class deriving from a generic handler base handles an event the parser does not read.
+  # A class deriving from a generic handler base or interface handles an event the parser does not read; a class deriving from a handler
+  # class would list the base as the handler; an abstract handler is not the handler that runs.
   for (k = 1; k <= nt; k++) {
     n = split(theads[k], h, " ")
-    for (w = 1; w <= n; w++)
+    for (w = 1; w <= n; w++) {
       if ((h[w] in hbase) && !(k in hbase))
-        fail("events: " tname[k] " in " fname[tfile[k]] " derives from the generic handler base " h[w] " (" fname[tfile[hbase[h[w]]]] "): the parser reads only handlers that implement IIntegrationEventHandler<Event> themselves")
+        fail("events: handler through a derived generic interface/base: " tname[k] " in " fname[tfile[k]] " derives from " h[w] " (" fname[tfile[hbase[h[w]]]] "); the parser reads only handlers that implement IIntegrationEventHandler<Event> themselves")
+      if (h[w] in hclass)
+        fail("events: handler base class " h[w] " (" fname[tfile[hclass[h[w]]]] ") is derived from by " tname[k] " (" fname[tfile[k]] "): unsupported, name the concrete handler")
+    }
   }
+  for (c in hclass)
+    if (tabs[hclass[c]]) fail("events: handler base class " c " in " fname[tfile[hclass[c]]] " is abstract: unsupported, name the concrete handler")
   # A file named <X>IntegrationEvent.cs or <X>IntegrationEventHandler.cs declares a type X (an abstract base or an interface is fine); a
   # concrete class or record X there must be an event (or a handler) the parser read.
   for (i = 1; i <= nf; i++) {

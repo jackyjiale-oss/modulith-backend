@@ -1465,7 +1465,24 @@ case_events_loud() {
   put src/Modules/B/B/Application/OnQuiet.cs 'internal sealed class OnQuiet : BaseIntegrationEventHandler<QuietIntegrationEvent>
 {
 }'
-  emit_fails "events_loud: a handler through a generic base" "OnQuiet in src/Modules/B/B/Application/OnQuiet.cs derives from the generic handler base" emit_events
+  emit_fails "events_loud: a handler through a generic base" "handler through a derived generic interface/base: OnQuiet in src/Modules/B/B/Application/OnQuiet.cs" emit_events
+  rm -f "$tree/src/Modules/B/B/Application/BaseIntegrationEventHandler.cs" "$tree/src/Modules/B/B/Application/OnQuiet.cs"
+  # The same through a generic interface (the runtime scan registers OnLogin: GetInterfaces() is transitive).
+  put src/Modules/A/A.Contracts/IntegrationEvents/LoginIntegrationEvent.cs 'public sealed record LoginIntegrationEvent(Guid Id) : IIntegrationEvent;'
+  put src/Modules/B/B/Application/IAuthIntegrationEventHandler.cs 'public interface IAuthIntegrationEventHandler<in TEvent> : IIntegrationEventHandler<TEvent>
+{
+}'
+  put src/Modules/B/B/Application/OnLogin.cs 'internal sealed class OnLogin : IAuthIntegrationEventHandler<LoginIntegrationEvent> { }'
+  emit_fails "events_loud: a handler through a generic interface" "handler through a derived generic interface/base: OnLogin in src/Modules/B/B/Application/OnLogin.cs" emit_events
+  rm -f "$tree/src/Modules/B/B/Application/IAuthIntegrationEventHandler.cs" "$tree/src/Modules/B/B/Application/OnLogin.cs"
+  # A non-generic abstract handler with a concrete subclass would list the base as the handler.
+  put src/Modules/B/B/Application/BaseThingHandler.cs 'internal abstract class BaseThingHandler : IIntegrationEventHandler<ThingHappenedIntegrationEvent>
+{
+}'
+  put src/Modules/C/C/Application/OnThingConcrete.cs 'internal sealed class OnThingConcrete : BaseThingHandler { }'
+  emit_fails "events_loud: a subclass of a handler class" "handler base class BaseThingHandler (src/Modules/B/B/Application/BaseThingHandler.cs) is derived from by OnThingConcrete (src/Modules/C/C/Application/OnThingConcrete.cs)" emit_events
+  rm -f "$tree/src/Modules/C/C/Application/OnThingConcrete.cs"
+  emit_fails "events_loud: an abstract handler class" "handler base class BaseThingHandler in src/Modules/B/B/Application/BaseThingHandler.cs is abstract" emit_events
 }
 
 # jobs_fixture: the plumbing of the tree (IRecurringJob, the abstract BatchedCleanupJob, the AddRecurringJob declaration and
