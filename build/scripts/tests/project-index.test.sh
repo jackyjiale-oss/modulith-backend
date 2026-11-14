@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Tests for project-index.sh (project index design): the CLI, the markers, routes, permissions, errors, events and jobs shards, the MAP.md
-# checks and --check.
+# Tests for project-index.sh (project index design): the CLI, the markers, routes, permissions, errors, events, jobs, config and tests
+# shards, the MAP.md checks and --check.
 # Each case builds its own throwaway tree, runs the script on it and checks the files it writes, its output and its exit code.
 #
 # Usage: bash build/scripts/tests/project-index.test.sh [case_name...]
@@ -1759,6 +1759,253 @@ case_jobs_loud() {
   emit_fails "jobs_loud: AddOutbox without its extension" "AddOutbox<...> is called in $m" emit_jobs
 }
 
+# config_fixture: a Host appsettings.json in CRLF (JSON with comments) with Serilog, Auth (wrapped in //#if marker lines), Caching and a
+# commented-out section; module A owns Auth (`Auth:Lockout`, two files), two building blocks own Caching (`Caching` and `Caching:Redis`),
+# a SectionName of a section the file does not have (not listed), decoys (a use of SectionName in an interpolated string and in a
+# concatenation, a SectionName under tests/, another appsettings file with an unowned section); docs: a heading `Auth` in a module doc, a
+# table row `Serilog` in api.md, Caching only in prose and in a fenced code block.
+config_fixture() {
+  put_raw src/Host/H/appsettings.json '{\r\n  "Serilog": {\r\n    "MinimumLevel": "Information"\r\n  },\r\n  // "Old": { "Gone": true },\r\n  /* "Older": {} */\r\n  //#if (notifications)\r\n  "Auth": {\r\n    "Lockout": { "Max": 5 },\r\n    "Text": "a \\"quoted\\" { brace"\r\n  },\r\n  //#endif\r\n  "Caching": {\r\n    //#if (caching == "redis")\r\n    "Redis": { "InstanceName": "x" },\r\n    //#endif\r\n    "Provider": "memory"\r\n  }\r\n}\r\n'
+  put src/Host/H/appsettings.Development.json '{
+  "Unowned": {}
+}'
+  put tests/T.IntegrationTests/appsettings.json '{
+  "AlsoUnowned": {}
+}'
+  put src/Modules/A/A/Application/AuthOptions.cs 'internal sealed class LockoutOptions
+{
+    internal const string SectionName = "Auth:Lockout";
+
+    public string Path => $"{SectionName}:Max";
+}'
+  put src/Modules/A/A/Application/SeedOptions.cs 'internal sealed class SeedOptions
+{
+    internal const string SectionName = "Auth:Seed";
+    internal const string AdminPath = SectionName + ":" + nameof(Admin);
+}'
+  put src/Modules/A/A/Infrastructure/RetentionOptions.cs 'internal sealed class RetentionOptions
+{
+    internal const string SectionName = "Retention";
+}'
+  put src/BuildingBlocks/TemplateName.Infrastructure.Common/Caching/CachingOptions.cs 'public sealed class CachingOptions
+{
+    public const string SectionName = "Caching";
+}'
+  put src/BuildingBlocks/TemplateName.Platform.Redis/RedisCachingOptions.cs '// The SectionName below is read with GetSection(RedisCachingOptions.SectionName).
+internal sealed class RedisCachingOptions
+{
+    internal const string SectionName = "Caching:Redis";
+}'
+  put tests/T.UnitTests/A/FakeOptions.cs 'internal sealed class FakeOptions { internal const string SectionName = "Mystery"; }'
+  put docs/modules/a.md '# A
+
+## Configuration
+
+### `Auth`
+
+Uses `Caching` too.'
+  put docs/services/api.md '# API
+
+| Key | Default |
+|---|---|
+| `Serilog` | see below |
+
+```
+### `Caching`
+```'
+  put docs/other/x.md '### `Caching`'
+}
+
+config_rows='Auth|A|docs/modules/a.md
+Caching|Infrastructure.Common, Platform.Redis|-
+Serilog|Host|docs/services/api.md'
+
+case_config() {
+  make_tree
+  config_fixture
+  emit_of_tree emit_config
+  assert_eq "0" "$status" "config: exit code"
+  assert_eq "$config_rows"$'\n--' "$combined" "config: exact rows (markers skipped, owners joined, Host allowlist, docs rule, CRLF)"
+  # The one end-to-end run of the config shard: the rendered table.
+  generate
+  assert_contains $'Rows: 3\n\n| section | owner | documented in |\n| --- | --- | --- |\n| Auth | A | docs/modules/a.md |' \
+    "$(<"$idx/config.md")" "config: rendered shard"
+  # A section owned by the Host and a project at once lists both; a heading with a sub-key and a table row with one count.
+  put src/Host/H/SerilogOptions.cs 'internal sealed class SerilogOptions { internal const string SectionName = "Serilog"; }'
+  put docs/building-blocks/b.md '| `Caching:Provider` | memory |'
+  put docs/modules/c.md '### `Auth:Seed`'
+  emit_of_tree emit_config
+  assert_eq $'Auth|A|docs/modules/a.md, docs/modules/c.md\nCaching|Infrastructure.Common, Platform.Redis|docs/building-blocks/b.md\nSerilog|Host|docs/services/api.md\n--' \
+    "$combined" "config: Host project owner, sub-key heading and table row"
+  # A tree without a Host appsettings.json has no rows and no error.
+  make_tree
+  put src/Modules/A/A/AuthOptions.cs 'internal sealed class LockoutOptions { internal const string SectionName = "Auth:Lockout"; }'
+  emit_of_tree emit_config
+  assert_eq "0" "$status" "config: no appsettings: exit code"
+  assert_eq "--" "$combined" "config: no appsettings: no rows"
+}
+
+# Shapes that would give a wrong or missing configuration row with exit 0 fail loudly instead.
+case_config_loud() {
+  local app='src/Host/H/appsettings.json' opt='src/Modules/A/A/Application/AuthOptions.cs'
+  # A section with no owner and not in the Host allowlist.
+  make_tree
+  config_fixture
+  put "$app" '{
+  "Serilog": {},
+  "Auth": {},
+  "Caching": {},
+  "Mystery": { "X": 1 }
+}'
+  emit_fails "config_loud: an unassigned section" "Mystery" emit_config
+  run_gen --root "$tree" --out "$idx"
+  assert_eq "2" "$status" "config_loud: generator exit code"
+  assert_contains "Mystery" "$err" "config_loud: generator names the section"
+  # A section that appears twice.
+  put "$app" '{
+  "Serilog": {},
+  "Auth": {},
+  "Auth": {}
+}'
+  emit_fails "config_loud: a section twice" "Auth" emit_config
+  # A section not at the two-space indent, and a key that is not letters only.
+  put "$app" '{
+    "Serilog": {},
+    "Auth": {}
+}'
+  emit_fails "config_loud: four-space indent" "line 2 of $app" emit_config
+  put "$app" '{
+  "Serilog": {}, "Auth": {}
+}'
+  emit_fails "config_loud: two sections on one line" "line 2 of $app" emit_config
+  put "$app" '{
+  "Serilog": {},
+  "Auth_X": {}
+}'
+  emit_fails "config_loud: a section name the regex does not take" "line 3 of $app" emit_config
+  # A marker that is not a whole line, and a file that does not close.
+  put "$app" '{
+  "Serilog": {}, //#if (notifications)
+  "Auth": {}
+}'
+  emit_fails "config_loud: a marker inside a line" "line 2 of $app" emit_config
+  put "$app" '{
+  "Serilog": {},
+  "Auth": {'
+  emit_fails "config_loud: an unclosed file" "$app" emit_config
+  put "$app" '{
+}'
+  emit_fails "config_loud: no section" "$app" emit_config
+  # SectionName shapes the parser cannot read.
+  config_fixture
+  put "$opt" 'internal sealed class LockoutOptions { internal const string SectionName = "Auth" + ":Lockout"; }'
+  emit_fails "config_loud: a concatenated SectionName" "line 1 of $opt" emit_config
+  put "$opt" 'internal sealed class LockoutOptions { internal const string SectionName = $"Auth:{Name}"; }'
+  emit_fails "config_loud: an interpolated SectionName" "line 1 of $opt" emit_config
+  put "$opt" 'internal sealed class LockoutOptions
+{
+    internal static readonly string SectionName = "Auth:Lockout";
+}'
+  emit_fails "config_loud: a static readonly SectionName" "line 3 of $opt" emit_config
+  put "$opt" 'internal sealed class LockoutOptions { public static string SectionName => "Auth:Lockout"; }'
+  emit_fails "config_loud: a SectionName property" "line 1 of $opt" emit_config
+  put "$opt" 'internal sealed class LockoutOptions { internal const string SectionName = "Auth.Lockout"; }'
+  emit_fails "config_loud: a SectionName that is not a configuration path" "line 1 of $opt" emit_config
+}
+
+# tests_fixture: two test projects: T.UnitTests with module and building-block folders (nested files counted, a non-.cs file and a
+# bin folder not counted), a cross-cutting folder, a folder that matches a module and a building block (the module wins) and a loose
+# file at its root; T.ArchitectureTests with no folder. Sources: a module, building blocks, pairs and decoys.
+tests_fixture() {
+  put src/Modules/Auth/Auth/Application/Login/Login.cs 'class Login {}'
+  put src/Modules/Redis/Redis/RedisModule.cs 'class RedisModule {}'
+  put src/BuildingBlocks/TemplateName.Web.Common/Http/WebThing.cs 'class WebThing {}'
+  put src/BuildingBlocks/TemplateName.Platform.Redis/RedisCache.cs 'class RedisCache {}'
+  put tests/T.UnitTests/Auth/Login/LoginTests.cs 'class LoginTests {}'
+  put tests/T.UnitTests/Auth/Helpers.cs 'class Helpers {}'
+  put tests/T.UnitTests/Auth/data.json '{}'
+  put tests/T.UnitTests/Web/WebThingTests.cs 'class WebThingTests {}'
+  put tests/T.UnitTests/Odd/OddTests.cs 'class OddTests {}'
+  put tests/T.UnitTests/Redis/RedisCacheTests.cs 'class RedisCacheTests {}'
+  put tests/T.UnitTests/Usings.cs 'global using Xunit;'
+  put tests/T.UnitTests/bin/Debug/Gen.cs 'class Gen {}'
+  put tests/T.UnitTests/T.UnitTests.csproj '<Project />'
+  put tests/T.ArchitectureTests/LayerTests.cs 'class LayerTests {}'
+  put tests/T.ArchitectureTests/NamingTests.cs 'class NamingTests {}'
+}
+
+tests_rows='T.ArchitectureTests|(flat)|-|2
+T.UnitTests|(root)|-|1
+T.UnitTests|Auth|Auth|2
+T.UnitTests|Odd|cross-cutting|1
+T.UnitTests|Redis|Redis|1
+T.UnitTests|Web|Web.Common|1'
+
+case_tests_folders() {
+  make_tree
+  tests_fixture
+  emit_of_tree emit_tests
+  assert_eq "0" "$status" "tests_folders: exit code"
+  assert_eq "$tests_rows"$'\n--' "$combined" "tests_folders: exact rows (module, building block, cross-cutting, module wins, root, flat, .cs only)"
+  # A tree without tests has no rows and no error.
+  make_tree
+  put src/Modules/Auth/Auth/A.cs 'class A {}'
+  emit_of_tree emit_tests
+  assert_eq "0" "$status" "tests_folders: no tests: exit code"
+  assert_eq "--" "$combined" "tests_folders: no tests: no rows"
+}
+
+# tests_pairs: runs emit_tests_2 on the current tree; sets status and combined (the rows, sorted, then "note: " and the table note).
+tests_pairs() {
+  sourced "root='$tree'; cd '$tree'; prepare_files; emit_tests_2 > \"\$work/p\"; sort \"\$work/p\"; echo \"note: \$table_note\""
+}
+
+case_tests_pairs() {
+  make_tree
+  tests_fixture
+  # Dup.cs twice in src/ and BarTests.cs twice in tests/: skipped, two names counted; Foo.cs under Migrations does not make Foo
+  # ambiguous, and Snapshot.cs under Migrations does not pair.
+  put src/Modules/Auth/Auth/Application/Foo.cs 'class Foo {}'
+  put src/Modules/Auth/Auth/Infrastructure/Persistence/Migrations/Foo.cs 'class Foo {}'
+  put src/Modules/Auth/Auth/Infrastructure/Persistence/Migrations/Snapshot.cs 'class Snapshot {}'
+  put src/Modules/Auth/Auth/Application/Dup.cs 'class Dup {}'
+  put src/Modules/Redis/Redis/Dup.cs 'class Dup {}'
+  put src/Modules/Auth/Auth/Application/Bar.cs 'class Bar {}'
+  put tests/T.UnitTests/Auth/FooTests.cs 'class FooTests {}'
+  put tests/T.UnitTests/Auth/SnapshotTests.cs 'class SnapshotTests {}'
+  put tests/T.UnitTests/Auth/DupTests.cs 'class DupTests {}'
+  put tests/T.UnitTests/Auth/BarTests.cs 'class BarTests {}'
+  put tests/T.ArchitectureTests/Auth/BarTests.cs 'class BarTests {}'
+  tests_pairs
+  assert_eq "0" "$status" "tests_pairs: exit code"
+  assert_eq 'src/BuildingBlocks/TemplateName.Platform.Redis/RedisCache.cs|tests/T.UnitTests/Redis/RedisCacheTests.cs
+src/BuildingBlocks/TemplateName.Web.Common/Http/WebThing.cs|tests/T.UnitTests/Web/WebThingTests.cs
+src/Modules/Auth/Auth/Application/Foo.cs|tests/T.UnitTests/Auth/FooTests.cs
+src/Modules/Auth/Auth/Application/Login/Login.cs|tests/T.UnitTests/Auth/Login/LoginTests.cs' "$(printf '%s\n' "$combined" | sed '$d')" \
+    "tests_pairs: exact pairs (unique names only, Migrations ignored)"
+  assert_contains "2 names that occur more than once" "$(printf '%s\n' "$combined" | tail -n 1)" "tests_pairs: the note counts the skipped names"
+  # The one end-to-end run of the tests shard: both tables, the note above the second, Rows over both.
+  generate
+  assert_contains $'Rows: 11\n\n## Folders\n\n| test project | folder | source area | files |' "$(<"$idx/tests.md")" "tests_pairs: rendered Rows over both tables"
+  assert_contains $'## Name pairs\n\nPairs `Foo.cs`' "$(<"$idx/tests.md")" "tests_pairs: rendered note above the pairs"
+}
+
+# Shapes that would give a wrong test row with exit 0 fail loudly instead.
+case_tests_loud() {
+  # A folder that names two building blocks.
+  make_tree
+  tests_fixture
+  put src/BuildingBlocks/TemplateName.Application.Common/A.cs 'class A {}'
+  put src/BuildingBlocks/TemplateName.Infrastructure.Common/B.cs 'class B {}'
+  put tests/T.UnitTests/Common/CommonTests.cs 'class CommonTests {}'
+  emit_fails "tests_loud: a folder matching two building blocks" "tests/T.UnitTests/Common" emit_tests
+  # A .cs file directly under tests/, outside any test project.
+  make_tree
+  tests_fixture
+  put tests/Stray.cs 'class Stray {}'
+  emit_fails "tests_loud: a .cs file outside a test project" "tests/Stray.cs" emit_tests
+}
+
 # Each case runs in a subshell so that its tree and variables do not leak into the next.
 # The subshell reports its failures through its exit code, since variables do not cross the boundary.
 run_case() {
@@ -1773,7 +2020,8 @@ all_cases="case_usage_errors case_markers_shard case_markers_kinds_and_expressio
   case_check_stale case_check_missing_and_unknown case_map_rules case_need_rows
   case_routes case_routes_zero case_routes_module_absent case_routes_loud case_routes_shapes
   case_permissions case_permissions_loud case_permissions_shapes case_errors case_errors_zero case_errors_loud
-  case_events case_events_zero case_events_loud case_jobs case_jobs_zero case_jobs_loud case_unknown_case_name"
+  case_events case_events_zero case_events_loud case_jobs case_jobs_zero case_jobs_loud
+  case_config case_config_loud case_tests_folders case_tests_pairs case_tests_loud case_unknown_case_name"
 
 # With arguments, only the named cases run (for iterating on one case); without, all of them. Every argument is checked against the
 # registered list before anything runs: run_case ignores set -e, so a misspelled name would otherwise print "command not found" and pass.

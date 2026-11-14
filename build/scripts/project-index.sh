@@ -148,11 +148,6 @@ shard_meta() {
   esac
 }
 
-# The shards below are stubs here (a table with no rows); later tasks give each its parser.
-emit_config() { :; }
-emit_tests() { :; }
-emit_tests_2() { :; }
-
 # routes_awk: one awk run over the tracked file list (stdin, from files_cache) that reads the C# files it needs with getline. Three kinds:
 #   E  src/Modules/<Module>/<Project>/.../Endpoints/*Endpoints.cs   the routes; only these give rows
 #   M  src/Modules/<Module>/<Project>/*Module.cs                    module extensions that call the endpoint extensions
@@ -1135,6 +1130,245 @@ emit_jobs() {
   local rows_file="$work/jobs.awk.out" lines=()
   run_awk jobs "$jobs_awk" "$rows_file"
   mapfile -t lines < "$rows_file"
+  if (( ${#lines[@]} > 0 )); then printf '%s\n' "${lines[@]}"; fi
+}
+
+# config_awk: one awk run over the tracked file list (stdin) that reads:
+#   A  src/Host/<Project>/appsettings.json (JSON with comments; no other appsettings file)   the top-level sections: each key of the root
+#      object, on a line `  "Name":` (two spaces, letters only); whole-line template marker lines (//#if ...) are skipped, so a section
+#      inside a switch is listed; // and /* */ comments are skipped, so a commented-out section is not
+#   C  src/**/*.cs holding the text SectionName   the owners: `const string SectionName = "Section:Sub";` (the first segment is the
+#      section); the owner is the folder under src/Modules, the building-block directory under src/BuildingBlocks without its first
+#      dotted part, or Host under src/Host; a use of SectionName (X.SectionName, a concatenation, an interpolation hole) is not one
+#   D  docs/services/api.md, docs/modules/*.md, docs/building-blocks/*.md   the documentation: a heading `### \`Section\`` or a table row
+#      starting `| \`Section\`` (either optionally with `:Sub`), outside fenced code blocks
+# and prints section|owners|docs (owners and docs sorted, joined with ", "; docs "-" when none). The sections Serilog, AllowedHosts and
+# Kestrel are owned by Host (the ASP.NET Core host reads them; no SectionName). A SectionName whose section the file does not have is
+# bound but not in appsettings.json: it gives no row.
+# Errors (exit 3, the message in errfile), so that no shape gives a wrong or missing row: a section with no owner; a section twice in
+# one file; a top-level key not on a `  "Name":` line (another indent, two keys on a line, a name that is not letters only); a template
+# marker that is not a whole line; a file that does not close (an object, a string, a comment) or is not an object; a file with no
+# section; a SectionName declared in any other shape (static readonly, a property, a concatenation, an interpolated or verbatim string)
+# or whose value is not a configuration path; a file that cannot be read.
+# shellcheck disable=SC2016
+config_awk="$cs_awk_lib"'
+function owner_of(f,   n, seg, mod) {
+  n = split(f, seg, "/")
+  if (seg[2] == "Host") return "Host"
+  mod = (n >= 4 ? seg[3] : seg[2])
+  if (seg[2] != "Modules") sub(/^[^.]*\./, "", mod)
+  return mod
+}
+# add_to(arr, key, item): adds item to the SUBSEP-separated set arr[key]; joined(list): that set sorted, joined with ", ".
+function add_to(arr, key, item) { if (index(arr[key] SUBSEP, SUBSEP item SUBSEP) == 0) arr[key] = arr[key] SUBSEP item }
+function joined(list,   n, a, i, j, t, out) {
+  n = split(substr(list, 2), a, SUBSEP)
+  for (i = 2; i <= n; i++) { t = a[i]; for (j = i - 1; j >= 1 && a[j] > t; j--) a[j + 1] = a[j]; a[j + 1] = t }
+  out = ""
+  for (i = 1; i <= n; i++) out = out (i > 1 ? ", " : "") a[i]
+  return out
+}
+function read_settings(f,   line, rc, lineno, n, k, c, st, depth, expect, iskey, kstart, key, rkey, cnt, roots) {
+  st = 0; depth = 0; expect = 0; lineno = 0; cnt = 0; roots = 0
+  while ((rc = (getline line < f)) > 0) {
+    lineno++
+    sub(/\r$/, "", line)
+    if (st == 0 && line ~ /^[ \t]*(\/\/|<!--|%%)?#(if|elseif|else|endif)([ \t]|\(|-->|$)/) continue
+    if (line ~ /(\/\/|<!--|%%)[ \t]*#(if|elseif|else|endif)([ \t(]|-->|$)/) fail("config: a template marker that is not a whole line at line " lineno " of " f)
+    n = length(line)
+    for (k = 1; k <= n; k++) {
+      c = substr(line, k, 1)
+      if (st == 4) { if (c == "*" && substr(line, k + 1, 1) == "/") { st = 0; k++ } continue }
+      if (st == 1) {
+        if (c == "\\") { k++; continue }
+        if (c != "\"") continue
+        st = 0
+        if (!iskey) continue
+        key = substr(line, kstart + 1, k - kstart - 1)
+        rkey = ""
+        if (kstart == 3 && match(line, /^  "[A-Za-z]+":/)) { rkey = substr(line, 4, RLENGTH - 5) }
+        if (rkey != key) fail("config: cannot read the section at line " lineno " of " f " (expected one top-level key on a line `  \"Name\":`: two spaces, letters only)")
+        if ((f, key) in seen) fail("config: the section " key " appears twice in " f " (lines " seen[f, key] " and " lineno ")")
+        seen[f, key] = lineno; cnt++
+        if (!(key in sec)) { sec[key] = 1; ns++; secs[ns] = key; secfile[key] = f }
+        continue
+      }
+      if (c == "/" && substr(line, k + 1, 1) == "/") break
+      if (c == "/" && substr(line, k + 1, 1) == "*") { st = 4; k++; continue }
+      if (c == "\"") { st = 1; iskey = (depth == 1 && expect); kstart = k; expect = 0; continue }
+      if (c == "{" || c == "[") {
+        depth++
+        if (depth == 1) { if (c != "{" || roots) fail("config: " f " is not one JSON object (line " lineno ")"); roots = 1; expect = 1 }
+        continue
+      }
+      if (c == "}" || c == "]") { depth--; if (depth < 0) fail("config: an unmatched " c " at line " lineno " of " f); continue }
+      if (c == "," && depth == 1) expect = 1
+    }
+    if (st == 1) fail("config: a string that does not close on its line at line " lineno " of " f)
+  }
+  if (rc < 0) fail("config: cannot read " f)
+  close(f)
+  if (st == 4 || depth != 0 || !roots) fail("config: " f " does not close (an object, an array or a /* comment is still open at the end)")
+  if (cnt == 0) fail("config: no top-level section parsed in " f)
+}
+function has_token(f,   line, rc, hit) {
+  hit = 0
+  while ((rc = (getline line < f)) > 0) if (index(line, "SectionName") > 0) { hit = 1; break }
+  if (rc < 0) fail("config: cannot read " f)
+  close(f)
+  return hit
+}
+function read_owners(f,   pos, abs, from, pre, after, at, p, val, first) {
+  if (cs_read(f) < 0) fail("config: cannot read " f)
+  pos = 1
+  while (match(substr(MASK, pos), /(^|[^A-Za-z0-9_])SectionName([^A-Za-z0-9_]|$)/)) {
+    abs = pos + RSTART - 1; if (substr(MASK, abs, 1) != "S") abs++
+    pos = abs + 11
+    from = (abs > 80 ? abs - 80 : 1)
+    pre = substr(MASK, from, abs - from); after = substr(MASK, pos, 200)
+    # A use, not a declaration: X.SectionName, or SectionName followed by anything but =, =>, { or ; (and not after a type name).
+    if (pre ~ /\.[ \t\n]*$/) continue
+    if (pre !~ /(^|[^A-Za-z0-9_])(string|String|var)[ \t\n]+$/ && after !~ /^[ \t\n]*(=[^=>]|=>|\{|;)/) continue
+    at = line_at(abs)
+    if (pre !~ /(^|[^A-Za-z0-9_])const[ \t\n]+string[ \t\n]+$/ || !match(after, /^[ \t\n]*=[ \t\n]*"_*"[ \t\n]*;/))
+      fail("config: cannot read the SectionName at line " at " of " f " (expected `const string SectionName = \"Section:Sub\";`; a static readonly field, a property, a concatenation, an interpolated or a verbatim string is not read)")
+    p = pos + index(after, "\"")
+    val = substr(RAW, p, index(substr(MASK, p), "\"") - 1)
+    if (val !~ /^[A-Za-z][A-Za-z0-9]*(:[A-Za-z0-9]+)*$/) fail("config: the SectionName \"" val "\" at line " at " of " f " is not a configuration path (Section or Section:Sub, letters and digits)")
+    first = val; sub(/:.*$/, "", first)
+    add_to(declared, first, owner_of(f))
+  }
+}
+function read_doc(f,   line, rc, fence, t) {
+  fence = 0
+  while ((rc = (getline line < f)) > 0) {
+    sub(/\r$/, "", line)
+    if (line ~ /^[ \t]*(```|~~~)/) { fence = !fence; continue }
+    if (fence) continue
+    if (match(line, /^###[ \t]+`[A-Za-z]+[`:]/) || match(line, /^\|[ \t]*`[A-Za-z]+[`:]/)) {
+      t = substr(line, RSTART, RLENGTH); sub(/^[^`]*`/, "", t); t = substr(t, 1, length(t) - 1)
+      add_to(docs, t, f)
+    }
+  }
+  if (rc < 0) fail("config: cannot read " f)
+  close(f)
+}
+BEGIN { host["Serilog"] = 1; host["AllowedHosts"] = 1; host["Kestrel"] = 1 }
+{
+  sub(/\r$/, "")
+  n = split($0, seg, "/")
+  if (seg[1] == "src" && n == 4 && seg[2] == "Host" && seg[4] == "appsettings.json") { na++; afile[na] = $0 }
+  else if (seg[1] == "src" && seg[n] ~ /\.cs$/) { nc++; cfile[nc] = $0 }
+  else if ($0 == "docs/services/api.md" || (n == 3 && seg[1] == "docs" && (seg[2] == "modules" || seg[2] == "building-blocks") && seg[3] ~ /\.md$/)) { nd++; dfile[nd] = $0 }
+}
+END {
+  if (failed) exit 3
+  if (na == 0) exit 0
+  for (i = 1; i <= na; i++) read_settings(afile[i])
+  for (i = 1; i <= nc; i++) if (has_token(cfile[i])) read_owners(cfile[i])
+  for (i = 1; i <= nd; i++) read_doc(dfile[i])
+  for (i = 1; i <= ns; i++) {
+    s = secs[i]
+    own = declared[s]
+    if (s in host && index(own SUBSEP, SUBSEP "Host" SUBSEP) == 0) own = own SUBSEP "Host"
+    if (own == "") fail("config: the section " s " of " secfile[s] " has no owner: no `const string SectionName = \"" s "...\"` under src/, and not a Host section (Serilog, AllowedHosts, Kestrel)")
+    print s "|" joined(own) "|" ((s in docs) ? joined(docs[s]) : "-")
+  }
+}'
+
+# emit_config: the config shard (see config_awk); one awk process for the whole tree.
+emit_config() {
+  local rows_file="$work/config.awk.out" lines=()
+  run_awk config "$config_awk" "$rows_file"
+  mapfile -t lines < "$rows_file"
+  if (( ${#lines[@]} > 0 )); then printf '%s\n' "${lines[@]}"; fi
+}
+
+# tests_awk: one awk run over the tracked file list (stdin; no file is opened) that prints:
+#   table 1 (stdout)  test project|folder|source area|files: per tests/<Project>/ and per first-level folder of it, the number of .cs
+#                     files in it at any depth; the loose .cs files of a project are a row (root), or (flat) when the project has no
+#                     folder (source area -). The source area is the module when src/Modules/<Folder> exists, else the one building
+#                     block under src/BuildingBlocks whose directory name contains .<Folder>. or ends .<Folder> (without its first dotted
+#                     part), else cross-cutting
+#   table 2 (out2)    source|test: src/**/Foo.cs (not under a Migrations folder) with tests/**/FooTests.cs, when Foo.cs occurs once under
+#                     src/ and FooTests.cs once under tests/
+#   out3              "<test .cs files> <names skipped>": the names with both a source and a test file of which one occurs more than once
+# bin and obj folders are skipped. Errors (exit 3, the message in errfile): a folder whose name matches two building blocks (the area
+# would be a guess); a .cs file directly under tests/, outside a test project.
+# shellcheck disable=SC2016
+tests_awk='
+function fail(msg) { print msg > errfile; failed = 1; exit 3 }
+function ends_with(s, t) { return length(s) >= length(t) && substr(s, length(s) - length(t) + 1) == t }
+function area_of(fold, where,   d, hit, cnt, list) {
+  if (fold in mods) return fold
+  cnt = 0; list = ""
+  for (d in bbs) if (index(d, "." fold ".") > 0 || ends_with(d, "." fold)) { cnt++; hit = d; list = list " " d }
+  if (cnt > 1) fail("tests: the folder " where " matches more than one building block under src/BuildingBlocks (" substr(list, 2) "); the source area would be a guess")
+  if (cnt == 1) { sub(/^[^.]*\./, "", hit); return hit }
+  return "cross-cutting"
+}
+{
+  sub(/\r$/, "")
+  n = split($0, seg, "/")
+  for (k = 1; k < n; k++) if (seg[k] == "bin" || seg[k] == "obj") next
+  if (seg[1] == "src" && n >= 4 && seg[2] == "Modules") mods[seg[3]] = 1
+  if (seg[1] == "src" && n >= 4 && seg[2] == "BuildingBlocks") bbs[seg[3]] = 1
+  if (seg[n] !~ /\.cs$/) next
+  if (seg[1] == "src") {
+    for (k = 2; k < n; k++) if (seg[k] == "Migrations") next
+    base = seg[n]; sub(/\.cs$/, "", base)
+    scount[base]++; spath[base] = $0
+  } else if (seg[1] == "tests") {
+    if (n == 2) fail("tests: " $0 " is directly under tests/, outside a test project")
+    proj = seg[2]; ntests++
+    if (n == 3) loose[proj]++
+    else {
+      if (!((proj, seg[3]) in fcount)) { nfo++; fproj[nfo] = proj; ffold[nfo] = seg[3] }
+      fcount[proj, seg[3]]++; hasfold[proj] = 1
+    }
+    if (seg[n] ~ /.Tests\.cs$/) { base = seg[n]; sub(/Tests\.cs$/, "", base); tcount[base]++; tpath[base] = $0 }
+  }
+}
+END {
+  if (failed) exit 3
+  for (k = 1; k <= nfo; k++) print fproj[k] "|" ffold[k] "|" area_of(ffold[k], "tests/" fproj[k] "/" ffold[k]) "|" fcount[fproj[k], ffold[k]]
+  for (p in loose) print p "|" ((p in hasfold) ? "(root)" : "(flat)") "|-|" loose[p]
+  printf "" > out2
+  skipped = 0
+  for (b in tcount) {
+    if (!(b in scount)) continue
+    if (tcount[b] > 1 || scount[b] > 1) { skipped++; continue }
+    print spath[b] "|" tpath[b] > out2
+  }
+  print (ntests + 0) " " skipped > out3
+}'
+
+# tests_pass: runs tests_awk once; table 1 goes to tests.table1, table 2 to tests.table2, the counts to tests.counts (see errors_pass).
+tests_done=""
+tests_pass() {
+  run_awk tests "$tests_awk" "$work/tests.table1" -v out2="$work/tests.table2" -v out3="$work/tests.counts"
+  tests_done="$work"
+}
+
+# emit_tests: table 1 of the tests shard (folders).
+emit_tests() {
+  local lines=()
+  tests_pass
+  mapfile -t lines < "$work/tests.table1"
+  if (( ${#lines[@]} > 0 )); then printf '%s\n' "${lines[@]}"; fi
+}
+
+# emit_tests_2: table 2 of the tests shard (name pairs); the note above it, when the tree has test files, says how many names were
+# skipped because they occur more than once.
+emit_tests_2() {
+  local lines=() ntests=0 skipped=0 names
+  [[ "$tests_done" == "$work" ]] || tests_pass
+  read -r ntests skipped < "$work/tests.counts"
+  if (( ntests > 0 )); then
+    if (( skipped == 1 )); then names="1 name that occurs more than once was"; else names="$skipped names that occur more than once were"; fi
+    table_note="Pairs \`Foo.cs\` under \`src/\` (not under \`Migrations\`) with \`FooTests.cs\` under \`tests/\` when each name occurs once; $names skipped."
+  fi
+  mapfile -t lines < "$work/tests.table2"
   if (( ${#lines[@]} > 0 )); then printf '%s\n' "${lines[@]}"; fi
 }
 
