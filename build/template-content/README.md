@@ -142,13 +142,13 @@ Most shared files are edited at an anchor comment in them; the two exceptions ar
 On Windows, run the command from Git Bash: PowerShell and cmd can pick up the `bash.exe` of WSL, which then fails.
 
 When the script fails, `dotnet new` itself exits 105; the script's own lines naming the cause are above that line.
-If an edit was skipped or the script stopped before the last edit, fix the cause and run this from the project root, with your own module name (the flags stand in for the marker file, which a finished run deletes):
+If an edit was skipped, the module is already registered: add the printed `add by hand:` lines yourself, then run the commands printed as `then run:` by hand. Running the script again changes nothing and exits 2.
+If a `dotnet` step failed instead, the module is also already registered: fix the cause and run the commands printed as `then run:` by hand.
+Only when the script stopped before it registered the module in `Program.cs` (the module is not in `Program.cs` yet), fix the cause and run this from the project root, with your own module name (the flags stand in for the marker file, which a finished run deletes):
 
 ```bash
 bash build/scripts/add-module.sh --name Billing --prefix TemplateName
 ```
-
-If a `dotnet` step failed instead, the module is already wired: run the commands printed as `then run:` by hand.
 
 Running the `dotnet new` command again for a module that exists changes nothing. Removing a module stays manual.
 
