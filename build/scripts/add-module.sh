@@ -10,13 +10,14 @@
 # When every edit is made it also runs, from the solution root: dotnet tool restore, dotnet restore (writes the new projects'
 #   packages.lock.json, and gives them the assets file dotnet ef needs), dotnet ef migrations add Create{Name}Schema and dotnet build
 #   --no-restore -c Release, then lists what to commit.
-#   The dotnet executable is $DOTNET (default dotnet). A skipped edit means none of them runs: the commands are printed instead.
+#   The dotnet executable is $ADD_MODULE_DOTNET (default dotnet). A skipped edit means none of them runs: the commands are printed instead.
 #
 # Exit codes: 0 done, 1 a skipped edit or a failed step (the message says which; a skipped edit prints 'add by hand: <file>: <line>'
 #   for each line to add yourself and 'then run: <command>' for the four commands, the other edits are done; a failed command stops
 #   the script, prints itself and the later ones as 'then run: <command>' and leaves the edits in place, the module is wired then, so
-#   run the printed commands by hand), 2 invalid input (nothing was wired; for an invalid name or a wrong prefix the generated files
-#   are removed again, for a module that is already wired nothing at all is changed).
+#   run the printed commands by hand), 2 invalid input (nothing was wired; for an invalid name or a wrong prefix the files the engine just
+#   wrote are removed again when the marker is present, a run with flags only and no marker changes nothing, and for a module that is
+#   already wired nothing at all is changed).
 #   A run that stops midway through the edits leaves the module unregistered in Program.cs (that edit comes last), so running it
 #   again finishes.
 #
@@ -112,28 +113,41 @@ has_using() {
     END { exit !found }' "${programs[@]}"
 }
 
-# remove_generated NAME PREFIX: removes what the engine wrote for the module: src/Modules/NAME, docs/modules/NAME.md,
-# docs/modules/{kebab}.md and the marker; only the paths that exist, nothing else. It refuses (changes nothing, prints why and
-# returns 1) for a module that any host's Program.cs already registers or already has a 'using ....Modules.NAME;' line for (a run
-# that stopped midway: the files on disk are the module's, and a re-run with a mistyped prefix must not delete them). It ignores a
-# name that could point outside those paths (empty, leading '.', a slash), removing only the marker then.
+# remove_generated NAME PREFIX: removes exactly what the engine wrote for the module: the directories
+# src/Modules/NAME/PREFIX.Modules.NAME and src/Modules/NAME/PREFIX.Modules.NAME.Contracts, src/Modules/NAME itself when that is empty
+# afterwards, docs/modules/NAME.md (never the kebab-case page: the engine does not write it) and the marker. It runs only while the
+# marker exists, which is the proof that the engine has just written those files: a run with flags only (no marker) changes nothing,
+# so a mistyped prefix cannot reach the files of a module added by hand. It also refuses (changes nothing, prints why and returns 1)
+# for a module that any host's Program.cs already registers or already has a 'using ....Modules.NAME;' line for (a run that stopped
+# midway: the files on disk are the module's, and a re-run with a mistyped prefix must not delete them), and for a name that could
+# point outside those paths (empty, leading '.', a slash). Returns 0 only when it removed the files.
 remove_generated() {
-  local name="${1-}" kebab
+  local name="${1-}" prefix="${2-}"
+  if [[ ! -f "$marker" ]]; then
+    echo "add-module: no $marker: the files are not fresh from the template, so none was removed." >&2
+    return 1
+  fi
   if [[ -z "$name" || "$name" == .* || "$name" == *[/\\]* ]]; then
+    echo "add-module: '$name' could point outside the module folders: leaving the files alone." >&2
     rm -f -- "$marker"
-    return 0
+    return 1
   fi
   if is_wired "$name"; then
     echo "add-module: '$name' is already registered in a src/Host/*/Program.cs: leaving its files alone." >&2
     return 1
   fi
   if has_using "$name"; then
-    echo "add-module: a src/Host/*/Program.cs already has 'using ${2-PREFIX}.Modules.$name;' (or the same under another prefix): the module is half wired, leaving its files alone. Run add-module.sh --name $name --prefix <the right prefix> to finish it." >&2
+    echo "add-module: a src/Host/*/Program.cs already has 'using ${prefix:-PREFIX}.Modules.$name;' (or the same under another prefix): the module is half wired, leaving its files alone. Run add-module.sh --name $name --prefix <the right prefix> to finish it." >&2
     return 1
   fi
-  kebab="$(kebab_case "$name")"
-  rm -rf -- "src/Modules/$name"
-  rm -f -- "docs/modules/$name.md" "docs/modules/$kebab.md" "$marker"
+  if ! validate_prefix "$prefix" > /dev/null 2>&1; then
+    echo "add-module: '$prefix' is not a valid project prefix: leaving the files alone." >&2
+    rm -f -- "$marker"
+    return 1
+  fi
+  rm -rf -- "src/Modules/$name/$prefix.Modules.$name" "src/Modules/$name/$prefix.Modules.$name.Contracts"
+  rmdir -- "src/Modules/$name" 2> /dev/null || true
+  rm -f -- "docs/modules/$name.md" "$marker"
 }
 
 # --- edits at the anchors ------------------------------------------------------------------------------------------------------------
@@ -416,7 +430,7 @@ list_steps() {
 # step and listing it with the later ones). The plain restore writes the new projects' packages.lock.json (the Dockerfile COPY lines
 # and the locked-mode restore of CI need them committed) and the assets files the migration needs. Then lists what to commit.
 finish_module() {
-  local dotnet="${DOTNET:-dotnet}" index status log
+  local dotnet="${ADD_MODULE_DOTNET:-dotnet}" index status log
   local -a argv
   module_steps "$1" "$2"
   # The output of the dotnet commands goes to a log file, so the script prints only its own few lines (a failure prints the last lines
@@ -443,11 +457,12 @@ finish_module() {
   if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
     git status --short
     # A new folder is listed as one line above, so the new packages.lock.json files (the Dockerfile COPY lines and the locked-mode
-    # restore of CI need them) are named one by one.
-    git status --short -uall -- '*packages.lock.json'
+    # restore of CI need them) are named one by one; a tracked one that changed is in the list above already.
+    git ls-files --others --exclude-standard -- '*packages.lock.json'
   else
     echo "add-module: this is not a git repository: commit the new module folders (src/Modules/$1, docs/modules/$(kebab_case "$1").md), the packages.lock.json files they gained, and the edited shared files."
   fi
+  return 0
 }
 
 main() {
@@ -483,7 +498,7 @@ main() {
 
   # 2. The name becomes folder, namespace and type names, so it is checked before anything is wired; an invalid one is cleaned up.
   if ! validate_name "$name"; then
-    remove_generated "$name" "$prefix" || true # refuses, changing nothing, when a host registers that name
+    remove_generated "$name" "$prefix" || true # prints why and changes nothing when it refuses (no marker, a registered name)
     exit 2
   fi
 
@@ -495,8 +510,10 @@ main() {
 
   # 4. The prefix must be the project's own: no edit is made when the host project does not exist.
   if ! validate_prefix "$prefix" || [[ ! -d "src/Host/$prefix.Api" ]]; then
-    echo "add-module: src/Host/$prefix.Api does not exist: '$prefix' is not this project's prefix. The generated module files are removed; run the template again with the right prefix." >&2
-    remove_generated "$name" "$prefix" || true
+    echo "add-module: src/Host/$prefix.Api does not exist: '$prefix' is not this project's prefix." >&2
+    if remove_generated "$name" "$prefix"; then
+      echo "add-module: the generated module files are removed; run the template again with the right prefix." >&2
+    fi
     exit 2
   fi
 

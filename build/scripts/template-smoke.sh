@@ -9,6 +9,7 @@
 #   --add-module NAME  after the restore and the path-length guard, add the module NAME to the generated project with the item template
 #                   (`dotnet new modulith-module -n NAME --prefix Acme.Smoke --allow-scripts yes`, from the same private hive); the
 #                   format check, build and tests then run on the result. NAME is PascalCase (for example Billing or LeaveManagement).
+#                   Before them, `dotnet restore --locked-mode` must pass and the same command run again must exit 73 and change nothing.
 #   --module-contracts  give that module a .Contracts project too (`--contracts true`); only valid together with --add-module.
 #   --integration   also run the integration tests (they need Docker); without it only the unit and architecture tests run.
 #   --gates         also run the quality gates of the generated project's CI (ci.yml): `dotnet format --verify-no-changes`, the tests
@@ -295,19 +296,19 @@ if [[ -n "$leftover_markers" ]]; then
 fi
 
 step "Checking the module anchors in the generated files"
-# The generated build/scripts/module-anchors.txt lists "key|path|anchor text" rows (the paths name TemplateName, the engine renames it
-# to the project in the files, not in this list's text). add-module.sh edits only at those anchors, so every row must name a generated
-# file that holds its anchor line (an anchor sits outside the switch markers, so it survives every switch combination), and no
+# The generated build/scripts/module-anchors.txt lists "key|path|anchor text" rows. The engine's sourceName replacement rewrites
+# TemplateName inside this list too, so its paths already name the project (add-module.sh relies on that). add-module.sh edits only
+# at those anchors, so every row must name a generated file that holds its anchor line (an anchor sits outside the switch markers, so it survives every switch combination), and no
 # generated file may carry a "modulith:" anchor that the list does not name. The list is read with awk, not grep -iF, which aborts on
-# some Git Bash builds. check_module_anchors DIR PROJECT_NAME prints one "FAIL:" line per problem to standard error; it returns 1 on any.
+# some Git Bash builds. check_module_anchors DIR prints one "FAIL:" line per problem to standard error; it returns 1 on any.
 check_module_anchors() {
-  local dir="$1" name="$2" list row_path row_text problems=0 anchored leaked file
+  local dir="$1" list row_path row_text problems=0 anchored leaked file
   list="$dir/build/scripts/module-anchors.txt"
   if [[ ! -f "$list" ]]; then
     echo "FAIL: build/scripts/module-anchors.txt is missing" >&2
     return 1
   fi
-  anchored="$(awk -F '|' -v name="$name" 'NF >= 3 { sub(/\r$/, "", $2); gsub(/TemplateName/, name, $2); print $2 }' "$list" | sort -u)"
+  anchored="$(awk -F '|' 'NF >= 3 { sub(/\r$/, "", $2); print $2 }' "$list" | sort -u)"
   [[ -n "$anchored" ]] || { echo "FAIL: build/scripts/module-anchors.txt lists no anchor" >&2; return 1; }
   while IFS=$'\t' read -r row_path row_text; do
     if [[ ! -f "$dir/$row_path" ]]; then
@@ -317,7 +318,7 @@ check_module_anchors() {
       echo "FAIL: $row_path has no line with the anchor '$row_text' that build/scripts/module-anchors.txt names" >&2
       problems=$((problems + 1))
     fi
-  done < <(awk -F '|' -v name="$name" 'NF >= 3 { sub(/\r$/, "", $2); sub(/\r$/, "", $3); gsub(/TemplateName/, name, $2)
+  done < <(awk -F '|' 'NF >= 3 { sub(/\r$/, "", $2); sub(/\r$/, "", $3)
     sub(/^[ \t]+/, "", $3); sub(/[ \t]+$/, "", $3); print $2 "\t" $3 }' "$list")
   leaked="$(grep -rIl --exclude-dir=bin --exclude-dir=obj --exclude-dir=.git -e 'modulith:' "$dir" || true)"
   while IFS= read -r file; do
@@ -331,7 +332,7 @@ check_module_anchors() {
   done <<< "$leaked"
   (( problems == 0 ))
 }
-check_module_anchors "$out" "$project_name" 2> "$tmp/anchor-problems.txt" || {
+check_module_anchors "$out" 2> "$tmp/anchor-problems.txt" || {
   failures=$((failures + 1))
   cat "$tmp/anchor-problems.txt" >&2
 }
@@ -534,6 +535,19 @@ if [[ -n "$add_module" ]]; then
   fi
   [[ ! -e .modulith-module ]] || fail ".modulith-module is left behind: the post-action did not finish"
   grep -qF "Add${add_module}Module(" "src/Host/$project_name.Api/Program.cs" || fail "src/Host/$project_name.Api/Program.cs does not register the module"
+
+  step "Restoring in locked mode with the new module (as the generated project's CI does)"
+  # The post-action's restore wrote the new projects' lock files and rewrote the ones that gained a reference: all of them must agree.
+  dotnet restore --locked-mode || fail "dotnet restore --locked-mode failed after adding the module: a packages.lock.json is missing or out of date"
+
+  step "Running the module command a second time (the engine must stop with exit 73 and change nothing)"
+  # The same command for a module that exists stops on the engine's own file-overwrite check before the post-action runs.
+  module_tree() { find . -type f -not -path './.git/*' -not -path '*/bin/*' -not -path '*/obj/*' -not -path './TestResults/*' -exec cksum {} + | sort -k3; }
+  tree_before="$(module_tree)"
+  second_status=0
+  dotnet new modulith-module "${module_options[@]}" || second_status=$?
+  [[ "$second_status" == 73 ]] || fail "the second 'dotnet new modulith-module' exited $second_status, expected 73 (the engine's refusal to overwrite)"
+  [[ "$tree_before" == "$(module_tree)" ]] || fail "the second 'dotnet new modulith-module' changed the project tree"
   if (( failures > 0 )); then
     echo
     echo "template-smoke: $failures check(s) failed" >&2

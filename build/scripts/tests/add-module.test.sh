@@ -27,7 +27,7 @@ cleanup() { rm -rf "$tmp"; }
 trap cleanup EXIT
 export TMPDIR="$tmp" # the script's dotnet logs land in the scratch folder
 
-# A stand-in for the dotnet executable (the script reads it from DOTNET): it appends its arguments to $RECORD, one line per call, and
+# A stand-in for the dotnet executable (the script reads it from ADD_MODULE_DOTNET): it appends its arguments to $RECORD, one line per call, and
 # exits 0, or 1 when FAIL_ON is set and the arguments start with it. On 'restore' it also creates the files named in LOCK_FILES (what
 # the real restore does with packages.lock.json). It also prints a line to standard output and one to standard error, like a build.
 # Every scenario below runs against it, so no test ever starts a real dotnet.
@@ -42,7 +42,7 @@ if [[ "${1:-}" == restore ]]; then
 fi
 exit 0
 STUB
-export DOTNET="$dotnet_stub"
+export ADD_MODULE_DOTNET="$dotnet_stub"
 export RECORD="$tmp/dotnet.rec"
 
 # Forking is slow on some machines (Windows with Git Bash: about half a second per process), so the helpers below use shell built-ins
@@ -170,18 +170,45 @@ for invalid in billing Bill_ing 2Billing "" "Bill ing" "Bill-ing" "../Billing"; 
   [[ "$code" == 2 ]] || fail "validate_name '$invalid' exited $code, expected 2"
 done
 
-# remove_generated removes the module, its pages and the marker, and nothing else.
+# remove_generated removes what the engine wrote (the module's two projects, the docs page named after the module, the marker) and
+# nothing else: not the kebab-cased page (the engine never writes it), not a file of the module folder it did not write.
 base="$tmp/direct"
 build_base "$base"
+echo "stray" > "$base/docs/modules/leave-management.md" # a name whose kebab page differs from the generated one by more than case
 before="$(snapshot "$base")"
-simulate_engine "$base" Billing Acme.Shop
-echo "stray" > "$base/docs/modules/billing.md"
-(cd "$base" && source_script && remove_generated Billing Acme.Shop) > /dev/null 2>&1 || fail "remove_generated Billing failed"
+simulate_engine "$base" LeaveManagement Acme.Shop 1
+(cd "$base" && source_script && remove_generated LeaveManagement Acme.Shop) > /dev/null 2>&1 || fail "remove_generated LeaveManagement failed"
 assert_same_tree "remove_generated" "$before" "$base"
+[[ ! -e "$base/src/Modules/LeaveManagement" ]] || fail "remove_generated: the empty src/Modules/LeaveManagement was left behind"
 
-# It leaves a module alone that Program.cs already registers, and a name that points outside the module folders.
+# The parent folder goes only when it is empty after the two projects are gone.
+base="$tmp/direct-parent"
+build_base "$base"
+mkdir -p "$base/src/Modules/Billing"
+echo "notes" > "$base/src/Modules/Billing/notes.txt"
+before="$(snapshot "$base")"
+simulate_engine "$base" Billing Acme.Shop 1
+(cd "$base" && source_script && remove_generated Billing Acme.Shop) > /dev/null 2>&1 || fail "remove_generated Billing (parent with a file) failed"
+assert_same_tree "remove_generated, parent not empty" "$before" "$base"
+[[ -f "$base/src/Modules/Billing/notes.txt" ]] || fail "remove_generated: a file of the module folder the engine did not write was removed"
+
+# A real module folder that no host registers (a module added by hand, not yet wired) is not touched by a run with a typo'd prefix.
+base="$tmp/direct-unregistered"
+build_base "$base"
+mkdir -p "$base/src/Modules/LeaveManagement/Acme.Shop.Modules.LeaveManagement"
+echo "// the module" > "$base/src/Modules/LeaveManagement/Acme.Shop.Modules.LeaveManagement/LeaveManagementModule.cs"
+echo "# Leave management" > "$base/docs/modules/leave-management.md"
+before="$(snapshot "$base")"
+simulate_engine "$base" LeaveManagement Acme.Shopp
+code="$(run_in "$base")"
+assert_code "typo'd prefix next to an unregistered real module" 2 "$code"
+assert_same_tree "typo'd prefix next to an unregistered real module" "$before" "$base"
+grep -q "files are removed" "$tmp/out.log" || fail "typo'd prefix next to an unregistered real module: the message does not say the generated files were removed"
+
+# It leaves a module alone that Program.cs already registers (the marker stays, as the run that refuses does not clean up).
 base="$tmp/direct-audit"
 build_base "$base"
+printf 'Audit\nAcme.Shop\n' > "$base/.modulith-module"
 before="$(snapshot "$base")"
 for prefix in Acme.Shop Wrong.Name; do
   code=0
@@ -189,8 +216,29 @@ for prefix in Acme.Shop Wrong.Name; do
   [[ "$code" != 0 ]] || fail "remove_generated Audit $prefix returned 0, expected non-zero (it must refuse)"
   assert_same_tree "remove_generated Audit $prefix" "$before" "$base"
 done
+
+# Without the marker nothing is removed at all, whatever the name and prefix (the files are not fresh from the engine).
+base="$tmp/direct-no-marker"
+build_base "$base"
+simulate_engine "$base" Billing Wrong.Name 1
+rm "$base/.modulith-module"
+before="$(snapshot "$base")"
+for prefix in Wrong.Name Acme.Shop; do
+  code=0
+  (cd "$base" && source_script && remove_generated Billing "$prefix") > /dev/null 2>&1 || code=$?
+  [[ "$code" != 0 ]] || fail "remove_generated Billing $prefix without a marker returned 0, expected non-zero"
+  assert_same_tree "remove_generated without a marker ($prefix)" "$before" "$base"
+done
+
+# A name that points outside the module folders: nothing is removed but the marker.
+base="$tmp/direct-hostile"
+build_base "$base"
+before="$(snapshot "$base")"
 for hostile in ".." "../Modules" "a/b"; do
-  (cd "$base" && source_script && remove_generated "$hostile" Acme.Shop) > /dev/null 2>&1 || fail "remove_generated '$hostile' failed"
+  printf 'x\nAcme.Shop\n' > "$base/.modulith-module"
+  code=0
+  (cd "$base" && source_script && remove_generated "$hostile" Acme.Shop) > /dev/null 2>&1 || code=$?
+  [[ "$code" != 0 ]] || fail "remove_generated '$hostile' returned 0, expected non-zero"
   assert_same_tree "remove_generated '$hostile'" "$before" "$base"
 done
 
@@ -206,6 +254,8 @@ before="$(snapshot "$base")"
 code="$(run_in "$base" --name LeaveManagement --prefix Wrong.Name)"
 assert_code "half-wired, typo'd prefix" 2 "$code"
 assert_same_tree "half-wired, typo'd prefix" "$before" "$base"
+grep -q "files are removed" "$tmp/out.log" && fail "half-wired, typo'd prefix: the output says the files were removed although nothing was ($(tr '\n' ' ' < "$tmp/out.log"))"
+grep -q "half wired" "$tmp/out.log" || fail "half-wired, typo'd prefix: the refusal message is missing"
 for prefix in Acme.Shop Wrong.Name; do
   code=0
   (cd "$base" && source_script && remove_generated LeaveManagement "$prefix") > /dev/null 2>&1 || code=$?
@@ -245,6 +295,7 @@ assert_code "prefix Wrong.Name through the marker" 2 "$code"
 [[ ! -e "$base/docs/modules/Billing.md" ]] || fail "prefix Wrong.Name: docs/modules/Billing.md still exists"
 [[ ! -e "$base/.modulith-module" ]] || fail "prefix Wrong.Name: the marker still exists"
 assert_same_tree "prefix Wrong.Name" "$before" "$base"
+grep -q "files are removed" "$tmp/out.log" || fail "prefix Wrong.Name: the output does not say the generated files were removed"
 
 base="$tmp/wrong-prefix-flags"
 build_base "$base"
@@ -253,6 +304,21 @@ simulate_engine "$base" Billing Wrong.Name
 code="$(run_in "$base" --name Billing --prefix Wrong.Name)"
 assert_code "prefix Wrong.Name through the flags" 2 "$code"
 assert_same_tree "prefix Wrong.Name through the flags" "$before" "$base"
+
+# Without the marker the files are not fresh from the engine (a manual run, flags only): a wrong prefix or an invalid name exits 2
+# and changes nothing, the module folder included.
+base="$tmp/wrong-prefix-no-marker"
+build_base "$base"
+simulate_engine "$base" Billing Wrong.Name
+rm "$base/.modulith-module"
+before="$(snapshot "$base")"
+code="$(run_in "$base" --name Billing --prefix Wrong.Name)"
+assert_code "prefix Wrong.Name, flags only, no marker" 2 "$code"
+assert_same_tree "prefix Wrong.Name, flags only, no marker" "$before" "$base"
+grep -q "files are removed" "$tmp/out.log" && fail "prefix Wrong.Name, flags only, no marker: the output says files were removed"
+code="$(run_in "$base" --name billing --prefix Acme.Shop)"
+assert_code "invalid name, flags only, no marker" 2 "$code"
+assert_same_tree "invalid name, flags only, no marker" "$before" "$base"
 
 # --- a module that is already wired: exit 2 and nothing changes ---------------------------------------------------------------------
 
@@ -352,6 +418,17 @@ assert_code "unknown flag" 2 "$code"
 code="$(run_in "$base" --name)"
 assert_code "--name without a value" 2 "$code"
 assert_same_tree "input errors" "$before" "$base"
+
+# --- finish_module ends with status 0 once the commands succeeded, whatever the last git query says ---------------------------------
+
+code=0
+(
+  source_script
+  git() { if [[ "$1" == rev-parse ]]; then return 0; fi; return 1; }
+  rm -f "$RECORD"
+  if finish_module Billing Acme.Shop > /dev/null 2>&1; then exit 0; else exit 7; fi
+) || code=$?
+[[ "$code" == 0 ]] || fail "finish_module returned non-zero (exit $code) although all four commands succeeded"
 
 # --- the target page already exists: exit 2 and it is not overwritten ----------------------------------------------------------------
 
@@ -681,18 +758,23 @@ base="$tmp/wire-billing"
 new_project "$base"
 # A git work tree this time: the base is committed, the engine's files are new, so the commit list comes from git status and names
 # every new file one by one (the lock files too), not only their folders.
+echo "old lock" > "$base/src/Host/Acme.Shop.Api/packages.lock.json" # tracked, and rewritten by the restore below
 (cd "$base" && git init -q . && git add -A && git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -q -m base) > /dev/null 2>&1 ||
   fail "wire Billing: could not prepare the git work tree"
 simulate_engine "$base" Billing Acme.Shop 1
 [[ -d "$base/src/Modules/Billing/Acme.Shop.Modules.Billing.Contracts" ]] || fail "the simulated engine wrote no Contracts folder"
 rm -f "$RECORD"
-code="$(LOCK_FILES="src/Modules/Billing/Acme.Shop.Modules.Billing/packages.lock.json src/Modules/Billing/Acme.Shop.Modules.Billing.Contracts/packages.lock.json" run_in "$base")"
+code="$(LOCK_FILES="src/Modules/Billing/Acme.Shop.Modules.Billing/packages.lock.json src/Modules/Billing/Acme.Shop.Modules.Billing.Contracts/packages.lock.json src/Host/Acme.Shop.Api/packages.lock.json" run_in "$base")"
 assert_code "wire Billing with Contracts" 0 "$code"
 grep -q "commit these:" "$tmp/out.log" || fail "wire Billing: the output has no 'commit these:' line"
 grep -q "not a git repository" "$tmp/out.log" && fail "wire Billing: a git work tree was reported as not a git repository"
 for path in "src/Modules/Billing/Acme.Shop.Modules.Billing/packages.lock.json" "src/Modules/Billing/Acme.Shop.Modules.Billing.Contracts/packages.lock.json" \
   "docs/modules/billing.md" "src/Host/Acme.Shop.Api/Program.cs"; do
   grep -qF -- "$path" "$tmp/out.log" || fail "wire Billing: the commit list does not name $path ($(tr '\n' '|' < "$tmp/out.log"))"
+done
+# Each lock file is listed once: the new ones by the second query, a tracked and modified one by the first only.
+for path in "src/Modules/Billing/Acme.Shop.Modules.Billing/packages.lock.json" "src/Host/Acme.Shop.Api/packages.lock.json"; do
+  [[ "$(grep -cF -- "$path" "$tmp/out.log")" == 1 ]] || fail "wire Billing: $path is listed $(grep -cF -- "$path" "$tmp/out.log") times, expected once ($(tr '\n' '|' < "$tmp/out.log"))"
 done
 check_all "$base" Acme.Shop Billing:1:billing
 load_lines "$base/Acme.Shop.slnx"

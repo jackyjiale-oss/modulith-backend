@@ -135,7 +135,22 @@ The command creates `src/Modules/{Module}/` (the module project: DbContext, outb
 - adds it to the solution, copies its projects and lock files in the Dockerfile and lists it in `Assemblies` of the architecture tests, in `docs/README.md` and as a commit scope (`build/scripts/check-commit-msg.sh`, `CONTRIBUTING.md`);
 - runs `dotnet tool restore`, `dotnet restore`, `dotnet ef migrations add Create{Module}Schema` and `dotnet build -c Release`, and lists what to commit (the new `packages.lock.json` files included).
 
-It generates no route and no entity: write the first use case by hand, test first, then fill in the page. Each shared file is edited at an anchor comment in it; when you have edited a file so that its anchor is gone, that one edit is skipped, the exact lines to add are printed as `add by hand:` and the script exits 1 with the commands to run by hand. Running the command again for a module that exists changes nothing. Removing a module stays manual.
+It generates no route and no entity: write the first use case by hand, test first, then fill in the page.
+
+Most shared files are edited at an anchor comment in them; the two exceptions are the commit-scope list in `build/scripts/check-commit-msg.sh` (the value of `ALLOWED_SCOPES`) and the index row in `docs/README.md`. When you have edited a file so that its anchor is gone, that one edit is skipped, the exact lines to add are printed as `add by hand:` and the script exits 1 with the commands to run by hand.
+
+On Windows, run the command from Git Bash: PowerShell and cmd can pick up the `bash.exe` of WSL, which then fails.
+
+When the script fails, `dotnet new` itself exits 105; the script's own lines naming the cause are above that line.
+If an edit was skipped or the script stopped before the last edit, fix the cause and run this from the project root, with your own module name (the flags stand in for the marker file, which a finished run deletes):
+
+```bash
+bash build/scripts/add-module.sh --name Billing --prefix TemplateName
+```
+
+If a `dotnet` step failed instead, the module is already wired: run the commands printed as `then run:` by hand.
+
+Running the `dotnet new` command again for a module that exists changes nothing. Removing a module stays manual.
 
 ### Adding an error message or a language
 

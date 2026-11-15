@@ -35,7 +35,7 @@
 - **Two templates, one install.** `templates/modulith-module/` has its own `.template.config/template.json` (short name `modulith-module`, type `item`, identity `Modulith.Module.Templates`). The solution template excludes `templates/**`, so generated projects do not carry it. `dotnet new install .` of the repository registers both.
 - **Hand-written placeholder files** (not a compiled reference project, not a script that copies Audit). A repo-only CI job generates a project and adds a module with the item template, so drift fails there.
 - **The wiring script ships in the generated project** as `build/scripts/add-module.sh`. The item template's post-action calls it; a user can run it again by hand. Bash is already required (Git Bash on Windows) by the project's other scripts.
-- **Anchors, not pattern matching.** Each shared file gets a named anchor comment, outside every switch region so it survives every switch combination. The script inserts text after an anchor; it never rewrites code.
+- **Anchors, not pattern matching.** Each shared file gets a named anchor comment, outside every switch region so it survives every switch combination. The script inserts text before an anchor (the anchor stays last); it never rewrites code.
 - **Fail soft on a missing anchor, fail hard on a bad prefix.** A missing anchor skips that one edit and lists the lines to add; the exit code is non-zero so CI notices. A prefix with no `src/Host/{prefix}.Api` stops before any edit and removes what the engine just wrote.
 - **Idempotency comes from the engine.** `dotnet new` refuses to overwrite existing files, so a second run for the same name fails on the file conflict before the script runs.
 
@@ -68,7 +68,7 @@ The script then runs `dotnet tool restore` and a plain `dotnet restore` (which w
 
 ## 6. The wiring
 
-| File | Insert, at its anchor |
+| File | Insert, before its anchor |
 |---|---|
 | `src/Host/{P}.Api/Program.cs` | the `using`; `builder.Services.Add{M}Module(builder.Configuration);`; `api.Map{M}Endpoints();` (three anchors: usings, module registrations, endpoint mapping) |
 | `src/Host/{P}.Api/{P}.Api.csproj`, and the `.csproj` of the Unit, Architecture and Integration test projects | `ProjectReference` to the module, and to its Contracts project when asked |
@@ -107,7 +107,7 @@ The plan's first task is a throwaway spike of the five points below (the post-ac
 - **Formatting and anchors.** The CI legs run `dotnet format --verify-no-changes --no-restore` on a project whose shared files the wiring script has edited. Whether an inserted `using`, placed after the last using rather than in sorted position, fails that check was unknown. Fallback: insert it in sorted position among the project's own usings. The spike's answer is in section 10 (D5).
 - **Windows.** The script runs under Git Bash; the CI legs run on Ubuntu. A local run on Windows is part of the spike. A project's migration step uses `dotnet ef` through the local tool manifest, which a project generated from this template already has.
 - **Integration tests cannot run on this machine** (Docker is broken): their part of the CI legs is verified in CI only.
-- **Anchor drift.** A refactor of `Program.cs` or `Assemblies.cs` that removes an anchor is caught only by the CI legs; the plan adds a unit test that every anchor the script uses exists in the template's shared files.
+- **Anchor drift.** A refactor of `Program.cs` or `Assemblies.cs` that removes an anchor is caught only by the CI legs; the plan adds a script test that every anchor the script uses exists in the template's shared files.
 
 ## 10. Spike results
 
