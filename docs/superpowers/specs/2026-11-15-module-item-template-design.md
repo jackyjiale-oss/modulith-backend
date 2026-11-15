@@ -45,7 +45,7 @@
 dotnet new modulith-module -n Billing --prefix Acme.Shop [--contracts true] --allow-scripts yes
 ```
 
-- `-n` / `--name`: the module name, PascalCase, `^[A-Z][A-Za-z0-9]*$`. Derived forms: kebab-case for the route segment and `docs/modules/{kebab}.md` (`LeaveManagement` becomes `leave-management`), lower-case for the DB schema (`leavemanagement`, per `docs/coding-conventions.md`).
+- `-n` / `--name`: the module name, PascalCase, `^[A-Z][A-Za-z0-9]*$`. Derived forms: kebab-case for the route segment and `docs/modules/{kebab}.md` (`LeaveManagement` becomes `leave-management`), lower-case for the DB schema (`leavemanagement`, per `docs/coding-conventions.md`). (Section 10 D2 overrides the engine's `kebabCase` wording here: the script computes the kebab form with the repository's own rule.)
 - `--prefix`: the generated project's own name (`Acme.Shop`), required. An item template cannot read it from the solution; the generated README shows the exact command with the project's name already filled in.
 - `--contracts` (bool, default false): also create `{P}.Modules.{M}.Contracts` and its wiring.
 - `--allow-scripts yes` is the engine's own flag for post-actions; without it the engine asks.
@@ -64,7 +64,7 @@ Under `src/Modules/{M}/{P}.Modules.{M}/`:
 
 With `--contracts true`: `src/Modules/{M}/{P}.Modules.{M}.Contracts/` with a csproj that references only SharedKernel (the `ContractsTests` rule) and an empty `Public` folder with a `.gitkeep`.
 
-The script then generates the first migration (`dotnet ef migrations add Create{M}Schema` through the host, as in the project's `CLAUDE.md`), runs a plain `dotnet restore` to write the new `packages.lock.json` files (the Dockerfile `COPY` needs them and locked-mode CI needs them committed), builds once, and prints the files to commit.
+The script then runs `dotnet tool restore` and a plain `dotnet restore` (which writes the new `packages.lock.json` files: the Dockerfile `COPY` needs them and locked-mode CI needs them committed), generates the first migration (`dotnet ef migrations add Create{M}Schema` through the host, as in the project's `CLAUDE.md`; `dotnet ef` restores nothing, so it must follow the restore, or it fails with NETSDK1004), builds once, and prints the files to commit. The post-action sets `redirectStandardOutput` and `redirectStandardError` to `"false"` and the script sends the `dotnet` output to a log file: the engine hangs when a script writes more than a few KB to a redirected stdout (Task 7 of the plan).
 
 ## 6. The wiring
 
@@ -101,7 +101,7 @@ The anchors are plain comment lines added to the template's shared files in the 
 The plan's first task is a throwaway spike of the five points below (the post-action, the derived forms, one install with two templates, where tests reach the module, and formatting with the anchors), because none was verified in the design session; each has a stated fallback. The results are in section 10.
 
 - **The run-script post-action.** How it locates and runs `build/scripts/add-module.sh`, what it does without `--allow-scripts` in CI, and whether a non-zero exit is visible to the caller. Fallback: the template prints the command to run by hand and the CI job runs it.
-- **Derived forms.** Whether the engine's kebab-case and lower-case forms exist in SDK 10.0.401. Fallback: the script computes both from `-n` and renames the generated files.
+- **Derived forms.** Whether the engine's kebab-case and lower-case forms exist in SDK 10.0.401. Fallback: the script computes both from `-n` and renames the generated files. Section 10 D2 overrides this: the kebab form is computed by the script with the repository's own rule, not taken from the engine.
 - **One install, two templates.** Whether `dotnet new install .` finds a template in a nested folder next to the solution template. Fallback: install both paths explicitly (`.` and `./templates/modulith-module`).
 - **Where tests reach the module.** `InternalsVisibleTo` comes from `src/Directory.Build.props` (verified), so a new module under `src` needs no change; the spike confirms that a module built from the template is visible to the three test projects.
 - **Formatting and anchors.** The CI legs run `dotnet format --verify-no-changes --no-restore` on a project whose shared files the wiring script has edited. Whether an inserted `using`, placed after the last using rather than in sorted position, fails that check was unknown. Fallback: insert it in sorted position among the project's own usings. The spike's answer is in section 10 (D5).

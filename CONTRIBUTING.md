@@ -72,7 +72,7 @@ On Windows, keep the repository in a short folder (for example `C:\src\{project}
 
 ### 2.3 Scopes
 
-A scope is the area the change lives in. Use one from this list, or leave it out for repo-wide changes. To add a module scope, add it to `ALLOWED_SCOPES` in `build/scripts/check-commit-msg.sh` in the same PR that adds the module.
+A scope is the area the change lives in. Use one from this list, or leave it out for repo-wide changes. To add a module scope, add it to `ALLOWED_SCOPES` in `build/scripts/check-commit-msg.sh` in the same PR that adds the module (`dotnet new modulith-module` does this for you: see the README recipe "Adding a module").
 
 | Group | Scopes |
 |---|---|

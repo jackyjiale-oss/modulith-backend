@@ -30,6 +30,7 @@ dotnet ef migrations add {Verb}{What} \
   <!--#if (notifications)-->
   A module that declares notification types adds `Templates/` (embedded Scriban files) at the project root, as Notifications does.
   <!--#endif-->
+- Add a module with `dotnet new modulith-module -n {Module} --prefix TemplateName [--contracts true] --allow-scripts yes` at the solution root (the README recipe "Adding a module"): it wires the module into the shared files and adds its first migration; never wire one by hand unless the command prints `add by hand:` lines.
 - Each command or query gets its own folder under `Application/{Aggregates}/{UseCase}/` holding the message, handler and validator.
 - Modules talk to each other only through `*.Contracts` (integration events and public interfaces). Never reference another module's project or read its tables.
   <!--#if (notifications)-->
