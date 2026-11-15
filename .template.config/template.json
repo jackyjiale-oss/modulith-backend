@@ -80,6 +80,7 @@
         "build/scripts/tests/project-index.test.sh",
         "build/scripts/tests/module-anchors.test.sh",
         "build/scripts/tests/module-template-files.test.sh",
+        "build/scripts/tests/add-module.test.sh",
         ".github/workflows/template-matrix.yml",
         ".github/workflows/project-index.yml",
         "README.md",
