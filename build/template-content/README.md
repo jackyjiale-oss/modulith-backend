@@ -102,7 +102,7 @@ Tests that need a removed part are removed with it; nothing is rewritten to stan
 
 A project generated with any of `--notifications false`, `--includeSample false` or `--caching memory` has no `packages.lock.json` in the host project and the three test projects, because their contents depend on the switches. Run `dotnet restore` once after generating, then commit the four lock files; until then CI's `dotnet restore --locked-mode` fails on the missing lock files, and the Docker build fails before its restore, at the `COPY` of the API's `packages.lock.json`.
 
-The template's own checks of these projects are narrower than their CI: for each combination it generates the project, builds it and runs its tests. The 80 % coverage gate, the `dotnet format` check, the image build and the licence job of a project generated with `--notifications false`, `--includeSample false` or `--caching memory` have not been run by the template, so the first push of such a project should be watched, and tests added if the coverage gate fails.
+The template's own checks of these projects come close to their CI: for each combination it generates the project, builds it, runs its tests with coverage and holds them to the 80 % line gate, checks the formatting (`dotnet format`) and the dependency licences. It does not build the Docker image of a combination, and `dotnet restore --locked-mode` cannot catch dependency drift in the four lock files that the first restore writes, so watch the first push of such a project for those two.
 
 The decision and its costs are in [ADR 0035](docs/adr/0035-template-switches-by-engine-conditionals.md).
 
