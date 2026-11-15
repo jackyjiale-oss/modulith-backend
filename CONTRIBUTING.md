@@ -78,7 +78,7 @@ A scope is the area the change lives in. Use one from this list, or leave it out
 |---|---|
 | Building blocks | `shared-kernel`, `application`, `infrastructure`, `web`, `platform`, `host` |
 | Cross-cutting | `persistence`, `outbox`, `idempotency`, `observability`, `security`, `i18n`, `architecture` |
-| Modules | `sample`, `auth`, `notifications`, `audit` |
+| Modules | `sample`, `auth`, `notifications`, `audit`<!-- modulith:module-scopes --> |
 | Repository | `ci`, `deps`, `template`, `docker`, `adr`, `release` |
 
 ### 2.4 Examples

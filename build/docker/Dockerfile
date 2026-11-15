@@ -32,6 +32,7 @@ COPY src/Modules/Notifications/TemplateName.Modules.Notifications/TemplateName.M
 COPY src/Modules/Sample/TemplateName.Modules.Sample/TemplateName.Modules.Sample.csproj src/Modules/Sample/TemplateName.Modules.Sample/packages.lock.json src/Modules/Sample/TemplateName.Modules.Sample/
 #endif
 COPY src/Modules/Audit/TemplateName.Modules.Audit/TemplateName.Modules.Audit.csproj src/Modules/Audit/TemplateName.Modules.Audit/packages.lock.json src/Modules/Audit/TemplateName.Modules.Audit/
+# modulith:module-copies
 COPY src/Host/TemplateName.Api/TemplateName.Api.csproj src/Host/TemplateName.Api/packages.lock.json src/Host/TemplateName.Api/
 RUN dotnet restore src/Host/TemplateName.Api/TemplateName.Api.csproj --locked-mode
 

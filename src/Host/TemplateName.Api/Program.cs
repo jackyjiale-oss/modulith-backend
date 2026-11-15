@@ -23,6 +23,7 @@ using TemplateName.Web.Common;
 using TemplateName.Web.Common.Localization;
 using TemplateName.Web.Common.Observability;
 using TemplateName.Web.Common.Security;
+// modulith:module-usings
 
 // The container HEALTHCHECK (ADR 0006): before CreateBuilder, so no host is built and nothing but the one line is written.
 if (HostCommand.Parse(args) == HostCommandKind.Healthcheck)
@@ -62,6 +63,7 @@ builder.Services.AddSampleModule();
 //#endif
 // Consumes the change sets every module's outbox publishes (EntityChangesRecordedIntegrationEvent); any position among the modules works.
 builder.Services.AddAuditModule(builder.Configuration);
+// modulith:module-registrations
 //#if (caching == "redis")
 // Optional Redis (Caching:Provider = redis; a no-op otherwise, ADR 0027): the HybridCache second level, the readiness check "redis", the
 // Redis rate limiter (it replaces the in-memory IFixedWindowLimiterFactory of AddHttpSecurity) and the SignalR backplane. After
@@ -163,6 +165,7 @@ app.MapNotificationsHub();
 api.MapSampleEndpoints();
 //#endif
 api.MapAuditEndpoints();
+// modulith:module-endpoints
 
 app.Run();
 return 0;

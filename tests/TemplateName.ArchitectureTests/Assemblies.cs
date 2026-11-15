@@ -20,6 +20,7 @@ using TemplateName.Platform.Redis;
 using TemplateName.SharedKernel;
 using TemplateName.Web.Common.Resources;
 using TemplateName.Web.Common.Results;
+// modulith:module-usings
 
 namespace TemplateName.ArchitectureTests;
 
@@ -55,12 +56,14 @@ public static class Assemblies
         typeof(SampleModule).Assembly,
         //#endif
         typeof(AuditModule).Assembly,
+        // modulith:modules
     ];
 
     /// <summary>One entry per <c>*.Contracts</c> assembly: the public surface a module offers the others (see <c>ContractsTests</c>).</summary>
     public static IReadOnlyList<Assembly> Contracts { get; } =
     [
         typeof(IUserContactDirectory).Assembly,
+        // modulith:contracts
     ];
 
     /// <summary>The building-block assemblies (everything under <c>src/BuildingBlocks</c>).</summary>
@@ -87,6 +90,7 @@ public static class Assemblies
         //#if (includeSample)
         typeof(SampleErrorMessages),
         //#endif
+        // modulith:error-messages
     ];
 
     /// <summary>
