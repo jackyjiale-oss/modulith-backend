@@ -2,10 +2,10 @@
 # Test for the modulith-module item template (templates/modulith-module): installs it into a private hive, generates two modules
 # and asserts the files, names and substituted content. It does not run the wiring script: the generated trees are only checked.
 #
-# Every `dotnet new` call passes --allow-scripts no once the template has a post-action: without an --allow-scripts flag a
-# non-interactive run loops forever on the engine's prompt (a template without a post-action rejects the flag, so it is passed only
-# when the template's help lists it). The exit code of `dotnet new` is not asserted (it is 104 under --allow-scripts no with a
-# post-action); the files are.
+# The template has a post-action (it runs build/scripts/add-module.sh), so every `dotnet new` call passes --allow-scripts no: the
+# engine then writes the files, does not run the script and exits 104. This test asserts exactly that (the marker file stays and a
+# stand-in script in the output folder is not run). It must never call `dotnet new modulith-module` without an explicit
+# --allow-scripts value: without one a non-interactive run loops forever on the engine prompt.
 #
 # Usage: bash build/scripts/tests/module-template-files.test.sh   (from any directory)
 set -euo pipefail
@@ -32,18 +32,14 @@ fi
 dotnet new install "$template" --force --debug:custom-hive "$hive" > "$tmp/install.log" 2>&1 \
   || { cat "$tmp/install.log" >&2; echo "FAIL: dotnet new install failed" >&2; exit 1; }
 
-# The engine accepts --allow-scripts only for a template that has a post-action, and prompts (forever, non-interactively) only for such
-# a template: pass the flag exactly when the template's help lists it.
-scripts_flag=()
-if dotnet new modulith-module -h --debug:custom-hive "$hive" 2>&1 | grep -q -- '--allow-scripts'; then
-  scripts_flag=(--allow-scripts no)
-fi
-
-# generate <output folder> <dotnet new arguments...>: the exit code is ignored on purpose (see the header).
+# generate <output folder> <dotnet new arguments...>: always with --allow-scripts no (never without a value, see the header), under
+# a timeout in case the engine ever prompts. Sets generate_code to the exit code of `dotnet new`, which must be 104.
+generate_code=0
 generate() {
   local out="$1"
   shift
-  dotnet new modulith-module "$@" -o "$out" ${scripts_flag[@]+"${scripts_flag[@]}"} --debug:custom-hive "$hive" > "$out.log" 2>&1 || true
+  generate_code=0
+  timeout 600 dotnet new modulith-module "$@" -o "$out" --allow-scripts no --debug:custom-hive "$hive" > "$out.log" 2>&1 || generate_code=$?
 }
 
 # assert_files <output folder> <expected files, one per line>: the generated tree is exactly these files.
@@ -97,11 +93,16 @@ assert_clean() {
 
 # --- LeaveManagement with Contracts ------------------------------------------------------------------------------------------
 lm="$tmp/lm"
+# A stand-in for the wiring script already sits in the output folder: with --allow-scripts no the engine must not run it.
+mkdir -p "$lm/build/scripts"
+printf '#!/usr/bin/env bash\necho ran > stub-ran.txt\n' > "$lm/build/scripts/add-module.sh"
 generate "$lm" -n LeaveManagement --prefix Acme.Shop --contracts true
+[[ "$generate_code" == 104 ]] || { cat "$lm.log" >&2; fail "LeaveManagement: dotnet new exited $generate_code under --allow-scripts no, expected 104"; }
 
-[[ -d "$lm" ]] || { cat "$lm.log" >&2; echo "FAIL: nothing was generated for LeaveManagement" >&2; exit 1; }
+[[ -f "$lm/.modulith-module" ]] || { cat "$lm.log" >&2; echo "FAIL: nothing was generated for LeaveManagement" >&2; exit 1; }
+[[ ! -e "$lm/stub-ran.txt" ]] || fail "LeaveManagement: the post-action ran the script although --allow-scripts no was given"
 
-assert_files "$lm" "$(module_files LeaveManagement Acme.Shop; contracts_files LeaveManagement Acme.Shop)"
+assert_files "$lm" "$(module_files LeaveManagement Acme.Shop; contracts_files LeaveManagement Acme.Shop; echo build/scripts/add-module.sh)"
 assert_clean "$lm"
 
 lm_project="$lm/src/Modules/LeaveManagement/Acme.Shop.Modules.LeaveManagement"
@@ -144,8 +145,9 @@ fi
 # --- Billing without Contracts -------------------------------------------------------------------------------------------------
 bl="$tmp/bl"
 generate "$bl" -n Billing --prefix Acme.Shop
+[[ "$generate_code" == 104 ]] || { cat "$bl.log" >&2; fail "Billing: dotnet new exited $generate_code under --allow-scripts no, expected 104"; }
 
-[[ -d "$bl" ]] || { cat "$bl.log" >&2; echo "FAIL: nothing was generated for Billing" >&2; exit 1; }
+[[ -f "$bl/.modulith-module" ]] || { cat "$bl.log" >&2; echo "FAIL: nothing was generated for Billing" >&2; exit 1; }
 
 assert_files "$bl" "$(module_files Billing Acme.Shop)"
 assert_clean "$bl"

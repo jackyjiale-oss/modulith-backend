@@ -7,18 +7,27 @@
 #   prefix) and deletes it when it finishes or cleans up. --name and --prefix override the marker values, so a manual re-run needs
 #   no marker. Contracts are not a flag: the wiring detects src/Modules/{Name}/{Prefix}.Modules.{Name}.Contracts on disk.
 #
+# When every edit is made it also runs, from the solution root: dotnet tool restore, dotnet restore (writes the new projects'
+#   packages.lock.json, and gives them the assets file dotnet ef needs), dotnet ef migrations add Create{Name}Schema and dotnet build
+#   --no-restore -c Release, then lists what to commit.
+#   The dotnet executable is $DOTNET (default dotnet). A skipped edit means none of them runs: the commands are printed instead.
+#
 # Exit codes: 0 done, 1 a skipped edit or a failed step (the message says which; a skipped edit prints 'add by hand: <file>: <line>'
-#   for each line to add yourself, the other edits are done), 2 invalid input (nothing was wired; for an invalid name or a wrong
-#   prefix the generated files are removed again, for a module that is already wired nothing at all is changed).
-#   A run that stops midway leaves the module unregistered in Program.cs (that edit comes last), so running it again finishes.
+#   for each line to add yourself and 'then run: <command>' for the four commands, the other edits are done; a failed command stops
+#   the script, prints itself and the later ones as 'then run: <command>' and leaves the edits in place, the module is wired then, so
+#   run the printed commands by hand), 2 invalid input (nothing was wired; for an invalid name or a wrong prefix the generated files
+#   are removed again, for a module that is already wired nothing at all is changed).
+#   A run that stops midway through the edits leaves the module unregistered in Program.cs (that edit comes last), so running it
+#   again finishes.
 #
 # Source-safe: the tests source this file to call its functions; main runs only when it is executed.
 set -euo pipefail
 
 marker=".modulith-module"
 
+# die MESSAGE [CODE]: prints the message only (the code is the exit status, not part of the text).
 die() {
-  echo "add-module: $*" >&2
+  echo "add-module: $1" >&2
   exit "${2:-1}"
 }
 
@@ -81,10 +90,33 @@ is_wired() {
   awk -v pattern="Add${1-}Module(" 'index(tolower($0), tolower(pattern)) { found = 1; exit } END { exit !found }' "${programs[@]}"
 }
 
+# has_using NAME: returns 0 when the Program.cs of any host has a line 'using <anything>.Modules.NAME;' (case-insensitive, whatever
+# the prefix): the module is at least half wired, because the using is the first edit and the registration the last. awk for the
+# same reason as in is_wired.
+has_using() {
+  local -a programs=()
+  local candidate
+  for candidate in src/Host/*/Program.cs; do
+    [[ -f "$candidate" ]] && programs+=("$candidate")
+  done
+  ((${#programs[@]} > 0)) || return 1
+  awk -v name="${1-}" '
+    BEGIN { suffix = tolower(".Modules." name ";") }
+    {
+      line = tolower($0)
+      sub(/\r$/, "", line)
+      sub(/^[ \t]+/, "", line)
+      sub(/[ \t]+$/, "", line)
+      if (substr(line, 1, 6) == "using " && length(line) > length(suffix) + 6 && substr(line, length(line) - length(suffix) + 1) == suffix) { found = 1; exit }
+    }
+    END { exit !found }' "${programs[@]}"
+}
+
 # remove_generated NAME PREFIX: removes what the engine wrote for the module: src/Modules/NAME, docs/modules/NAME.md,
 # docs/modules/{kebab}.md and the marker; only the paths that exist, nothing else. It refuses (changes nothing, prints why and
-# returns 1) for a module that any host's Program.cs already registers: the files on disk then belong to that module, not to this
-# run. It ignores a name that could point outside those paths (empty, leading '.', a slash), removing only the marker then.
+# returns 1) for a module that any host's Program.cs already registers or already has a 'using ....Modules.NAME;' line for (a run
+# that stopped midway: the files on disk are the module's, and a re-run with a mistyped prefix must not delete them). It ignores a
+# name that could point outside those paths (empty, leading '.', a slash), removing only the marker then.
 remove_generated() {
   local name="${1-}" kebab
   if [[ -z "$name" || "$name" == .* || "$name" == *[/\\]* ]]; then
@@ -93,6 +125,10 @@ remove_generated() {
   fi
   if is_wired "$name"; then
     echo "add-module: '$name' is already registered in a src/Host/*/Program.cs: leaving its files alone." >&2
+    return 1
+  fi
+  if has_using "$name"; then
+    echo "add-module: a src/Host/*/Program.cs already has 'using ${2-PREFIX}.Modules.$name;' (or the same under another prefix): the module is half wired, leaving its files alone. Run add-module.sh --name $name --prefix <the right prefix> to finish it." >&2
     return 1
   fi
   kebab="$(kebab_case "$name")"
@@ -108,6 +144,8 @@ remove_generated() {
 
 anchors_list="build/scripts/module-anchors.txt"
 skipped=()
+current_name="NAME" # the real values are set by edit_all, for the messages
+current_prefix="PREFIX"
 
 # The awk program. MODULITH_MODE: lines (insert the lines of MODULITH_TEXT before the first line equal to / containing MODULITH_ANCHOR,
 # per MODULITH_MATCH, copying that line's indentation and line ending), inline (insert MODULITH_TEXT right before the anchor text on
@@ -215,7 +253,7 @@ after_edit() {
     3)
       for entry in "$@"; do skipped+=("$file: $entry"); done
       ;;
-    *) die "editing $file failed (awk status $status); check it with git diff, then run add-module.sh --name ... --prefix ... again." 1 ;;
+    *) die "editing $file failed (awk status $status); check it with git diff, then run add-module.sh --name $current_name --prefix $current_prefix again." 1 ;;
   esac
 }
 
@@ -301,6 +339,8 @@ edit_commit_scopes() {
 # module unwired and a re-run finishes the remaining (idempotent) edits.
 edit_all() {
   local m="$1" p="$2" k mod con contracts=0
+  current_name="$m"
+  current_prefix="$p"
   k="$(kebab_case "$m")"
   mod="$p.Modules.$m"
   con="$p.Modules.$m.Contracts"
@@ -346,6 +386,70 @@ edit_all() {
   insert_before_anchor program-registrations "builder.Services.Add${m}Module(builder.Configuration);"
 }
 
+# --- after the edits: migration, restore, build ------------------------------------------------------------------------------------
+
+steps=()
+step_labels=("dotnet tool restore" "dotnet restore" "dotnet ef migrations add" "dotnet build")
+
+# module_steps NAME PREFIX: sets steps to the arguments of the four dotnet commands, in order (no value holds a space: the name and the
+# prefix are validated before anything runs). The plain restore comes BEFORE the migration: dotnet ef restores nothing itself and
+# fails with NETSDK1004 ("Assets file ... not found") for the new, not yet restored module project (found by running the real tree).
+module_steps() {
+  local m="$1" p="$2"
+  steps=(
+    "tool restore"
+    "restore"
+    "ef migrations add Create${m}Schema --project src/Modules/$m/$p.Modules.$m --startup-project src/Host/$p.Api --context ${m}DbContext --output-dir Infrastructure/Persistence/Migrations"
+    "build --no-restore -c Release"
+  )
+}
+
+# list_steps FROM: prints the commands from index FROM on as 'then run: dotnet ...' lines (to run by hand).
+list_steps() {
+  local index
+  for ((index = $1; index < ${#steps[@]}; index++)); do
+    echo "add-module: then run: dotnet ${steps[index]}" >&2
+  done
+}
+
+# finish_module NAME PREFIX: runs the four commands in order from the solution root; the first failure stops it (returns 1, naming the
+# step and listing it with the later ones). The plain restore writes the new projects' packages.lock.json (the Dockerfile COPY lines
+# and the locked-mode restore of CI need them committed) and the assets files the migration needs. Then lists what to commit.
+finish_module() {
+  local dotnet="${DOTNET:-dotnet}" index status log
+  local -a argv
+  module_steps "$1" "$2"
+  # The output of the dotnet commands goes to a log file, so the script prints only its own few lines (a failure prints the last lines
+  # of the log and keeps the file, a success deletes it). This also matters under the template engine: a post-action that redirects
+  # the script's output reads it only after the script ends, and the script blocked in a write for ever once more than the pipe's
+  # buffer (a few KB) of build output had been written (seen on the real tree). The template's post-action does not redirect.
+  log="$(mktemp "${TMPDIR:-/tmp}/add-module.XXXXXX")"
+  for index in "${!steps[@]}"; do
+    echo "add-module: running ${step_labels[index]}"
+    read -r -a argv <<< "${steps[index]}"
+    status=0
+    "$dotnet" "${argv[@]}" > "$log" 2>&1 || status=$?
+    if ((status != 0)); then
+      echo "add-module: step '${step_labels[index]}' failed (exit status $status); the later steps did not run. The module is wired: fix the cause, then run by hand from the solution root:" >&2
+      list_steps "$index"
+      echo "add-module: the last lines of its output (all of it is in $log):" >&2
+      tail -n 12 "$log" | cut -c1-200 >&2
+      return 1
+    fi
+  done
+  rm -f -- "$log"
+
+  echo "add-module: commit these:"
+  if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+    git status --short
+    # A new folder is listed as one line above, so the new packages.lock.json files (the Dockerfile COPY lines and the locked-mode
+    # restore of CI need them) are named one by one.
+    git status --short -uall -- '*packages.lock.json'
+  else
+    echo "add-module: this is not a git repository: commit the new module folders (src/Modules/$1, docs/modules/$(kebab_case "$1").md), the packages.lock.json files they gained, and the edited shared files."
+  fi
+}
+
 main() {
   local name="" prefix="" line_one="" line_two=""
 
@@ -386,7 +490,7 @@ main() {
   # 3. Already wired under ANY host (not only the prefix given): the files on disk belong to that module, so nothing at all is
   #    touched, the marker included.
   if is_wired "$name"; then
-    die "module '$name' is already wired in a src/Host/*/Program.cs: nothing was changed." 2
+    die "module '$name' (--name $name --prefix $prefix) is already wired in a src/Host/*/Program.cs: nothing was changed." 2
   fi
 
   # 4. The prefix must be the project's own: no edit is made when the host project does not exist.
@@ -418,16 +522,22 @@ main() {
   # 6. The edits in the shared files (see edit_all for the order). A skipped edit does not stop the others.
   edit_all "$name" "$prefix"
 
-  # TODO(task-7): call finish_module "$name" "$prefix" here (migration, restore, build); it runs after the edits, before the marker goes.
+  # 7. The marker goes on every outcome from here: the module is wired (or its leftovers are listed), so a re-run needs the flags.
   rm -f -- "$marker"
   if ((${#skipped[@]} > 0)); then
     local entry
     for entry in "${skipped[@]}"; do
       echo "add-module: add by hand: $entry" >&2
     done
+    # Migrating and building a half-wired solution would fail for the wrong reason, so the commands are only listed.
+    module_steps "$name" "$prefix"
+    list_steps 0
     exit 1
   fi
   echo "add-module: '$name' is wired into the shared files."
+
+  # 8. Migration, restore, build, then what to commit.
+  finish_module "$name" "$prefix" || exit 1
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

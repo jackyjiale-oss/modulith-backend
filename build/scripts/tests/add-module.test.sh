@@ -25,6 +25,25 @@ fi
 tmp="$(mktemp -d)"
 cleanup() { rm -rf "$tmp"; }
 trap cleanup EXIT
+export TMPDIR="$tmp" # the script's dotnet logs land in the scratch folder
+
+# A stand-in for the dotnet executable (the script reads it from DOTNET): it appends its arguments to $RECORD, one line per call, and
+# exits 0, or 1 when FAIL_ON is set and the arguments start with it. On 'restore' it also creates the files named in LOCK_FILES (what
+# the real restore does with packages.lock.json). It also prints a line to standard output and one to standard error, like a build.
+# Every scenario below runs against it, so no test ever starts a real dotnet.
+dotnet_stub="$tmp/dotnet-stub"
+cat > "$dotnet_stub" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$RECORD"
+echo "stub output of: $*"; echo "stub error output of: $*" >&2
+if [[ -n "${FAIL_ON:-}" && "$*" == "$FAIL_ON"* ]]; then exit 1; fi
+if [[ "${1:-}" == restore ]]; then
+  for lock in ${LOCK_FILES:-}; do : > "$lock"; done
+fi
+exit 0
+STUB
+export DOTNET="$dotnet_stub"
+export RECORD="$tmp/dotnet.rec"
 
 # Forking is slow on some machines (Windows with Git Bash: about half a second per process), so the helpers below use shell built-ins
 # for the per-file work, build the fake project once and copy it per scenario, and checksum a whole tree with one cksum call.
@@ -175,6 +194,32 @@ for hostile in ".." "../Modules" "a/b"; do
   assert_same_tree "remove_generated '$hostile'" "$before" "$base"
 done
 
+# A half-wired module (a run that stopped midway: the using is in Program.cs, the registration is not yet) is not removed either:
+# a re-run with a typo'd prefix must leave the freshly generated files alone, and so must a using of any other prefix or case.
+base="$tmp/half-wired"
+build_base "$base"
+simulate_engine "$base" LeaveManagement Acme.Shop
+{ echo "using Acme.Shop.Modules.LeaveManagement;"; cat "$base/src/Host/Acme.Shop.Api/Program.cs"; } > "$base/Program.cs.new"
+mv "$base/Program.cs.new" "$base/src/Host/Acme.Shop.Api/Program.cs"
+grep -q "AddLeaveManagementModule(" "$base/src/Host/Acme.Shop.Api/Program.cs" && fail "half-wired fixture: the registration is already there"
+before="$(snapshot "$base")"
+code="$(run_in "$base" --name LeaveManagement --prefix Wrong.Name)"
+assert_code "half-wired, typo'd prefix" 2 "$code"
+assert_same_tree "half-wired, typo'd prefix" "$before" "$base"
+for prefix in Acme.Shop Wrong.Name; do
+  code=0
+  (cd "$base" && source_script && remove_generated LeaveManagement "$prefix") > /dev/null 2>&1 || code=$?
+  [[ "$code" != 0 ]] || fail "remove_generated half-wired $prefix returned 0, expected non-zero (it must refuse)"
+  assert_same_tree "remove_generated half-wired $prefix" "$before" "$base"
+done
+content="$(< "$base/src/Host/Acme.Shop.Api/Program.cs")"
+printf '%s\n' "${content/using Acme.Shop.Modules.LeaveManagement;/  using other.MODULES.leavemanagement;}" > "$base/src/Host/Acme.Shop.Api/Program.cs"
+before="$(snapshot "$base")"
+code=0
+(cd "$base" && source_script && remove_generated LeaveManagement Wrong.Name) > /dev/null 2>&1 || code=$?
+[[ "$code" != 0 ]] || fail "remove_generated with a using of another prefix and case returned 0, expected non-zero"
+assert_same_tree "remove_generated, using of another prefix and case" "$before" "$base"
+
 # --- invalid names: exit 2, the generated module is gone, no other file changed ------------------------------------------------------
 
 for invalid in billing Bill_ing 2Billing; do
@@ -218,6 +263,10 @@ before="$(snapshot "$base")"
 code="$(run_in "$base" --name Audit --prefix Acme.Shop)"
 assert_code "--name Audit" 2 "$code"
 grep -q "already wired" "$tmp/out.log" || fail "--name Audit: the message does not say it is already wired"
+# The message names the real values and is only the message: no exit code printed after it.
+grep -q "Audit" "$tmp/out.log" && grep -q "Acme.Shop" "$tmp/out.log" || fail "--name Audit: the message does not name the module and the prefix ($(tr '\n' ' ' < "$tmp/out.log"))"
+grep -Eq '[0-9]$' "$tmp/out.log" && fail "--name Audit: the message ends in a stray digit ($(tr '\n' ' ' < "$tmp/out.log"))"
+grep -q '\.\.\.' "$tmp/out.log" && fail "--name Audit: the message still holds a placeholder"
 assert_same_tree "--name Audit" "$before" "$base"
 [[ -f "$base/.modulith-module" ]] || fail "--name Audit: the marker was deleted (it must stay)"
 [[ -f "$base/src/Modules/Audit/Acme.Shop.Modules.Audit/AuditModule.cs" ]] || fail "--name Audit: the Audit module is gone"
@@ -589,10 +638,24 @@ new_project() {
 base="$tmp/wire-lm"
 new_project "$base"
 simulate_engine "$base" LeaveManagement Acme.Shop
+rm -f "$RECORD"
 code="$(run_in "$base")"
 assert_code "wire LeaveManagement" 0 "$code"
 check_all "$base" Acme.Shop LeaveManagement:0:leave-management
 grep -q "add by hand" "$tmp/out.log" && fail "wire LeaveManagement: nothing should be left to do by hand"
+# After the edits: the four dotnet commands, in this order, with exactly these arguments.
+expected_calls=$'tool restore\nrestore\n'
+expected_calls+=$'ef migrations add CreateLeaveManagementSchema --project src/Modules/LeaveManagement/Acme.Shop.Modules.LeaveManagement --startup-project src/Host/Acme.Shop.Api --context LeaveManagementDbContext --output-dir Infrastructure/Persistence/Migrations\n'
+expected_calls+='build --no-restore -c Release'
+[[ -f "$RECORD" && "$(< "$RECORD")" == "$expected_calls" ]] ||
+  fail "wire LeaveManagement: the dotnet calls are not the expected four: $(tr '\n' '|' < "$RECORD" 2>/dev/null)"
+# The output of the dotnet commands stays out of the script's own output (a large output blocks the script under the template engine,
+# which reads it only after the script ends); the success path keeps no log file behind.
+grep -q "stub output of" "$tmp/out.log" && fail "wire LeaveManagement: the dotnet output reached the script's output"
+# Not a git work tree: the commit list is a note naming what to commit, the lock files included.
+grep -q "commit these:" "$tmp/out.log" || fail "wire LeaveManagement: the output has no 'commit these:' line"
+grep -q "not a git repository" "$tmp/out.log" || fail "wire LeaveManagement: no note that this is not a git repository"
+grep -q "packages.lock.json" "$tmp/out.log" || fail "wire LeaveManagement: the note does not name the packages.lock.json files"
 [[ ! -e "$base/.modulith-module" ]] || fail "wire LeaveManagement: the marker was not deleted"
 # The slnx folder: the project two spaces deeper than the anchor, the closing tag at the anchor's indentation.
 load_lines "$base/Acme.Shop.slnx"
@@ -616,10 +679,21 @@ assert_same_tree "second run" "$before" "$base"
 # 2. A full run with Contracts.
 base="$tmp/wire-billing"
 new_project "$base"
+# A git work tree this time: the base is committed, the engine's files are new, so the commit list comes from git status and names
+# every new file one by one (the lock files too), not only their folders.
+(cd "$base" && git init -q . && git add -A && git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -q -m base) > /dev/null 2>&1 ||
+  fail "wire Billing: could not prepare the git work tree"
 simulate_engine "$base" Billing Acme.Shop 1
 [[ -d "$base/src/Modules/Billing/Acme.Shop.Modules.Billing.Contracts" ]] || fail "the simulated engine wrote no Contracts folder"
-code="$(run_in "$base")"
+rm -f "$RECORD"
+code="$(LOCK_FILES="src/Modules/Billing/Acme.Shop.Modules.Billing/packages.lock.json src/Modules/Billing/Acme.Shop.Modules.Billing.Contracts/packages.lock.json" run_in "$base")"
 assert_code "wire Billing with Contracts" 0 "$code"
+grep -q "commit these:" "$tmp/out.log" || fail "wire Billing: the output has no 'commit these:' line"
+grep -q "not a git repository" "$tmp/out.log" && fail "wire Billing: a git work tree was reported as not a git repository"
+for path in "src/Modules/Billing/Acme.Shop.Modules.Billing/packages.lock.json" "src/Modules/Billing/Acme.Shop.Modules.Billing.Contracts/packages.lock.json" \
+  "docs/modules/billing.md" "src/Host/Acme.Shop.Api/Program.cs"; do
+  grep -qF -- "$path" "$tmp/out.log" || fail "wire Billing: the commit list does not name $path ($(tr '\n' '|' < "$tmp/out.log"))"
+done
 check_all "$base" Acme.Shop Billing:1:billing
 load_lines "$base/Acme.Shop.slnx"
 first_index "<!-- modulith:modules -->"
@@ -647,8 +721,16 @@ load_lines "$base/tests/Acme.Shop.ArchitectureTests/Assemblies.cs"
     [[ "${line#"${line%%[![:space:]]*}"}" == "// modulith:modules" ]] || printf '%s\n' "$line"
   done
 } > "$base/tests/Acme.Shop.ArchitectureTests/Assemblies.cs"
+rm -f "$RECORD"
 code="$(run_in "$base")"
 assert_code "one anchor missing" 1 "$code"
+# A skipped edit: the dotnet steps are not run, they are printed to run by hand.
+[[ ! -s "$RECORD" ]] || fail "one anchor missing: dotnet was run although an edit was skipped ($(tr '\n' '|' < "$RECORD"))"
+grep -qxF 'add-module: then run: dotnet tool restore' "$tmp/out.log" || fail "one anchor missing: no 'then run: dotnet tool restore' line"
+grep -qxF 'add-module: then run: dotnet ef migrations add CreateLeaveManagementSchema --project src/Modules/LeaveManagement/Acme.Shop.Modules.LeaveManagement --startup-project src/Host/Acme.Shop.Api --context LeaveManagementDbContext --output-dir Infrastructure/Persistence/Migrations' "$tmp/out.log" ||
+  fail "one anchor missing: no 'then run: dotnet ef migrations add ...' line"
+grep -qxF 'add-module: then run: dotnet restore' "$tmp/out.log" || fail "one anchor missing: no 'then run: dotnet restore' line"
+grep -qxF 'add-module: then run: dotnet build --no-restore -c Release' "$tmp/out.log" || fail "one anchor missing: no 'then run: dotnet build' line"
 grep -qxF 'add-module: add by hand: tests/Acme.Shop.ArchitectureTests/Assemblies.cs: typeof(LeaveManagementModule).Assembly,' "$tmp/out.log" ||
   fail "one anchor missing: the output does not list the line to add by hand ($(tr '\n' ' ' < "$tmp/out.log"))"
 [[ "$(grep -c 'add by hand' "$tmp/out.log")" == 1 ]] || fail "one anchor missing: more than one entry listed"
@@ -657,6 +739,22 @@ load_lines "$base/tests/Acme.Shop.ArchitectureTests/Assemblies.cs"
 count_exact "typeof(LeaveManagementModule).Assembly,"
 [[ "$count" == 0 ]] || fail "one anchor missing: the skipped line was inserted anyway"
 [[ ! -e "$base/.modulith-module" ]] || fail "one anchor missing: the marker was not deleted"
+
+# 5b. The migration step fails: exit 1, the message names the step, the build never runs, the marker is gone.
+base="$tmp/wire-ef-fails"
+new_project "$base"
+simulate_engine "$base" LeaveManagement Acme.Shop
+rm -f "$RECORD"
+code="$(FAIL_ON="ef " run_in "$base")"
+assert_code "failing ef step" 1 "$code"
+grep -q "ef migrations add" "$tmp/out.log" || fail "failing ef step: the message does not name the step ($(tr '\n' ' ' < "$tmp/out.log"))"
+# The failed command's own output is shown (its last lines), from the log file the script keeps.
+grep -q "stub output of: ef migrations add" "$tmp/out.log" || fail "failing ef step: the output of the failed command is not shown"
+grep -qxF 'add-module: then run: dotnet build --no-restore -c Release' "$tmp/out.log" || fail "failing ef step: the later step is not listed to run by hand"
+[[ "$(wc -l < "$RECORD" | tr -d ' ')" == 3 ]] || fail "failing ef step: expected exactly three dotnet calls (the build must not run), got $(tr '\n' '|' < "$RECORD")"
+[[ "$(sed -n 1p "$RECORD")" == "tool restore" && "$(sed -n 2p "$RECORD")" == "restore" && "$(sed -n 3p "$RECORD")" == "ef migrations add CreateLeaveManagementSchema "* ]] ||
+  fail "failing ef step: the recorded calls are $(tr '\n' '|' < "$RECORD")"
+[[ ! -e "$base/.modulith-module" ]] || fail "failing ef step: the marker was not deleted"
 
 # 6. A missing target file is skipped like a missing anchor.
 base="$tmp/wire-no-file"

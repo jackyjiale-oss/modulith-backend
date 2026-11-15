@@ -58,5 +58,23 @@
         }
       ]
     }
+  ],
+  "postActions": [
+    {
+      "description": "Wire the module into the shared files, add its first migration, restore and build.",
+      "manualInstructions": [
+        {
+          "text": "Run: bash build/scripts/add-module.sh"
+        }
+      ],
+      "actionId": "3A7C4B45-1F5D-4A30-959A-51B88E82B5D2",
+      "args": {
+        "executable": "bash",
+        "args": "build/scripts/add-module.sh",
+        "redirectStandardOutput": "false",
+        "redirectStandardError": "false"
+      },
+      "continueOnError": false
+    }
   ]
 }
