@@ -7,10 +7,12 @@
 #   prefix) and deletes it when it finishes or cleans up. --name and --prefix override the marker values, so a manual re-run needs
 #   no marker. Contracts are not a flag: the wiring detects src/Modules/{Name}/{Prefix}.Modules.{Name}.Contracts on disk.
 #
-# Exit codes: 0 done, 1 a skipped edit or a failed step (the message says which), 2 invalid input (nothing was wired; for an invalid
-#   name or a wrong prefix the generated files are removed again, for a module that is already wired nothing at all is changed).
+# Exit codes: 0 done, 1 a skipped edit or a failed step (the message says which; a skipped edit prints 'add by hand: <file>: <line>'
+#   for each line to add yourself, the other edits are done), 2 invalid input (nothing was wired; for an invalid name or a wrong
+#   prefix the generated files are removed again, for a module that is already wired nothing at all is changed).
+#   A run that stops midway leaves the module unregistered in Program.cs (that edit comes last), so running it again finishes.
 #
-# Source-safe: the tests source this file to call kebab_case, validate_name and remove_generated; main runs only when it is executed.
+# Source-safe: the tests source this file to call its functions; main runs only when it is executed.
 set -euo pipefail
 
 marker=".modulith-module"
@@ -98,6 +100,252 @@ remove_generated() {
   rm -f -- "docs/modules/$name.md" "docs/modules/$kebab.md" "$marker"
 }
 
+# --- edits at the anchors ------------------------------------------------------------------------------------------------------------
+# One awk call per edit, with no GNU extension: it reads the whole file first and only then writes the result back to the same file
+# (so the file keeps its mode), and it writes nothing when the anchor is missing or the edit is already there. The values travel
+# through the environment because awk -v would interpret backslashes. LC_ALL=C keeps every byte as it is (UTF-8 text included).
+# Exit status of the awk call: 0 changed, 3 anchor not found, 4 already present (nothing written), anything else a real failure.
+
+anchors_list="build/scripts/module-anchors.txt"
+skipped=()
+
+# The awk program. MODULITH_MODE: lines (insert the lines of MODULITH_TEXT before the first line equal to / containing MODULITH_ANCHOR,
+# per MODULITH_MATCH, copying that line's indentation and line ending), inline (insert MODULITH_TEXT right before the anchor text on
+# its line) or scopes (append |MODULITH_CHECK to the value of the ALLOWED_SCOPES="..." line). MODULITH_CHECK is what tells the edit is
+# already there. MODULITH_FINAL_NEWLINE tells whether the file ends with a newline; the end state is kept.
+read -r -d '' awk_program <<'AWK' || true
+function trim(s) {
+  sub(/\r$/, "", s)
+  sub(/^[ \t]+/, "", s)
+  sub(/[ \t]+$/, "", s)
+  return s
+}
+function emit(s) {
+  if (written > 0) printf "\n" > target
+  printf "%s", s > target
+  written++
+}
+BEGIN {
+  # Git Bash's gawk reads in text mode and would drop every CR of a CRLF file; BINMODE keeps the bytes (other awks ignore the variable).
+  BINMODE = 3
+  mode = ENVIRON["MODULITH_MODE"]
+  anchor = ENVIRON["MODULITH_ANCHOR"]
+  text = ENVIRON["MODULITH_TEXT"]
+  check = ENVIRON["MODULITH_CHECK"]
+  match_mode = ENVIRON["MODULITH_MATCH"]
+  final_newline = (ENVIRON["MODULITH_FINAL_NEWLINE"] == "1")
+  target = ARGV[1]
+}
+{ rows[NR] = $0 }
+END {
+  found = 0
+  if (mode == "lines") {
+    count = split(text, ins, "\n")
+    first = trim(ins[1])
+    for (i = 1; i <= NR; i++) {
+      t = trim(rows[i])
+      if (t == first) exit 4
+      if (found == 0) {
+        if (match_mode == "contains") {
+          if (index(rows[i], anchor) > 0) found = i
+        } else if (t == anchor) {
+          found = i
+        }
+      }
+    }
+    if (found == 0) exit 3
+    line_end = ""
+    if (rows[found] ~ /\r$/) line_end = "\r"
+    else if (found == NR && !final_newline && found > 1 && rows[found - 1] ~ /\r$/) line_end = "\r"
+    match(rows[found], /^[ \t]*/)
+    indent = substr(rows[found], 1, RLENGTH)
+    for (i = 1; i <= NR; i++) {
+      if (i == found) for (j = 1; j <= count; j++) emit(indent ins[j] line_end)
+      emit(rows[i])
+    }
+  } else if (mode == "inline") {
+    for (i = 1; i <= NR; i++) {
+      position = index(rows[i], anchor)
+      if (position > 0) { found = i; break }
+    }
+    if (found == 0) exit 3
+    if (index(rows[found], check) > 0) exit 4
+    rows[found] = substr(rows[found], 1, position - 1) text substr(rows[found], position)
+    for (i = 1; i <= NR; i++) emit(rows[i])
+  } else if (mode == "scopes") {
+    for (i = 1; i <= NR; i++) {
+      if (substr(rows[i], 1, length(anchor)) == anchor) { found = i; break }
+    }
+    if (found == 0) exit 3
+    closing = 0
+    for (k = length(rows[found]); k > length(anchor); k--) {
+      if (substr(rows[found], k, 1) == "\"") { closing = k; break }
+    }
+    if (closing == 0) exit 3
+    count = split(substr(rows[found], length(anchor) + 1, closing - length(anchor) - 1), parts, "|")
+    for (k = 1; k <= count; k++) if (parts[k] == check) exit 4
+    rows[found] = substr(rows[found], 1, closing - 1) "|" check substr(rows[found], closing)
+    for (i = 1; i <= NR; i++) emit(rows[i])
+  } else {
+    exit 2
+  }
+  if (final_newline) printf "\n" > target
+  close(target)
+  exit 0
+}
+AWK
+
+# run_awk FILE MODE ANCHOR TEXT CHECK MATCH: runs the program above on FILE; returns its exit status (see above).
+run_awk() {
+  local file="$1" content="" final=0 status=0
+  IFS= read -r -d '' content < "$file" || true
+  [[ "$content" == *$'\n' ]] && final=1
+  LC_ALL=C MODULITH_MODE="$2" MODULITH_ANCHOR="$3" MODULITH_TEXT="$4" MODULITH_CHECK="$5" MODULITH_MATCH="$6" MODULITH_FINAL_NEWLINE="$final" \
+    awk "$awk_program" "$file" || status=$?
+  return "$status"
+}
+
+# after_edit FILE STATUS DESCRIPTION...: a missing anchor (status 3) or file puts each DESCRIPTION on the skipped list; 0 and 4
+# (already there) are fine; any other status stops the script, because the file may be half written.
+after_edit() {
+  local file="$1" status="$2" entry
+  shift 2
+  case "$status" in
+    0 | 4) ;;
+    3)
+      for entry in "$@"; do skipped+=("$file: $entry"); done
+      ;;
+    *) die "editing $file failed (awk status $status); check it with git diff, then run add-module.sh --name ... --prefix ... again." 1 ;;
+  esac
+}
+
+# insert_lines FILE MATCH ANCHOR LINE...: inserts the LINEs before the first line of FILE that equals (MATCH equals) or contains
+# (MATCH contains) ANCHOR. A LINE's own leading blanks are kept after the anchor line's indentation, so a block can nest. A missing
+# file or anchor puts '<file>: <line>' for each LINE on the skipped list.
+insert_lines() {
+  local file="$1" match="$2" anchor="$3" joined line status=0
+  shift 3
+  local -a wanted=("$@")
+  if [[ ! -f "$file" ]]; then
+    after_edit "$file" 3 "${wanted[@]}"
+    return 0
+  fi
+  joined="${wanted[0]}"
+  for line in "${wanted[@]:1}"; do joined+=$'\n'"$line"; done
+  run_awk "$file" lines "$anchor" "$joined" "" "$match" || status=$?
+  after_edit "$file" "$status" "${wanted[@]}"
+}
+
+# load_anchor KEY: sets anchor_file and anchor_text from module-anchors.txt; returns 1 when the list or the key is missing.
+anchor_file=""
+anchor_text=""
+load_anchor() {
+  local row_key row_file row_text
+  anchor_file=""
+  anchor_text=""
+  [[ -f "$anchors_list" ]] || return 1
+  while IFS='|' read -r row_key row_file row_text || [[ -n "$row_key" ]]; do
+    if [[ "$row_key" == "$1" ]]; then
+      anchor_file="${row_file%$'\r'}"
+      row_text="${row_text%$'\r'}"
+      row_text="${row_text#"${row_text%%[![:space:]]*}"}"
+      anchor_text="${row_text%"${row_text##*[![:space:]]}"}"
+      return 0
+    fi
+  done < "$anchors_list"
+  return 1
+}
+
+# insert_before_anchor KEY LINE...: inserts the LINEs immediately before the anchor line of KEY (so the anchor stays last and a later
+# module goes after an earlier one). Does nothing when the first LINE is already in the file; records '<file>: <line>' on the skipped
+# list for each LINE when the anchor (or its file) is missing.
+insert_before_anchor() {
+  local key="$1"
+  shift
+  if ! load_anchor "$key"; then
+    after_edit "anchors:$key" 3 "$@"
+    return 0
+  fi
+  insert_lines "$anchor_file" equals "$anchor_text" "$@"
+}
+
+# insert_inline_before_anchor KEY TEXT CHECK DESCRIPTION: inserts TEXT right before the anchor text on its line (for an anchor that
+# ends a table row); does nothing when that row already contains CHECK. A missing anchor records DESCRIPTION.
+insert_inline_before_anchor() {
+  local key="$1" text="$2" check="$3" description="$4" status=0
+  if ! load_anchor "$key"; then
+    after_edit "anchors:$key" 3 "$description"
+    return 0
+  fi
+  if [[ ! -f "$anchor_file" ]]; then
+    after_edit "$anchor_file" 3 "$description"
+    return 0
+  fi
+  run_awk "$anchor_file" inline "$anchor_text" "$text" "$check" "" || status=$?
+  after_edit "$anchor_file" "$status" "$description"
+}
+
+# edit_commit_scopes SCOPE: appends |SCOPE to ALLOWED_SCOPES in check-commit-msg.sh.
+edit_commit_scopes() {
+  local file="build/scripts/check-commit-msg.sh" status=0
+  if [[ ! -f "$file" ]]; then
+    after_edit "$file" 3 "add |$1 to the ALLOWED_SCOPES list"
+    return 0
+  fi
+  run_awk "$file" scopes 'ALLOWED_SCOPES="' "" "$1" "" || status=$?
+  after_edit "$file" "$status" "add |$1 to the ALLOWED_SCOPES list"
+}
+
+# edit_all NAME PREFIX: applies every edit of the wiring table. Contracts lines are written when the Contracts project folder exists.
+# The Program.cs registration comes LAST: is_wired treats a module registered there as existing, so a run that stops midway leaves the
+# module unwired and a re-run finishes the remaining (idempotent) edits.
+edit_all() {
+  local m="$1" p="$2" k mod con contracts=0
+  k="$(kebab_case "$m")"
+  mod="$p.Modules.$m"
+  con="$p.Modules.$m.Contracts"
+  [[ -d "src/Modules/$m/$con" ]] && contracts=1
+
+  insert_before_anchor program-usings "using $mod;"
+  insert_before_anchor program-endpoints "api.Map${m}Endpoints();"
+
+  local key prefix_path ref
+  for key in api-references unit-references arch-references integration-references; do
+    # The host project sits two levels below the root (..\..\Modules), a test project reaches src from there (..\..\src\Modules).
+    if [[ "$key" == api-references ]]; then prefix_path='..\..\Modules'; else prefix_path='..\..\src\Modules'; fi
+    ref="<ProjectReference Include=\"$prefix_path\\$m\\$mod\\$mod.csproj\" />"
+    if ((contracts)); then
+      insert_before_anchor "$key" "$ref" "<ProjectReference Include=\"$prefix_path\\$m\\$con\\$con.csproj\" />"
+    else
+      insert_before_anchor "$key" "$ref"
+    fi
+  done
+
+  if ((contracts)); then
+    insert_before_anchor slnx-modules "<Folder Name=\"/src/Modules/$m/\">" \
+      "  <Project Path=\"src/Modules/$m/$mod/$mod.csproj\" />" "  <Project Path=\"src/Modules/$m/$con/$con.csproj\" />" "</Folder>"
+    insert_before_anchor docker-copies \
+      "COPY src/Modules/$m/$mod/$mod.csproj src/Modules/$m/$mod/packages.lock.json src/Modules/$m/$mod/" \
+      "COPY src/Modules/$m/$con/$con.csproj src/Modules/$m/$con/packages.lock.json src/Modules/$m/$con/"
+  else
+    insert_before_anchor slnx-modules "<Folder Name=\"/src/Modules/$m/\">" "  <Project Path=\"src/Modules/$m/$mod/$mod.csproj\" />" "</Folder>"
+    insert_before_anchor docker-copies "COPY src/Modules/$m/$mod/$mod.csproj src/Modules/$m/$mod/packages.lock.json src/Modules/$m/$mod/"
+  fi
+
+  insert_before_anchor assemblies-usings "using $mod;" "using $mod.Resources;"
+  insert_before_anchor assemblies-modules "typeof(${m}Module).Assembly,"
+  if ((contracts)); then
+    insert_before_anchor assemblies-contracts "Assembly.Load(\"$con\"),"
+  fi
+  insert_before_anchor assemblies-errors "typeof(${m}ErrorMessages),"
+
+  insert_inline_before_anchor contributing-scopes ", \`$k\`" "\`$k\`" "add \`$k\` to the Modules row of the scopes table"
+  insert_lines "docs/README.md" contains "modules/_template.md" "| [\`modules/$k.md\`](modules/$k.md) | $m: new module (describe it) |"
+  edit_commit_scopes "$k"
+
+  insert_before_anchor program-registrations "builder.Services.Add${m}Module(builder.Configuration);"
+}
+
 main() {
   local name="" prefix="" line_one="" line_two=""
 
@@ -153,13 +401,13 @@ main() {
   kebab="$(kebab_case "$name")"
   source="docs/modules/$name.md"
   target="docs/modules/$kebab.md"
-  if [[ ! -f "$source" ]]; then
+  if [[ ! -f "$source" && -f "$target" ]]; then
+    : # A re-run after a run that stopped midway: the page was renamed already.
+  elif [[ ! -f "$source" ]]; then
     die "$source is missing: the template did not generate the module's documentation page." 1
-  fi
-  if [[ -e "$target" && ! "$source" -ef "$target" ]]; then
+  elif [[ -e "$target" && ! "$source" -ef "$target" ]]; then
     die "$target already exists: not overwriting it. Move or remove it, then run add-module.sh --name $name --prefix $prefix again." 2
-  fi
-  if [[ "$source" -ef "$target" ]]; then
+  elif [[ "$source" -ef "$target" ]]; then
     # A case-insensitive file system sees both names as one file: rename through a temporary name.
     mv -- "$source" "$target.tmp"
     mv -- "$target.tmp" "$target"
@@ -167,9 +415,19 @@ main() {
     mv -- "$source" "$target"
   fi
 
-  # TODO(task-6): replace this with the anchor edits (Program.cs, project references, slnx, Dockerfile, architecture tests, CONTRIBUTING).
+  # 6. The edits in the shared files (see edit_all for the order). A skipped edit does not stop the others.
+  edit_all "$name" "$prefix"
+
+  # TODO(task-7): call finish_module "$name" "$prefix" here (migration, restore, build); it runs after the edits, before the marker goes.
   rm -f -- "$marker"
-  echo "add-module: '$name' checked and its page renamed to $target; wiring into the shared files is not done yet."
+  if ((${#skipped[@]} > 0)); then
+    local entry
+    for entry in "${skipped[@]}"; do
+      echo "add-module: add by hand: $entry" >&2
+    done
+    exit 1
+  fi
+  echo "add-module: '$name' is wired into the shared files."
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

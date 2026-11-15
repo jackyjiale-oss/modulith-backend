@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test for build/scripts/add-module.sh (input checks, preflight, cleanup and the documentation rename). It builds a fake generated
+# Test for build/scripts/add-module.sh (input checks, preflight, cleanup, the documentation rename and the edits at the anchors). It builds a fake generated
 # project (the repo's anchor-bearing files with TemplateName replaced by Acme.Shop, as the engine would, plus a stand-in Audit module)
 # and a simulated engine output of the item template for a given name and prefix, then runs or sources the script against it.
 #
@@ -35,7 +35,8 @@ base_template="$tmp/base-template"
 build_base() {
   local dir="$1" key relative anchor path target content
   if [[ ! -d "$base_template" ]]; then
-    local paths=("build/scripts/module-anchors.txt")
+    # Every file an edit touches: the anchor files, the anchor list itself, the docs index and the commit scope list.
+    local paths=("build/scripts/module-anchors.txt" "docs/README.md" "build/scripts/check-commit-msg.sh")
     while IFS='|' read -r key relative anchor || [[ -n "$key" ]]; do
       [[ -z "$key" ]] && continue
       paths+=("$relative")
@@ -67,12 +68,15 @@ while IFS= read -r path; do
   template_files+=("${path#"$template"/}")
 done < <(find "$template" -type f ! -path "$template/.template.config/*" | sort)
 
-# simulate_engine DIR NAME PREFIX: what `dotnet new modulith-module` leaves behind: the template tree (without .template.config) with
-# ModuleName and ProjectPrefix replaced in names and content, and the marker.
+# simulate_engine DIR NAME PREFIX [CONTRACTS]: what `dotnet new modulith-module` leaves behind: the template tree (without
+# .template.config) with ModuleName and ProjectPrefix replaced in names and content, and the marker; the Contracts project only when
+# CONTRACTS is 1.
 simulate_engine() {
-  local dir="$1" name="$2" prefix="$3" relative target content
+  local dir="$1" name="$2" prefix="$3" contracts="${4:-0}" relative target content
   local -a directories=("$dir")
   for relative in "${template_files[@]}"; do
+    # Like the engine's (!contracts) source modifier: the Contracts project is written only when asked for.
+    [[ "$contracts" != 1 && "$relative" == *.Contracts/* ]] && continue
     target="${relative//ModuleName/$name}"
     target="${target//ProjectPrefix/$prefix}"
     if [[ "$target" == */* ]]; then
@@ -81,6 +85,7 @@ simulate_engine() {
   done
   mkdir -p "${directories[@]}"
   for relative in "${template_files[@]}"; do
+    [[ "$contracts" != 1 && "$relative" == *.Contracts/* ]] && continue
     target="${relative//ModuleName/$name}"
     target="${target//ProjectPrefix/$prefix}"
     content="$(< "$template/$relative")"
@@ -317,6 +322,432 @@ simulate_engine "$base" LeaveManagement Acme.Shop
 rm "$base/docs/modules/LeaveManagement.md"
 code="$(run_in "$base")"
 assert_code "generated page missing" 1 "$code"
+
+# --- the edits at the anchors --------------------------------------------------------------------------------------------------------
+# Expectations are written out here, independently of the script. A SPEC is NAME:CONTRACTS:KEBAB (CONTRACTS 0 or 1), in the order
+# the modules were added. Lines are compared trimmed and without a trailing CR; a block must sit immediately before its anchor.
+
+all_keys=(program-usings program-registrations program-endpoints api-references unit-references arch-references integration-references
+  slnx-modules docker-copies assemblies-usings assemblies-modules assemblies-contracts assemblies-errors)
+
+# anchor_of DIR KEY: sets a_file and a_text from the anchor list of the tree.
+anchor_of() {
+  local row_file row_anchor k
+  a_file=""
+  a_text=""
+  while IFS='|' read -r k row_file row_anchor || [[ -n "$k" ]]; do
+    if [[ "$k" == "$2" ]]; then
+      a_file="$row_file"
+      a_text="${row_anchor%$'\r'}"
+      return 0
+    fi
+  done < "$1/build/scripts/module-anchors.txt"
+  return 1
+}
+
+# wire_lines KEY NAME PREFIX CONTRACTS: sets block to the lines that must be inserted at the anchor of KEY.
+wire_lines() {
+  local key="$1" m="$2" p="$3" c="$4"
+  local mod="$p.Modules.$m" con="$p.Modules.$m.Contracts"
+  block=()
+  case "$key" in
+    program-usings) block=("using $mod;") ;;
+    program-registrations) block=("builder.Services.Add${m}Module(builder.Configuration);") ;;
+    program-endpoints) block=("api.Map${m}Endpoints();") ;;
+    api-references)
+      block=("<ProjectReference Include=\"..\\..\\Modules\\$m\\$mod\\$mod.csproj\" />")
+      [[ "$c" == 1 ]] && block+=("<ProjectReference Include=\"..\\..\\Modules\\$m\\$con\\$con.csproj\" />")
+      ;;
+    unit-references | arch-references | integration-references)
+      block=("<ProjectReference Include=\"..\\..\\src\\Modules\\$m\\$mod\\$mod.csproj\" />")
+      [[ "$c" == 1 ]] && block+=("<ProjectReference Include=\"..\\..\\src\\Modules\\$m\\$con\\$con.csproj\" />")
+      ;;
+    slnx-modules)
+      block=("<Folder Name=\"/src/Modules/$m/\">" "<Project Path=\"src/Modules/$m/$mod/$mod.csproj\" />")
+      [[ "$c" == 1 ]] && block+=("<Project Path=\"src/Modules/$m/$con/$con.csproj\" />")
+      block+=("</Folder>")
+      ;;
+    docker-copies)
+      block=("COPY src/Modules/$m/$mod/$mod.csproj src/Modules/$m/$mod/packages.lock.json src/Modules/$m/$mod/")
+      [[ "$c" == 1 ]] && block+=("COPY src/Modules/$m/$con/$con.csproj src/Modules/$m/$con/packages.lock.json src/Modules/$m/$con/")
+      ;;
+    assemblies-usings) block=("using $mod;" "using $mod.Resources;") ;;
+    assemblies-modules) block=("typeof(${m}Module).Assembly,") ;;
+    assemblies-contracts)
+      [[ "$c" == 1 ]] && block=("Assembly.Load(\"$con\"),")
+      ;;
+    assemblies-errors) block=("typeof(${m}ErrorMessages),") ;;
+    *) fail "wire_lines: unknown key $key" ;;
+  esac
+  return 0
+}
+
+# load_lines FILE: sets file_lines (trimmed, CR removed) and file_raw (CR removed only). Returns 1 for a missing file.
+load_lines() {
+  local line trimmed
+  file_lines=()
+  file_raw=()
+  [[ -f "$1" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    file_raw+=("$line")
+    trimmed="${line#"${line%%[![:space:]]*}"}"
+    trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+    file_lines+=("$trimmed")
+  done < "$1"
+  return 0
+}
+
+# count_exact TEXT: sets count to the number of file_lines equal to TEXT.
+count_exact() {
+  local entry
+  count=0
+  for entry in "${file_lines[@]}"; do
+    [[ "$entry" == "$1" ]] && count=$((count + 1))
+  done
+  return 0
+}
+
+# first_index TEXT: sets index to the first position of TEXT in file_lines, or -1.
+first_index() {
+  local i
+  index=-1
+  for i in "${!file_lines[@]}"; do
+    if [[ "${file_lines[i]}" == "$1" ]]; then
+      index=$i
+      return 0
+    fi
+  done
+  return 0
+}
+
+# check_key DIR KEY PREFIX SPEC...: each inserted line is in the file exactly once (except the generic </Folder>) and the blocks of all
+# SPECs, in order, sit immediately before the one anchor line.
+check_key() {
+  local dir="$1" key="$2" prefix="$3" spec name rest contracts line i n start
+  shift 3
+  local -a expected=()
+  anchor_of "$dir" "$key" || { fail "$key: no anchor entry"; return; }
+  load_lines "$dir/$a_file" || { fail "$key: cannot read $a_file"; return; }
+  for spec in "$@"; do
+    name="${spec%%:*}"
+    rest="${spec#*:}"
+    contracts="${rest%%:*}"
+    wire_lines "$key" "$name" "$prefix" "$contracts"
+    if ((${#block[@]} > 0)); then
+      for line in "${block[@]}"; do
+        expected+=("$line")
+        [[ "$line" == "</Folder>" ]] && continue
+        count_exact "$line"
+        [[ "$count" == 1 ]] || fail "$key: '$line' occurs $count times in $a_file, expected 1"
+      done
+    fi
+  done
+  count_exact "$a_text"
+  [[ "$count" == 1 ]] || fail "$key: the anchor '$a_text' occurs $count times in $a_file, expected 1"
+  first_index "$a_text"
+  n=${#expected[@]}
+  start=$((index - n))
+  if ((index < 0 || start < 0)); then
+    fail "$key: the anchor is missing or too near the top of $a_file"
+    return
+  fi
+  for ((i = 0; i < n; i++)); do
+    [[ "${file_lines[start + i]}" == "${expected[i]}" ]] || fail "$key: line $((start + i + 1)) of $a_file is '${file_lines[start + i]}', expected '${expected[i]}'"
+  done
+}
+
+# row_of FILE TEXT: sets row to the first CR-less line of FILE that contains TEXT (empty if none) and rows to how many contain it.
+row_of() {
+  local entry
+  row=""
+  rows=0
+  load_lines "$1" || return 1
+  for entry in "${file_raw[@]}"; do
+    if [[ "$entry" == *"$2"* ]]; then
+      [[ $rows == 0 ]] && row="$entry"
+      rows=$((rows + 1))
+    fi
+  done
+  return 0
+}
+
+# check_misc DIR PREFIX SPEC...: the scopes row, the docs index rows and ALLOWED_SCOPES. Honours skip_readme=1.
+check_misc() {
+  local dir="$1" spec name rest kebab added="" original_row expected_row scope_anchor='<!-- modulith:module-scopes -->'
+  local -a index_rows=()
+  shift 2
+  for spec in "$@"; do
+    name="${spec%%:*}"
+    rest="${spec#*:}"
+    kebab="${rest#*:}"
+    added+=", \`$kebab\`"
+    index_rows+=("| [\`modules/$kebab.md\`](modules/$kebab.md) | $name: new module (describe it) |")
+  done
+
+  row_of "$base_template/CONTRIBUTING.md" "$scope_anchor"
+  original_row="$row"
+  expected_row="${original_row%%"$scope_anchor"*}$added$scope_anchor${original_row#*"$scope_anchor"}"
+  row_of "$dir/CONTRIBUTING.md" "$scope_anchor"
+  [[ "$rows" == 1 && "$row" == "$expected_row" ]] || fail "CONTRIBUTING.md: row is '$row' ($rows rows), expected '$expected_row'"
+
+  if [[ "${skip_readme:-0}" != 1 ]]; then
+    local i n=${#index_rows[@]} start
+    if load_lines "$dir/docs/README.md"; then
+      first_index '| [`modules/_template.md`](modules/_template.md) | The required outline; copy it to `modules/{module}.md` when you add a module |'
+      start=$((index - n))
+      if ((index < 0 || start < 0)); then
+        fail "docs/README.md: the _template row is missing"
+      else
+        for ((i = 0; i < n; i++)); do
+          [[ "${file_lines[start + i]}" == "${index_rows[i]}" ]] || fail "docs/README.md: row $((start + i + 1)) is '${file_lines[start + i]}', expected '${index_rows[i]}'"
+          count_exact "${index_rows[i]}"
+          [[ "$count" == 1 ]] || fail "docs/README.md: '${index_rows[i]}' occurs $count times"
+        done
+      fi
+    else
+      fail "docs/README.md is missing"
+    fi
+  fi
+
+  row_of "$base_template/build/scripts/check-commit-msg.sh" 'ALLOWED_SCOPES="'
+  expected_row="${row%\"*}"
+  for spec in "$@"; do
+    rest="${spec#*:}"
+    expected_row+="|${rest#*:}"
+  done
+  expected_row+='"'
+  row_of "$dir/build/scripts/check-commit-msg.sh" 'ALLOWED_SCOPES="'
+  [[ "$rows" == 1 && "$row" == "$expected_row" ]] || fail "check-commit-msg.sh: ALLOWED_SCOPES line is '$row' ($rows lines), expected '$expected_row'"
+}
+
+# check_all DIR PREFIX SPEC...: every key and the misc edits; except_key=KEY leaves one key out.
+check_all() {
+  local dir="$1" prefix="$2" key spec name rest
+  shift 2
+  for key in "${all_keys[@]}"; do
+    [[ "$key" == "${except_key:-}" ]] && continue
+    check_key "$dir" "$key" "$prefix" "$@"
+  done
+  check_misc "$dir" "$prefix" "$@"
+  # A module without Contracts leaves no trace of a Contracts project in the shared files.
+  for spec in "$@"; do
+    name="${spec%%:*}"
+    rest="${spec#*:}"
+    if [[ "${rest%%:*}" != 1 ]]; then
+      if grep -rlF --exclude-dir=Modules "Modules.$name.Contracts" "$dir" > "$tmp/grep.log" 2>&1; then
+        fail "$name has no Contracts, but $(tr '\n' ' ' < "$tmp/grep.log")mention(s) it"
+      fi
+    fi
+  done
+}
+
+# ends_with_newline FILE
+ends_with_newline() {
+  local content=""
+  IFS= read -r -d '' content < "$1" || true
+  [[ "$content" == *$'\n' ]]
+}
+
+# all_crlf FILE: every line ends with CR LF (a last line without any newline is exempt).
+all_crlf() {
+  local line
+  while IFS= read -r line; do
+    [[ "$line" == *$'\r' ]] || { fail "$1: a line does not end in CRLF: '$line'"; return; }
+  done < "$1"
+}
+
+# to_crlf FILE [noeol]: rewrites FILE with CRLF line endings; with a second argument it also drops the final line ending.
+to_crlf() {
+  local line out=""
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    out+="$line"$'\r\n'
+  done < "$1"
+  [[ -n "${2-}" ]] && out="${out%$'\r\n'}"
+  printf '%s' "$out" > "$1"
+}
+
+# shared_paths DIR: sets shared to every file an edit touches (relative paths, each once).
+shared_paths() {
+  local k row_file row_anchor known=" "
+  shared=()
+  while IFS='|' read -r k row_file row_anchor || [[ -n "$k" ]]; do
+    [[ -z "$k" || "$known" == *" $row_file "* ]] && continue
+    known+="$row_file "
+    shared+=("$row_file")
+  done < "$1/build/scripts/module-anchors.txt"
+  shared+=("build/scripts/module-anchors.txt" "docs/README.md" "build/scripts/check-commit-msg.sh")
+}
+
+# new_project DIR: a fresh fake project.
+new_project() {
+  mkdir -p "$(dirname "$1")"
+  build_base "$1"
+}
+
+# 1. A full run without Contracts.
+base="$tmp/wire-lm"
+new_project "$base"
+simulate_engine "$base" LeaveManagement Acme.Shop
+code="$(run_in "$base")"
+assert_code "wire LeaveManagement" 0 "$code"
+check_all "$base" Acme.Shop LeaveManagement:0:leave-management
+grep -q "add by hand" "$tmp/out.log" && fail "wire LeaveManagement: nothing should be left to do by hand"
+[[ ! -e "$base/.modulith-module" ]] || fail "wire LeaveManagement: the marker was not deleted"
+# The slnx folder: the project two spaces deeper than the anchor, the closing tag at the anchor's indentation.
+load_lines "$base/Acme.Shop.slnx"
+first_index "<!-- modulith:modules -->"
+[[ "${file_raw[index]}" == '  <!-- modulith:modules -->' ]] || fail "slnx: the anchor line changed"
+[[ "${file_raw[index - 1]}" == '  </Folder>' ]] || fail "slnx: closing tag is '${file_raw[index - 1]}'"
+[[ "${file_raw[index - 2]}" == '    <Project Path="src/Modules/LeaveManagement/Acme.Shop.Modules.LeaveManagement/Acme.Shop.Modules.LeaveManagement.csproj" />' ]] ||
+  fail "slnx: project line is '${file_raw[index - 2]}'"
+[[ "${file_raw[index - 3]}" == '  <Folder Name="/src/Modules/LeaveManagement/">' ]] || fail "slnx: folder line is '${file_raw[index - 3]}'"
+# Program.cs: the registration keeps the anchor's (zero) indentation and sits right before it.
+load_lines "$base/src/Host/Acme.Shop.Api/Program.cs"
+first_index "// modulith:module-registrations"
+[[ "${file_raw[index - 1]}" == 'builder.Services.AddLeaveManagementModule(builder.Configuration);' ]] || fail "Program.cs: registration line is '${file_raw[index - 1]}'"
+
+# 4. A second run for the same module: exit 2 and nothing at all changes.
+before="$(snapshot "$base")"
+code="$(run_in "$base" --name LeaveManagement --prefix Acme.Shop)"
+assert_code "second run" 2 "$code"
+assert_same_tree "second run" "$before" "$base"
+
+# 2. A full run with Contracts.
+base="$tmp/wire-billing"
+new_project "$base"
+simulate_engine "$base" Billing Acme.Shop 1
+[[ -d "$base/src/Modules/Billing/Acme.Shop.Modules.Billing.Contracts" ]] || fail "the simulated engine wrote no Contracts folder"
+code="$(run_in "$base")"
+assert_code "wire Billing with Contracts" 0 "$code"
+check_all "$base" Acme.Shop Billing:1:billing
+load_lines "$base/Acme.Shop.slnx"
+first_index "<!-- modulith:modules -->"
+[[ "${file_raw[index - 1]}" == '  </Folder>' && "${file_raw[index - 2]}" == '    <Project Path="src/Modules/Billing/Acme.Shop.Modules.Billing.Contracts/Acme.Shop.Modules.Billing.Contracts.csproj" />' ]] ||
+  fail "slnx: the Contracts project line is missing or misplaced"
+
+# 3. Two modules in sequence: both blocks, in order, anchors still last.
+base="$tmp/wire-two"
+new_project "$base"
+simulate_engine "$base" Billing Acme.Shop 1
+code="$(run_in "$base")"
+assert_code "two modules: Billing" 0 "$code"
+simulate_engine "$base" LeaveManagement Acme.Shop
+code="$(run_in "$base")"
+assert_code "two modules: LeaveManagement" 0 "$code"
+check_all "$base" Acme.Shop Billing:1:billing LeaveManagement:0:leave-management
+
+# 5. One anchor is gone: that edit is skipped and reported, everything else is done, exit 1.
+base="$tmp/wire-no-anchor"
+new_project "$base"
+simulate_engine "$base" LeaveManagement Acme.Shop
+load_lines "$base/tests/Acme.Shop.ArchitectureTests/Assemblies.cs"
+{
+  for line in "${file_raw[@]}"; do
+    [[ "${line#"${line%%[![:space:]]*}"}" == "// modulith:modules" ]] || printf '%s\n' "$line"
+  done
+} > "$base/tests/Acme.Shop.ArchitectureTests/Assemblies.cs"
+code="$(run_in "$base")"
+assert_code "one anchor missing" 1 "$code"
+grep -qxF 'add-module: add by hand: tests/Acme.Shop.ArchitectureTests/Assemblies.cs: typeof(LeaveManagementModule).Assembly,' "$tmp/out.log" ||
+  fail "one anchor missing: the output does not list the line to add by hand ($(tr '\n' ' ' < "$tmp/out.log"))"
+[[ "$(grep -c 'add by hand' "$tmp/out.log")" == 1 ]] || fail "one anchor missing: more than one entry listed"
+except_key=assemblies-modules check_all "$base" Acme.Shop LeaveManagement:0:leave-management
+load_lines "$base/tests/Acme.Shop.ArchitectureTests/Assemblies.cs"
+count_exact "typeof(LeaveManagementModule).Assembly,"
+[[ "$count" == 0 ]] || fail "one anchor missing: the skipped line was inserted anyway"
+[[ ! -e "$base/.modulith-module" ]] || fail "one anchor missing: the marker was not deleted"
+
+# 6. A missing target file is skipped like a missing anchor.
+base="$tmp/wire-no-file"
+new_project "$base"
+simulate_engine "$base" LeaveManagement Acme.Shop
+rm "$base/docs/README.md"
+code="$(run_in "$base")"
+assert_code "docs/README.md missing" 1 "$code"
+grep -qxF 'add-module: add by hand: docs/README.md: | [`modules/leave-management.md`](modules/leave-management.md) | LeaveManagement: new module (describe it) |' "$tmp/out.log" ||
+  fail "docs/README.md missing: the output does not list the row to add ($(tr '\n' ' ' < "$tmp/out.log"))"
+skip_readme=1 check_all "$base" Acme.Shop LeaveManagement:0:leave-management
+[[ ! -e "$base/.modulith-module" ]] || fail "docs/README.md missing: the marker was not deleted"
+
+# 7. CRLF: every shared file in CRLF (the Dockerfile without a final newline): inserted lines are CRLF, the end state is kept.
+base="$tmp/wire-crlf"
+new_project "$base"
+shared_paths "$base"
+for path in "${shared[@]}"; do
+  if [[ "$path" == "build/docker/Dockerfile" ]]; then to_crlf "$base/$path" noeol; else to_crlf "$base/$path"; fi
+done
+simulate_engine "$base" Billing Acme.Shop 1
+code="$(run_in "$base")"
+assert_code "CRLF tree" 0 "$code"
+check_all "$base" Acme.Shop Billing:1:billing
+for path in "${shared[@]}"; do
+  if [[ "$path" == "build/docker/Dockerfile" ]]; then
+    ends_with_newline "$base/$path" && fail "CRLF tree: $path gained a final newline"
+  else
+    ends_with_newline "$base/$path" || fail "CRLF tree: $path lost its final newline"
+  fi
+  all_crlf "$base/$path"
+done
+# A pure-LF tree stays pure LF.
+base="$tmp/wire-lf"
+new_project "$base"
+simulate_engine "$base" Billing Acme.Shop 1
+code="$(run_in "$base")"
+assert_code "LF tree" 0 "$code"
+shared_paths "$base"
+for path in "${shared[@]}"; do
+  grep -q $'\r' "$base/$path" && fail "LF tree: $path gained a CR"
+done
+
+# 8. A solution root with spaces in its path.
+base="$tmp/lee jia le/proj dir"
+new_project "$base"
+simulate_engine "$base" LeaveManagement Acme.Shop 1
+code="$(run_in "$base")"
+assert_code "path with spaces" 0 "$code"
+check_all "$base" Acme.Shop LeaveManagement:1:leave-management
+
+# 9. A failure after the other edits but before the Program.cs registration leaves the module unwired; a re-run completes it.
+base="$tmp/wire-partial"
+new_project "$base"
+simulate_engine "$base" LeaveManagement Acme.Shop
+code=0
+(
+  cd "$base" && source "$script" &&
+    edit_commit_scopes() {
+      echo "forced failure" >&2
+      exit 9
+    } && main
+) > "$tmp/out.log" 2>&1 || code=$?
+assert_code "forced failure before the registration" 9 "$code"
+load_lines "$base/src/Host/Acme.Shop.Api/Program.cs"
+count_exact "builder.Services.AddLeaveManagementModule(builder.Configuration);"
+[[ "$count" == 0 ]] || fail "partial run: Program.cs already registers the module"
+check_key "$base" api-references Acme.Shop LeaveManagement:0:leave-management
+check_key "$base" assemblies-modules Acme.Shop LeaveManagement:0:leave-management
+code="$(run_in "$base" --name LeaveManagement --prefix Acme.Shop)"
+assert_code "re-run after a partial failure" 0 "$code"
+check_all "$base" Acme.Shop LeaveManagement:0:leave-management
+
+# insert_before_anchor on its own: CRLF with the anchor on a last line without a newline, indentation, idempotency, a missing anchor.
+mini="$tmp/mini"
+mkdir -p "$mini/build/scripts"
+printf 'k|f.txt|# anchor\nm|g.txt|# nowhere\nn|missing.txt|# anchor\n' > "$mini/build/scripts/module-anchors.txt"
+printf 'a\r\n# anchor' > "$mini/f.txt"
+printf 'x\n' > "$mini/g.txt"
+(cd "$mini" && source_script && insert_before_anchor k "X" "  Y") > /dev/null 2>&1 || fail "insert_before_anchor failed on a CRLF file"
+[[ "$(< "$mini/f.txt")" == $'a\r\nX\r\n  Y\r\n# anchor' ]] || fail "insert_before_anchor (CRLF, no final newline): got $(od -c "$mini/f.txt" | head -3 | tr '\n' ' ')"
+ends_with_newline "$mini/f.txt" && fail "insert_before_anchor: a final newline appeared"
+before="$(snapshot "$mini")"
+(cd "$mini" && source_script && insert_before_anchor k "X" "  Y") > /dev/null 2>&1 || fail "insert_before_anchor failed on the second call"
+assert_same_tree "insert_before_anchor idempotency" "$before" "$mini"
+printf 'a\n    # anchor\nb\n' > "$mini/f.txt"
+(cd "$mini" && source_script && insert_before_anchor k "X" "  Y") > /dev/null 2>&1 || fail "insert_before_anchor failed on an indented anchor"
+[[ "$(< "$mini/f.txt")" == $'a\n    X\n      Y\n    # anchor\nb' ]] || fail "insert_before_anchor (indented): got $(od -c "$mini/f.txt" | head -3 | tr '\n' ' ')"
+ends_with_newline "$mini/f.txt" || fail "insert_before_anchor: the final newline was lost"
+skipped_list="$(cd "$mini" && source_script && insert_before_anchor m "P" "Q"; insert_before_anchor n "R"; printf '%s;' "${skipped[@]}")"
+[[ "$skipped_list" == "g.txt: P;g.txt: Q;missing.txt: R;" ]] || fail "insert_before_anchor: skipped list is '$skipped_list'"
 
 if ((failures > 0)); then
   echo "$failures failure(s)" >&2
