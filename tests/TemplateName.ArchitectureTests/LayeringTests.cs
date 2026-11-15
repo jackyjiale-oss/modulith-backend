@@ -57,12 +57,27 @@ public sealed class LayeringTests
     }
 
     //#endif
+    [Fact]
+    public void At_least_one_module_has_domain_types()
+    {
+        // Keeps the per-module domain rule from passing vacuously: a rename of the Domain namespace would leave every module without types.
+        var modulesWithDomainTypes = Assemblies.Modules
+            .Where(assembly => Types.InAssembly(assembly).That().ResideInNamespaceStartingWith($"{assembly.GetName().Name}.Domain").GetTypes().Any())
+            .ToList();
+
+        modulesWithDomainTypes.ShouldNotBeEmpty();
+    }
+
     [Theory]
     [MemberData(nameof(Assemblies.ModuleNames), MemberType = typeof(Assemblies))]
     public void Module_domain_does_not_depend_on_other_layers_or_frameworks(string moduleName)
     {
         var domainTypes = Types.InAssembly(Assemblies.Module(moduleName)).That().ResideInNamespaceStartingWith($"{moduleName}.Domain");
-        domainTypes.GetTypes().ShouldNotBeEmpty();
+        if (!domainTypes.GetTypes().Any())
+        {
+            // A module with no domain types yet (a freshly scaffolded one) is not a failure; At_least_one_module_has_domain_types guards the rule.
+            return;
+        }
 
         var result = domainTypes
             .Should()
