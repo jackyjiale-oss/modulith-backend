@@ -159,8 +159,12 @@ assert_same_tree "remove_generated" "$before" "$base"
 base="$tmp/direct-audit"
 build_base "$base"
 before="$(snapshot "$base")"
-(cd "$base" && source_script && remove_generated Audit Acme.Shop) > /dev/null 2>&1 || fail "remove_generated Audit failed"
-assert_same_tree "remove_generated of a registered module" "$before" "$base"
+for prefix in Acme.Shop Wrong.Name; do
+  code=0
+  (cd "$base" && source_script && remove_generated Audit "$prefix") > /dev/null 2>&1 || code=$?
+  [[ "$code" != 0 ]] || fail "remove_generated Audit $prefix returned 0, expected non-zero (it must refuse)"
+  assert_same_tree "remove_generated Audit $prefix" "$before" "$base"
+done
 for hostile in ".." "../Modules" "a/b"; do
   (cd "$base" && source_script && remove_generated "$hostile" Acme.Shop) > /dev/null 2>&1 || fail "remove_generated '$hostile' failed"
   assert_same_tree "remove_generated '$hostile'" "$before" "$base"
@@ -204,12 +208,38 @@ assert_same_tree "prefix Wrong.Name through the flags" "$before" "$base"
 
 base="$tmp/wired"
 build_base "$base"
+printf 'Audit\nAcme.Shop\n' > "$base/.modulith-module"
 before="$(snapshot "$base")"
 code="$(run_in "$base" --name Audit --prefix Acme.Shop)"
 assert_code "--name Audit" 2 "$code"
 grep -q "already wired" "$tmp/out.log" || fail "--name Audit: the message does not say it is already wired"
 assert_same_tree "--name Audit" "$before" "$base"
+[[ -f "$base/.modulith-module" ]] || fail "--name Audit: the marker was deleted (it must stay)"
 [[ -f "$base/src/Modules/Audit/Acme.Shop.Modules.Audit/AuditModule.cs" ]] || fail "--name Audit: the Audit module is gone"
+
+# A wrong prefix must not hide a registered module: the host that registers it is found under any prefix, nothing is deleted.
+base="$tmp/wired-wrong-prefix"
+build_base "$base"
+before="$(snapshot "$base")"
+code="$(run_in "$base" --name Audit --prefix Wrong.Name)"
+assert_code "--name Audit --prefix Wrong.Name" 2 "$code"
+assert_same_tree "--name Audit --prefix Wrong.Name" "$before" "$base"
+[[ -f "$base/src/Modules/Audit/Acme.Shop.Modules.Audit/AuditModule.cs" ]] || fail "--name Audit --prefix Wrong.Name: the Audit module is gone"
+[[ -f "$base/docs/modules/audit.md" ]] || fail "--name Audit --prefix Wrong.Name: docs/modules/audit.md is gone"
+
+# The same for case variants of a registered name (the same folder on a case-insensitive file system): AUDIT is a valid name,
+# audit is not (the invalid-name path), and a wrong prefix does not matter.
+for variant in AUDIT audit; do
+  for prefix in Wrong.Name Acme.Shop; do
+    base="$tmp/wired-$variant-$prefix"
+    build_base "$base"
+    before="$(snapshot "$base")"
+    code="$(run_in "$base" --name "$variant" --prefix "$prefix")"
+    assert_code "--name $variant --prefix $prefix" 2 "$code"
+    assert_same_tree "--name $variant --prefix $prefix" "$before" "$base"
+    [[ -f "$base/src/Modules/Audit/Acme.Shop.Modules.Audit/AuditModule.cs" ]] || fail "--name $variant --prefix $prefix: the Audit module is gone"
+  done
+done
 
 # --- the happy path: the documentation page is renamed and the marker is deleted ------------------------------------------------------
 

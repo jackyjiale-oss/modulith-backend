@@ -66,21 +66,32 @@ validate_prefix() {
   return 2
 }
 
+# is_wired NAME: returns 0 when the Program.cs of ANY host folder (src/Host/*/Program.cs, whatever the prefix) registers
+# Add{NAME}Module(, compared case-insensitively (a case-insensitive file system treats 'audit' and 'Audit' as one folder, and a wrong
+# prefix must not hide a registered module). awk, not grep -i -F, which aborts on some Git Bash builds. NAME must hold no backslash.
+is_wired() {
+  local -a programs=()
+  local candidate
+  for candidate in src/Host/*/Program.cs; do
+    [[ -f "$candidate" ]] && programs+=("$candidate")
+  done
+  ((${#programs[@]} > 0)) || return 1
+  awk -v pattern="Add${1-}Module(" 'index(tolower($0), tolower(pattern)) { found = 1; exit } END { exit !found }' "${programs[@]}"
+}
+
 # remove_generated NAME PREFIX: removes what the engine wrote for the module: src/Modules/NAME, docs/modules/NAME.md,
-# docs/modules/{kebab}.md and the marker; only the paths that exist, nothing else. It refuses a name that could point outside those
-# paths, and a module that Program.cs already registers (the files on disk then belong to that module, not to this run).
+# docs/modules/{kebab}.md and the marker; only the paths that exist, nothing else. It refuses (changes nothing, prints why and
+# returns 1) for a module that any host's Program.cs already registers: the files on disk then belong to that module, not to this
+# run. It ignores a name that could point outside those paths (empty, leading '.', a slash), removing only the marker then.
 remove_generated() {
-  local name="${1-}" prefix="${2-}" program kebab
+  local name="${1-}" kebab
   if [[ -z "$name" || "$name" == .* || "$name" == *[/\\]* ]]; then
     rm -f -- "$marker"
     return 0
   fi
-  program="src/Host/$prefix.Api/Program.cs"
-  # awk, not grep -i: a case-insensitive match, because a case-insensitive file system treats 'audit' and 'Audit' as one folder.
-  if [[ -n "$prefix" && -f "$program" ]] \
-    && awk -v pattern="Add${name}Module(" 'index(tolower($0), tolower(pattern)) { found = 1; exit } END { exit !found }' "$program"; then
-    echo "add-module: '$name' is already registered in $program: leaving its files alone." >&2
-    return 0
+  if is_wired "$name"; then
+    echo "add-module: '$name' is already registered in a src/Host/*/Program.cs: leaving its files alone." >&2
+    return 1
   fi
   kebab="$(kebab_case "$name")"
   rm -rf -- "src/Modules/$name"
@@ -120,20 +131,20 @@ main() {
 
   # 2. The name becomes folder, namespace and type names, so it is checked before anything is wired; an invalid one is cleaned up.
   if ! validate_name "$name"; then
-    remove_generated "$name" "$prefix"
+    remove_generated "$name" "$prefix" || true # refuses, changing nothing, when a host registers that name
     exit 2
   fi
 
-  # 3. Already wired: the files on disk belong to that module, so nothing at all is touched.
-  local program="src/Host/$prefix.Api/Program.cs"
-  if [[ -f "$program" ]] && grep -qF -- "Add${name}Module(" "$program"; then
-    die "module '$name' is already wired in $program: nothing was changed." 2
+  # 3. Already wired under ANY host (not only the prefix given): the files on disk belong to that module, so nothing at all is
+  #    touched, the marker included.
+  if is_wired "$name"; then
+    die "module '$name' is already wired in a src/Host/*/Program.cs: nothing was changed." 2
   fi
 
   # 4. The prefix must be the project's own: no edit is made when the host project does not exist.
   if ! validate_prefix "$prefix" || [[ ! -d "src/Host/$prefix.Api" ]]; then
     echo "add-module: src/Host/$prefix.Api does not exist: '$prefix' is not this project's prefix. The generated module files are removed; run the template again with the right prefix." >&2
-    remove_generated "$name" "$prefix"
+    remove_generated "$name" "$prefix" || true
     exit 2
   fi
 
