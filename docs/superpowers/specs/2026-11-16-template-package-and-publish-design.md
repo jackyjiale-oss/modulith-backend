@@ -121,3 +121,12 @@ Run on Windows 11 with SDK 10.0.401, `LongPathsEnabled` = 0, from a pack project
 **release-please**: its documentation says `prerelease` and `prerelease-type` apply only with the `prerelease` versioning strategy (section 7 is amended), and does not say how a version is computed from `0.0.0`. History has no `Release-As` footer; two commits carry `BREAKING CHANGE` footers, and release PR #8 proposes 1.0.0 although `bump-minor-pre-major` is on. The proposal under the prerelease strategy can only be read on a real release PR, so the plan reads it before merging anything, with the `release-as` fallback.
 
 **Not run**: the full build and test of a project generated from the package (acceptance 2, done in the plan), and the real publish (acceptance 5).
+
+## 13. Additions made while planning (2026-11-16)
+
+Found while reading the files the plan changes; they follow from the rule that nothing repository-only reaches a generated project, and they refine sections 4 to 7 without changing a decision the user made.
+
+- `release.yml` and `release-please-config.json` are both generated into every project. The publish job is therefore guarded by a `detect-package` job (it runs only where `build/pack/Modulith.Templates.csproj` exists, which a generated project does not have), the same idea as `cd.yml`'s `detect` job. The release-candidate keys are in the root config only; generated projects get a plain copy from `build/template-content/release-please-config.json` (the mechanism `Version.props` already uses), and a test keeps the two equal apart from those three lines.
+- The tag check and the pack live in `build/scripts/release-package.sh` with a test, so the workflow's logic is testable; the smoke uses the same script to pack.
+- `package-smoke` has two legs, `all-on` and `all-off`, so the required-check names will be `package-smoke (all-on)` and `package-smoke (all-off)`.
+- The README's install section changes after the first release candidate is published, in a small follow-up pull request, so that it is true when merged; the implementation pull request only rewords the "once Plan 7 publishes" sentence.
