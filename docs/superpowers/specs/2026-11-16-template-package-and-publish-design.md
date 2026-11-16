@@ -46,12 +46,13 @@ CI: a job `package-smoke` in `.github/workflows/template-matrix.yml` (repository
 
 `release.yml` gains the job `publish-package`, after `release-please`, only when a release was created, in the GitHub environment `nuget`:
 
-1. Check out the release tag (no persisted credentials).
-2. Assert the tag without its `v` equals `<Version>` in `Version.props` at that tag; fail otherwise.
-3. `dotnet pack` with that version.
-4. `template-smoke.sh --from-package <that file> --generate-only` on the exact file to be published.
-5. Upload the `.nupkg` to the GitHub Release (`gh release upload --clobber`).
-6. `NuGet/login@v1` (needs `id-token: write`; the nuget.org profile name is the secret `NUGET_USER`), then `dotnet nuget push --skip-duplicate`. This is last: everything that can fail comes before it, and a re-run cannot double-publish.
+1. Check out the release tag (no persisted credentials), with the full history.
+2. Assert the tag's commit is an ancestor of `origin/main` (`git merge-base --is-ancestor HEAD origin/main`); fail otherwise, before any script of the checkout runs.
+3. Assert the tag without its `v` equals `<Version>` in `Version.props` at that tag; fail otherwise.
+4. `dotnet pack` with that version.
+5. `template-smoke.sh --from-package <that file> --generate-only` on the exact file to be published.
+6. Upload the `.nupkg` to the GitHub Release (`gh release upload --clobber`).
+7. `NuGet/login@v1` (needs `id-token: write`; the nuget.org profile name is the secret `NUGET_USER`), then `dotnet nuget push --skip-duplicate`. This is last: everything that can fail comes before it, and a re-run cannot double-publish.
 
 Recovery: `release.yml` gains `workflow_dispatch` with an input `tag`. A dispatch skips `release-please` and runs `publish-package` for that existing release. The tag reaches the shell only through `env`, validated against `^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$` before use, as the matrix workflow passes its inputs.
 
@@ -61,7 +62,7 @@ What a failure leaves behind: pack, assert, smoke or upload failing leaves the G
 
 ## 7. Versioning and the prerelease
 
-`release-please-config.json` gains `"versioning": "prerelease"`, `"prerelease": true` and `"prerelease-type": "rc"` (the prerelease keys only apply under the `prerelease` versioning strategy; section 12), so the next release PR should propose `1.0.0-rc.1`. The plan checks the proposal on the updated release PR before anything is merged; if release-please proposes another version, a per-package `release-as` of `1.0.0-rc.1` is the fallback (to be removed again after that release). Dropping the two keys later gives the 1.0.0 cut. A prerelease is installed with `dotnet new install Modulith.Backend.Templates::1.0.0-rc.1`; the plan confirms that form works on the pinned SDK and records the exact command in the README.
+`release-please-config.json` gains `"versioning": "prerelease"`, `"prerelease": true` and `"prerelease-type": "rc"` (the prerelease keys only apply under the `prerelease` versioning strategy; section 12), so the next release PR should propose `1.0.0-rc.1`. The plan checks the proposal on the updated release PR before anything is merged; if release-please proposes another version, a per-package `release-as` of `1.0.0-rc.1` is the fallback (to be removed again after that release). Dropping the three keys later gives the 1.0.0 cut. A prerelease is installed with `dotnet new install Modulith.Backend.Templates::1.0.0-rc.1`; the plan confirms that form works on the pinned SDK and records the exact command in the README.
 
 ## 8. Documentation
 
@@ -130,3 +131,4 @@ Found while reading the files the plan changes; they follow from the rule that n
 - The tag check and the pack live in `build/scripts/release-package.sh` with a test, so the workflow's logic is testable; the smoke uses the same script to pack.
 - `package-smoke` has two legs, `all-on` and `all-off`, so the required-check names will be `package-smoke (all-on)` and `package-smoke (all-off)`.
 - The README's install section changes after the first release candidate is published, in a small follow-up pull request, so that it is true when merged; the implementation pull request only rewords the "once Plan 7 publishes" sentence.
+- Added after the final review: the ancestry step of section 6 (a tag is not protected like a branch, and the trusted-publishing policy checks the workflow file and the environment, not the branch), and the restriction of the `nuget` environment to `main` in the owner's setup (`docs/releasing.md`). The runbook also says that the trusted-publishing claims come from nuget.org's documentation and were not checked on the live site, and gives a manual first push as the fallback.

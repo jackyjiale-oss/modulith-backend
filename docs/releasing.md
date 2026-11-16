@@ -19,8 +19,10 @@ Only the owner of the repository (`jackyjiale-oss`) can do these. Do them in thi
   | Environment | `nuget` |
   | Package scope | a scope that allows publishing new packages, for the ID `Modulith.Backend.Templates` |
 
-  The scope that allows new packages is what lets the first publish create the package, so no API key is ever needed. The repository is public, so the policy is active at once (the 7-day activation window applies to private repositories only). A key the policy issues lasts one hour.
-- [ ] **The GitHub environment `nuget`** (Settings, Environments, New environment). Add the owner as **required reviewer**. Leave "Prevent self-review" off: there is one maintainer, and with it on nobody could approve a release.
+  The scope that allows new packages is what lets the first publish create the package, so no API key is needed. The repository is public, so the policy is active at once (the 7-day activation window applies to private repositories only). A key the policy issues lasts one hour.
+
+  **These three statements (a scope for new packages, the 7-day window for private repositories only, one-hour keys) come from nuget.org's documentation and were not checked against the live site.** If the first push is refused because the package does not exist yet, Section 5 has a manual fallback that needs no change to the workflow.
+- [ ] **The GitHub environment `nuget`** (Settings, Environments, New environment). Add the owner as **required reviewer**. Leave "Prevent self-review" off: there is one maintainer, and with it on nobody could approve a release. Then set **Deployment branches and tags** to **Selected branches and tags** and allow **`main` only**. The trusted-publishing policy checks the workflow file name and the environment, not the branch: without this limit a collaborator with write access could push a branch with a modified `release.yml`, dispatch it, and one approval click would publish whatever that file packs. Both publish paths run from `main` (the release-please push, and `gh workflow run release.yml -f tag=vX.Y.Z --ref main`), so the limit costs nothing. Optional: add a tag ruleset (Settings, Rules) that restricts who may create `v*` tags. The job also refuses a tag whose commit is not on `main` (Section 2, step 4), but a ruleset stops the tag earlier.
 - [ ] **The environment secret `NUGET_USER`** in that environment: the nuget.org profile name from the first step, not the email address. It is an environment secret, not a repository secret, so only the publish job can read it.
 - [ ] **Optional: reserve the `Modulith.` ID prefix** on nuget.org (an application to the nuget.org team, which they may decline). Another author's package named `Modulith` exists; ours does not collide with it, but a reserved prefix marks ours as the owner's.
 - [ ] **Add the two package checks to the protection of `main`** after they have run green once on `main`: `package-smoke (all-on)` and `package-smoke (all-off)` ([`repository-management.md`](repository-management.md), Section 3).
@@ -30,7 +32,7 @@ Only the owner of the repository (`jackyjiale-oss`) can do these. Do them in thi
 1. Commits on `main` are Conventional Commits. release-please keeps one pull request, `chore(release): release x.y.z`, up to date. It changes `Version.props`, writes `CHANGELOG.md` and updates `.release-please-manifest.json`.
 2. Merging that pull request creates the tag `vx.y.z` and the GitHub Release. The `release.yml` run then starts its jobs: `third-party-notices` attaches the notices, `cd` calls `cd.yml` (in this repository its `detect` job skips everything, so nothing is built or deployed), and `detect-package` finds `build/pack/Modulith.Templates.csproj`.
 3. `publish-package` waits for the owner. It is in the environment `nuget`, so the run shows "Waiting" under Actions. Open the run, choose **Review deployments**, tick `nuget`, and **Approve and deploy**. Until then nothing reaches nuget.org.
-4. After approval the job checks out `refs/tags/vx.y.z`, checks that the tag equals `<Version>` in `Version.props` at that tag, packs, proves the exact file with `template-smoke.sh --from-package <file> --generate-only`, attaches it to the GitHub Release, logs in to nuget.org with the trusted-publishing policy and pushes it. The push is the last step.
+4. After approval the job checks out `refs/tags/vx.y.z` with the full history, refuses the tag unless its commit is on `main` (`git merge-base --is-ancestor HEAD origin/main`; release-please tags are on `main`), checks that the tag equals `<Version>` in `Version.props` at that tag, packs, proves the exact file with `template-smoke.sh --from-package <file> --generate-only`, attaches it to the GitHub Release, logs in to nuget.org with the trusted-publishing policy and pushes it. The push is the last step.
 5. Check the result: the package page `https://www.nuget.org/packages/Modulith.Backend.Templates` lists the version (indexing can take a few minutes) and the GitHub Release holds `Modulith.Backend.Templates.x.y.z.nupkg`.
 
 If nobody approves, the release stays a GitHub Release without a package, and the run stays waiting until it times out. Approve it later from the same run, or cancel it and then dispatch the tag (Section 5).
@@ -68,8 +70,9 @@ What a failure leaves behind:
 
 | Failed step | State | Fix |
 |---|---|---|
-| Check the tag, Pack, Prove the package, Attach to the release | The GitHub Release exists without a package | Fix the cause, then dispatch the tag (below) |
+| Check the tag is on main, Check the tag, Pack, Prove the package, Attach to the release | The GitHub Release exists without a package | Fix the cause (a failure in the tag-sourced files needs a new version, see below), then dispatch the tag (below) |
 | Push to nuget.org (login or push) | The release has the asset and nuget.org has nothing | Dispatch the tag |
+| The first push is refused because the package does not exist yet, or the policy has no scope for new packages (the claims in Section 1 were not verified live) | The release has the asset (the upload comes before the login) and nuget.org has nothing | Push the asset by hand once, then fix the policy (below) |
 | Nothing failed, but nobody approved | The release has no package | Approve the waiting run, or cancel it first and then dispatch the tag (a waiting run holds the workflow's concurrency group, so a dispatch made meanwhile stays queued) |
 
 To publish an existing release again, run the workflow by hand with the tag:
@@ -78,7 +81,16 @@ To publish an existing release again, run the workflow by hand with the tag:
 gh workflow run release.yml -f tag=vX.Y.Z --ref main
 ```
 
-(or Actions, Release, Run workflow, with the tag in the input). The dispatch skips `release-please`, runs `publish-package` for that tag and waits for the same approval. It starts only when no other `release.yml` run is waiting or running: cancel a run that is waiting for approval first, or the dispatch queues behind it. The tag must look like `v1.2.3` or `v1.2.3-rc.1` and equal `<Version>` in `Version.props` at that tag, or the job stops before packing. The job runs the workflow file from `main` but packs the code at the tag, so a fix to the workflow takes effect and a fix to the code does not: a code fix is a new version.
+(or Actions, Release, Run workflow, with the tag in the input). The dispatch skips `release-please`, runs `publish-package` for that tag and waits for the same approval. It starts only when no other `release.yml` run is waiting or running: cancel a run that is waiting for approval first, or the dispatch queues behind it. The tag must look like `v1.2.3` or `v1.2.3-rc.1` and equal `<Version>` in `Version.props` at that tag, or the job stops before packing. The job runs the workflow file from `main` but takes everything else from the tag: `build/scripts/release-package.sh`, `build/scripts/template-smoke.sh`, `build/pack/`, `global.json` and the files the proof generates. Only the workflow YAML comes from `main`. So a fix to the workflow takes effect on a dispatch, and a failure in any of the tag-sourced files does not go away: it needs a new version (fix `main`, merge the next release PR).
+
+**The manual first push** (when nuget.org refuses the first push as described in the table). It needs no change to the workflow, and the key never enters GitHub:
+
+1. On nuget.org create an API key with a short expiry (a day), scope **Push new packages and package versions**, and a glob of `Modulith.Backend.Templates` as the package pattern.
+2. Download the asset the failed run attached: `gh release download vX.Y.Z --pattern "*.nupkg"`.
+3. From your machine: `dotnet nuget push Modulith.Backend.Templates.X.Y.Z.nupkg --api-key <key> --source https://api.nuget.org/v3/index.json --skip-duplicate`.
+4. Delete the key on nuget.org. Then correct the trusted-publishing policy (the scope for new packages, the field values of Section 1) so that the next version publishes through the workflow. The package now exists, so even a policy limited to existing packages works from then on.
+
+The job's step that pushes (`Push to nuget.org`) is the one that would otherwise need the key; giving it a stored key would mean changing the workflow and keeping a secret, so the manual push is preferred.
 
 Re-running is safe, and the job's rules are:
 
@@ -102,4 +114,4 @@ A published version cannot be deleted and its number cannot be used again.
 
 ## 8. What the approval is and is not
 
-The environment `nuget` makes the owner approve the job before it reaches the push. There is one maintainer and self-review stays allowed, so the owner approves their own release. It is a **deliberate pause before an irreversible step**, a moment to check the release PR, the package contents and the version. It is **not a four-eyes control**: it does not stop the owner, or anyone who can act as the owner, from publishing. A second maintainer as required reviewer, with "Prevent self-review" on, would make it a control.
+The environment `nuget` makes the owner approve the job before it reaches the push. There is one maintainer and self-review stays allowed, so the owner approves their own release. It is a **deliberate pause before an irreversible step**. The gate fires before the job starts, so at approval no package exists yet: nothing is packed, proven or attached. What the owner can check then is the release PR and the version; the package is built and proven only after the approval. It is **not a four-eyes control**: it does not stop the owner, or anyone who can act as the owner, from publishing. A second maintainer as required reviewer, with "Prevent self-review" on, would make it a control.
