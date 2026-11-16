@@ -42,6 +42,7 @@ if [[ "${1:-}" == restore ]]; then
 fi
 exit 0
 STUB
+chmod +x "$dotnet_stub" # Linux refuses to run it otherwise (exit 126); Windows with Git Bash does not care
 export ADD_MODULE_DOTNET="$dotnet_stub"
 export RECORD="$tmp/dotnet.rec"
 
