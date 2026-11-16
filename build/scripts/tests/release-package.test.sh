@@ -215,6 +215,18 @@ else
   [[ "$(checkout_ref "$tmp/good-ref.yml")" == refs/tags/* ]] || fail "the checkout ref check rejected a refs/tags/ ref"
 fi
 
+# find_python <candidate>...: prints the first candidate that really runs python (a Windows Store stub or a missing name does not), else fails.
+find_python() {
+  local candidate
+  for candidate in "$@"; do
+    if "$candidate" -c 'import json' > /dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # The release-candidate keys belong to this repository only: the root release-please config minus those three lines is the copy a
 # generated project receives (build/template-content replaces the root file in the generated output).
 root_config="$repo_root/release-please-config.json"
@@ -229,8 +241,12 @@ else
   grep -vE '^[[:space:]]*"(versioning|prerelease|prerelease-type)"' "$root_config" > "$tmp/config-without-rc.json" || true
   cmp -s "$tmp/config-without-rc.json" "$content_config" ||
     fail "release-please-config.json without its release-candidate lines differs from build/template-content/release-please-config.json"
-  python -m json.tool "$root_config" > /dev/null || fail "release-please-config.json is not valid JSON"
-  python -m json.tool "$content_config" > /dev/null || fail "build/template-content/release-please-config.json is not valid JSON"
+  if ! python_cmd="$(find_python ${PYTHON_CANDIDATES:-python3 python})"; then
+    fail "no working python interpreter found (tried ${PYTHON_CANDIDATES:-python3 python}); the JSON check needs one"
+  else
+    "$python_cmd" -m json.tool "$root_config" > /dev/null || fail "release-please-config.json is not valid JSON"
+    "$python_cmd" -m json.tool "$content_config" > /dev/null || fail "build/template-content/release-please-config.json is not valid JSON"
+  fi
 fi
 
 if ((failures > 0)); then
