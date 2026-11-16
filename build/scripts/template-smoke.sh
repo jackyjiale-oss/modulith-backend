@@ -3,7 +3,7 @@
 # from it, checks the generated files, then builds it and runs its unit and architecture tests.
 #
 # Usage: bash build/scripts/template-smoke.sh [--notifications true|false] [--includeSample true|false] [--caching redis|memory]
-#                                             [--add-module NAME [--module-contracts]]
+#                                             [--add-module NAME [--module-contracts]] [--from-package [PATH]]
 #                                             [--integration] [--gates] [--generate-only] [--output DIR]
 #   --notifications, --includeSample, --caching  the template switches, passed to `dotnet new` (defaults: true, true, redis).
 #   --add-module NAME  after the restore and the path-length guard, add the module NAME to the generated project with the item template
@@ -11,6 +11,16 @@
 #                   format check, build and tests then run on the result. NAME is PascalCase (for example Billing or LeaveManagement).
 #                   Before them, `dotnet restore --locked-mode` must pass and the same command run again must exit 73 and change nothing.
 #   --module-contracts  give that module a .Contracts project too (`--contracts true`); only valid together with --add-module.
+#   --from-package [PATH]  install the template from the NuGet package (Modulith.Backend.Templates) instead of from the checkout: PATH,
+#                   an absolute path to an existing .nupkg, when given (the next argument is taken as PATH unless it starts with
+#                   "--"); otherwise the checkout is packed as version 0.0.0-smoke into the temporary directory with
+#                   `release-package.sh pack`. A package that lacks a file of the checkout (a dotfile, say) then fails the smoke:
+#                   a step after the generation checks installs the checkout in a second private hive, generates the same project
+#                   and compares the two trees (`diff -r`, ignoring the new UserSecretsId GUID), and does the same for the
+#                   modulith-module item template (generated with --allow-scripts no, so the engine exits 104 from both installs).
+#                   It composes with --generate-only, --add-module and the switches. The environment variable
+#                   RELEASE_PACKAGE_PACK_ARGS reaches that pack unchanged (a test hook: the negative test runs with
+#                   RELEASE_PACKAGE_PACK_ARGS='-p:NoDefaultExcludes=false', which drops the dotfiles, and the smoke must then fail).
 #   --integration   also run the integration tests (they need Docker); without it only the unit and architecture tests run.
 #   --gates         also run the quality gates of the generated project's CI (ci.yml): `dotnet format --verify-no-changes`, the tests
 #                   with coverage and the 80 % line-coverage gate, and the licence check. The coverage covers the tests that ran, so
@@ -41,10 +51,12 @@ generate_only=false
 output_dir=""
 add_module=""
 module_contracts=false
+from_package=false
+package_path=""
 
 usage_error() {
   echo "template-smoke: $1" >&2
-  echo "usage: template-smoke.sh [--notifications true|false] [--includeSample true|false] [--caching redis|memory] [--add-module NAME [--module-contracts]] [--integration] [--gates] [--generate-only] [--output DIR]" >&2
+  echo "usage: template-smoke.sh [--notifications true|false] [--includeSample true|false] [--caching redis|memory] [--add-module NAME [--module-contracts]] [--from-package [PATH]] [--integration] [--gates] [--generate-only] [--output DIR]" >&2
   exit 2
 }
 
@@ -62,6 +74,11 @@ while (( $# > 0 )); do
       shift 2
       ;;
     --module-contracts) module_contracts=true; shift ;;
+    --from-package)
+      from_package=true
+      # PATH is optional: the next argument is its value unless it is another option.
+      if (( $# >= 2 )) && [[ "$2" != --* ]]; then package_path="$2"; shift 2; else shift; fi
+      ;;
     --integration) run_integration=true; shift ;;
     --gates) run_gates=true; shift ;;
     --generate-only) generate_only=true; shift ;;
@@ -95,6 +112,11 @@ if [[ -n "$output_dir" && ! "$output_dir" =~ $absolute_path ]]; then
 fi
 if [[ -n "$output_dir" && -e "$output_dir" ]]; then
   usage_error "--output $output_dir already exists; give a directory that does not exist"
+fi
+if [[ -n "$package_path" ]]; then
+  [[ "$package_path" =~ $absolute_path ]] || usage_error "--from-package $package_path must be an absolute path"
+  [[ "$package_path" == *.nupkg ]] || usage_error "--from-package $package_path is not a .nupkg file"
+  [[ -f "$package_path" ]] || usage_error "--from-package $package_path does not exist"
 fi
 all_on=true
 if [[ "$notifications" != "true" || "$include_sample" != "true" || "$caching" != "redis" ]]; then
@@ -131,9 +153,19 @@ bash "$repo_root/build/scripts/path-guard-check.sh" "$repo_root"
 step "Testing the dead-reference check (its own test)"
 bash "$repo_root/build/scripts/tests/dead-reference-check.test.sh"
 
-step "Installing the template from $repo_root (private hive $hive)"
 cd "$repo_root"
-dotnet new install . --force --debug:custom-hive "$hive"
+if [[ "$from_package" == "true" ]]; then
+  if [[ -z "$package_path" ]]; then
+    step "Packing the checkout as version 0.0.0-smoke into $tmp/pack"
+    # release-package.sh pack prints the absolute path of the .nupkg as its last line; dotnet pack's own output goes to stderr.
+    package_path="$(bash "$repo_root/build/scripts/release-package.sh" pack 0.0.0-smoke "$tmp/pack" | tail -n 1)"
+  fi
+  step "Installing the template from the package $package_path (private hive $hive)"
+  dotnet new install "$package_path" --force --debug:custom-hive "$hive"
+else
+  step "Installing the template from $repo_root (private hive $hive)"
+  dotnet new install . --force --debug:custom-hive "$hive"
+fi
 
 step "Generating $project_name (notifications=$notifications, includeSample=$include_sample, caching=$caching) into $out"
 dotnet new modulith-backend -n "$project_name" -o "$out" --debug:custom-hive "$hive" \
@@ -450,6 +482,73 @@ while IFS= read -r document; do
   done < <(grep -oE '\]\([^) ]+\)' "$document" | sed -E 's/^\]\((.*)\)$/\1/')
 done < <(find "$out" -name '*.md' \( -path "$out/docs/*" -o -path "$out/README.md" -o -path "$out/CLAUDE.md" -o -path "$out/CONTRIBUTING.md" \))
 (( link_count > 0 )) || fail "no relative links were found to check"
+
+if [[ "$from_package" == "true" ]]; then
+  step "Checking that the package and the checkout generate the same project"
+  # What the package holds is decided by its pack project, not by the engine's rules for a checkout, so a file the pack leaves out
+  # (a dotfile, a folder under a default exclude) only shows when the two generations are compared. The checkout goes into a second
+  # private hive; both hives live in $tmp, which the EXIT trap removes.
+  hive_checkout="$tmp/hive-checkout"
+  compare_out="$tmp/compare/$project_name"
+
+  # (a) one package installs both templates.
+  template_list="$(dotnet new list --debug:custom-hive "$hive" 2>&1 || true)"
+  for short_name in modulith-backend modulith-module; do
+    grep -qF "$short_name" <<< "$template_list" || fail "the package installed no '$short_name' template; dotnet new list shows:"$'\n'"$template_list"
+  done
+
+  # (b) the same project from the checkout, compared file by file. The UserSecretsId GUID is new in each generation, so a hunk made
+  # only of that line is ignored (-I); the non-brief form is used because only it is certain to honour -I in every diff version.
+  dotnet new install . --force --debug:custom-hive "$hive_checkout" > "$tmp/checkout-install.txt" 2>&1 \
+    || { cat "$tmp/checkout-install.txt" >&2; fail "installing the checkout into the second hive failed"; }
+  checkout_status=0
+  dotnet new modulith-backend -n "$project_name" -o "$compare_out" --debug:custom-hive "$hive_checkout" \
+    --notifications "$notifications" --includeSample "$include_sample" --caching "$caching" > "$tmp/checkout-generate.txt" 2>&1 \
+    || checkout_status=$?
+  if (( checkout_status != 0 )); then
+    cat "$tmp/checkout-generate.txt" >&2
+    fail "generating $project_name from the checkout exited $checkout_status"
+  else
+    compare_status=0
+    diff -r -I '<UserSecretsId>' "$compare_out" "$out" > "$tmp/compare-diff.txt" 2>&1 || compare_status=$?
+    if (( compare_status != 0 )); then
+      # "Only in DIR: name" lines and the header line of each differing file, shown relative to the two projects, at most 20.
+      differing="$(awk '/^Only in / { print; next } /^diff / { print "differs: " $NF }' "$tmp/compare-diff.txt" \
+        | sed -e "s|$compare_out|<checkout>|g" -e "s|$out|<package>|g" | head -n 20)"
+      [[ -n "$differing" ]] || differing="$(head -n 20 "$tmp/compare-diff.txt")"
+      fail "the project generated from the package differs from the one generated from the checkout (diff exit $compare_status); <checkout> is the checkout's, <package> the package's:"$'\n'"$differing"
+    fi
+  fi
+
+  # (c) the item template: --allow-scripts no keeps the post-action (a restore) from running, so the engine exits 104 and leaves the
+  # files; both installs must exit 104 and write the same files (including the dotfile .modulith-module).
+  module_trees=()
+  for module_install in package checkout; do
+    module_hive="$hive"
+    [[ "$module_install" == "checkout" ]] && module_hive="$hive_checkout"
+    module_dir="$tmp/module-$module_install"
+    module_status=0
+    dotnet new modulith-module -n Billing --prefix "$project_name" --contracts true --allow-scripts no -o "$module_dir" \
+      --debug:custom-hive "$module_hive" > "$tmp/module-$module_install.txt" 2>&1 || module_status=$?
+    if [[ "$module_status" != 104 ]]; then
+      cat "$tmp/module-$module_install.txt" >&2
+      fail "dotnet new modulith-module from the $module_install exited $module_status, expected 104 (post-action not run)"
+    fi
+    module_trees+=("$module_dir")
+  done
+  if [[ -d "${module_trees[0]}" && -d "${module_trees[1]}" ]]; then
+    module_diff_status=0
+    diff -r "${module_trees[1]}" "${module_trees[0]}" > "$tmp/module-diff.txt" 2>&1 || module_diff_status=$?
+    if (( module_diff_status != 0 )); then
+      module_differing="$(awk '/^Only in / { print; next } /^diff / { print "differs: " $NF }' "$tmp/module-diff.txt" \
+        | sed -e "s|${module_trees[1]}|<checkout>|g" -e "s|${module_trees[0]}|<package>|g" | head -n 20)"
+      [[ -n "$module_differing" ]] || module_differing="$(head -n 20 "$tmp/module-diff.txt")"
+      fail "the module generated from the package differs from the one generated from the checkout (diff exit $module_diff_status):"$'\n'"$module_differing"
+    fi
+  else
+    fail "the module item template did not write its folder from both installs"
+  fi
+fi
 
 if (( failures > 0 )); then
   echo
