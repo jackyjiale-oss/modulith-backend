@@ -242,6 +242,8 @@ for forbidden in \
   BACKEND_TEMPLATE_BLUEPRINT.md \
   docs/blueprint-review.md \
   docs/repository-management.md \
+  docs/releasing.md \
+  build/pack \
   docs/superpowers \
   build/template-content \
   build/scripts/configure-github-repo.sh \

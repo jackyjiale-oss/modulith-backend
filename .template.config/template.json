@@ -71,6 +71,8 @@
         "LICENSE",
         "SECURITY.md",
         "docs/repository-management.md",
+        "docs/releasing.md",
+        "build/pack/**",
         "build/scripts/configure-github-repo.sh",
         "build/scripts/template-smoke.sh",
         "build/scripts/path-guard-check.sh",
