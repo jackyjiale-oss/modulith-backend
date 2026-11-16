@@ -158,9 +158,10 @@ jobs:
     env:
       TAG: ${{ needs.release-please.outputs.tag_name || inputs.tag }}
     steps:
+      # refs/tags/: a bare name could resolve to a branch of the same name, and the job would pack that branch's code.
       - uses: actions/checkout@v7
         with:
-          ref: ${{ env.TAG }}
+          ref: refs/tags/${{ env.TAG }}
           persist-credentials: false
 
       - uses: actions/setup-dotnet@v6

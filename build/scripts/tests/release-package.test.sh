@@ -162,6 +162,15 @@ tag_input_misuse() {
   grep -n 'inputs\.tag' "$1" | grep -vE '^[0-9]+:[[:space:]]*[A-Z][A-Z0-9_]*:[[:space:]]+\$\{\{[^}]*inputs\.tag[^}]*\}\}[[:space:]]*$' || true
 }
 
+# checkout_ref <workflow>: prints the value of the ref: line of the publish-package job's actions/checkout step (nothing if it has none).
+# A ref without a refs/ prefix lets actions/checkout pick a branch over a tag of the same name.
+checkout_ref() {
+  job_block "$1" publish-package | awk '
+    /^      - / { in_checkout = ($0 ~ /uses: actions\/checkout@/) }
+    in_checkout && /^[[:space:]]+ref:[[:space:]]/ { sub(/^[[:space:]]+ref:[[:space:]]+/, ""); print; exit }
+  '
+}
+
 if [[ ! -f "$workflow" ]]; then
   fail "$workflow does not exist"
 else
@@ -192,6 +201,18 @@ else
   [[ -n "$(tag_input_misuse "$tmp/bad-run.yml")" ]] || fail "the inputs.tag check accepted an expression inside a run: step"
   printf '%s\n' '  scratch:' '    env:' '      TAG: ${{ needs.release-please.outputs.tag_name || inputs.tag }}' > "$tmp/good-env.yml"
   [[ -z "$(tag_input_misuse "$tmp/good-env.yml")" ]] || fail "the inputs.tag check rejected an env assignment"
+
+  # The publish job checks out the tag, not a branch that happens to have the tag's name.
+  ref="$(checkout_ref "$workflow")"
+  [[ "$ref" == refs/tags/* ]] || fail "release.yml: the publish-package checkout ref is '$ref', expected a value beginning with refs/tags/"
+
+  # The ref check must reject the bare tag and accept the refs/tags/ form (scratch copies of the job, never the real file).
+  printf '%s\n' '  publish-package:' '    steps:' '      - uses: actions/checkout@v7' '        with:' '          ref: ${{ env.TAG }}' \
+    '          persist-credentials: false' > "$tmp/bad-ref.yml"
+  [[ "$(checkout_ref "$tmp/bad-ref.yml")" != refs/tags/* ]] || fail "the checkout ref check accepted a bare tag ref"
+  printf '%s\n' '  publish-package:' '    steps:' '      - uses: actions/checkout@v7' '        with:' '          ref: refs/tags/${{ env.TAG }}' \
+    '          persist-credentials: false' > "$tmp/good-ref.yml"
+  [[ "$(checkout_ref "$tmp/good-ref.yml")" == refs/tags/* ]] || fail "the checkout ref check rejected a refs/tags/ ref"
 fi
 
 if ((failures > 0)); then
