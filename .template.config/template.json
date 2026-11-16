@@ -83,6 +83,8 @@
         "build/scripts/tests/module-anchors.test.sh",
         "build/scripts/tests/module-template-files.test.sh",
         "build/scripts/tests/add-module.test.sh",
+        "build/scripts/release-package.sh",
+        "build/scripts/tests/release-package.test.sh",
         ".github/workflows/template-matrix.yml",
         ".github/workflows/project-index.yml",
         "README.md",

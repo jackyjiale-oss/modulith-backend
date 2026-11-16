@@ -21,8 +21,8 @@
 #   --output DIR    keep the generated project in DIR, an absolute path that must not exist (use a short path such as C:/w/g1 on Windows).
 # With no arguments it generates with every switch on, builds and runs the unit and architecture tests.
 #
-# A full run also runs the repo-only script tests of the module item template (build/scripts/tests/module-anchors.test.sh,
-# module-template-files.test.sh and add-module.test.sh; the last takes about 5 minutes) in one step, "Running the repo-only script tests".
+# A full run also runs the repo-only script tests (build/scripts/tests/module-anchors.test.sh, module-template-files.test.sh,
+# add-module.test.sh and release-package.test.sh; add-module takes about 5 minutes) in one step, "Running the repo-only script tests".
 #
 # CI runs the integration tests of the default project in the build-test job; --integration is for a machine with Docker.
 # Every `dotnet new` call uses a private template hive inside the temporary directory, so the user's global
@@ -256,6 +256,8 @@ for forbidden in \
   build/scripts/tests/module-anchors.test.sh \
   build/scripts/tests/module-template-files.test.sh \
   build/scripts/tests/add-module.test.sh \
+  build/scripts/release-package.sh \
+  build/scripts/tests/release-package.test.sh \
   templates \
   .github/workflows/template-matrix.yml \
   .github/workflows/project-index.yml \
@@ -461,10 +463,11 @@ if [[ "$generate_only" == "true" ]]; then
   exit 0
 fi
 
-# The scripts of the module item template are repo-only (template.json leaves their tests out of every generated project), so they are
-# tested here, in one step, and only by a full run: add-module.test.sh takes about 5 minutes, which --generate-only must not pay.
-step "Running the repo-only script tests (module-anchors, module-template-files, add-module: about 5 minutes)"
-for repo_test in module-anchors module-template-files add-module; do
+# The scripts of the module item template and the release-package script are repo-only (template.json leaves them and their tests out
+# of every generated project), so they are tested here, in one step, and only by a full run: add-module.test.sh takes about 5 minutes,
+# which --generate-only must not pay.
+step "Running the repo-only script tests (module-anchors, module-template-files, add-module, release-package: about 6 minutes)"
+for repo_test in module-anchors module-template-files add-module release-package; do
   bash "$repo_root/build/scripts/tests/$repo_test.test.sh"
 done
 
