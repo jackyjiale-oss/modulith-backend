@@ -61,7 +61,7 @@ What a failure leaves behind: pack, assert, smoke or upload failing leaves the G
 
 ## 7. Versioning and the prerelease
 
-`release-please-config.json` gains `"prerelease": true` and `"prerelease-type": "rc"`, so the next release PR proposes `1.0.0-rc.1`. The plan checks the proposal on the updated release PR before anything is merged; if release-please proposes another version, `release-as` is the fallback. Dropping the two keys later gives the 1.0.0 cut. A prerelease is installed with `dotnet new install Modulith.Backend.Templates::1.0.0-rc.1`; the plan confirms that form works on the pinned SDK and records the exact command in the README.
+`release-please-config.json` gains `"versioning": "prerelease"`, `"prerelease": true` and `"prerelease-type": "rc"` (the prerelease keys only apply under the `prerelease` versioning strategy; section 12), so the next release PR should propose `1.0.0-rc.1`. The plan checks the proposal on the updated release PR before anything is merged; if release-please proposes another version, a per-package `release-as` of `1.0.0-rc.1` is the fallback (to be removed again after that release). Dropping the two keys later gives the 1.0.0 cut. A prerelease is installed with `dotnet new install Modulith.Backend.Templates::1.0.0-rc.1`; the plan confirms that form works on the pinned SDK and records the exact command in the README.
 
 ## 8. Documentation
 
@@ -70,7 +70,7 @@ What a failure leaves behind: pack, assert, smoke or upload failing leaves the G
 - README: the "once Plan 7 publishes" paragraph becomes install, update and uninstall commands (the stable form and the prerelease form); the checkout route stays for contributors. The NuGet badge is added after the first publish.
 - `docs/repository-management.md`: the "Package (Plan 7)" row, the `nuget` environment, the `NUGET_USER` secret, the new check. `docs/blueprint-review.md`: row 7c. `docs/README.md` and `docs/architecture/overview.md`: the ADR row. `docs/superpowers/index/MAP.md` by `build/scripts/project-index.sh`.
 
-## 9. Risks, checked first by a spike
+## 9. Risks (the spike's answers are in section 12)
 
 - Dotfiles (`.github`, `.editorconfig`, `.gitkeep`, `.gitignore`) must survive the pack globs; the equivalence diff catches a loss.
 - Windows path length when the engine unpacks the package under the user profile. The spike measures the longest path on this machine and the result goes into the spec before the plan.
@@ -97,3 +97,27 @@ Inputs and conditions most likely to bite, each with the expected behaviour:
 3. A dispatch `tag` input that is not a release tag or carries shell text: rejected before any use.
 4. A new file in the repository that the pack globs miss or wrongly include: the equivalence diff fails and names it.
 5. A reviewer who never approves the `nuget` environment: the release stays a GitHub Release without a package, and the docs say how to find and approve it.
+
+## 12. Spike results (2026-11-16, local, throwaway; these override the sections above)
+
+Run on Windows 11 with SDK 10.0.401, `LongPathsEnabled` = 0, from a pack project outside the repository and then from a copy of the tracked tree.
+
+**Pack project settings that work** (section 4 is amended as follows):
+
+- `<NoDefaultExcludes>true</NoDefaultExcludes>` is required. By default pack drops every file whose name starts with a dot (warning NU5119): `.editorconfig`, `.gitkeep`, `.gitignore`, and the 7b marker `.modulith-module` were all missing, which would have broken the module template. A check for this is part of the equivalence diff.
+- The content item is `<Content Include="$(RepoRoot)**\*" Exclude="..." Pack="true" PackagePath="content\" />`, with the folder only. Per-file `PackagePath="content\%(RecursiveDir)%(Filename)%(Extension)"` doubles the path of extensionless files (`Dockerfile`, `LICENSE`, `.githooks/commit-msg`); a folder-only `content\%(RecursiveDir)` doubles every directory; `Link="%(RecursiveDir)..."` flattens the tree. `RepoRoot` is `$(MSBuildThisFileDirectory)..\..\`.
+- `build/pack/` needs its own `Directory.Build.props` that imports only `..\..\Version.props`. Without it the repository's settings apply: a `packages.lock.json` appears next to the project, and an explicit import of `Version.props` warns about a double import. With it, there is no lock file, the version is the product version (0.0.0 today), and `CS2008` (no source files) is silenced with `NoWarn`. The root `Directory.Build.targets` (path-length guard) still applies and does no harm.
+- The exclude list also gets `coverage` and `**\*.user` (the engine excludes both), so a local pack of a dirty working tree does not carry them.
+- Result: 1532 files, equal to `git ls-files` minus the 32 files under `docs/superpowers`; 2.5 MB; longest entry 149 characters.
+
+**Equivalence** (section 5): a project generated from the package install and one from the checkout install are identical except `UserSecretsId` in `src/Host/<Name>.Api/<Name>.Api.csproj`, for the default switches and for `--notifications false --includeSample false --caching memory`. The module template, generated with `--allow-scripts no`, exits 104 from both installs and writes the same 15 files, marker included. `dotnet new list` shows both short names from the package install.
+
+**Path length** (section 9): closed. The engine stores an installed package as one file, `packages/<id>.<version>.nupkg`, and does not unpack it, so the install adds no long paths even with long paths disabled. Generated paths are the same as from the checkout; the README's long-path note still covers them.
+
+**Install forms**: `dotnet new install Modulith.Backend.Templates::0.0.0-spike.1 --add-source <feed>` works. The bare ID also resolved from a local feed that held only a prerelease. nuget.org itself is unproven until the real rc publish; the README documents the `::version` form.
+
+**Repository scan**: `ci.yml` and `codeql.yml` run bare `dotnet restore`, `format`, `build` and `test` in the repository root, which resolve to `TemplateName.slnx`; a project that is not in the solution file is not touched, so the pack project stays invisible to them. Dependabot's NuGet scan of `/` finds a project without package references and has nothing to update.
+
+**release-please**: its documentation says `prerelease` and `prerelease-type` apply only with the `prerelease` versioning strategy (section 7 is amended), and does not say how a version is computed from `0.0.0`. History has no `Release-As` footer; two commits carry `BREAKING CHANGE` footers, and release PR #8 proposes 1.0.0 although `bump-minor-pre-major` is on. The proposal under the prerelease strategy can only be read on a real release PR, so the plan reads it before merging anything, with the `release-as` fallback.
+
+**Not run**: the full build and test of a project generated from the package (acceptance 2, done in the plan), and the real publish (acceptance 5).
