@@ -124,6 +124,17 @@ nupkg="$(printf '%s\n' "$pack_out" | tail -n 1)"
 entries="$tmp/entries.txt"
 unzip -Z1 "$nupkg" | tr -d '\r' | LC_ALL=C sort > "$entries"
 
+# A failed content assertion also prints the start of the package listing, once, so a CI log shows what the package really holds.
+listing_shown=0
+fail_package() {
+  fail "$@"
+  if ((listing_shown == 0)); then
+    listing_shown=1
+    echo "the first 20 of $(wc -l < "$entries" | tr -d ' ') entries in the package:" >&2
+    head -n 20 "$entries" >&2
+  fi
+}
+
 for wanted in \
   content/.github/workflows/ci.yml \
   content/.editorconfig \
@@ -131,19 +142,33 @@ for wanted in \
   content/build/docker/Dockerfile \
   content/.template.config/template.json \
   PACKAGE-README.md; do
-  grep -qxF "$wanted" "$entries" || fail "the package does not contain $wanted"
+  grep -qxF "$wanted" "$entries" || fail_package "the package does not contain $wanted"
 done
 
 # Every tracked file is in the package under content/, except the plan documents and the pack project itself.
 sed -n 's|^content/||p' "$entries" > "$tmp/content-entries.txt"
 (cd "$repo_root" && git ls-files | grep -vE '^(docs/superpowers/|build/pack/)' | LC_ALL=C sort) > "$tmp/tracked.txt"
 missing="$(LC_ALL=C comm -23 "$tmp/tracked.txt" "$tmp/content-entries.txt")"
-[[ -z "$missing" ]] || fail "tracked files missing from the package:"$'\n'"$missing"
+[[ -z "$missing" ]] || fail_package "$(printf '%s\n' "$missing" | wc -l | tr -d ' ') tracked files missing from the package, the first 10:"$'\n'"$(printf '%s\n' "$missing" | head -n 10)"
 
 for unwanted in content/docs/superpowers/ content/build/pack/ content/.git/; do
   found="$(grep -F "$unwanted" "$entries" | awk -v p="$unwanted" 'index($0, p) == 1' || true)"
-  [[ -z "$found" ]] || fail "the package carries files under $unwanted:"$'\n'"$(printf '%s\n' "$found" | head -n 5)"
+  [[ -z "$found" ]] || fail_package "the package carries files under $unwanted:"$'\n'"$(printf '%s\n' "$found" | head -n 5)"
 done
+
+# --- pack: a package without template content is refused ------------------------------------------------------------------------
+# RepoRoot pointing at an empty folder makes dotnet pack succeed with no content (what a path-separator mistake in build/pack does on
+# Linux); pack must then exit 1 and say so on stderr, instead of printing the path of a useless package.
+empty_root="$tmp/empty-root"
+mkdir -p "$empty_root"
+empty_root_arg="$(cygpath -m "$empty_root" 2> /dev/null || printf '%s' "$empty_root")/"
+code=0
+RELEASE_PACKAGE_PACK_ARGS="-p:RepoRoot=$empty_root_arg" bash "$script" pack 1.2.4 "$tmp/out-empty" > "$tmp/empty-pack.out" 2> "$tmp/empty-pack.err" || code=$?
+if [[ "$code" != 1 ]]; then
+  fail "pack of a package without template content: exit $code, expected 1"
+elif ! grep -qi 'no template content' "$tmp/empty-pack.err"; then
+  fail "pack of a package without template content: stderr does not say the package has no template content:"$'\n'"$(tail -n 5 "$tmp/empty-pack.err")"
+fi
 
 # --- release.yml: the shape of the publish job (checks of text, not of how GitHub runs the file) -------------------------------
 workflow="$repo_root/.github/workflows/release.yml"

@@ -20,15 +20,15 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <NoWarn>$(NoWarn);NU5128;NU5110;NU5111;CS2008</NoWarn>
-    <RepoRoot>$([MSBuild]::EnsureTrailingSlash('$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)..\..'))'))</RepoRoot>
+    <RepoRoot>$([MSBuild]::EnsureTrailingSlash('$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)../..'))'))</RepoRoot>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="PACKAGE-README.md" Pack="true" PackagePath="\" />
-    <Content Include="$(RepoRoot)**\*"
-             Exclude="$(RepoRoot).git;$(RepoRoot).git\**;$(RepoRoot)**\bin\**;$(RepoRoot)**\obj\**;$(RepoRoot).vs\**;$(RepoRoot).superpowers\**;$(RepoRoot).claude\**;$(RepoRoot)docs\superpowers\**;$(RepoRoot)artifacts\**;$(RepoRoot)build\pack\**;$(RepoRoot)coverage\**;$(RepoRoot)**\TestResults\**;$(RepoRoot)**\*.user;$(RepoRoot).env"
+    <None Include="PACKAGE-README.md" Pack="true" PackagePath="/" />
+    <Content Include="$(RepoRoot)**/*"
+             Exclude="$(RepoRoot).git;$(RepoRoot).git/**;$(RepoRoot)**/bin/**;$(RepoRoot)**/obj/**;$(RepoRoot).vs/**;$(RepoRoot).superpowers/**;$(RepoRoot).claude/**;$(RepoRoot)docs/superpowers/**;$(RepoRoot)artifacts/**;$(RepoRoot)build/pack/**;$(RepoRoot)coverage/**;$(RepoRoot)**/TestResults/**;$(RepoRoot)**/*.user;$(RepoRoot).env"
              Pack="true"
-             PackagePath="content\" />
+             PackagePath="content/" />
   </ItemGroup>
 
 </Project>

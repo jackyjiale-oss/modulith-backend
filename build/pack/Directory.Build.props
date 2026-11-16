@@ -1,1 +1,1 @@
-<Project><Import Project="$(MSBuildThisFileDirectory)..\..\Version.props" /></Project>
+<Project><Import Project="$(MSBuildThisFileDirectory)../../Version.props" /></Project>

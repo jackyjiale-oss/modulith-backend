@@ -9,7 +9,8 @@
 #       stderr when the tag is malformed or does not match; exits 2 on a missing argument or an unknown command.
 #   bash build/scripts/release-package.sh pack VERSION OUTDIR
 #       VERSION is major.minor.patch with an optional pre-release suffix (no v). Packs into OUTDIR and prints the absolute path of
-#       the .nupkg as the last line of stdout; exits 1 when the version is malformed or no .nupkg results.
+#       the .nupkg as the last line of stdout; exits 1 when the version is malformed, no .nupkg results or the package holds no
+#       content/.template.config/template.json (then the first 15 entries go to stderr).
 #       The words of $RELEASE_PACKAGE_PACK_ARGS are added to the dotnet pack command (a hook for tests).
 #
 # Both commands validate their arguments before they read or write anything else.
@@ -53,7 +54,7 @@ check_tag() {
 
 pack() {
   (($# == 2)) || usage
-  local version="$1" outdir="$2" out nupkg
+  local version="$1" outdir="$2" out nupkg entries
   is_version "$version" || die "the version '$version' is not of the form 1.2.3 or 1.2.3-rc.1"
   [[ -n "$outdir" ]] || die "the output folder is empty"
   mkdir -p "$outdir"
@@ -64,6 +65,17 @@ pack() {
     || die "dotnet pack failed"
   nupkg="$out/Modulith.Backend.Templates.$version.nupkg"
   [[ -f "$nupkg" ]] || die "dotnet pack produced no $nupkg"
+  # A package without the template content is useless to `dotnet new install`. The listing goes into a variable first: with
+  # `unzip -Z1 | grep -q` the early exit of grep can SIGPIPE unzip and, under pipefail, report a false negative.
+  entries="$(unzip -Z1 "$nupkg" | tr -d '\r')" || die "cannot list the entries of $nupkg"
+  if ! grep -qxF "content/.template.config/template.json" <<< "$entries"; then
+    {
+      echo "release-package: the package has no template content (no content/.template.config/template.json); a path-separator problem in build/pack is likely."
+      echo "The first 15 entries of $nupkg:"
+      head -n 15 <<< "$entries"
+    } >&2
+    exit 1
+  fi
   printf '%s\n' "$nupkg"
 }
 
