@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Test for build/scripts/release-package.sh: the tag check (version pattern, match against Version.props, CRLF and spaces), the
-# pack command (the produced .nupkg path, a bad version) and the package contents (one real `dotnet pack`, about 6 seconds).
+# pack command (the produced .nupkg path, a bad version) and the package contents. The whole test takes about 35 seconds, mostly
+# the one real `dotnet pack`.
 #
 # Usage: bash build/scripts/tests/release-package.test.sh   (from any directory)
 set -euo pipefail
@@ -213,6 +214,17 @@ else
   printf '%s\n' '  publish-package:' '    steps:' '      - uses: actions/checkout@v7' '        with:' '          ref: refs/tags/${{ env.TAG }}' \
     '          persist-credentials: false' > "$tmp/good-ref.yml"
   [[ "$(checkout_ref "$tmp/good-ref.yml")" == refs/tags/* ]] || fail "the checkout ref check rejected a refs/tags/ ref"
+
+  # The job refuses a tag whose commit is not on main: a full-history checkout (so origin/main exists) and an ancestry check that
+  # runs before the first step that runs a repository script (check-tag).
+  grep -qF 'fetch-depth: 0' <<< "$publish" || fail "release.yml: the publish-package checkout does not set fetch-depth: 0"
+  ancestry_line="$(grep -nF 'merge-base --is-ancestor' <<< "$publish" | head -n 1 | cut -d: -f1 || true)"
+  check_tag_line="$(grep -nF 'release-package.sh check-tag' <<< "$publish" | head -n 1 | cut -d: -f1 || true)"
+  if [[ -z "$ancestry_line" ]]; then
+    fail "release.yml: the publish-package job has no 'merge-base --is-ancestor' check"
+  elif [[ -z "$check_tag_line" || "$ancestry_line" -ge "$check_tag_line" ]]; then
+    fail "release.yml: the ancestry check (line $ancestry_line) does not come before release-package.sh check-tag (line ${check_tag_line:-none})"
+  fi
 fi
 
 # find_python <candidate>...: prints the first candidate that really runs python (a Windows Store stub or a missing name does not), else fails.

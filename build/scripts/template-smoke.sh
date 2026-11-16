@@ -25,7 +25,8 @@
 #   --gates         also run the quality gates of the generated project's CI (ci.yml): `dotnet format --verify-no-changes`, the tests
 #                   with coverage and the 80 % line-coverage gate, and the licence check. The coverage covers the tests that ran, so
 #                   without --integration it is a lower bound of what CI measures.
-#   --generate-only stop after the generation checks (about 7 minutes); no restore, build or tests, and none of the repo-only script
+#   --generate-only stop after the generation checks (about 7 minutes; with --from-package about twice as long, because of the second
+#                   hive and the second generation); no restore, build or tests, and none of the repo-only script
 #                   tests either (see below). It cannot be combined with --add-module (the module is added after the restore).
 #                   The full smoke takes 5 to 15 minutes, plus about 5 for the repo-only script tests.
 #   --output DIR    keep the generated project in DIR, an absolute path that must not exist (use a short path such as C:/w/g1 on Windows).
