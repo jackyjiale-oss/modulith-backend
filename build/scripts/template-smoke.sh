@@ -255,6 +255,9 @@ fi
 if [[ -f "$out/Version.props" ]] && ! grep -qF "<Version>0.0.0</Version>" "$out/Version.props"; then
   fail "Version.props must contain <Version>0.0.0</Version>, not the template's own version"
 fi
+if [[ -f "$out/release-please-config.json" ]] && grep -qi "prerelease" "$out/release-please-config.json"; then
+  fail "release-please-config.json contains prerelease text: the release-candidate setting leaked into the generated project"
+fi
 if [[ -f "$out/docs/README.md" ]] && grep -qF "repository-management.md" "$out/docs/README.md"; then
   fail "docs/README.md links repository-management.md, which is not generated"
 fi

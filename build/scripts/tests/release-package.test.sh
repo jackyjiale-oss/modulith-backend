@@ -215,6 +215,24 @@ else
   [[ "$(checkout_ref "$tmp/good-ref.yml")" == refs/tags/* ]] || fail "the checkout ref check rejected a refs/tags/ ref"
 fi
 
+# The release-candidate keys belong to this repository only: the root release-please config minus those three lines is the copy a
+# generated project receives (build/template-content replaces the root file in the generated output).
+root_config="$repo_root/release-please-config.json"
+content_config="$repo_root/build/template-content/release-please-config.json"
+if [[ ! -f "$content_config" ]]; then
+  fail "$content_config does not exist"
+else
+  for key in versioning prerelease prerelease-type; do
+    grep -qE "^[[:space:]]*\"$key\"" "$root_config" || fail "release-please-config.json does not contain the \"$key\" key"
+    ! grep -qE "^[[:space:]]*\"$key\"" "$content_config" || fail "build/template-content/release-please-config.json contains the \"$key\" key"
+  done
+  grep -vE '^[[:space:]]*"(versioning|prerelease|prerelease-type)"' "$root_config" > "$tmp/config-without-rc.json" || true
+  cmp -s "$tmp/config-without-rc.json" "$content_config" ||
+    fail "release-please-config.json without its release-candidate lines differs from build/template-content/release-please-config.json"
+  python -m json.tool "$root_config" > /dev/null || fail "release-please-config.json is not valid JSON"
+  python -m json.tool "$content_config" > /dev/null || fail "build/template-content/release-please-config.json is not valid JSON"
+fi
+
 if ((failures > 0)); then
   echo "release-package: $failures failure(s)" >&2
   exit 1

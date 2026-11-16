@@ -91,6 +91,7 @@
         "CHANGELOG.md",
         "CLAUDE.md",
         ".release-please-manifest.json",
+        "release-please-config.json",
         "Version.props",
         "**/*.received.*",
         "build/template-content/**"
