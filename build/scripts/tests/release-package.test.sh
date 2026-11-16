@@ -144,6 +144,56 @@ for unwanted in content/docs/superpowers/ content/build/pack/ content/.git/; do
   [[ -z "$found" ]] || fail "the package carries files under $unwanted:"$'\n'"$(printf '%s\n' "$found" | head -n 5)"
 done
 
+# --- release.yml: the shape of the publish job (checks of text, not of how GitHub runs the file) -------------------------------
+workflow="$repo_root/.github/workflows/release.yml"
+
+# job_block <workflow> <job>: the job's lines, from its two-space-indented key up to the next job key or the end of the file.
+job_block() {
+  awk -v job="$2" '
+    $0 == "  " job ":" { on = 1; print; next }
+    on && /^  [A-Za-z0-9_-]+:/ { on = 0 }
+    on { print }
+  ' "$1"
+}
+
+# tag_input_misuse <workflow>: prints the lines naming the dispatch input that are not an env-style assignment (a KEY: value line
+# whose key is upper case). The input may reach a step only through the environment; inside a run: block it would be script text.
+tag_input_misuse() {
+  grep -n 'inputs\.tag' "$1" | grep -vE '^[0-9]+:[[:space:]]*[A-Z][A-Z0-9_]*:[[:space:]]+\$\{\{[^}]*inputs\.tag[^}]*\}\}[[:space:]]*$' || true
+}
+
+if [[ ! -f "$workflow" ]]; then
+  fail "$workflow does not exist"
+else
+  publish="$(job_block "$workflow" publish-package)"
+  for wanted in 'environment: nuget' 'id-token: write' 'NuGet/login@v1' '--skip-duplicate' '--clobber' \
+    'release-package.sh check-tag'; do
+    grep -qF -- "$wanted" <<< "$publish" || fail "release.yml: the publish-package job does not contain '$wanted'"
+  done
+  grep -qE '^    needs:.*detect-package' <<< "$publish" || fail "release.yml: publish-package does not list detect-package in needs:"
+
+  misuse="$(tag_input_misuse "$workflow")"
+  [[ -z "$misuse" ]] || fail "release.yml: inputs.tag is used outside an env assignment:"$'\n'"$misuse"
+
+  grep -qF "if: github.event_name == 'push'" <<< "$(job_block "$workflow" release-please)" ||
+    fail "release.yml: the release-please job does not have if: github.event_name == 'push'"
+
+  # Only publish-package may ask for an OIDC token: every id-token line in the file sits inside that job.
+  total="$(grep -c 'id-token:' "$workflow" || true)"
+  inside="$(grep -c 'id-token:' <<< "$publish" || true)"
+  [[ "$total" == "$inside" ]] || fail "release.yml: id-token appears outside publish-package ($total in the file, $inside in the job)"
+
+  # The guard that keeps a generated project from publishing: detect-package tests for the pack project.
+  grep -qF 'build/pack/Modulith.Templates.csproj' <<< "$(job_block "$workflow" detect-package)" ||
+    fail "release.yml: detect-package does not test for build/pack/Modulith.Templates.csproj"
+
+  # The inputs.tag check must reject a run: step that uses the input and accept an env assignment (scratch files, never the real one).
+  printf '%s\n' '  scratch:' '    steps:' '      - run: echo "${{ inputs.tag }}"' > "$tmp/bad-run.yml"
+  [[ -n "$(tag_input_misuse "$tmp/bad-run.yml")" ]] || fail "the inputs.tag check accepted an expression inside a run: step"
+  printf '%s\n' '  scratch:' '    env:' '      TAG: ${{ needs.release-please.outputs.tag_name || inputs.tag }}' > "$tmp/good-env.yml"
+  [[ -z "$(tag_input_misuse "$tmp/good-env.yml")" ]] || fail "the inputs.tag check rejected an env assignment"
+fi
+
 if ((failures > 0)); then
   echo "release-package: $failures failure(s)" >&2
   exit 1

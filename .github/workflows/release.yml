@@ -2,12 +2,22 @@ name: Release
 
 # release-please keeps a "chore(release): release x.y.z" pull request up to date from the Conventional Commits on main.
 # Merging it tags vx.y.z, writes CHANGELOG.md, bumps <Version> in Version.props and creates the GitHub Release;
-# the second job then attaches THIRD-PARTY-NOTICES.md to that release, and the third calls cd.yml to publish and deploy it.
+# the second job then attaches THIRD-PARTY-NOTICES.md to that release, the third calls cd.yml to publish and deploy it, and
+# the last two pack the template as a NuGet package, attach it to the release and push it to nuget.org (publish-package).
+# Only the template repository has build/pack; detect-package looks for it, so a project generated from the template skips publishing.
+# If publish-package fails after the release exists, run this workflow by hand (Actions, Run workflow) with the release tag,
+# for example v1.0.0: it publishes that tag again (the upload overwrites, the push skips a version nuget.org already has).
 # Actions use their latest major tag so Dependabot can update them.
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag (vX.Y.Z) to publish again"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -24,6 +34,7 @@ env:
 jobs:
   release-please:
     name: release-please
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -104,3 +115,90 @@ jobs:
     with:
       release: true
       version: ${{ needs.release-please.outputs.version }}
+
+  # This workflow is generated into every project made from the template, which has no build/pack: there the next job is skipped.
+  detect-package:
+    name: detect-package
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      has_pack: ${{ steps.detect.outputs.has_pack }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Look for the pack project
+        id: detect
+        run: |
+          if [ -f build/pack/Modulith.Templates.csproj ]; then
+            echo "has_pack=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_pack=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Packs the template (Modulith.Backend.Templates), proves it generates a project, attaches the .nupkg to the GitHub Release and
+  # pushes it to nuget.org. `!cancelled()` lets it run after release-please was skipped (a manual run), and the if: then
+  # requires a created release or a manual run. A manual run takes the tag from the input, which reaches the steps only through
+  # the environment (TAG), never as script text. The environment `nuget` holds the approval and the trusted-publishing
+  # identity: NuGet/login exchanges the job's OIDC token for a short-lived API key, so no long-lived key is stored.
+  # Re-running is safe: gh release upload --clobber replaces the asset and --skip-duplicate accepts a version already on nuget.org.
+  publish-package:
+    name: publish-package
+    needs: [release-please, detect-package]
+    if: ${{ !cancelled() && needs.detect-package.outputs.has_pack == 'true' && (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: nuget
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      TAG: ${{ needs.release-please.outputs.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      # The tag must be vX.Y.Z (or with a pre-release) and equal <Version> in Version.props at that tag; the script prints the version.
+      # A plain assignment, so a failing check fails the step.
+      - name: Check the tag
+        id: version
+        run: |
+          version=$(bash build/scripts/release-package.sh check-tag "$TAG")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # pipefail: a failing pack must fail the step, not be hidden by tail.
+      - name: Pack
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -o pipefail
+          PACKAGE=$(bash build/scripts/release-package.sh pack "$VERSION" "$RUNNER_TEMP/package" | tail -n 1)
+          echo "PACKAGE=$PACKAGE" >> "$GITHUB_ENV"
+
+      - name: Prove the package
+        run: bash build/scripts/template-smoke.sh --from-package "$PACKAGE" --generate-only
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "$PACKAGE" --clobber
+
+      - name: NuGet login
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: dotnet nuget push "$PACKAGE" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
