@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\BuildingBlocks\ProjectPrefix.SharedKernel\ProjectPrefix.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\ProjectPrefix.Application.Common\ProjectPrefix.Application.Common.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\ProjectPrefix.Infrastructure.Common\ProjectPrefix.Infrastructure.Common.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\ProjectPrefix.Web.Common\ProjectPrefix.Web.Common.csproj" />
+  </ItemGroup>
+
+</Project>

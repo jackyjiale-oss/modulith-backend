@@ -1,6 +1,6 @@
 # {Module} module
 
-<!-- Copy this file to docs/modules/{module}.md (kebab-case module name, the module's route segment: LeaveManagement → leave-management.md) when you add a module. Keep every heading, in this order; write "None." under a section that does not apply. -->
+<!-- Copy this file to docs/modules/{module}.md (kebab-case module name, the module's route segment: LeaveManagement → leave-management.md) when you add a module (`dotnet new modulith-module` creates this page for you; see the README recipe "Adding a module"). Keep every heading, in this order; write "None." under a section that does not apply. -->
 
 ## Purpose and boundaries
 

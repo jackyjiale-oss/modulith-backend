@@ -1,0 +1,14 @@
+program-usings|src/Host/TemplateName.Api/Program.cs|// modulith:module-usings
+program-registrations|src/Host/TemplateName.Api/Program.cs|// modulith:module-registrations
+program-endpoints|src/Host/TemplateName.Api/Program.cs|// modulith:module-endpoints
+api-references|src/Host/TemplateName.Api/TemplateName.Api.csproj|<!-- modulith:module-references -->
+unit-references|tests/TemplateName.UnitTests/TemplateName.UnitTests.csproj|<!-- modulith:module-references -->
+arch-references|tests/TemplateName.ArchitectureTests/TemplateName.ArchitectureTests.csproj|<!-- modulith:module-references -->
+integration-references|tests/TemplateName.IntegrationTests/TemplateName.IntegrationTests.csproj|<!-- modulith:module-references -->
+slnx-modules|TemplateName.slnx|<!-- modulith:modules -->
+docker-copies|build/docker/Dockerfile|# modulith:module-copies
+assemblies-usings|tests/TemplateName.ArchitectureTests/Assemblies.cs|// modulith:module-usings
+assemblies-modules|tests/TemplateName.ArchitectureTests/Assemblies.cs|// modulith:modules
+assemblies-contracts|tests/TemplateName.ArchitectureTests/Assemblies.cs|// modulith:contracts
+assemblies-errors|tests/TemplateName.ArchitectureTests/Assemblies.cs|// modulith:error-messages
+contributing-scopes|CONTRIBUTING.md|<!-- modulith:module-scopes -->

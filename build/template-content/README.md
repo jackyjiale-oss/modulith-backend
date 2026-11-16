@@ -73,7 +73,7 @@ live in the memory of one instance, and nothing needs Redis. To share them acros
 | Sample (leave requests) | [`docs/modules/sample.md`](docs/modules/sample.md) |
 <!--#endif-->
 
-A new module gets its own page, copied from [`docs/modules/_template.md`](docs/modules/_template.md).
+A new module gets its own page, copied from [`docs/modules/_template.md`](docs/modules/_template.md); the recipe "Adding a module" below creates it with the module.
 
 ## Switches
 
@@ -118,6 +118,39 @@ dotnet test --config-file coverage.testconfig.json --coverlet --results-director
 CI (`.github/workflows/ci.yml`) also checks formatting (`dotnet format --verify-no-changes`), builds in Release with warnings as errors, and fails below 80 % line coverage on SharedKernel, Application.Common and the module Domain and Application namespaces.
 
 ## Recipes
+
+### Adding a module
+
+Install the template once from a checkout of the template repository (`dotnet new install <path>` registers `modulith-module` next to `modulith-backend`), then run this at the solution root, with your own module name (PascalCase):
+
+```bash
+dotnet new modulith-module -n Billing --prefix TemplateName [--contracts true] --allow-scripts yes
+```
+
+`--prefix` is this project's own name, as above. Add `--contracts true` when the module offers integration events or public interfaces to other modules; without it the module is one project, as Audit is. **Always pass `--allow-scripts yes`**: without it, `no` writes the files and exits 104, and a shell that cannot answer the engine's prompt waits forever.
+
+The command creates `src/Modules/{Module}/` (the module project: DbContext, outbox, an empty permission source, the error-message class and its three `.resx` files, the layer folders, and the Contracts project when asked) and `docs/modules/{module}.md` (kebab-case, as `DocumentationTests` expects). It then runs `build/scripts/add-module.sh`, which
+
+- registers the module in `Program.cs` and references it from the API and the unit, architecture and integration test projects;
+- adds it to the solution, copies its projects and lock files in the Dockerfile and lists it in `Assemblies` of the architecture tests, in `docs/README.md` and as a commit scope (`build/scripts/check-commit-msg.sh`, `CONTRIBUTING.md`);
+- runs `dotnet tool restore`, `dotnet restore`, `dotnet ef migrations add Create{Module}Schema` and `dotnet build -c Release`, and lists what to commit (the new `packages.lock.json` files included).
+
+It generates no route and no entity: write the first use case by hand, test first, then fill in the page.
+
+Most shared files are edited at an anchor comment in them; the two exceptions are the commit-scope list in `build/scripts/check-commit-msg.sh` (the value of `ALLOWED_SCOPES`) and the index row in `docs/README.md`. When you have edited a file so that its anchor is gone, that one edit is skipped, the exact lines to add are printed as `add by hand:` and the script exits 1 with the commands to run by hand.
+
+On Windows, run the command from Git Bash: PowerShell and cmd can pick up the `bash.exe` of WSL, which then fails.
+
+When the script fails, `dotnet new` itself exits 105; the script's own lines naming the cause are above that line.
+If an edit was skipped, the module is already registered: add the printed `add by hand:` lines yourself, then run the commands printed as `then run:` by hand. Running the script again changes nothing and exits 2.
+If a `dotnet` step failed instead, the module is also already registered: fix the cause and run the commands printed as `then run:` by hand.
+Only when the script stopped before it registered the module in `Program.cs` (the module is not in `Program.cs` yet), fix the cause and run this from the project root, with your own module name (the flags stand in for the marker file, which a finished run deletes):
+
+```bash
+bash build/scripts/add-module.sh --name Billing --prefix TemplateName
+```
+
+Running the `dotnet new` command again for a module that exists changes nothing. Removing a module stays manual.
 
 ### Adding an error message or a language
 

@@ -4,6 +4,8 @@ name: Template matrix
 # Generates the template with each combination of the three switches (notifications, includeSample, caching) and runs the
 # smoke test with its integration tests and the quality gates of the generated project's CI (formatting, 80 % line coverage, licences),
 # so a project that turns a switch off still builds and passes (switches design, section 5).
+# The `module-template` job generates the project, adds a module to it with the `modulith-module` item template (a single-word and a
+# multi-word name, with and without a .Contracts project) and runs the same smoke test and gates on the result.
 # The all-on `template-smoke` job in ci.yml stays the fast required check; the `all-on` leg here is additional.
 # Actions use their latest major tag so Dependabot can update them.
 
@@ -94,4 +96,39 @@ jobs:
           SWITCHES: ${{ matrix.switches }}
         run: |
           read -r -a args <<< "$SWITCHES"
+          bash build/scripts/template-smoke.sh --integration --gates "${args[@]}"
+
+  # The module item template: a project generated with the switches, then one module added to it, on every pull request, push to main and
+  # manual run. The switches and the module arguments reach the script only through env.
+  module-template:
+    name: module-template (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: all-on-contracts
+            switches: ""
+            module_args: "--add-module Billing --module-contracts"
+          - name: all-off-multiword
+            switches: "--notifications false --includeSample false --caching memory"
+            module_args: "--add-module LeaveManagement"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Template smoke test with a module (${{ matrix.name }})
+        env:
+          SWITCHES: ${{ matrix.switches }}
+          MODULE_ARGS: ${{ matrix.module_args }}
+        run: |
+          read -r -a switch_args <<< "$SWITCHES"
+          read -r -a module_args <<< "$MODULE_ARGS"
+          args=("${switch_args[@]}" "${module_args[@]}")
           bash build/scripts/template-smoke.sh --integration --gates "${args[@]}"

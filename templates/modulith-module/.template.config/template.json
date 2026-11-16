@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Modulith contributors",
+  "classifications": ["Web", "API", "Modular Monolith", "Module"],
+  "identity": "Modulith.Module.Templates",
+  "name": "Modulith Module",
+  "shortName": "modulith-module",
+  "description": "Adds a business module to a project generated from modulith-backend: a wired skeleton with a DbContext, outbox, permission source and error messages, and no business code.",
+  "sourceName": "ModuleName",
+  "tags": {
+    "language": "C#",
+    "type": "item"
+  },
+  "guids": [
+    "419ff3d2-6889-4ff3-a632-7334b74176a0"
+  ],
+  "symbols": {
+    "prefix": {
+      "type": "parameter",
+      "datatype": "string",
+      "isRequired": true,
+      "replaces": "ProjectPrefix",
+      "fileRename": "ProjectPrefix",
+      "description": "The generated project's own name (for example Acme.Shop); every project and namespace of the module starts with it."
+    },
+    "contracts": {
+      "type": "parameter",
+      "datatype": "bool",
+      "defaultValue": "false",
+      "description": "Also create the module's .Contracts project (integration events and public interfaces other modules may reference)."
+    },
+    "moduleLower": {
+      "type": "derived",
+      "datatype": "string",
+      "valueSource": "name",
+      "valueTransform": "lowerCase",
+      "replaces": "module-lower"
+    }
+  },
+  "forms": {
+    "lowerCase": {
+      "identifier": "lowerCase"
+    }
+  },
+  "sources": [
+    {
+      "source": "./",
+      "target": "./",
+      "exclude": [
+        ".template.config/**"
+      ],
+      "modifiers": [
+        {
+          "condition": "(!contracts)",
+          "exclude": [
+            "src/Modules/ModuleName/ProjectPrefix.Modules.ModuleName.Contracts/**"
+          ]
+        }
+      ]
+    }
+  ],
+  "postActions": [
+    {
+      "description": "Wire the module into the shared files, add its first migration, restore and build.",
+      "manualInstructions": [
+        {
+          "text": "Run: bash build/scripts/add-module.sh"
+        }
+      ],
+      "actionId": "3A7C4B45-1F5D-4A30-959A-51B88E82B5D2",
+      "args": {
+        "executable": "bash",
+        "args": "build/scripts/add-module.sh",
+        "redirectStandardOutput": "false",
+        "redirectStandardError": "false"
+      },
+      "continueOnError": false
+    }
+  ]
+}

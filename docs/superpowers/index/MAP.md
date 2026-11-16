@@ -28,6 +28,7 @@ lists of names).
   (flat); a first-level folder is named after a module or an area (`tests/<Project>/<Module>/`).
 - `build/scripts/`: maintenance scripts (for example the template smoke, dead-reference check, commit-message check, this generator); their tests in
   `build/scripts/tests/`.
+- `templates/modulith-module/`: the `dotnet new modulith-module` item template (placeholder files, not part of the solution and not generated into projects); `build/scripts/add-module.sh` wires a generated module into the shared files at the anchor comments listed in `build/scripts/module-anchors.txt`.
 - `.github/workflows/`: CI, CodeQL, secret scan, pull-request title, delivery, release, the template matrix and this index's check
   (`.github/workflows/project-index.yml`).
 - `docs/`: `docs/README.md` indexes every document; one page per module in `docs/modules/`, per building block in

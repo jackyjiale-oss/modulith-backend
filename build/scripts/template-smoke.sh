@@ -3,15 +3,26 @@
 # from it, checks the generated files, then builds it and runs its unit and architecture tests.
 #
 # Usage: bash build/scripts/template-smoke.sh [--notifications true|false] [--includeSample true|false] [--caching redis|memory]
+#                                             [--add-module NAME [--module-contracts]]
 #                                             [--integration] [--gates] [--generate-only] [--output DIR]
 #   --notifications, --includeSample, --caching  the template switches, passed to `dotnet new` (defaults: true, true, redis).
+#   --add-module NAME  after the restore and the path-length guard, add the module NAME to the generated project with the item template
+#                   (`dotnet new modulith-module -n NAME --prefix Acme.Smoke --allow-scripts yes`, from the same private hive); the
+#                   format check, build and tests then run on the result. NAME is PascalCase (for example Billing or LeaveManagement).
+#                   Before them, `dotnet restore --locked-mode` must pass and the same command run again must exit 73 and change nothing.
+#   --module-contracts  give that module a .Contracts project too (`--contracts true`); only valid together with --add-module.
 #   --integration   also run the integration tests (they need Docker); without it only the unit and architecture tests run.
 #   --gates         also run the quality gates of the generated project's CI (ci.yml): `dotnet format --verify-no-changes`, the tests
 #                   with coverage and the 80 % line-coverage gate, and the licence check. The coverage covers the tests that ran, so
 #                   without --integration it is a lower bound of what CI measures.
-#   --generate-only stop after the generation checks (about 7 minutes); no restore, build or tests. The full smoke takes 5 to 15 minutes.
+#   --generate-only stop after the generation checks (about 7 minutes); no restore, build or tests, and none of the repo-only script
+#                   tests either (see below). It cannot be combined with --add-module (the module is added after the restore).
+#                   The full smoke takes 5 to 15 minutes, plus about 5 for the repo-only script tests.
 #   --output DIR    keep the generated project in DIR, an absolute path that must not exist (use a short path such as C:/w/g1 on Windows).
 # With no arguments it generates with every switch on, builds and runs the unit and architecture tests.
+#
+# A full run also runs the repo-only script tests of the module item template (build/scripts/tests/module-anchors.test.sh,
+# module-template-files.test.sh and add-module.test.sh; the last takes about 5 minutes) in one step, "Running the repo-only script tests".
 #
 # CI runs the integration tests of the default project in the build-test job; --integration is for a machine with Docker.
 # Every `dotnet new` call uses a private template hive inside the temporary directory, so the user's global
@@ -28,31 +39,52 @@ run_integration=false
 run_gates=false
 generate_only=false
 output_dir=""
+add_module=""
+module_contracts=false
 
 usage_error() {
   echo "template-smoke: $1" >&2
-  echo "usage: template-smoke.sh [--notifications true|false] [--includeSample true|false] [--caching redis|memory] [--integration] [--gates] [--generate-only] [--output DIR]" >&2
+  echo "usage: template-smoke.sh [--notifications true|false] [--includeSample true|false] [--caching redis|memory] [--add-module NAME [--module-contracts]] [--integration] [--gates] [--generate-only] [--output DIR]" >&2
   exit 2
 }
 
 while (( $# > 0 )); do
   case "$1" in
-    --notifications | --includeSample | --caching | --output)
+    --notifications | --includeSample | --caching | --output | --add-module)
       (( $# >= 2 )) || usage_error "$1 needs a value"
       case "$1" in
         --notifications) notifications="$2" ;;
         --includeSample) include_sample="$2" ;;
         --caching) caching="$2" ;;
         --output) output_dir="$2" ;;
+        --add-module) add_module="$2" ;;
       esac
       shift 2
       ;;
+    --module-contracts) module_contracts=true; shift ;;
     --integration) run_integration=true; shift ;;
     --gates) run_gates=true; shift ;;
     --generate-only) generate_only=true; shift ;;
     *) usage_error "unknown argument '$1'" ;;
   esac
 done
+if [[ "$module_contracts" == "true" && -z "$add_module" ]]; then
+  usage_error "--module-contracts is only valid together with --add-module NAME"
+fi
+if [[ -n "$add_module" && "$generate_only" == "true" ]]; then
+  usage_error "--add-module cannot be combined with --generate-only: the module is added after the restore, which --generate-only skips"
+fi
+# The same rule as add-module.sh: a capital, then letters and digits (the name becomes folders, namespaces and type names).
+if [[ -n "$add_module" ]]; then
+  case "$add_module" in
+    [ABCDEFGHIJKLMNOPQRSTUVWXYZ]*) ;;
+    *) usage_error "--add-module '$add_module' is not a module name: use PascalCase letters and digits only, starting with a capital (for example LeaveManagement)" ;;
+  esac
+  case "$add_module" in
+    *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789]*)
+      usage_error "--add-module '$add_module' is not a module name: use PascalCase letters and digits only, starting with a capital (for example LeaveManagement)" ;;
+  esac
+fi
 case "$notifications" in true | false) ;; *) usage_error "--notifications must be 'true' or 'false', got '$notifications'" ;; esac
 case "$include_sample" in true | false) ;; *) usage_error "--includeSample must be 'true' or 'false', got '$include_sample'" ;; esac
 case "$caching" in redis | memory) ;; *) usage_error "--caching must be 'redis' or 'memory', got '$caching'" ;; esac
@@ -136,6 +168,8 @@ for required in \
   build/docker/Dockerfile \
   .dockerignore \
   build/scripts/container-verify.sh \
+  build/scripts/add-module.sh \
+  build/scripts/module-anchors.txt \
   build/scripts/deploy-iis.ps1 \
   build/deploy/roll-out.sh \
   build/deploy/maintenance.html \
@@ -217,6 +251,10 @@ for forbidden in \
   build/scripts/tests/dead-reference-check.test.sh \
   build/scripts/project-index.sh \
   build/scripts/tests/project-index.test.sh \
+  build/scripts/tests/module-anchors.test.sh \
+  build/scripts/tests/module-template-files.test.sh \
+  build/scripts/tests/add-module.test.sh \
+  templates \
   .github/workflows/template-matrix.yml \
   .github/workflows/project-index.yml \
   .template.config \
@@ -256,6 +294,48 @@ leftover_markers="$(grep -rInE --exclude-dir=bin --exclude-dir=obj --exclude-dir
 if [[ -n "$leftover_markers" ]]; then
   fail "template conditional markers are left in the generated files:"$'\n'"$leftover_markers"
 fi
+
+step "Checking the module anchors in the generated files"
+# The generated build/scripts/module-anchors.txt lists "key|path|anchor text" rows. The engine's sourceName replacement rewrites
+# TemplateName inside this list too, so its paths already name the project (add-module.sh relies on that). add-module.sh edits only
+# at those anchors, so every row must name a generated file that holds its anchor line (an anchor sits outside the switch markers, so it survives every switch combination), and no
+# generated file may carry a "modulith:" anchor that the list does not name. The list is read with awk, not grep -iF, which aborts on
+# some Git Bash builds. check_module_anchors DIR prints one "FAIL:" line per problem to standard error; it returns 1 on any.
+check_module_anchors() {
+  local dir="$1" list row_path row_text problems=0 anchored leaked file
+  list="$dir/build/scripts/module-anchors.txt"
+  if [[ ! -f "$list" ]]; then
+    echo "FAIL: build/scripts/module-anchors.txt is missing" >&2
+    return 1
+  fi
+  anchored="$(awk -F '|' 'NF >= 3 { sub(/\r$/, "", $2); print $2 }' "$list" | sort -u)"
+  [[ -n "$anchored" ]] || { echo "FAIL: build/scripts/module-anchors.txt lists no anchor" >&2; return 1; }
+  while IFS=$'\t' read -r row_path row_text; do
+    if [[ ! -f "$dir/$row_path" ]]; then
+      echo "FAIL: build/scripts/module-anchors.txt names $row_path, which is not generated" >&2
+      problems=$((problems + 1))
+    elif ! awk -v text="$row_text" '{ sub(/\r$/, "") } index($0, text) { found = 1; exit } END { exit !found }' "$dir/$row_path"; then
+      echo "FAIL: $row_path has no line with the anchor '$row_text' that build/scripts/module-anchors.txt names" >&2
+      problems=$((problems + 1))
+    fi
+  done < <(awk -F '|' 'NF >= 3 { sub(/\r$/, "", $2); sub(/\r$/, "", $3)
+    sub(/^[ \t]+/, "", $3); sub(/[ \t]+$/, "", $3); print $2 "\t" $3 }' "$list")
+  leaked="$(grep -rIl --exclude-dir=bin --exclude-dir=obj --exclude-dir=.git -e 'modulith:' "$dir" || true)"
+  while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    file="${file#"$dir"/}"
+    [[ "$file" == build/scripts/module-anchors.txt ]] && continue
+    if ! grep -qxF -e "$file" <<< "$anchored"; then
+      echo "FAIL: $file carries a 'modulith:' anchor but is not listed in build/scripts/module-anchors.txt" >&2
+      problems=$((problems + 1))
+    fi
+  done <<< "$leaked"
+  (( problems == 0 ))
+}
+check_module_anchors "$out" 2> "$tmp/anchor-problems.txt" || {
+  failures=$((failures + 1))
+  cat "$tmp/anchor-problems.txt" >&2
+}
 
 if [[ "$all_on" == "true" ]]; then
   step "Checking that the all-on project is the template source without its marker lines"
@@ -379,6 +459,13 @@ if [[ "$generate_only" == "true" ]]; then
   exit 0
 fi
 
+# The scripts of the module item template are repo-only (template.json leaves their tests out of every generated project), so they are
+# tested here, in one step, and only by a full run: add-module.test.sh takes about 5 minutes, which --generate-only must not pay.
+step "Running the repo-only script tests (module-anchors, module-template-files, add-module: about 5 minutes)"
+for repo_test in module-anchors module-template-files add-module; do
+  bash "$repo_root/build/scripts/tests/$repo_test.test.sh"
+done
+
 cd "$out"
 if [[ "$all_on" == "true" ]]; then
   step "Restoring (locked mode) and checking the Windows path-length guard in $project_name"
@@ -415,6 +502,58 @@ else
   step "Checking the Windows path-length guard in $project_name"
 fi
 bash "$repo_root/build/scripts/path-guard-check.sh" "$out"
+
+if [[ -n "$add_module" ]]; then
+  # The restore above checked the lock files the template ships, so the module is added after it: the item template's post-action runs
+  # a plain restore that gives the new projects their lock files and rewrites the ones that gain a project reference.
+  # `dotnet new install .` registered the item template (templates/modulith-module) together with the solution template, in the same
+  # private hive, so no second install is needed; the call below fails when it is not there.
+  # --allow-scripts yes is required: without a flag a non-interactive run asks for the post-action's permission in a loop for ever.
+  # No -o: an item template writes into the current directory, which is the project root here.
+  module_options=(-n "$add_module" --prefix "$project_name" --allow-scripts yes --debug:custom-hive "$hive")
+  if [[ "$module_contracts" == "true" ]]; then module_options+=(--contracts true); fi
+  step "Adding the module $add_module (contracts=$module_contracts) with the item template"
+  dotnet new modulith-module "${module_options[@]}"
+
+  step "Checking the module $add_module"
+  # The documentation page is named by the kebab-case rule of DocumentPaths.KebabCase: a hyphen before each capital after the first character.
+  module_kebab="$(printf '%s' "$add_module" | sed -E ':again; s/([^-])([A-Z])/\1-\2/; t again' | tr 'A-Z' 'a-z')"
+  module_project="src/Modules/$add_module/$project_name.Modules.$add_module"
+  for added in \
+    "$module_project/$project_name.Modules.$add_module.csproj" \
+    "$module_project/packages.lock.json" \
+    "$module_project/Infrastructure/Persistence/Migrations" \
+    "docs/modules/$module_kebab.md"; do
+    [[ -e "$added" ]] || fail "the module item template did not leave $added"
+  done
+  if [[ "$module_contracts" == "true" ]]; then
+    contracts_project="src/Modules/$add_module/$project_name.Modules.$add_module.Contracts"
+    [[ -f "$contracts_project/$project_name.Modules.$add_module.Contracts.csproj" ]] || fail "$contracts_project/ has no csproj, though --module-contracts was given"
+    [[ -f "$contracts_project/packages.lock.json" ]] || fail "$contracts_project/packages.lock.json is missing: the post-action's restore did not write it"
+  elif [[ -e "src/Modules/$add_module/$project_name.Modules.$add_module.Contracts" ]]; then
+    fail "src/Modules/$add_module has a Contracts project, though --module-contracts was not given"
+  fi
+  [[ ! -e .modulith-module ]] || fail ".modulith-module is left behind: the post-action did not finish"
+  grep -qF "Add${add_module}Module(" "src/Host/$project_name.Api/Program.cs" || fail "src/Host/$project_name.Api/Program.cs does not register the module"
+
+  step "Restoring in locked mode with the new module (as the generated project's CI does)"
+  # The post-action's restore wrote the new projects' lock files and rewrote the ones that gained a reference: all of them must agree.
+  dotnet restore --locked-mode || fail "dotnet restore --locked-mode failed after adding the module: a packages.lock.json is missing or out of date"
+
+  step "Running the module command a second time (the engine must stop with exit 73 and change nothing)"
+  # The same command for a module that exists stops on the engine's own file-overwrite check before the post-action runs.
+  module_tree() { find . -type f -not -path './.git/*' -not -path '*/bin/*' -not -path '*/obj/*' -not -path './TestResults/*' -exec cksum {} + | sort -k3; }
+  tree_before="$(module_tree)"
+  second_status=0
+  dotnet new modulith-module "${module_options[@]}" || second_status=$?
+  [[ "$second_status" == 73 ]] || fail "the second 'dotnet new modulith-module' exited $second_status, expected 73 (the engine's refusal to overwrite)"
+  [[ "$tree_before" == "$(module_tree)" ]] || fail "the second 'dotnet new modulith-module' changed the project tree"
+  if (( failures > 0 )); then
+    echo
+    echo "template-smoke: $failures check(s) failed" >&2
+    exit 1
+  fi
+fi
 
 # The gates are those of the generated project's ci.yml (build-test and licenses jobs), run in the same order and with the same options.
 if [[ "$run_gates" == "true" ]]; then

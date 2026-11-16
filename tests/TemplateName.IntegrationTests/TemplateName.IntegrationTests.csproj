@@ -18,6 +18,7 @@
     <ProjectReference Include="..\..\src\Modules\Notifications\TemplateName.Modules.Notifications\TemplateName.Modules.Notifications.csproj" />
     <!--#endif-->
     <ProjectReference Include="..\..\src\Modules\Audit\TemplateName.Modules.Audit\TemplateName.Modules.Audit.csproj" />
+    <!-- modulith:module-references -->
   </ItemGroup>
 
   <ItemGroup>

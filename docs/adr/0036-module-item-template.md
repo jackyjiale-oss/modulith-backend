@@ -1,0 +1,52 @@
+# 0036. A module item template that wires itself, through anchors and a script that ships with the project
+
+- Status: Accepted
+- Date: 2026-11-15
+- Deciders: Lee Jia Le
+
+## Context
+A project generated from `modulith-backend` grows by adding business modules. A module is two projects (or one, when it has nothing to offer other modules), and each needs the same wiring: a registration and an endpoint mapping in the host, project references in the host and in three test projects, solution folders, `COPY` lines in the Dockerfile, entries in the architecture tests' `Assemblies`, a documentation page and its index row, and a commit scope. Done by hand this is about a dozen edits in as many files, and a missed one does not fail loudly: an assembly missing from `Assemblies.Modules` makes every architecture rule silently ignore the module. The review (Section 5, item 2, and the short-name decision in Section 6) asked for a `dotnet new modulith-module` item template for this; the design (`docs/superpowers/specs/2026-11-15-module-item-template-design.md` in the template repository, which a generated project does not carry) settled the points below and its spike (Section 10) fixed the ones that the template engine decided for us.
+
+The constraints: the template repository is the all-on tree and must keep building and testing as it is, without the engine (ADR 0035); a generated project must not change in any route, response, table or column (ADR 0031); the scaffold has no business code; and an edit that cannot be made must not break the command.
+
+## Options considered
+
+**Where the module's files come from.**
+1. **A compiled reference module that the engine copies.** Always compiles, but it is one more project in every solution, and the scaffold would carry whatever that project needs to build as a real module.
+2. **A script that copies Audit and renames it.** Audit's own details (its consumer, its inbox, its options) would leak into every new module and have to be stripped by pattern.
+3. **Hand-written placeholder files in the item template**, kept honest by a CI job that adds a module to a generated project, builds it and runs every test.
+
+**How the shared files are edited.**
+1. **Files only.** The item template generates the module and prints a checklist of the shared edits. Safe, but it is the status quo for the part that goes wrong.
+2. **The engine's built-in post-actions only.** They can run a script, add a project to a solution and restore, but not insert a line into `Program.cs`, a `COPY` into a Dockerfile or an entry into a list; they cannot do the work, so a script is needed anyway.
+3. **A post-action that runs a script, which inserts text before named anchor comments.** One pattern for every file, no rewriting of code, and a missing anchor is detectable.
+
+**Where the script lives.**
+1. **In the template repository only.** The user would need the repository at hand, and the script's list of files would drift from the project's.
+2. **In the generated project** (`build/scripts/add-module.sh`), where it is tested against the files it edits.
+
+## Decision
+We chose hand-written placeholder files, anchors with a soft failure, and the script shipping in the generated project.
+
+- **Two templates, one install.** `templates/modulith-module/` has its own `.template.config/template.json` (short name `modulith-module`, type `item`, identity `Modulith.Module.Templates`). `dotnet new install .` of the repository registers both, as the spike showed. The solution template excludes `templates/**` so a generated project does not carry the item template.
+- **The interface.** `dotnet new modulith-module -n Billing --prefix Acme.Shop [--contracts true] --allow-scripts yes`, run at the solution root. `-n` is the module name in PascalCase, `--prefix` the project's own name (an item template cannot read it from the solution; the generated README shows the command with the project's name filled in), `--contracts` adds the `.Contracts` project (off by default). **`--allow-scripts yes` is required:** with no flag in a non-interactive shell the engine prompts, reads an empty line and loops forever, and with `no` the files are written, the script is not run and the command exits 104.
+- **The scaffold** is a wired skeleton: the module project with its DbContext, outbox, an empty permission source, the error-message class and three empty `.resx` files, the `Domain/`, `Application/` and `Infrastructure/` folders, an optional `.Contracts` project and a page under `docs/modules/`. It has no route and no entity; the first use case is written by hand, test first.
+- **Name and prefix reach the script through a marker file.** The engine does not substitute symbols into a post-action's arguments (spike D1), so the template writes `.modulith-module` (line 1 the name, line 2 the prefix) and the post-action runs `bash build/scripts/add-module.sh` with no arguments. The script reads the marker and deletes it. The `--contracts` flag needs no marker: the script tests whether the Contracts project exists.
+- **The kebab-case form is the repository's own.** The engine's `kebabCase` form splits at digits and keeps acronyms together, which differs from `DocumentPaths.KebabCase` in the architecture tests (`HRPayroll` gives `h-r-payroll`, `Billing2` gives `billing2`), and the documentation tests look for the page under that name. The script computes the kebab form with the repository's rule, for the docs page, the route segment and the commit scope; the engine's `lowerCase` form is used for the database schema.
+- **Anchors, not pattern matching.** Each shared file carries a named anchor comment, outside every switch region so it survives every combination of ADR 0035's switches. The script inserts text before an anchor (the anchor stays last) and never rewrites code. The anchors are listed with their files in `build/scripts/module-anchors.txt` (14 rows), which a script test and the smoke test check against the files, so a refactor that removes an anchor fails in CI. The commit scope is appended to the value of `ALLOWED_SCOPES` in `build/scripts/check-commit-msg.sh`, which has no anchor.
+- **Soft failure, hard failure, idempotency.** A missing anchor skips that one edit, prints `add by hand:` with the exact line and the follow-on commands to run by hand, and exits 1 so CI notices. A prefix that matches no host project, or a name that is not PascalCase, exits 2 and removes only what the engine just wrote. A module that is already wired is never touched (exit 2). A second `dotnet new` for the same module stops on the engine's file-overwrite check (exit 73) before the script runs.
+- **The script's follow-on steps, in this order:** `dotnet tool restore`, `dotnet restore` (writes the new projects' `packages.lock.json`, which the Dockerfile `COPY` and locked-mode CI need), `dotnet ef migrations add Create{Module}Schema` through the host, `dotnet build -c Release`; then it prints what to commit. The order is not the obvious one: `dotnet ef` restores nothing, so run before the restore it fails with NETSDK1004 for the new project.
+- **The post-action does not redirect the script's output.** The engine hangs when a script writes more than a few kilobytes to a redirected stdout (the script blocks in a write and `dotnet new` waits for it forever). The post-action therefore sets `redirectStandardOutput` and `redirectStandardError` to `"false"`, which also lets the commit list reach the user, and the script sends the output of the `dotnet` commands to a log file (kept on failure) and prints only short lines.
+- **A new architecture rule** (`ModuleRegistrationTests`) fails when a module project exists under `src/Modules` but is not in `Assemblies.Modules`, or a Contracts project is not in `Assemblies.Contracts`. The layering rule for the Domain folder is relaxed per module, with a test that at least one module has domain types, because a fresh scaffold has none.
+- **Verification (template repository only).** `template-matrix.yml` has a job `module-template` with two legs, `all-on-contracts` (`-n Billing --contracts true`, all switches on) and `all-off-multiword` (`-n LeaveManagement`, every switch off), each running `template-smoke.sh --integration --gates --add-module NAME`. The smoke test also runs three repo-only script tests: the anchors, the template's files and the script (`add-module`, on a fake tree with a stub for `dotnet`).
+
+## Consequences
+- **A module is one command, and nothing in the shared files is hand-edited.** The cost is a script in every generated project that knows the shape of a dozen files; the anchor list and the script test keep that knowledge honest, and the anchors are visible comments in `Program.cs`, `Assemblies.cs`, the project files, the solution, the Dockerfile and `CONTRIBUTING.md`.
+- **Every full smoke run is a few minutes longer**, because the script test runs in it (the required `template-smoke` job and every matrix leg).
+- **The two new checks are not required yet.** `module-template (all-on-contracts)` and `module-template (all-off-multiword)` join the required list of `docs/repository-management.md` after their first green run on a pull request, as the matrix did.
+- **The integration tests of the module legs are proven only by CI.** The spike and the smoke runs were on Windows with Git Bash and without Docker: the post-action's `bash` lookup, the brace and prompt behaviour of the engine and `dotnet format` on a generated module were verified on Windows or not at all, and Ubuntu is covered by the CI legs only.
+- **A bare `dotnet new modulith-module` in a script or a pipeline hangs.** Every example and every step must pass `--allow-scripts yes`; the generated README says so.
+- **A failed run leaves the module wired.** The registration is the last edit, so a run that stops before it can be repeated, but one that fails later (the migration, the build) cannot: the script prints the remaining commands to run by hand instead.
+- **Editing a shared file can remove an anchor.** The command then skips that edit and prints the line to add. The smoke test and the anchor test fail in the template repository when a refactor drops one, but a generated project that deletes an anchor sees it only as the printed fallback.
+- **Removing a module stays manual**, as does discovering modules by convention in the host (registration remains explicit).
+- **Publishing the template** (a NuGet package, so `dotnet new install` needs no checkout) and the v1.0 cut are the next plan (7c).
