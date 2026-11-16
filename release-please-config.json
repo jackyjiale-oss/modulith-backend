@@ -23,7 +23,6 @@
   ],
   "packages": {
     ".": {
-      "release-as": "1.0.0-rc.1",
       "extra-files": [
         {
           "type": "xml",
