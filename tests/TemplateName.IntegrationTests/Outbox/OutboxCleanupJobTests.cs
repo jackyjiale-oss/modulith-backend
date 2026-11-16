@@ -32,15 +32,18 @@ public sealed class OutboxCleanupJobTests(IntegrationTestWebAppFactory factory) 
             .Where(job => job.Name.EndsWith("OutboxCleanup", StringComparison.Ordinal))
             .ToDictionary(job => job.Name, job => job.DefaultInterval);
 
-        jobs.Keys.ShouldBe(
-            [
-                "AuthOutboxCleanup",
-                //#if (includeSample)
-                "SampleOutboxCleanup",
-                //#endif
-                JobName,
-            ],
-            ignoreOrder: true);
+        // A module added with the modulith-module item template registers its own {Module}OutboxCleanup job, so the jobs below are the
+        // ones this project must have, not the only ones it may have.
+        string[] required =
+        [
+            "AuthOutboxCleanup",
+            //#if (includeSample)
+            "SampleOutboxCleanup",
+            //#endif
+            JobName,
+        ];
+
+        required.ShouldBeSubsetOf(jobs.Keys);
         jobs.Values.ShouldAllBe(interval => interval == TimeSpan.FromDays(1));
     }
 
