@@ -1,0 +1,61 @@
+# 0037. Publishing the template package: nuget.org by trusted publishing, one package, one gated job
+
+- Status: Accepted
+- Date: 2026-11-16
+- Deciders: Lee Jia Le
+
+## Context
+`dotnet new install .` needs a checkout of the template repository. The README promised a NuGet package for that ("once Plan 7 publishes the package"), and row 7c of the review asks for it. Publishing is the first step of the pipeline that cannot be taken back: a version on nuget.org can be unlisted but never deleted, and its bytes stay as pushed. The design (`docs/superpowers/specs/2026-11-16-template-package-and-publish-design.md` in the template repository, which a generated project does not carry) settled the points below, and its spike (Section 12) fixed the ones that the pack tool and the template engine decided for us.
+
+The constraints: the package must hold both templates (`modulith-backend` and `modulith-module`, ADR 0036) under one ID; it must generate exactly what a checkout generates, so the checks that already run on a checkout still speak for it; no long-lived secret may be stored; nothing repository-only (the pack project, the publish job's logic) may reach a project generated from the template; and 7c does not cut v1.0, which stays a later, deliberate decision.
+
+## Options considered
+
+**Where to publish.**
+1. **nuget.org, and the `.nupkg` on the GitHub Release.** `dotnet new install <id>` works for anyone without configuration, and the release keeps the exact file that was pushed.
+2. **GitHub Packages.** Needs a source and a token on every machine that installs the template, which defeats the purpose.
+3. **The GitHub Release asset only.** No configuration problem for the publisher, but nobody finds the template with `dotnet new search` or installs it by ID.
+
+**How the package is built.**
+1. **A hand-written nuspec** listing the files. It drifts from the tree, and every new file would need a line.
+2. **A pack-only project** that includes the checkout tree and excludes the folders used only to develop the template. A new file is packed without a change here, and a lost file shows up in the equivalence check below.
+
+**How the first version reaches nuget.org.**
+1. **A manual-dispatch prerelease**, an ad-hoc run that is not the release workflow. It proves a different path from the one a real release takes.
+2. **The release workflow itself, with a release candidate first.** Everything that will run for 1.0 runs once for a version that claims nothing.
+
+**How the job authenticates.**
+1. **A stored API key** in a repository secret. It does not expire, and anyone who can read the secret can publish.
+2. **Trusted publishing (OIDC).** The job exchanges its identity token for a key that lasts one hour. No key is stored.
+
+## Decision
+We chose nuget.org with trusted publishing and a release asset, one package built by a pack-only project, equivalence proven against the checkout, one job behind an approval, and a release candidate first.
+
+- **One package.** `Modulith.Backend.Templates` holds both templates; `modulith-module` keeps its own template identity (`Modulith.Module.Templates`) and is not a second package. `build/pack/Modulith.Templates.csproj` (a `Template` package type, no build output) is not in the solution, and `build/pack/` has its own `Directory.Build.props` that imports only `Version.props`, so the repository's target framework, warnings-as-errors and lock-file settings do not apply to it. The product version stays in one file.
+- **`NoDefaultExcludes` and a folder-only package path.** By default pack drops every file whose name starts with a dot (`.editorconfig`, `.gitignore`, `.gitkeep`, and the module template's marker `.modulith-module`), which would break both templates; `NoDefaultExcludes` keeps them. The content item uses `PackagePath="content\"` for the folder only: a per-file path doubles the name of extensionless files (`Dockerfile`, `LICENSE`, `.githooks/commit-msg`), and a path with the recursive directory doubles every directory (spike, Section 12).
+- **The pack project does not copy the engine's exclude list.** It excludes only the folders that serve developing the template (`.git`, `bin`, `obj`, `.vs`, `.superpowers`, `.claude`, `docs/superpowers`, `artifacts`, `build/pack`, `coverage`, test output, `*.user`, `.env`). The engine still applies the exclude list of `.template.config/template.json` when it generates a project, so the two lists cannot drift in a way that matters; `build/pack/**` and `docs/releasing.md` are added to the engine's list.
+- **Equivalence is proven, not assumed.** `template-smoke.sh --from-package [PATH]` installs the `.nupkg` into the private template hive and runs the existing generation checks on the result. It then proves that a project generated from the package equals one generated from a checkout install with the same switches (every file, the per-generation `UserSecretsId` aside), that both short names are listed, and that the module template writes the same files from both installs. If the trees are identical, builds and tests are identical, so the full build and test run of the existing legs is not repeated for the package. The job `package-smoke` in `template-matrix.yml` runs this with `--generate-only` on every pull request, in two legs: `all-on` and `all-off`.
+- **One job, behind an approval.** `release.yml` gets the job `publish-package`, in the GitHub environment `nuget`, after `release-please` and only when a release was created or the workflow was run by hand. It checks out the release tag, asserts that the tag equals `<Version>` in `Version.props` at that tag, packs, proves the exact file with `--from-package ... --generate-only`, attaches the file to the GitHub Release (`gh release upload --clobber`), logs in to nuget.org with `NuGet/login@v1` (the profile name is the secret `NUGET_USER`; the job has `id-token: write`) and pushes with `--skip-duplicate`. The push is last: everything that can fail comes before it.
+- **The tag logic is a tested script.** `build/scripts/release-package.sh` has `check-tag` and `pack`, with a test that also checks the shape of `release.yml` (the tag reaches the shell only through `env`, only this job has `id-token: write`) and keeps the copy of the release-please configuration in step. The smoke uses the same script to pack.
+- **Decisions made while building.** (a) The checkout of the publish job uses `refs/tags/<tag>`: a bare name could resolve to a branch of the same name and the job would pack that branch's code (found in review). (b) The steps `Check the tag` and `Pack` are written so a failure fails the job: `check-tag` runs as a plain assignment and `Pack` sets `pipefail`, because a command substitution inside `echo` or a pipe into `tail` would hide the exit status and let an empty value go on. (c) A re-run packs again, replaces the release asset with the new build and skips the nuget.org push when that version exists. The asset and the package can therefore hold different bytes; nuget.org keeps the first push.
+- **The gate is a pause.** The environment `nuget` lists the repository owner as required reviewer. Merging a release PR creates the tag and the GitHub Release, but nothing reaches nuget.org until the owner approves the job. There is one maintainer and self-review stays allowed, so this is a deliberate stop before an irreversible step, not a four-eyes control. The trusted-publishing policy on nuget.org binds to the owner, the repository, the workflow file `release.yml` and the environment `nuget`, and its scope allows publishing a new package, so the first publish needs no API key either.
+- **A release candidate first.** `release-please-config.json` gets `"versioning": "prerelease"`, `"prerelease": true` and `"prerelease-type": "rc"` (the last two apply only under that strategy). The first published version is meant to be `1.0.0-rc.1`, so the whole pipeline is proven on nuget.org before anything claims 1.0. That release-please then proposes this exact version is **not proven**: its documentation does not say how a version is computed from `0.0.0`, and release PR #8 proposes 1.0.0 although `bump-minor-pre-major` is on. The plan reads the real release PR before anything is merged; the fallback is a per-package `release-as` of `1.0.0-rc.1`, removed again afterwards. Dropping the three keys later is the 1.0.0 cut.
+- **Nothing leaks into generated projects.** `release.yml` and `release-please-config.json` are generated into every project. The publish job is behind a job `detect-package`, which is true only where `build/pack/Modulith.Templates.csproj` exists (a generated project has no `build/pack`), the same idea as the `detect` job of `cd.yml`. The three prerelease keys are in the root configuration only: generated projects get a plain copy from `build/template-content/release-please-config.json`, the mechanism `Version.props` already uses, and a test keeps the two equal apart from those three keys.
+- **Recovery by dispatch.** `release.yml` has `workflow_dispatch` with the input `tag`. A dispatch skips `release-please` and runs the publish job for that existing release. The tag is validated against `^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$` before use.
+
+## Consequences
+- **Anyone can install the template by ID, once the first version is out.** Until then the checkout route in the README is the way. Nothing is on nuget.org at the time of this decision: the owner's one-time setup (the account, the trusted-publishing policy, the environment, the secret) comes first, and the runbook `docs/releasing.md` of the template repository lists it.
+- **The package re-reads the whole tree.** Any new file is packed without a change here, and the equivalence check catches a file the pack misses or wrongly includes. The cost is that the check runs on every pull request, in two more legs, and that the pack project's own exclude list needs a look when a new developer-only folder appears.
+- **A published version is permanent.** It can be unlisted on nuget.org, never deleted, and a re-run keeps the first push. A bad version is fixed by shipping the next one, which is why the first version is a release candidate.
+- **The approval is a pause, not a control.** The owner approves their own release. The runbook says so; a second maintainer and a required reviewer other than the author would make it a control.
+- **A failed publish leaves a visible state.** Pack, check, proof or upload failing leaves the GitHub Release without a package; a failed push leaves the release with the asset and nothing on nuget.org. Dispatching the tag repeats the job. Nothing runs after a successful push.
+- **The two new checks are not required yet.** `package-smoke (all-on)` and `package-smoke (all-off)` join the required list of `docs/repository-management.md` after their first green run on `main`, as the matrix did.
+- **The `nuget.org` side of the pipeline is proven only by the first real publish.** The package, the install and the equivalence were proven locally and in CI; the login, the push and the form `dotnet new install Modulith.Backend.Templates::1.0.0-rc.1` on nuget.org were not.
+- **A name clash is possible.** Another author's package named `Modulith` exists; our short names (`modulith-backend`, `modulith-module`) and our package ID do not collide with it. The owner may reserve the `Modulith.` ID prefix.
+
+## Follow-ups
+- The owner completes the one-time setup (`docs/releasing.md`), then merges the release candidate PR and approves the `nuget` environment.
+- A small pull request after the first release candidate is published: the README's install section (stable and prerelease forms, update and uninstall commands) and a NuGet badge.
+- Add `package-smoke (all-on)` and `package-smoke (all-off)` to the required checks after their first green run on `main`.
+- Cut v1.0 later, by the written checklist in `docs/releasing.md`, when the owner decides it is ready.
+- Not built: package signing beyond what nuget.org does, a GitHub Packages mirror, an SBOM for the package, and a second maintainer to make the approval a control.

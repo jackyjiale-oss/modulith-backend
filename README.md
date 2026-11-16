@@ -50,7 +50,7 @@ cd modulith-backend
 dotnet new install .
 ```
 
-Once Plan 7 publishes the package, install it from NuGet instead: `dotnet new install Modulith.Backend.Templates`.
+The release workflow publishes the template as the NuGet package `Modulith.Backend.Templates` (the maintainers' runbook is `docs/releasing.md` in the repository). Until the first release candidate is out, the checkout route above is the way to install; this section changes once the package is on nuget.org.
 
 Then generate a project:
 
