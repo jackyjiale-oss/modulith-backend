@@ -6,6 +6,8 @@ name: Template matrix
 # so a project that turns a switch off still builds and passes (switches design, section 5).
 # The `module-template` job generates the project, adds a module to it with the `modulith-module` item template (a single-word and a
 # multi-word name, with and without a .Contracts project) and runs the same smoke test and gates on the result.
+# The `package-smoke` job packs the checkout, installs the package and compares the project it generates with the checkout's own output
+# (all switches on, and all off); it publishes nothing.
 # The all-on `template-smoke` job in ci.yml stays the fast required check; the `all-on` leg here is additional.
 # Actions use their latest major tag so Dependabot can update them.
 
@@ -132,3 +134,33 @@ jobs:
           read -r -a module_args <<< "$MODULE_ARGS"
           args=("${switch_args[@]}" "${module_args[@]}")
           bash build/scripts/template-smoke.sh --integration --gates "${args[@]}"
+
+  # The template package: the checkout packed, installed and used to generate a project that must match the checkout's own output, on
+  # every pull request, push to main and manual run. Nothing is published. The switches reach the script only through env.
+  package-smoke:
+    name: package-smoke (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: all-on
+            switches: ""
+          - name: all-off
+            switches: "--notifications false --includeSample false --caching memory"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Template package smoke test (${{ matrix.name }})
+        env:
+          SWITCHES: ${{ matrix.switches }}
+        run: |
+          read -r -a args <<< "$SWITCHES"
+          bash build/scripts/template-smoke.sh --from-package --generate-only "${args[@]}"

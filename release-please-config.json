@@ -3,6 +3,9 @@
   "release-type": "simple",
   "include-component-in-tag": false,
   "bump-minor-pre-major": true,
+  "versioning": "prerelease",
+  "prerelease": true,
+  "prerelease-type": "rc",
   "pull-request-title-pattern": "chore(release): release${component} ${version}",
   "changelog-sections": [
     { "type": "feat", "section": "Added" },
