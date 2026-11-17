@@ -363,6 +363,29 @@ case_find_excludes_build_dirs() {
   assert_eq "| a.cs | //#if | notifications |" "$(rows markers)" "find_excludes_build_dirs: bin and obj are skipped without git"
 }
 
+# A tree without git (an export of the tracked files) gives the same shards as the git tree it came from: the file walk and
+# git ls-files agree, a nested .git directory and build output are skipped, and write mode has nothing to warn about.
+case_no_git_same_shards() {
+  make_tree
+  make_git_tree
+  put src/Modules/A/A/Tracked.cs "$(printf '//#if (notifications)\n//#endif')"
+  put docs/a.md "$(printf '<!--#if (includeSample)-->\ntext\n<!--#endif-->')"
+  put tests/T.UnitTests/A/TrackedTests.cs 'class TrackedTests {}'
+  must git -C "$tree" add src docs tests
+  generate
+  write_map
+  check
+  assert_eq "0" "$status" "no_git_same_shards: the git tree passes --check"
+  rm -rf "$tree/.git"
+  put vendor/.git/hooks/sample.cs "$(printf '//#if (caching == "redis")\n//#endif')"
+  put src/Modules/A/A/obj/Gen.cs "$(printf '//#if (includeSample)\n//#endif')"
+  check
+  assert_eq "0" "$status" "no_git_same_shards: the same tree without .git passes --check against the shards of the git tree (output: $combined)"
+  run_gen --root "$tree" --out "$idx"
+  assert_eq "0" "$status" "no_git_same_shards: write mode without git: exit code"
+  assert_eq "" "$err" "no_git_same_shards: write mode without git: no warning"
+}
+
 case_check_stale() {
   make_tree
   put a.cs "$(printf '//#if (notifications)\n//#endif')"
@@ -1000,6 +1023,40 @@ static void MapModules(RouteGroupBuilder api)
     api.MapAEndpoints();
 }'
   routes_fails "routes_scopes: local function in Program.cs" "cannot resolve the group prefix of app in $a"
+  # A host group whose prefix is not a string literal has a prefix the parser cannot read: not the root.
+  put src/Host/H/Program.cs 'var app = builder.Build();
+var api = app.MapGroup(ApiRoutes.Prefix);
+api.MapAEndpoints();
+app.Run();'
+  routes_fails "routes_scopes: host group with a prefix that is not a literal" "cannot resolve the group prefix of app in $a"
+  # A lambda parameter that hides the group of the extension, on one line and with a block.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("x", GetAsync).RequireAuthorization();
+        var mfa = group.MapGroup("mfa");
+        Configure(mfa, group => group.MapPost("verify", VerifyAsync).RequireAuthorization());
+        return app;
+    }
+}'
+  routes_fails "routes_scopes: lambda parameter hiding the group, one line" "cannot resolve the group prefix of group in $a"
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        var mfa = group.MapGroup("mfa");
+        Configure(mfa, (name, group) =>
+        {
+            group.MapPost("verify", VerifyAsync).RequireAuthorization();
+        });
+        group.MapGet("x", GetAsync).RequireAuthorization();
+        return app;
+    }
+}'
+  routes_fails "routes_scopes: lambda parameter hiding the group, block" "cannot resolve the group prefix of group in $a"
 }
 
 # Shapes the scope rules must keep reading: an extension whose `=>` is on the next line, a local function without routes in the middle
@@ -1016,6 +1073,10 @@ internal static class AEndpoints
         group.MapGet("keys", GetKeys).AllowAnonymous();
 
         static string Tag(string name) { return "a-" + name; }
+        Configure(group, (name, other) =>
+        {
+            other.WithTags(name);
+        });
 
         group.MapGet("list", ListAsync).RequireAuthorization();
         group.MapGet("/{id}", GetAsync).RequireAuthorization();
@@ -1462,6 +1523,51 @@ case_permissions_shapes() {
   emit_of_tree emit_permissions
   assert_eq "0" "$status" "permissions_shapes: exit code"
   assert_eq "$permissions_rows"$'\n--' "$combined" "permissions_shapes: two constants on one line, Domain/RolePermissions.cs ignored"
+}
+
+# A record that names its constant without the class is not read, so a positional admin flag in it would be lost (the row would say
+# no): it fails, with or without a flag.
+case_permissions_unqualified() {
+  local src='src/Modules/A/A/Application/APermissionSource.cs'
+  make_tree
+  permissions_fixture
+  put "$src" 'using static A.APermissions;
+
+class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        Define(APermissions.Edit, "Edit", "d"),
+        new(View, ModuleName, "View", "d", true),
+    ];
+}'
+  emit_fails "permissions_unqualified: positional flag under using static" \
+    "the first argument View of the record at line 8 of $src is a permission constant without its class" emit_permissions
+  put "$src" 'using P = A.APermissions;
+
+class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        Define(APermissions.Edit, "Edit", "d"),
+        Define(
+            P.View, "View", "d", true),
+    ];
+}'
+  emit_fails "permissions_unqualified: positional flag through an alias" \
+    "the first argument P.View of the record at line 8 of $src is a permission constant without its class" emit_permissions
+  put "$src" 'using static A.APermissions;
+
+class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        Define(APermissions.Edit, "Edit", "d"),
+        Define(Delete, "Delete", "d"),
+    ];
+}'
+  emit_fails "permissions_unqualified: no flag at all" \
+    "the first argument Delete of the record at line 8 of $src is a permission constant without its class" emit_permissions
 }
 
 # The runner refuses a case name it does not know rather than passing without running it.
@@ -2357,9 +2463,50 @@ case_config_loud() {
   emit_fails "config_loud: a SectionName that is not a configuration path" "line 1 of $opt" emit_config
 }
 
-# tests_fixture: two test projects: T.UnitTests with module and building-block folders (nested files counted, a non-.cs file and a
-# bin folder not counted), a cross-cutting folder, a folder that matches a module and a building block (the module wins) and a loose
-# file at its root; T.ArchitectureTests with no folder. Sources: a module, building blocks, pairs and decoys.
+# A fenced code block ends only at a fence of the same character, at least as long as the one that opened it and with nothing after it;
+# a line indented four spaces is not a fence. A fence line inside a block must not switch the reader on or off.
+case_config_fences() {
+  make_tree
+  config_fixture
+  # An opening-style line (with an info string) inside a block does not close it: the heading after the block is read.
+  put docs/modules/f.md '# F
+
+```md
+```json
+{ }
+```
+
+### `Caching`'
+  # A block of four backticks holding one of three; a tilde line inside a backtick block; a four-space "fence" (indented code).
+  put docs/modules/g.md '# G
+
+````md
+```
+### `Auth`
+```
+````
+
+```
+~~~
+### `Serilog`
+```
+
+    ```
+### `Caching`
+
+~~~
+### `Auth`
+~~~~'
+  emit_of_tree emit_config
+  assert_eq "0" "$status" "config_fences: exit code (output: $combined)"
+  assert_eq $'Auth|A|docs/modules/a.md\nCaching|Infrastructure.Common, Platform.Redis|docs/modules/f.md, docs/modules/g.md\nSerilog|Host|docs/services/api.md\n--' \
+    "$combined" "config_fences: only headings outside a block count"
+}
+
+# tests_fixture: two test projects: T.UnitTests with module and building-block folders (one with a file in a nested folder, which
+# gives no row of its own; a non-.cs file and a bin folder, which are not read), a cross-cutting folder, a folder that matches a
+# module and a building block (the module wins) and a loose file at its root; T.ArchitectureTests with no folder. Sources: a module,
+# building blocks, pairs and decoys.
 tests_fixture() {
   put src/Modules/Auth/Auth/Application/Login/Login.cs 'class Login {}'
   put src/Modules/Redis/Redis/RedisModule.cs 'class RedisModule {}'
@@ -2451,6 +2598,67 @@ case_tests_loud() {
   emit_fails "tests_loud: a .cs file outside a test project" "tests/Stray.cs" emit_tests
 }
 
+# A project prefix with a dot (Acme.Shop): the name of a building block is its directory without the whole prefix, which the module
+# projects (<Prefix>.Modules.<Name>) give. Errors, events, jobs, configuration owners and test areas all use it.
+case_dotted_prefix() {
+  make_tree
+  local bb='src/BuildingBlocks/Acme.Shop' mod='src/Modules/A/Acme.Shop.Modules.A'
+  put "$mod/Domain/AErrors.cs" 'internal static class AErrors
+{
+    public static readonly Error Missing = Error.NotFound("a.missing", "m");
+}'
+  put "$bb.Web.Common/Errors/CommonErrors.cs" 'public static class CommonErrors
+{
+    public static readonly Error Bad = Error.Validation("common.bad", "m");
+}'
+  put "$bb.SharedKernel/IIntegrationEvent.cs" 'public interface IIntegrationEvent { }'
+  put "$mod.Contracts/IntegrationEvents/ThingIntegrationEvent.cs" 'public sealed record ThingIntegrationEvent(Guid Id) : IIntegrationEvent;'
+  put "$bb.Infrastructure.Common/Auditing/Writer.cs" 'internal sealed class Writer(IIntegrationEventPublisher publisher)
+{
+    public Task WriteAsync(Guid id) => publisher.PublishAsync(new ThingIntegrationEvent(id));
+}'
+  put "$bb.Infrastructure.Common/Jobs/IRecurringJob.cs" 'public interface IRecurringJob { string Name { get; } }'
+  put "$bb.Infrastructure.Common/Jobs/SweepJob.cs" 'internal sealed class SweepJob : IRecurringJob
+{
+    public string Name => "Sweep";
+}'
+  put "$bb.Infrastructure.Common/Jobs/Registration.cs" 'public static class Registration
+{
+    public static IServiceCollection AddSweep(this IServiceCollection services)
+    {
+        services.AddRecurringJob<SweepJob>();
+        return services;
+    }
+}'
+  put src/Host/Acme.Shop.Api/appsettings.json '{
+  "Caching": {}
+}'
+  put "$bb.Infrastructure.Common/Caching/CachingOptions.cs" 'public sealed class CachingOptions
+{
+    public const string SectionName = "Caching";
+}'
+  put tests/Acme.Shop.UnitTests/A/AErrorsTests.cs 'class AErrorsTests {}'
+  put tests/Acme.Shop.UnitTests/Web/CommonErrorsTests.cs 'class CommonErrorsTests {}'
+  put tests/Acme.Shop.UnitTests/Shop/ShopTests.cs 'class ShopTests {}'
+  emit_of_tree emit_errors emit_events emit_jobs emit_config
+  assert_eq "0" "$status" "dotted_prefix: exit code (output: $combined)"
+  assert_eq "a.missing|A|404|-|$mod/Domain/AErrors.cs
+common.bad|Web.Common|400|-|$bb.Web.Common/Errors/CommonErrors.cs
+--
+ThingIntegrationEvent|Infrastructure.Common ($bb.Infrastructure.Common/Auditing/Writer.cs)|-
+--
+Sweep|Infrastructure.Common|Jobs:Sweep:Enabled, Jobs:Sweep:Interval|$bb.Infrastructure.Common/Jobs/SweepJob.cs
+--
+Caching|Infrastructure.Common|-
+--" "$combined" "dotted_prefix: errors, events, jobs and configuration name the building block without the prefix"
+  emit_of_tree emit_tests
+  assert_eq "0" "$status" "dotted_prefix: tests: exit code (output: $combined)"
+  assert_eq 'Acme.Shop.UnitTests|A|A
+Acme.Shop.UnitTests|Shop|cross-cutting
+Acme.Shop.UnitTests|Web|Web.Common
+--' "$combined" "dotted_prefix: test areas (a folder named like a part of the prefix matches no building block)"
+}
+
 # Each case runs in a subshell so that its tree and variables do not leak into the next.
 # The subshell reports its failures through its exit code, since variables do not cross the boundary.
 run_case() {
@@ -2477,12 +2685,15 @@ case_real_tree() {
 all_cases="case_usage_errors case_markers_shard case_markers_kinds_and_expressions case_markers_zero_rows case_stub_shards
   case_two_table_shard case_atomic_write
   case_determinism case_untracked_ignored case_untracked_warning case_git_file_marker case_find_excludes_build_dirs
+  case_no_git_same_shards
   case_check_stale case_check_missing_and_unknown case_map_rules case_need_rows
   case_routes case_routes_zero case_routes_module_absent case_routes_loud case_routes_shapes
   case_routes_scopes case_routes_scopes_ok case_routes_group_auth case_routes_elsewhere
-  case_permissions case_permissions_loud case_permissions_shapes case_errors case_errors_zero case_errors_loud
+  case_permissions case_permissions_loud case_permissions_shapes case_permissions_unqualified
+  case_errors case_errors_zero case_errors_loud
   case_events case_events_zero case_events_loud case_jobs case_jobs_zero case_jobs_loud
-  case_config case_config_loud case_tests_folders case_tests_pairs case_tests_loud case_unknown_case_name case_real_tree"
+  case_config case_config_loud case_config_fences case_tests_folders case_tests_pairs case_tests_loud case_dotted_prefix
+  case_unknown_case_name case_real_tree"
 
 # With arguments, only the named cases run (for iterating on one case); without, all of them. Every argument is checked against the
 # registered list before anything runs: run_case ignores set -e, so a misspelled name would otherwise print "command not found" and pass.

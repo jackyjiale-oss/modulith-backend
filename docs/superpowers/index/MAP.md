@@ -19,11 +19,11 @@ lists of names).
 - `src/Modules/<Name>/TemplateName.Modules.<Name>.Contracts/`: only for a module with something to offer others (integration events,
   public interfaces); the only project another module may reference.
 - `src/BuildingBlocks/`: shared projects (SharedKernel, Application.Common, Infrastructure.Common, Web.Common, Platform.Redis).
-- `src/Host/`: the API host; `src/Host/TemplateName.Api/Program.cs` maps the module endpoints on the `/api/v1` group;
-  root exceptions: JWKS, and the SignalR hub (`MapNotificationsHub` in `NotificationsModule.cs`). `routes.md` lists only the routes
-  of the module `*Endpoints.cs` files; the host-level mappings (health `MapHealthChecks`, `MapOpenApi`, `MapScalarApiReference` and
-  the hub) are called from `src/Host/TemplateName.Api/Program.cs`;
-  `src/Host/TemplateName.Api/appsettings.json` holds the sections with shipped values, not every section (see `config.md` below).
+- `src/Host/`: the API host; `src/Host/TemplateName.Api/Program.cs` maps the module endpoints on the `/api/v1` group, except JWKS
+  and the SignalR hub (`MapNotificationsHub` in `NotificationsModule.cs`), which are mapped at the root. `routes.md` lists only the
+  routes of the module `*Endpoints.cs` files, not the host-level mappings called from `Program.cs` (health `MapHealthChecks`,
+  `MapOpenApi`, `MapScalarApiReference`, the hub). `src/Host/TemplateName.Api/appsettings.json` holds the sections with shipped
+  values, not every section (see `config.md` below).
 - `tests/`: three projects, `TemplateName.UnitTests`, `TemplateName.IntegrationTests` (Docker) and `TemplateName.ArchitectureTests`
   (flat); a first-level folder is named after a module or an area (`tests/<Project>/<Module>/`).
 - `build/scripts/`: maintenance scripts (for example the template smoke, dead-reference check, commit-message check, this generator); their tests in
@@ -67,9 +67,9 @@ lists of names).
   `AllowAnonymous()`, any other word is a named policy. The handler file is the type name plus `Handler.cs` in the use-case folder.
   JWKS is mapped at the root (`/.well-known/jwks.json`), not under `/api/v1`, and has no handler type (`-`).
 - `permissions.md`: admin default is `yes` only when the definition sets the flag to a literal `true` (`adminDefault: true` in
-  `Define(...)`, or `AdminDefault: true`); the `Admin` role receives a
-  flagged code when the seeder first inserts it. `SuperAdmin` holds every permission that is not deprecated. Other roles get grants
-  through the role administration at run time, which no file records.
+  `Define(...)`, or `AdminDefault: true`); the `Admin` role receives a flagged code when the seeder first inserts it. `SuperAdmin`
+  holds every permission that is not deprecated. Other roles get grants through the role administration at run time, which no file
+  records.
 - `errors.md`: the resource key equals the code. A module's text is in its `Resources/<Module>ErrorMessages.resx`; building-block
   codes are in `src/BuildingBlocks/TemplateName.Web.Common/Resources/CommonErrorMessages.resx` or
   `src/BuildingBlocks/TemplateName.Infrastructure.Common/Resources/InfrastructureErrorMessages.resx`. The second table lists
@@ -89,27 +89,28 @@ lists of names).
 ## Pitfalls
 
 - Generated files are not edited; fix the source and regenerate. `bash build/scripts/project-index.sh --check` verifies.
-- Switch markers are comments in the all-on tree: the repository is the all-on tree; markers wrap only on-only regions, never an
-  `#else`. A sentence naming a removable part sits on its own marked line. After changing a marked region, run
-  `bash build/scripts/template-smoke.sh` with each switch off (`--notifications false`, `--includeSample false`, `--caching memory`).
-- `docs/README.md`, the module document sections and the ADR tables (`docs/README.md`, `docs/architecture/overview.md`) are enforced
-  by `tests/TemplateName.ArchitectureTests/DocumentationTests.cs`; every route is enforced in the module docs by
-  `tests/TemplateName.IntegrationTests/Documentation/EndpointDocumentationTests.cs`.
+- The repository is the all-on tree: switch markers are comments that wrap only on-only regions, never an `#else`. A sentence
+  naming a removable part sits on its own marked line. After changing a marked region, run `bash build/scripts/template-smoke.sh`
+  with each switch off (`--notifications false`, `--includeSample false`, `--caching memory`).
+- The document index in `docs/README.md`, the module document sections and the ADR tables (in `docs/README.md` and
+  `docs/architecture/overview.md`) are enforced by `tests/TemplateName.ArchitectureTests/DocumentationTests.cs`; that every route
+  is in its module document, by `tests/TemplateName.IntegrationTests/Documentation/EndpointDocumentationTests.cs`.
 - The generator fails (exit 2, naming the file) on a shape it cannot read, never emitting a short table. Known unsupported shapes:
-  - group-level authorization: a `MapGroup(...)` statement carrying `RequirePermission`, `AllowAnonymous` or `RequireAuthorization`
-    fails, even when every route has its own call, and so does a route without one (put the call on each route); a lambda policy
+  - group-level authorization: `RequirePermission`, `AllowAnonymous` or `RequireAuthorization` on a `MapGroup(...)` statement, on a
+    group in a statement of its own (`group.RequireAuthorization();`) or on the result of a `Map...Endpoints` call fails, even when
+    every route has its own call, and so does a route without one (put the call on each route); a lambda policy
     (`RequireAuthorization(p => ...)`) fails too;
   - a `Map...Endpoints` extension that is called but declared outside the files read (`Endpoints/**/<X>Endpoints.cs`, `<Name>Module.cs`,
-    `Program.cs`), or a `Map...` extension in an `Endpoints/` file not named `<X>Endpoints.cs`;
+    `Program.cs`), a `Map...` extension in an `Endpoints/` file not named `<X>Endpoints.cs`, and a route (`MapGet`, `MapPost` and
+    the like) mapped in any other file of a module, whatever its extension is called;
+  - routes mapped through a helper method, a local function or a lambda that takes the group as a parameter (map them in the
+    `Map<X>Endpoints` extension itself); a group in `Program.cs` whose prefix is not a string literal;
   - generic wrapper chains around `AddOutbox<>` or `AddInbox<>`;
   - an event published as `PublishAsync(new(...))` (target-typed), with an object initializer, or through a variable;
   - an event handler reached through a base class or a derived interface (name the concrete handler);
   - a `SectionName` that is not a plain `const string` literal;
-  - a permission or error code that is not a plain string literal or a `const string`.
-- NOT detected (silent, wrong rows): a route-mapping helper method without an access modifier in an endpoints file is read in the
-  scope of the extension above it and can get a wrong route prefix; declare helpers `private static`: the generator then fails
-  with exit 2 instead of emitting a wrong prefix.
-- NOT detected (silent, missing or incomplete rows): group authorization set in a separate statement after the group is created
-  (`g.RequireAuthorization(...)` or `g.RequirePermission(...)` on the group variable) when every route also has its own call: the
-  permission column then omits the group's requirement; a route-mapping extension that is NOT named `Map...Endpoints` and is called
-  from a `<Name>Module.cs` or `Program.cs` file is ignored, so its routes are missing from `routes.md` (name extensions `Map<X>Endpoints`).
+  - a permission or error code that is not a plain string literal or a `const string`; a permission definition whose first argument
+    is not `<Module>Permissions.<Name>` (an unqualified constant under `using static`, an alias).
+- NOT detected (silent, incomplete rows): authorization that reaches a route in any other way than those three calls (a custom
+  extension that wraps them, an `[Authorize]` attribute on the handler method) is not in the permission column; a handler method
+  whose declaration does not start its line with a modifier shows `-` as its handler type.
