@@ -264,18 +264,19 @@ find_python() {
   return 1
 }
 
-# The release-candidate keys and the release-as line belong to this repository only: the root release-please config minus those four
-# lines is the copy a generated project receives (build/template-content replaces the root file in the generated output).
+# The release-candidate keys belong to this repository only: the root release-please config minus those three lines is the copy a
+# generated project receives (build/template-content replaces the root file in the generated output). A "release-as" line is not in
+# the list, so one left in the root config fails the comparison below: it forces one version and must not stay after that release.
 root_config="$repo_root/release-please-config.json"
 content_config="$repo_root/build/template-content/release-please-config.json"
 if [[ ! -f "$content_config" ]]; then
   fail "$content_config does not exist"
 else
-  for key in versioning prerelease prerelease-type release-as; do
+  for key in versioning prerelease prerelease-type; do
     grep -qE "^[[:space:]]*\"$key\"" "$root_config" || fail "release-please-config.json does not contain the \"$key\" key"
     ! grep -qE "^[[:space:]]*\"$key\"" "$content_config" || fail "build/template-content/release-please-config.json contains the \"$key\" key"
   done
-  grep -vE '^[[:space:]]*"(versioning|prerelease|prerelease-type|release-as)"' "$root_config" > "$tmp/config-without-rc.json" || true
+  grep -vE '^[[:space:]]*"(versioning|prerelease|prerelease-type)"' "$root_config" > "$tmp/config-without-rc.json" || true
   cmp -s "$tmp/config-without-rc.json" "$content_config" ||
     fail "release-please-config.json without its release-candidate lines differs from build/template-content/release-please-config.json"
   if ! python_cmd="$(find_python ${PYTHON_CANDIDATES:-python3 python})"; then
