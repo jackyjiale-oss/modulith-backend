@@ -888,6 +888,309 @@ A|GET|/api/v1/a/{code:length(3,8)}|GetQuery|Admin|src/Modules/A/A/Endpoints/AEnd
     "routes_shapes: policy names (one, two, a constant) and commas inside the route"
 }
 
+# The scope of an extension ends with its body: a method below it, with or without an access modifier, is never read as part of it.
+case_routes_scopes() {
+  local a='src/Modules/A/A/Endpoints/AEndpoints.cs'
+  # A helper without an access modifier, called with a nested group, must not take the prefix of the extension's own `group`.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("x", GetAsync).RequireAuthorization();
+        var mfa = group.MapGroup("mfa");
+        MapMfa(mfa);
+        return app;
+    }
+
+    static void MapMfa(RouteGroupBuilder group)
+    {
+        group.MapPost("verify", VerifyAsync).RequireAuthorization();
+    }
+}'
+  routes_fails "routes_scopes: helper without an access modifier" "cannot resolve the group prefix of group in $a"
+  # The same when the declaration starts with an attribute and its signature is split: no line of it looks like a method.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("x", GetAsync).RequireAuthorization();
+        var mfa = group.MapGroup("mfa");
+        MapMfa(mfa);
+        return app;
+    }
+
+    [SuppressMessage("Design", "CA1062")] static void MapMfa(
+        RouteGroupBuilder group)
+    {
+        group.MapPost("verify", VerifyAsync).RequireAuthorization();
+    }
+}'
+  routes_fails "routes_scopes: helper behind an attribute, split signature" "cannot resolve the group prefix of group in $a"
+  # An expression-bodied extension ends at its semicolon.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+        => app.MapChildEndpoints();
+
+    [Obsolete] static void More(IEndpointRouteBuilder app)
+    {
+        app.MapGet("y", YAsync).AllowAnonymous();
+    }
+}'
+  put src/Modules/A/A/Endpoints/ChildEndpoints.cs 'internal static class ChildEndpoints
+{
+    internal static IEndpointRouteBuilder MapChildEndpoints(this IEndpointRouteBuilder a)
+    {
+        a.MapGet("child", GetAsync).AllowAnonymous();
+        return a;
+    }
+}'
+  routes_fails "routes_scopes: helper below an expression-bodied extension" "cannot resolve the group prefix of app in $a"
+  # A local function whose parameter hides the group of the extension: its routes have the prefix of its argument, which is not read.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        var mfa = group.MapGroup("mfa");
+        Add(mfa);
+        return app;
+
+        void Add(RouteGroupBuilder group)
+        {
+            group.MapPost("verify", VerifyAsync).RequireAuthorization();
+        }
+    }
+}'
+  routes_fails "routes_scopes: local function with a group parameter" "cannot resolve the group prefix of group in $a"
+  # A helper in a module file that calls an endpoints extension on its own parameter.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("x", GetAsync).RequireAuthorization();
+        return app;
+    }
+}'
+  put src/Host/H/Program.cs $'var api = app.MapGroup("/api/v1");\napi.MapAModuleEndpoints();'
+  put src/Modules/A/A/AModule.cs 'public static class AModule
+{
+    public static IEndpointRouteBuilder MapAModuleEndpoints(this IEndpointRouteBuilder app)
+    {
+        MapAll(app.MapGroup("inner"));
+        return app;
+    }
+
+    static void MapAll(IEndpointRouteBuilder app)
+    {
+        app.MapAEndpoints();
+    }
+}'
+  routes_fails "routes_scopes: helper without an access modifier in a module file" "cannot resolve the group prefix of app in $a"
+  # A local function of Program.cs is not the top level of the host: its parameter is not the root.
+  put src/Modules/A/A/AModule.cs 'public static class AModule { }'
+  put src/Host/H/Program.cs 'var app = builder.Build();
+MapModules(app.MapGroup("/api/v1"));
+app.Run();
+
+static void MapModules(RouteGroupBuilder api)
+{
+    api.MapAEndpoints();
+}'
+  routes_fails "routes_scopes: local function in Program.cs" "cannot resolve the group prefix of app in $a"
+}
+
+# Shapes the scope rules must keep reading: an extension whose `=>` is on the next line, a local function without routes in the middle
+# of an extension (the routes after it still belong to the extension), a handler method without an access modifier (its handler type
+# belongs to it, not to the method above), a record and a nested class beside the endpoints class.
+case_routes_scopes_ok() {
+  routes_one_module 'internal sealed record Paging(int Size);
+
+internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("keys", GetKeys).AllowAnonymous();
+
+        static string Tag(string name) { return "a-" + name; }
+
+        group.MapGet("list", ListAsync).RequireAuthorization();
+        group.MapGet("/{id}", GetAsync).RequireAuthorization();
+        return app;
+    }
+
+    private static IResult GetKeys(IKeyProvider keys) => TypedResults.Ok();
+
+    static async Task<IResult> ListAsync(
+        IQueryHandler<ListQuery, Item> handler)
+    {
+        var braces = "}{";
+        return TypedResults.Ok();
+    }
+
+    private sealed class Marker(string name)
+    {
+        public string Name { get; } = name;
+    }
+}'
+  put src/Host/H/Program.cs $'var api = app.MapGroup("/api/v1");
+api.MapAModuleEndpoints();'
+  put src/Modules/A/A/AModule.cs 'public static class AModule
+{
+    public static IEndpointRouteBuilder MapAModuleEndpoints(this IEndpointRouteBuilder app)
+        => app.MapAEndpoints();
+
+    static void Unrelated(IServiceCollection services) { }
+}'
+  routes_of_tree
+  assert_eq "0" "$status" "routes_scopes_ok: exit code (output: $combined)"
+  assert_eq 'A|GET|/api/v1/a/keys|-|anonymous|src/Modules/A/A/Endpoints/AEndpoints.cs
+A|GET|/api/v1/a/list|ListQuery|authenticated|src/Modules/A/A/Endpoints/AEndpoints.cs
+A|GET|/api/v1/a/{id}|-|authenticated|src/Modules/A/A/Endpoints/AEndpoints.cs' "$combined" \
+    "routes_scopes_ok: prefixes and handlers (next-line =>, local function, handler without an access modifier)"
+}
+
+# Authorization set on a group in a statement of its own is refused like the chained form: the permission column would omit it.
+case_routes_group_auth() {
+  local a='src/Modules/A/A/Endpoints/AEndpoints.cs'
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.RequirePermission(APermissions.View);
+        group.MapGet("/", ListAsync).RequireAuthorization();
+        return app;
+    }
+}'
+  routes_fails "routes_group_auth: a statement on the group variable" "group-level authorization is not read in $a"
+  # The same over several lines, after the routes.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("/", ListAsync).RequirePermission(APermissions.View);
+        group
+            .WithTags("A")
+            .RequireAuthorization("Admin");
+        return app;
+    }
+}'
+  routes_fails "routes_group_auth: a chain on the group variable over several lines" "group-level authorization is not read in $a"
+  # On the result of an endpoints extension, which returns the group it was given.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("/", ListAsync).RequireAuthorization();
+        group.MapChildEndpoints().RequirePermission(APermissions.View);
+        return app;
+    }
+}'
+  put src/Modules/A/A/Endpoints/ChildEndpoints.cs 'internal static class ChildEndpoints
+{
+    internal static RouteGroupBuilder MapChildEndpoints(this RouteGroupBuilder a)
+    {
+        a.MapGet("child", GetAsync).AllowAnonymous();
+        return a;
+    }
+}'
+  routes_fails "routes_group_auth: on the result of an endpoints extension" "group-level authorization is not read in $a"
+  # On the group of the host, in Program.cs.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("x", GetAsync).RequirePermission(APermissions.View);
+        return app;
+    }
+}' 'api.RequireAuthorization();'
+  routes_fails "routes_group_auth: on the group of the host" "group-level authorization is not read in src/Host/H/Program.cs"
+  # Not a group: a hub mapped in Program.cs may carry its authorization in a statement of its own, and a comment is no statement.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        // group.RequireAuthorization() is not written here.
+        app.MapGet("x", GetAsync).RequirePermission(APermissions.View);
+        return app;
+    }
+}' $'var hub = app.MapHub<AHub>("/hubs/a");\nhub.RequireAuthorization();'
+  routes_of_tree
+  assert_eq "0" "$status" "routes_group_auth: a hub statement in Program.cs: exit code (output: $combined)"
+  assert_eq "A|GET|/api/v1/x|-|APermissions.View|$a" "$combined" "routes_group_auth: a hub statement in Program.cs: the row"
+}
+
+# A route mapped in a module file the parser does not read would be missing from the shard, whatever its extension is called.
+case_routes_elsewhere() {
+  local endpoints='internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("x", GetAsync).RequireAuthorization();
+        return app;
+    }
+}'
+  # An extension not named Map...Endpoints, declared outside Endpoints/ and called from the module file.
+  routes_one_module "$endpoints" 'api.UseARoutes();'
+  put src/Modules/A/A/AModule.cs 'public static class AModule
+{
+    public static IEndpointRouteBuilder UseARoutes(this IEndpointRouteBuilder app)
+    {
+        app.MapARoutes();
+        return app;
+    }
+}'
+  put src/Modules/A/A/Infrastructure/ARouting.cs 'internal static class ARouting
+{
+    internal static IEndpointRouteBuilder MapARoutes(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("hidden", HiddenAsync).RequireAuthorization();
+        return app;
+    }
+}'
+  routes_fails "routes_elsewhere: an extension outside Endpoints/" \
+    "src/Modules/A/A/Infrastructure/ARouting.cs maps a route (.MapGet at line 5) outside an endpoints file"
+  # A route mapped in the module file itself.
+  routes_one_module "$endpoints" 'api.UseARoutes();'
+  put src/Modules/A/A/AModule.cs 'public static class AModule
+{
+    public static IEndpointRouteBuilder UseARoutes(this IEndpointRouteBuilder app)
+    {
+        app.MapPost(
+            "hidden", HiddenAsync).RequireAuthorization();
+        return app;
+    }
+}'
+  routes_fails "routes_elsewhere: a route in the module file" \
+    "src/Modules/A/A/AModule.cs maps a route (.MapPost at line 5) outside an endpoints file"
+  # A method that is no extension, in a file of the Endpoints folder not named *Endpoints.cs.
+  routes_one_module "$endpoints"
+  put src/Modules/A/A/Endpoints/Extra.cs 'internal static class Extra
+{
+    internal static void Add(RouteGroupBuilder group) => group.MapMethods("y", ["HEAD"], HeadAsync);
+}'
+  routes_fails "routes_elsewhere: a helper in the Endpoints folder" \
+    "src/Modules/A/A/Endpoints/Extra.cs maps a route (.MapMethods at line 3) outside an endpoints file"
+  # A comment, a string and a block comment that only mention a mapping are not routes; the host may map routes of its own.
+  routes_one_module "$endpoints" 'app.MapGet("/", () => "ok");'
+  put src/Modules/A/A/Infrastructure/Notes.cs 'internal static class Notes
+{
+    // group.MapGet("a", Nothing) is how a route is mapped.
+    /* and so is
+       group.MapPut("b", Nothing) */
+    internal const string Hint = "call app.MapDelete(\"c\", Nothing)";
+}'
+  routes_of_tree
+  assert_eq "0" "$status" "routes_elsewhere: mentions only: exit code (output: $combined)"
+  assert_eq "A|GET|/api/v1/x|-|authenticated|src/Modules/A/A/Endpoints/AEndpoints.cs" "$combined" "routes_elsewhere: mentions only: the row"
+}
+
 # emit_of_tree <emit function...>: runs the emit functions of the sourced script on the current tree, one after the other (no full
 # generator run); sets status and combined (the rows of each, sorted, each block followed by a "--" line, or the error output).
 emit_of_tree() {
@@ -2176,6 +2479,7 @@ all_cases="case_usage_errors case_markers_shard case_markers_kinds_and_expressio
   case_determinism case_untracked_ignored case_untracked_warning case_git_file_marker case_find_excludes_build_dirs
   case_check_stale case_check_missing_and_unknown case_map_rules case_need_rows
   case_routes case_routes_zero case_routes_module_absent case_routes_loud case_routes_shapes
+  case_routes_scopes case_routes_scopes_ok case_routes_group_auth case_routes_elsewhere
   case_permissions case_permissions_loud case_permissions_shapes case_errors case_errors_zero case_errors_loud
   case_events case_events_zero case_events_loud case_jobs case_jobs_zero case_jobs_loud
   case_config case_config_loud case_tests_folders case_tests_pairs case_tests_loud case_unknown_case_name case_real_tree"

@@ -154,7 +154,8 @@ shard_meta() {
 #   M  src/Modules/<Module>/<Project>/*Module.cs                    module extensions that call the endpoint extensions
 #   P  src/Host/<Project>/Program.cs                                the host: `var api = app.MapGroup("/api/v1"); api.MapXEndpoints();`
 # Pass 1 (scan_file) reads each file line by line (CR and // comments removed) and records, per scope (a file and the Map...Endpoints
-# extension being read, any other method, or the top level of the file): `var X = Y.MapGroup("p")` (group X under Y),
+# extension being read, any other method, or the top level of the file; a scope ends with its body, see "Scopes" below):
+# `var X = Y.MapGroup("p")` (group X under Y),
 # `X.MapFooEndpoints()` calls (Foo takes the prefix of X in the caller's scope), `MapFooEndpoints(this T P)` declarations (P is the
 # caller's group), `const string N = "v"`, the first generic argument of the ICommandHandler<...> or IQueryHandler<...> parameter of
 # each method, and each statement (from a line with `.Map` to the line with `;`) holding `X.Map(Get|Post|Put|Patch|Delete)(route,
@@ -163,11 +164,16 @@ shard_meta() {
 # root, where `app` lives) and prints module|METHOD|route|handler|permission|file.
 # Errors (exit 3, the message in errfile), so that no shape gives a wrong row: an endpoint file with MapGroup or a Map...Endpoints call
 # but zero routes; any other .MapX call in an endpoint file; an extension called from two places or declared in two files; a prefix that
-# cannot be resolved (an extension not named Map...Endpoints or not on one line, a helper method); a route with no authorization call of
-# its own; a MapGroup statement carrying RequireAuthorization, RequirePermission or AllowAnonymous (group-level authorization is not
-# read); an authorization argument that is not a constant or a policy name (a lambda policy); a Map...Endpoints extension called but
-# declared in no file read here; another .cs file under an Endpoints folder that declares a Map... extension on RouteGroupBuilder or
-# IEndpointRouteBuilder (not named *Endpoints.cs, so not read); a file that cannot be read.
+# cannot be resolved (an extension not named Map...Endpoints or not on one line; a helper method, a local function or a lambda with a
+# route-builder parameter, with or without an access modifier; a local function of Program.cs); a route with no authorization call of
+# its own; group-level authorization, which is not read: a MapGroup statement carrying RequireAuthorization, RequirePermission or
+# AllowAnonymous, such a call in a statement of its own (anywhere in an endpoints file; on a group variable or on the parameter of the
+# extension in a module file or Program.cs) or on the result of a Map...Endpoints call; an authorization argument that is not a
+# constant or a policy name (a lambda policy); a Map...Endpoints extension called but declared in no file read here; another .cs file
+# under an Endpoints folder that declares a Map... extension on RouteGroupBuilder or IEndpointRouteBuilder (not named *Endpoints.cs,
+# so not read); any .cs file of a module other than an endpoints file that maps a route (.MapGet, .MapPost, .MapPut, .MapPatch,
+# .MapDelete, .MapMethods), whatever its extension is called; a file that cannot be read.
+# The program runs with cs_awk_lib in front of it (emit_routes), which gives cs_read, line_at and fail.
 # shellcheck disable=SC2016
 routes_awk='
 function strip_comment(s,   k, c, n, inq) {
@@ -225,6 +231,9 @@ function process(i, sc, stmt,   rest, before, after, tok, name, recv, x, arg, me
       } else if (fkind[i] == "E") unknown(i, ".MapGroup without `var X = Y.MapGroup(\"literal\")`")
     } else if (name ~ /Endpoints$/ && substr(tok, length(tok)) == "(") {
       if (recv == "") { if (fkind[i] == "E") unknown(i, ".Map" name " without a receiver"); continue }
+      # An authorization call chained on the extension call lands on the group the extension returns.
+      if (after ~ /(RequireAuthorization|RequirePermission|AllowAnonymous)[ \t]*[(<]/ && after !~ /\.Map(Get|Post|Put|Patch|Delete)[ \t]*\(/)
+        fail("routes: group-level authorization is not read in " fname[i] " (an authorization call on the result of Map" name "): put the authorization call on each route")
       if (fkind[i] == "E") groups[i]++
       if (!(("Map" name) in caller_var)) { caller_scope["Map" name] = sc; caller_var["Map" name] = recv }
       else if (caller_scope["Map" name] != sc || caller_var["Map" name] != recv) fail("routes: extension Map" name " called from two places in " fname[i])
@@ -254,39 +263,87 @@ function process(i, sc, stmt,   rest, before, after, tok, name, recv, x, arg, me
     } else if (fkind[i] == "E") unknown(i, ".Map" name)
   }
 }
-function scan_file(i,   f, line, sc, stmt, m, decl, nm, prm, rc) {
-  f = fname[i]; sc = i SUBSEP ""; scope_ext[sc] = ""; scope_file[sc] = i; stmt = ""; curm = ""; lineno = 0
+# Scopes. A scope is the top level of a file (level 0), a Map...Endpoints extension, any other method, or an anonymous one opened by a
+# route-builder parameter. The open scopes form a stack (sp; lv_sc the scope, lv_m its method name, lv_d the brace depth at its
+# declaration, lv_b its body: 0 not yet seen, 1 a block, 2 an expression after "=>"); sc and curm are those of the innermost one. A scope
+# ends with its body, so that a method below an extension is never read as part of it, whatever its declaration looks like.
+function push_scope(s, m) {
+  sp++; lv_sc[sp] = s; lv_m[sp] = m; lv_d[sp] = bd; lv_b[sp] = 0
+  sc = s; curm = m; scope_ext[s] = ""; scope_file[s] = cur
+}
+function scope_end() {
+  if (stmt != "") { process(cur, sc, stmt); stmt = "" }
+  sp--; sc = lv_sc[sp]; curm = lv_m[sp]
+}
+# brace_scan: follows the braces of one line (string and char literals skipped). The innermost open scope ends at the brace that closes
+# its block, or, for an expression body or a declaration without a body, at the ";" at the depth of its declaration.
+function brace_scan(s,   k, n, c, inq, q) {
+  n = length(s); inq = 0
+  for (k = 1; k <= n; k++) {
+    c = substr(s, k, 1)
+    if (inq) { if (c == "\\") k++; else if (c == q) inq = 0; continue }
+    if (c == "\"" || c == SQ) { inq = 1; q = c; continue }
+    if (c == "{") { bd++; if (sp > 0 && lv_b[sp] == 0) lv_b[sp] = 1 }
+    else if (c == "}") { bd--; if (sp > 0 && lv_b[sp] == 1 && bd == lv_d[sp]) scope_end() }
+    else if (c == "=" && substr(s, k + 1, 1) == ">") { k++; if (sp > 0 && lv_b[sp] == 0) lv_b[sp] = 2 }
+    else if (c == ";" && sp > 0 && lv_b[sp] != 1 && bd == lv_d[sp]) scope_end()
+  }
+}
+# group_auth: an authorization call outside a route statement, in a statement that starts with the line head. In an endpoints file it
+# can only be on a group; in a module file or Program.cs it is refused when the statement starts with a group variable or with the
+# parameter of the extension (a hub or a health check may carry its own).
+function group_auth(i,   recv) {
+  recv = ""
+  if (match(head, /^[ \t]*[A-Za-z_][A-Za-z0-9_]*/)) { recv = substr(head, RSTART, RLENGTH); sub(/^[ \t]+/, "", recv) }
+  if (fkind[i] == "E" || ((sc SUBSEP recv) in gpar) || (scope_ext[sc] != "" && recv == ext_param[scope_ext[sc]]))
+    fail("routes: group-level authorization is not read in " fname[i] " (line " lineno ": an authorization call in a statement of its own, not on a route): put the authorization call on each route")
+}
+function scan_file(i,   f, line, full, m, decl, nm, prm, rc, isdecl) {
+  f = fname[i]; cur = i; sp = 0; bd = 0; stmt = ""; head = ""; lineno = 0
+  sc = i SUBSEP ""; curm = ""; lv_sc[0] = sc; lv_m[0] = ""; scope_ext[sc] = ""; scope_file[sc] = i
   while ((rc = (getline line < f)) > 0) {
     lineno++
     sub(/\r$/, "", line)
     line = strip_comment(line)
     if (line ~ /^[ \t]*$/) continue
+    full = line; isdecl = 0
     if (match(line, /const[ \t]+string[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*"[^"]*"/)) {
       m = substr(line, RSTART, RLENGTH); sub(/^const[ \t]+string[ \t]+/, "", m)
       nm = m; sub(/[ \t]*=.*$/, "", nm); sub(/^[^"]*"/, "", m); sub(/"$/, "", m)
       konst[i, nm] = m
     }
-    if (match(line, /^[ \t]*(public|private|internal|protected)[^=;(]*[ \t][A-Za-z_][A-Za-z0-9_]*[ \t]*\(/)) {
-      m = substr(line, RSTART, RLENGTH); sub(/[ \t]*\($/, "", m); sub(/^.*[ \t]/, "", m)
-      curm = m
-      # A method starts a scope of its own: a helper is not part of the extension above it (the extension branch below overrides it).
-      sc = i SUBSEP "m:" m; scope_ext[sc] = ""; scope_file[sc] = i
+    # A method declaration: a line that starts (after attributes) with a modifier and has a name before its first parenthesis. With an
+    # access modifier it is a member of a class, so every open scope is over; without one it may be a local function.
+    if (match(line, /^[ \t]*(\[[^]]*\][ \t]*)*(public|private|internal|protected|static|async|unsafe|extern|partial)([ \t][^=;(]*)?[ \t][A-Za-z_][A-Za-z0-9_]*[ \t]*\(/)) {
+      m = substr(line, RSTART, RLENGTH)
+      if (m ~ /(^|[^A-Za-z0-9_])(public|private|internal|protected)[ \t]/) sp = 0
+      sub(/[ \t]*\($/, "", m); sub(/^.*[ \t]/, "", m)
+      push_scope(i SUBSEP "m:" m, m); isdecl = 1
     }
     if (curm != "" && !((i, curm) in handler) && match(line, /I(Command|Query)Handler</)) handler[i, curm] = first_generic(substr(line, RSTART + RLENGTH))
     if (match(line, /Map[A-Za-z0-9_]*Endpoints[ \t]*\([ \t]*this[ \t]+[A-Za-z0-9_.<>]+[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\)/)) {
       decl = substr(line, RSTART, RLENGTH); line = substr(line, RSTART + RLENGTH)
       nm = decl; sub(/[ \t]*\(.*$/, "", nm)
       prm = decl; sub(/[ \t]*\)$/, "", prm); sub(/^.*[ \t]/, "", prm)
-      sc = i SUBSEP nm; scope_ext[sc] = nm; scope_file[sc] = i
+      sp = 0; push_scope(i SUBSEP nm, nm); scope_ext[sc] = nm; isdecl = 1
       if (!(nm in ext_param)) { ext_param[nm] = prm; ext_file[nm] = i }
       else if (ext_file[nm] != i) fail("routes: extension " nm " declared twice: " fname[ext_file[nm]] ", " fname[i])
     }
-    if (stmt == "" && line !~ /\.Map[A-Za-z0-9_]*[(<]/) continue
-    stmt = (stmt == "" ? line : stmt " " line)
-    if (index(line, ";") > 0) { process(i, sc, stmt); stmt = "" }
+    # A route-builder parameter outside the signature of the scope being declared belongs to a declaration the rule above did not see
+    # (a local function, a lambda, a method without a modifier): a scope of its own, whose receiver is not the group of the same name.
+    if (!isdecl && (sp == 0 || lv_b[sp] != 0) && line ~ /(^|[^A-Za-z0-9_])(RouteGroupBuilder|IEndpointRouteBuilder|WebApplication)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*[,)]/)
+      push_scope(i SUBSEP "p:" lineno, "")
+    if (stmt == "" && line !~ /\.Map[A-Za-z0-9_]*[(<]/) {
+      if (line !~ /^[ \t]*\./) head = line
+      if (line ~ /(^|[^A-Za-z0-9_])(RequireAuthorization|RequirePermission|AllowAnonymous)[ \t]*[(<]/) group_auth(i)
+    } else {
+      stmt = (stmt == "" ? line : stmt " " line)
+      if (index(line, ";") > 0) { process(i, sc, stmt); stmt = "" }
+    }
+    brace_scan(full)
   }
   if (rc < 0) fail("routes: cannot read " f)
-  if (stmt != "") process(i, sc, stmt)
+  if (stmt != "") { process(i, sc, stmt); stmt = "" }
   close(f)
 }
 # prefix: the route prefix of variable v in scope sc, or the error marker "\001".
@@ -296,11 +353,24 @@ function prefix(sc, v, depth,   key, ext, pp) {
   if (key in gpar) { pp = prefix(sc, gpar[key], depth + 1); return (pp == "\001" ? pp : join(pp, gpath[key])) }
   ext = scope_ext[sc]
   # Only the top level of the host (Program.cs, where `app` lives) is the root; any other scope without an extension is unknown.
-  if (ext == "") return (fkind[scope_file[sc]] == "P" ? "" : "\001")
+  if (ext == "") return (fkind[scope_file[sc]] == "P" && sc == scope_file[sc] SUBSEP "" ? "" : "\001")
   if (v == ext_param[ext] && (ext in caller_var)) return prefix(caller_scope[ext], caller_var[ext], depth + 1)
   return "\001"
 }
-function fail(msg) { print msg > errfile; failed = 1; exit 3 }
+# check_elsewhere: a .cs file of a module that is not an endpoints file must not map a route (it would be missing from the shard): a
+# .MapGet, .MapPost, .MapPut, .MapPatch, .MapDelete or .MapMethods call in its code (cs_read: not in a comment or a string).
+function check_elsewhere(f,   line, rc, hit, pos, t) {
+  hit = 0
+  while ((rc = (getline line < f)) > 0) if (line ~ /\.Map(Get|Post|Put|Patch|Delete|Methods)[ \t]*[(<]/) { hit = 1; break }
+  if (rc < 0) fail("routes: cannot read " f)
+  close(f)
+  if (!hit) return
+  if (cs_read(f) < 0) fail("routes: cannot read " f)
+  if (match(MASK, /\.Map(Get|Post|Put|Patch|Delete|Methods)[ \t\n]*[(<]/)) {
+    pos = RSTART; t = substr(MASK, RSTART, RLENGTH); sub(/[ \t\n]*[(<]$/, "", t)
+    fail("routes: " f " maps a route (" t " at line " line_at(pos) ") outside an endpoints file (src/Modules/*/*/Endpoints/**/*Endpoints.cs), so the route would be missing from the shard: move the mapping into Endpoints/<X>Endpoints.cs")
+  }
+}
 # check_other: a .cs file under an Endpoints folder that is not named *Endpoints.cs must not declare a route-mapping extension (its
 # routes would be skipped): a `Map...(this RouteGroupBuilder|IEndpointRouteBuilder ...)` signature, on one line or split after `(`.
 function check_other(f,   line, prev, rc) {
@@ -327,9 +397,11 @@ function check_other(f,   line, prev, rc) {
   else if (n == 5 && seg[1] == "src" && seg[2] == "Modules" && seg[5] ~ /.Module\.cs$/) kind = "M"
   else if (n == 4 && seg[1] == "src" && seg[2] == "Host" && seg[4] == "Program.cs") kind = "P"
   if (kind != "") { nf++; fname[nf] = $0; fkind[nf] = kind; fmod[nf] = seg[3] }
+  if (kind != "E" && kind != "P" && n >= 5 && seg[1] == "src" && seg[2] == "Modules" && seg[n] ~ /\.cs$/) { nelse++; ename[nelse] = $0 }
 }
 END {
   if (failed) exit 3
+  SQ = sprintf("%c", 39)
   for (i = 1; i <= nother; i++) check_other(oname[i])
   for (i = 1; i <= nf; i++) scan_file(i)
   for (i = 1; i <= nf; i++) {
@@ -358,13 +430,14 @@ END {
   # nobody listed.
   for (nm in caller_var) if (!(nm in ext_param))
     fail("routes: extension " nm " is called in " fname[scope_file[caller_scope[nm]]] " but declared in no file the parser reads (src/Modules/*/*/Endpoints/**/*Endpoints.cs, src/Modules/*/*/*Module.cs, src/Host/*/Program.cs, signature on one line)")
+  for (i = 1; i <= nelse; i++) check_elsewhere(ename[i])
 }'
 
 # emit_routes: the routes shard (see routes_awk); one awk process for the whole tree.
 emit_routes() {
   local rows_file="$work/routes.awk.out" err_file="$work/routes.awk.err" status=0 msg="" lines=()
   : > "$err_file"
-  awk -v errfile="$err_file" "$routes_awk" < "$files_cache" > "$rows_file" || status=$?
+  awk -v errfile="$err_file" "$cs_awk_lib$routes_awk" < "$files_cache" > "$rows_file" || status=$?
   if (( status != 0 )); then
     [[ -s "$err_file" ]] && read -r msg < "$err_file"
     fail_parse "${msg:-routes: awk failed (exit $status)}"
