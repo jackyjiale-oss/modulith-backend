@@ -154,7 +154,8 @@ shard_meta() {
 #   M  src/Modules/<Module>/<Project>/*Module.cs                    module extensions that call the endpoint extensions
 #   P  src/Host/<Project>/Program.cs                                the host: `var api = app.MapGroup("/api/v1"); api.MapXEndpoints();`
 # Pass 1 (scan_file) reads each file line by line (CR and // comments removed) and records, per scope (a file and the Map...Endpoints
-# extension being read, any other method, or the top level of the file): `var X = Y.MapGroup("p")` (group X under Y),
+# extension being read, any other method, or the top level of the file; a scope ends with its body, see "Scopes" below):
+# `var X = Y.MapGroup("p")` (group X under Y),
 # `X.MapFooEndpoints()` calls (Foo takes the prefix of X in the caller's scope), `MapFooEndpoints(this T P)` declarations (P is the
 # caller's group), `const string N = "v"`, the first generic argument of the ICommandHandler<...> or IQueryHandler<...> parameter of
 # each method, and each statement (from a line with `.Map` to the line with `;`) holding `X.Map(Get|Post|Put|Patch|Delete)(route,
@@ -163,11 +164,17 @@ shard_meta() {
 # root, where `app` lives) and prints module|METHOD|route|handler|permission|file.
 # Errors (exit 3, the message in errfile), so that no shape gives a wrong row: an endpoint file with MapGroup or a Map...Endpoints call
 # but zero routes; any other .MapX call in an endpoint file; an extension called from two places or declared in two files; a prefix that
-# cannot be resolved (an extension not named Map...Endpoints or not on one line, a helper method); a route with no authorization call of
-# its own; a MapGroup statement carrying RequireAuthorization, RequirePermission or AllowAnonymous (group-level authorization is not
-# read); an authorization argument that is not a constant or a policy name (a lambda policy); a Map...Endpoints extension called but
-# declared in no file read here; another .cs file under an Endpoints folder that declares a Map... extension on RouteGroupBuilder or
-# IEndpointRouteBuilder (not named *Endpoints.cs, so not read); a file that cannot be read.
+# cannot be resolved (an extension not named Map...Endpoints or not on one line; a helper method, a local function or a lambda with a
+# route-builder parameter, with or without an access modifier; a lambda parameter named like a group of its scope; a local function
+# of Program.cs; a group of Program.cs or of a module file whose prefix is not a string literal); a route with no authorization call of
+# its own; group-level authorization, which is not read: a MapGroup statement carrying RequireAuthorization, RequirePermission or
+# AllowAnonymous, such a call in a statement of its own (anywhere in an endpoints file; on a group variable or on the parameter of the
+# extension in a module file or Program.cs) or on the result of a Map...Endpoints call; an authorization argument that is not a
+# constant or a policy name (a lambda policy); a Map...Endpoints extension called but declared in no file read here; another .cs file
+# under an Endpoints folder that declares a Map... extension on RouteGroupBuilder or IEndpointRouteBuilder (not named *Endpoints.cs,
+# so not read); any .cs file of a module other than an endpoints file that maps a route (.MapGet, .MapPost, .MapPut, .MapPatch,
+# .MapDelete, .MapMethods), whatever its extension is called; a file that cannot be read.
+# The program runs with cs_awk_lib in front of it (emit_routes), which gives cs_read, line_at and fail.
 # shellcheck disable=SC2016
 routes_awk='
 function strip_comment(s,   k, c, n, inq) {
@@ -223,8 +230,16 @@ function process(i, sc, stmt,   rest, before, after, tok, name, recv, x, arg, me
         gpar[key] = recv; gpath[key] = p
         if (fkind[i] == "E") groups[i]++
       } else if (fkind[i] == "E") unknown(i, ".MapGroup without `var X = Y.MapGroup(\"literal\")`")
+      else if (match(before, /[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*$/)) {
+        # In a module file or Program.cs: a group whose prefix cannot be read (not a literal) is no root; what hangs off it fails.
+        x = substr(before, RSTART, RLENGTH); sub(/[ \t]*=[ \t]*$/, "", x)
+        gbad[sc SUBSEP x] = 1
+      }
     } else if (name ~ /Endpoints$/ && substr(tok, length(tok)) == "(") {
       if (recv == "") { if (fkind[i] == "E") unknown(i, ".Map" name " without a receiver"); continue }
+      # An authorization call chained on the extension call lands on the group the extension returns.
+      if (after ~ /(RequireAuthorization|RequirePermission|AllowAnonymous)[ \t]*[(<]/ && after !~ /\.Map(Get|Post|Put|Patch|Delete)[ \t]*\(/)
+        fail("routes: group-level authorization is not read in " fname[i] " (an authorization call on the result of Map" name "): put the authorization call on each route")
       if (fkind[i] == "E") groups[i]++
       if (!(("Map" name) in caller_var)) { caller_scope["Map" name] = sc; caller_var["Map" name] = recv }
       else if (caller_scope["Map" name] != sc || caller_var["Map" name] != recv) fail("routes: extension Map" name " called from two places in " fname[i])
@@ -254,53 +269,131 @@ function process(i, sc, stmt,   rest, before, after, tok, name, recv, x, arg, me
     } else if (fkind[i] == "E") unknown(i, ".Map" name)
   }
 }
-function scan_file(i,   f, line, sc, stmt, m, decl, nm, prm, rc) {
-  f = fname[i]; sc = i SUBSEP ""; scope_ext[sc] = ""; scope_file[sc] = i; stmt = ""; curm = ""; lineno = 0
+# Scopes. A scope is the top level of a file (level 0), a Map...Endpoints extension, any other method, or an anonymous one opened by a
+# route-builder parameter or by a lambda parameter that hides a group. The open scopes form a stack (sp; lv_sc the scope, lv_m its method name, lv_d the brace depth at its
+# declaration, lv_b its body: 0 not yet seen, 1 a block, 2 an expression after "=>"); sc and curm are those of the innermost one. A scope
+# ends with its body, so that a method below an extension is never read as part of it, whatever its declaration looks like.
+function push_scope(s, m) {
+  sp++; lv_sc[sp] = s; lv_m[sp] = m; lv_d[sp] = bd; lv_b[sp] = 0
+  sc = s; curm = m; scope_ext[s] = ""; scope_file[s] = cur
+}
+function scope_end() {
+  if (stmt != "") { process(cur, sc, stmt); stmt = "" }
+  sp--; sc = lv_sc[sp]; curm = lv_m[sp]
+}
+# brace_scan: follows the braces of one line (string and char literals skipped). The innermost open scope ends at the brace that closes
+# its block, or, for an expression body or a declaration without a body, at the ";" at the depth of its declaration.
+function brace_scan(s,   k, n, c, inq, q) {
+  n = length(s); inq = 0
+  for (k = 1; k <= n; k++) {
+    c = substr(s, k, 1)
+    if (inq) { if (c == "\\") k++; else if (c == q) inq = 0; continue }
+    if (c == "\"" || c == SQ) { inq = 1; q = c; continue }
+    if (c == "{") { bd++; if (sp > 0 && lv_b[sp] == 0) lv_b[sp] = 1 }
+    else if (c == "}") { bd--; if (sp > 0 && lv_b[sp] == 1 && bd == lv_d[sp]) scope_end() }
+    else if (c == "=" && substr(s, k + 1, 1) == ">") { k++; if (sp > 0 && lv_b[sp] == 0) lv_b[sp] = 2 }
+    else if (c == ";" && sp > 0 && lv_b[sp] != 1 && bd == lv_d[sp]) scope_end()
+  }
+}
+# group_auth: an authorization call outside a route statement, in a statement that starts with the line head. In an endpoints file it
+# can only be on a group; in a module file or Program.cs it is refused when the statement starts with a group variable or with the
+# parameter of the extension (a hub or a health check may carry its own).
+function group_auth(i,   recv) {
+  recv = ""
+  if (match(head, /^[ \t]*[A-Za-z_][A-Za-z0-9_]*/)) { recv = substr(head, RSTART, RLENGTH); sub(/^[ \t]+/, "", recv) }
+  if (fkind[i] == "E" || ((sc SUBSEP recv) in gpar) || (scope_ext[sc] != "" && recv == ext_param[scope_ext[sc]]))
+    fail("routes: group-level authorization is not read in " fname[i] " (line " lineno ": an authorization call in a statement of its own, not on a route): put the authorization call on each route")
+}
+# lambda_hides: whether a lambda on the line (x => or (a, b) =>) has a parameter named like a group variable of the scope or like the
+# parameter of its extension: inside the lambda that name is another builder.
+function lambda_hides(s,   rest, t, n, a, k) {
+  rest = s
+  while (match(rest, /(\([^()]*\)|[A-Za-z_][A-Za-z0-9_]*)[ \t]*=>/)) {
+    t = substr(rest, RSTART, RLENGTH); rest = substr(rest, RSTART + RLENGTH)
+    sub(/[ \t]*=>$/, "", t); gsub(/[()]/, "", t)
+    n = split(t, a, ",")
+    for (k = 1; k <= n; k++) {
+      sub(/[ \t]+$/, "", a[k]); sub(/^.*[ \t]/, "", a[k])
+      if (a[k] != "" && (((sc SUBSEP a[k]) in gpar) || (scope_ext[sc] != "" && a[k] == ext_param[scope_ext[sc]]))) return 1
+    }
+  }
+  return 0
+}
+function scan_file(i,   f, line, full, m, decl, nm, prm, rc, isdecl) {
+  f = fname[i]; cur = i; sp = 0; bd = 0; stmt = ""; head = ""; lineno = 0
+  sc = i SUBSEP ""; curm = ""; lv_sc[0] = sc; lv_m[0] = ""; scope_ext[sc] = ""; scope_file[sc] = i
   while ((rc = (getline line < f)) > 0) {
     lineno++
     sub(/\r$/, "", line)
     line = strip_comment(line)
     if (line ~ /^[ \t]*$/) continue
+    full = line; isdecl = 0
     if (match(line, /const[ \t]+string[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*"[^"]*"/)) {
       m = substr(line, RSTART, RLENGTH); sub(/^const[ \t]+string[ \t]+/, "", m)
       nm = m; sub(/[ \t]*=.*$/, "", nm); sub(/^[^"]*"/, "", m); sub(/"$/, "", m)
       konst[i, nm] = m
     }
-    if (match(line, /^[ \t]*(public|private|internal|protected)[^=;(]*[ \t][A-Za-z_][A-Za-z0-9_]*[ \t]*\(/)) {
-      m = substr(line, RSTART, RLENGTH); sub(/[ \t]*\($/, "", m); sub(/^.*[ \t]/, "", m)
-      curm = m
-      # A method starts a scope of its own: a helper is not part of the extension above it (the extension branch below overrides it).
-      sc = i SUBSEP "m:" m; scope_ext[sc] = ""; scope_file[sc] = i
+    # A method declaration: a line that starts (after attributes) with a modifier and has a name before its first parenthesis. With an
+    # access modifier it is a member of a class, so every open scope is over; without one it may be a local function.
+    if (match(line, /^[ \t]*(\[[^[]*\][ \t]*)*(public|private|internal|protected|static|async|unsafe|extern|partial)([ \t][^=;(]*)?[ \t][A-Za-z_][A-Za-z0-9_]*[ \t]*\(/)) {
+      m = substr(line, RSTART, RLENGTH)
+      if (m ~ /(^|[^A-Za-z0-9_])(public|private|internal|protected)[ \t]/) sp = 0
+      sub(/[ \t]*\($/, "", m); sub(/^.*[ \t]/, "", m)
+      push_scope(i SUBSEP "m:" m, m); isdecl = 1
     }
     if (curm != "" && !((i, curm) in handler) && match(line, /I(Command|Query)Handler</)) handler[i, curm] = first_generic(substr(line, RSTART + RLENGTH))
     if (match(line, /Map[A-Za-z0-9_]*Endpoints[ \t]*\([ \t]*this[ \t]+[A-Za-z0-9_.<>]+[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\)/)) {
       decl = substr(line, RSTART, RLENGTH); line = substr(line, RSTART + RLENGTH)
       nm = decl; sub(/[ \t]*\(.*$/, "", nm)
       prm = decl; sub(/[ \t]*\)$/, "", prm); sub(/^.*[ \t]/, "", prm)
-      sc = i SUBSEP nm; scope_ext[sc] = nm; scope_file[sc] = i
+      sp = 0; push_scope(i SUBSEP nm, nm); scope_ext[sc] = nm; isdecl = 1
       if (!(nm in ext_param)) { ext_param[nm] = prm; ext_file[nm] = i }
       else if (ext_file[nm] != i) fail("routes: extension " nm " declared twice: " fname[ext_file[nm]] ", " fname[i])
     }
-    if (stmt == "" && line !~ /\.Map[A-Za-z0-9_]*[(<]/) continue
-    stmt = (stmt == "" ? line : stmt " " line)
-    if (index(line, ";") > 0) { process(i, sc, stmt); stmt = "" }
+    # A route-builder parameter outside the signature of the scope being declared belongs to a declaration the rule above did not see
+    # (a local function, a lambda, a method without a modifier): a scope of its own, whose receiver is not the group of the same name.
+    if (!isdecl && (sp == 0 || lv_b[sp] != 0) && line ~ /(^|[^A-Za-z0-9_])(RouteGroupBuilder|IEndpointRouteBuilder|WebApplication)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*[,)]/)
+      push_scope(i SUBSEP "p:" lineno, "")
+    else if (!isdecl && index(line, "=>") > 0 && lambda_hides(line)) push_scope(i SUBSEP "l:" lineno, "")
+    if (stmt == "" && line !~ /\.Map[A-Za-z0-9_]*[(<]/) {
+      if (line !~ /^[ \t]*\./) head = line
+      if (line ~ /(^|[^A-Za-z0-9_])(RequireAuthorization|RequirePermission|AllowAnonymous)[ \t]*[(<]/) group_auth(i)
+    } else {
+      stmt = (stmt == "" ? line : stmt " " line)
+      if (index(line, ";") > 0) { process(i, sc, stmt); stmt = "" }
+    }
+    brace_scan(full)
   }
   if (rc < 0) fail("routes: cannot read " f)
-  if (stmt != "") process(i, sc, stmt)
+  if (stmt != "") { process(i, sc, stmt); stmt = "" }
   close(f)
 }
 # prefix: the route prefix of variable v in scope sc, or the error marker "\001".
 function prefix(sc, v, depth,   key, ext, pp) {
   if (depth > 40) return "\001"
   key = sc SUBSEP v
+  if (key in gbad) return "\001"
   if (key in gpar) { pp = prefix(sc, gpar[key], depth + 1); return (pp == "\001" ? pp : join(pp, gpath[key])) }
   ext = scope_ext[sc]
   # Only the top level of the host (Program.cs, where `app` lives) is the root; any other scope without an extension is unknown.
-  if (ext == "") return (fkind[scope_file[sc]] == "P" ? "" : "\001")
+  if (ext == "") return (fkind[scope_file[sc]] == "P" && sc == scope_file[sc] SUBSEP "" ? "" : "\001")
   if (v == ext_param[ext] && (ext in caller_var)) return prefix(caller_scope[ext], caller_var[ext], depth + 1)
   return "\001"
 }
-function fail(msg) { print msg > errfile; failed = 1; exit 3 }
+# check_elsewhere: a .cs file of a module that is not an endpoints file must not map a route (it would be missing from the shard): a
+# .MapGet, .MapPost, .MapPut, .MapPatch, .MapDelete or .MapMethods call in its code (cs_read: not in a comment or a string).
+function check_elsewhere(f,   line, rc, hit, pos, t) {
+  hit = 0
+  while ((rc = (getline line < f)) > 0) if (line ~ /\.Map(Get|Post|Put|Patch|Delete|Methods)[ \t]*[(<]/) { hit = 1; break }
+  if (rc < 0) fail("routes: cannot read " f)
+  close(f)
+  if (!hit) return
+  if (cs_read(f) < 0) fail("routes: cannot read " f)
+  if (match(MASK, /\.Map(Get|Post|Put|Patch|Delete|Methods)[ \t\n]*[(<]/)) {
+    pos = RSTART; t = substr(MASK, RSTART, RLENGTH); sub(/[ \t\n]*[(<]$/, "", t)
+    fail("routes: " f " maps a route (" t " at line " line_at(pos) ") outside an endpoints file (src/Modules/*/*/Endpoints/**/*Endpoints.cs), so the route would be missing from the shard: move the mapping into Endpoints/<X>Endpoints.cs")
+  }
+}
 # check_other: a .cs file under an Endpoints folder that is not named *Endpoints.cs must not declare a route-mapping extension (its
 # routes would be skipped): a `Map...(this RouteGroupBuilder|IEndpointRouteBuilder ...)` signature, on one line or split after `(`.
 function check_other(f,   line, prev, rc) {
@@ -327,9 +420,11 @@ function check_other(f,   line, prev, rc) {
   else if (n == 5 && seg[1] == "src" && seg[2] == "Modules" && seg[5] ~ /.Module\.cs$/) kind = "M"
   else if (n == 4 && seg[1] == "src" && seg[2] == "Host" && seg[4] == "Program.cs") kind = "P"
   if (kind != "") { nf++; fname[nf] = $0; fkind[nf] = kind; fmod[nf] = seg[3] }
+  if (kind != "E" && kind != "P" && n >= 5 && seg[1] == "src" && seg[2] == "Modules" && seg[n] ~ /\.cs$/) { nelse++; ename[nelse] = $0 }
 }
 END {
   if (failed) exit 3
+  SQ = sprintf("%c", 39)
   for (i = 1; i <= nother; i++) check_other(oname[i])
   for (i = 1; i <= nf; i++) scan_file(i)
   for (i = 1; i <= nf; i++) {
@@ -358,13 +453,14 @@ END {
   # nobody listed.
   for (nm in caller_var) if (!(nm in ext_param))
     fail("routes: extension " nm " is called in " fname[scope_file[caller_scope[nm]]] " but declared in no file the parser reads (src/Modules/*/*/Endpoints/**/*Endpoints.cs, src/Modules/*/*/*Module.cs, src/Host/*/Program.cs, signature on one line)")
+  for (i = 1; i <= nelse; i++) check_elsewhere(ename[i])
 }'
 
 # emit_routes: the routes shard (see routes_awk); one awk process for the whole tree.
 emit_routes() {
   local rows_file="$work/routes.awk.out" err_file="$work/routes.awk.err" status=0 msg="" lines=()
   : > "$err_file"
-  awk -v errfile="$err_file" "$routes_awk" < "$files_cache" > "$rows_file" || status=$?
+  awk -v errfile="$err_file" "$cs_awk_lib$routes_awk" < "$files_cache" > "$rows_file" || status=$?
   if (( status != 0 )); then
     [[ -s "$err_file" ]] && read -r msg < "$err_file"
     fail_parse "${msg:-routes: awk failed (exit $status)}"
@@ -431,6 +527,38 @@ function line_at(p,   s) { s = substr(MASK, 1, p); return gsub(/\n/, "", s) + 1 
 function fail(msg) { print msg > errfile; failed = 1; exit 3 }
 '
 
+# names_awk_lib: the name of a building block, shared by the errors, events, jobs, config and tests parsers. Its rule runs on every
+# path of the file list, before the rules of the program it is put in front of, and learns the project prefix from the module projects
+# (src/Modules/<Name>/<Prefix>.Modules.<Name>/), so that a prefix with a dot (Acme.Shop) is removed whole.
+#   block_name(dir)  a directory under src/BuildingBlocks without the project prefix (the longest one learned that it starts with); in
+#                    a tree with no such module project, without its first dotted part
+#   module_of(f)     the module of a path under src/: the folder under src/Modules, else block_name of the directory under
+#                    src/BuildingBlocks (call it in END, when every path has been seen)
+#   ends_with(s, t)  whether s ends with t
+# shellcheck disable=SC2016
+names_awk_lib='
+function ends_with(s, t) { return length(s) >= length(t) && substr(s, length(s) - length(t) + 1) == t }
+function block_name(dir,   p, best) {
+  best = ""
+  for (p in PREFIXES) if (index(dir, p) == 1 && length(p) > length(best)) best = p
+  if (best != "") return substr(dir, length(best) + 1)
+  sub(/^[^.]*\./, "", dir)
+  return dir
+}
+function module_of(f,   n, seg, mod) {
+  n = split(f, seg, "/")
+  mod = (n >= 4 ? seg[3] : seg[2])
+  return (seg[2] == "Modules" ? mod : block_name(mod))
+}
+{
+  if (substr($0, 1, 12) == "src/Modules/") {
+    PN = split($0, PSEG, "/")
+    if (PN >= 5 && length(PSEG[4]) > length(PSEG[3]) + 9 && ends_with(PSEG[4], ".Modules." PSEG[3]))
+      PREFIXES[substr(PSEG[4], 1, length(PSEG[4]) - length(PSEG[3]) - 8)] = 1
+  }
+}
+'
+
 # permissions_awk: one awk run over the tracked file list (stdin) that reads:
 #   C  src/Modules/<Module>/<Project>/Application/*Permissions.cs   the constants: `const string Name = "module.resource.action";`, each
 #                                                                  on one line, keyed by the enclosing class
@@ -443,8 +571,9 @@ function fail(msg) { print msg > errfile; failed = 1; exit 3 }
 # one-line shape, or a code-shaped string literal there that is not such a constant (a `static readonly string`, a property); a
 # constants file with no constant or a source file with no record; two constants with the same code; a record whose class or constant no
 # constants file declares; a constant in two records; a reference to a permission constant that is not the first argument of a record
-# (another record shape); an `adminDefault:` flag outside a parsed record (an unqualified constant under `using static`, an alias); an
-# admin flag that is positional or not a literal true or false; `AdminDefault = ...` anywhere other than a helper parameter defaulting
+# (another record shape); an `adminDefault:` flag outside a parsed record (an unqualified constant under `using static`, an alias); a
+# Define( or new( whose first argument is the name of a constant without its class (the same two, whatever the flag: named, positional
+# or absent); an admin flag that is positional or not a literal true or false; `AdminDefault = ...` anywhere other than a helper parameter defaulting
 # to false (a parameter defaulting to true, `with { AdminDefault = true }`); a module with constants and no source file, or with
 # constants and no record that names them; a file that cannot be read.
 # shellcheck disable=SC2016
@@ -470,6 +599,7 @@ function read_constants(i,   f, nl, L, R, j, cls, cnt, ln, nm, code, pos, abs, a
       if ((cls "." nm) in pcode) fail("permissions: the constant " cls "." nm " is declared twice: " pfile[cls "." nm] ", " f)
       if (code in bycode) fail("permissions: duplicate permission code " code " (" bycode[code] " in " pfile[bycode[code]] ", " cls "." nm " in " f ")")
       pcode[cls "." nm] = code; pfile[cls "." nm] = f; pmod[cls "." nm] = cmod[i]; bycode[code] = cls "." nm; fcodes[code] = 1
+      cname[nm] = 1
       cnt++
     }
     pos = 1
@@ -482,7 +612,7 @@ function read_constants(i,   f, nl, L, R, j, cls, cnt, ln, nm, code, pos, abs, a
   }
   if (cnt == 0) fail("permissions: no constant parsed in " f " (expected `const string Name = \"module.resource.action\";`)")
 }
-function read_source(i,   f, pos, abs, start, after, tok, cls, depth, k, L, c, rec, flag, recs, total, m, flags, pre, val) {
+function read_source(i,   f, pos, abs, start, after, tok, cls, depth, k, L, c, rec, flag, recs, total, m, flags, pre, val, bare, bareat) {
   f = sfile[i]
   if (cs_read(f) < 0) fail("permissions: cannot read " f)
   pos = 1
@@ -495,12 +625,21 @@ function read_source(i,   f, pos, abs, start, after, tok, cls, depth, k, L, c, r
     }
     fail("permissions: AdminDefault assigned with = at line " line_at(abs) " of " f " (for example `with { AdminDefault = true }`): a shape the parser does not know; pass AdminDefault: true in the record")
   }
-  pos = 1; recs = 0; flags = 0; L = length(MASK)
+  pos = 1; recs = 0; flags = 0; L = length(MASK); bare = ""
   while (match(substr(MASK, pos), /(^|[^A-Za-z0-9_])(Define|new)[ \t\n]*\(/)) {
     start = pos + RSTART - 1 + RLENGTH
     pos = start
     after = substr(MASK, start)
-    if (!match(after, /^[ \t\n]*[A-Za-z_][A-Za-z0-9_]*Permissions\.[A-Za-z_][A-Za-z0-9_]*/)) continue
+    if (!match(after, /^[ \t\n]*[A-Za-z_][A-Za-z0-9_]*Permissions\.[A-Za-z_][A-Za-z0-9_]*/)) {
+      # A first argument that is a name whose last part is a permission constant (View under `using static`, P.View through an alias):
+      # a record the parser does not read, so its admin flag, named or positional, would be lost. Reported after the checks below.
+      if (bare == "" && match(after, /^[ \t\n]*[A-Za-z_][A-Za-z0-9_.]*[ \t\n]*[,)]/)) {
+        tok = substr(after, 1, RLENGTH - 1); gsub(/[ \t\n]/, "", tok)
+        m = tok; sub(/^.*\./, "", m)
+        if (m in cname) { bare = tok; bareat = line_at(start - 1) }
+      }
+      continue
+    }
     tok = substr(after, RSTART, RLENGTH); gsub(/[ \t\n]/, "", tok)
     depth = 1
     for (k = start; k <= L && depth > 0; k++) {
@@ -530,6 +669,7 @@ function read_source(i,   f, pos, abs, start, after, tok, cls, depth, k, L, c, r
   total = 0; m = MASK
   while (match(m, /[A-Za-z_][A-Za-z0-9_]*Permissions\.[A-Za-z_][A-Za-z0-9_]*/)) { total++; m = substr(m, RSTART + RLENGTH) }
   if (total != recs) fail("permissions: " (total - recs) " reference(s) to a permission constant in " f " are not the first argument of a Define(...) or new(...) record (a shape the parser does not know)")
+  if (bare != "") fail("permissions: the first argument " bare " of the record at line " bareat " of " f " is a permission constant without its class (unqualified under `using static`, or through an alias), so the record is not read and its admin flag would be lost: write XPermissions.Name")
   if (recs == 0) fail("permissions: no record parsed in " f " (expected Define(XPermissions.Name, ...) or new(XPermissions.Name, ...))")
 }
 {
@@ -580,7 +720,7 @@ emit_permissions() {
 #      literal on the same or a later line, or a `const string` of the same file; the status comes from the factory
 # and prints table 1 (code|module|http|resource key|file; the resource key is the code when a neutral resx has it, else -) on stdout and
 # table 2 (key|http|resx file: the neutral keys that no declaration has; http is NNN for http.NNN, else -) into the file out2. The module
-# is the folder under src/Modules, or the building-block directory under src/BuildingBlocks without its first dotted part.
+# is the folder under src/Modules, or the building-block directory under src/BuildingBlocks without the project prefix (names_awk_lib).
 # Errors (exit 3, the message in errfile), so that no shape gives a wrong or missing row: a factory the status map does not know; a code
 # argument that is not a plain string literal or a const string of the file (a qualified constant must name a class of the file); a
 # code with a character outside [A-Za-z0-9_.-]; a `const` that is not `const string Name = "literal";`; a code-shaped string literal
@@ -588,7 +728,7 @@ emit_permissions() {
 # shape); an *Errors.cs file with no declaration; the same code declared twice; a neutral resx with no key, a key
 # twice in one file, or a <data element whose name is not on its line; a file that cannot be read.
 # shellcheck disable=SC2016
-errors_awk="$cs_awk_lib"'
+errors_awk="$cs_awk_lib$names_awk_lib"'
 function read_resx(i,   f, line, rc, lineno, incom, p, q, t, piece, key, cnt) {
   f = rfile[i]; lineno = 0; incom = 0; cnt = 0
   while ((rc = (getline line < f)) > 0) {
@@ -688,15 +828,12 @@ BEGIN {
   if (seg[n] ~ /^[A-Za-z0-9_]+ErrorMessages\.resx$/) { nr++; rfile[nr] = $0 }
   else if (seg[n] ~ /.Errors\.cs$/) {
     ne++; efile[ne] = $0
-    mod = (n >= 4 ? seg[3] : seg[2])
-    if (seg[2] != "Modules") sub(/^[^.]*\./, "", mod)
-    emod[ne] = mod
   }
 }
 END {
   if (failed) exit 3
   for (i = 1; i <= nr; i++) read_resx(i)
-  for (i = 1; i <= ne; i++) read_errors(i)
+  for (i = 1; i <= ne; i++) { emod[i] = module_of(efile[i]); read_errors(i) }
   for (d = 1; d <= nd; d++) print dcode[d] "|" dmod[d] "|" dstatus[d] "|" ((dcode[d] in haskey) ? dcode[d] : "-") "|" dpath[d]
   printf "" > out2
   for (k = 1; k <= nk; k++) {
@@ -746,16 +883,10 @@ emit_errors_2() {
 #                   (" A B ": the last name segment of each base, without its type arguments)
 #   base_items(b, items), item_head(s), item_arg(s), last_name(s)   the bases of a base list (split at top-level commas), the name of
 #                   one, its type argument (last segment when it is a name, else the text) and the last segment of a qualified name
-#   module_of(f)    the folder under src/Modules, or the building-block directory under src/BuildingBlocks without its first dotted part
+#   module_of(f)    from names_awk_lib, which goes in front of this library
 #   MASKS[i], RAWS[i]  the cs_read strings of each parsed file (done[i] set); set MASK (and RAW) to them before line_at
 # shellcheck disable=SC2016
 types_awk_lib='
-function module_of(f,   n, seg, mod) {
-  n = split(f, seg, "/")
-  mod = (n >= 4 ? seg[3] : seg[2])
-  if (seg[2] != "Modules") sub(/^[^.]*\./, "", mod)
-  return mod
-}
 function skipws(p,   L) { L = length(MASK); while (p <= L && substr(MASK, p, 1) ~ /[ \t\n]/) p++; return p }
 function close_of(p, o, c,   L, d, k, ch) {
   L = length(MASK); d = 0
@@ -897,7 +1028,7 @@ function grow(   changed, more, i, s, k, n, w, h) {
 # declaration (a variable, an explicit type argument), or that publishes a type that is not a declared event; a `new <Event>(` that is
 # not the first argument of a PublishAsync (another publishing path); a file that cannot be read.
 # shellcheck disable=SC2016
-events_awk="$cs_awk_lib$types_awk_lib"'
+events_awk="$cs_awk_lib$names_awk_lib$types_awk_lib"'
 function on_read(i) { return }
 function add(kind, key, val) {
   if ((kind, key, val) in LS) return
@@ -1037,7 +1168,7 @@ emit_events() {
 # `W<XDbContext>(`, or whose context does not end in DbContext; an AddOutbox<...> or AddInbox<...> call with no such extension method
 # found (P5 names both); a file that cannot be read.
 # shellcheck disable=SC2016
-jobs_awk="$cs_awk_lib$types_awk_lib"'
+jobs_awk="$cs_awk_lib$names_awk_lib$types_awk_lib"'
 function on_read(i,   pos, abs, a, t, rest, g, arg, re, off, wpos, wtok, w, q, L, bend, at) {
   pos = 1
   while (match(substr(MASK, pos), /(^|[^A-Za-z0-9_])AddRecurringJob([^A-Za-z0-9_]|$)/)) {
@@ -1174,10 +1305,10 @@ emit_jobs() {
 #      object, on a line `  "Name":` (two spaces, letters only); whole-line template marker lines (//#if ...) are skipped, so a section
 #      inside a switch is listed; // and /* */ comments are skipped, so a commented-out section is not
 #   C  src/**/*.cs holding the text SectionName   the owners: `const string SectionName = "Section:Sub";` (the first segment is the
-#      section); the owner is the folder under src/Modules, the building-block directory under src/BuildingBlocks without its first
-#      dotted part, or Host under src/Host; a use of SectionName (X.SectionName, a concatenation, an interpolation hole) is not one
+#      section); the owner is the folder under src/Modules, the building-block directory under src/BuildingBlocks without the
+#      project prefix (names_awk_lib), or Host under src/Host; a use of SectionName (X.SectionName, a concatenation, an interpolation hole) is not one
 #   D  docs/services/api.md, docs/modules/*.md, docs/building-blocks/*.md   the documentation: a heading `### \`Section\`` or a table row
-#      starting `| \`Section\`` (either optionally with `:Sub`), outside fenced code blocks
+#      starting `| \`Section\`` (either optionally with `:Sub`), outside fenced code blocks (see read_doc)
 # and prints section|owners|docs (owners and docs sorted, joined with ", "; docs "-" when none). The sections Serilog, AllowedHosts and
 # Kestrel are owned by Host (the ASP.NET Core host reads them; no SectionName). A SectionName whose section the file does not have is
 # bound but not in appsettings.json: it gives no row.
@@ -1187,13 +1318,10 @@ emit_jobs() {
 # section; a SectionName declared in any other shape (static readonly, a property, a concatenation, an interpolated or verbatim string)
 # or whose value is not a configuration path; a file that cannot be read.
 # shellcheck disable=SC2016
-config_awk="$cs_awk_lib"'
-function owner_of(f,   n, seg, mod) {
+config_awk="$cs_awk_lib$names_awk_lib"'
+function owner_of(f,   n, seg) {
   n = split(f, seg, "/")
-  if (seg[2] == "Host") return "Host"
-  mod = (n >= 4 ? seg[3] : seg[2])
-  if (seg[2] != "Modules") sub(/^[^.]*\./, "", mod)
-  return mod
+  return (seg[2] == "Host" ? "Host" : module_of(f))
 }
 # add_to(arr, key, item): adds item to the SUBSEP-separated set arr[key]; joined(list): that set sorted, joined with ", ".
 function add_to(arr, key, item) { if (index(arr[key] SUBSEP, SUBSEP item SUBSEP) == 0) arr[key] = arr[key] SUBSEP item }
@@ -1275,12 +1403,21 @@ function read_owners(f,   pos, abs, from, pre, after, at, p, val, first) {
     add_to(declared, first, owner_of(f))
   }
 }
-function read_doc(f,   line, rc, fence, t) {
-  fence = 0
+# read_doc: fenced code blocks are skipped by the CommonMark rule: a block opens at a line of three or more backticks or tildes indented
+# at most three spaces (a backtick fence has no backtick after it) and closes only at a line of the same character, at least as long,
+# with nothing after it; flen is the length of the open fence (0 outside a block) and fch its character.
+function read_doc(f,   line, rc, fch, flen, t, ch, rest) {
+  flen = 0
   while ((rc = (getline line < f)) > 0) {
     sub(/\r$/, "", line)
-    if (line ~ /^[ \t]*(```|~~~)/) { fence = !fence; continue }
-    if (fence) continue
+    if (match(line, /^ ? ? ?(```+|~~~+)/)) {
+      t = substr(line, RSTART, RLENGTH); rest = substr(line, RLENGTH + 1)
+      sub(/^ +/, "", t); ch = substr(t, 1, 1)
+      if (flen == 0) {
+        if (ch != "`" || index(rest, "`") == 0) { fch = ch; flen = length(t); continue }
+      } else if (ch == fch && length(t) >= flen && rest ~ /^[ \t]*$/) { flen = 0; continue }
+    }
+    if (flen > 0) continue
     if (match(line, /^###[ \t]+`[A-Za-z]+[`:]/) || match(line, /^\|[ \t]*`[A-Za-z]+[`:]/)) {
       t = substr(line, RSTART, RLENGTH); sub(/^[^`]*`/, "", t); t = substr(t, 1, length(t) - 1)
       add_to(docs, t, f)
@@ -1324,23 +1461,22 @@ emit_config() {
 #   table 1 (stdout)  test project|folder|source area: per tests/<Project>/, each first-level folder of it holding a .cs file at any
 #                     depth; loose .cs files of a project give a row (root), or (flat) when the project has no folder (source area -).
 #                     No file count: it would change on every added test file. The source area is the module when
-#                     src/Modules/<Folder> exists, else the one building block under src/BuildingBlocks whose directory name contains
-#                     .<Folder>. or ends .<Folder> (without its first dotted part), else cross-cutting
+#                     src/Modules/<Folder> exists, else the one building block under src/BuildingBlocks whose name (its directory
+#                     without the project prefix, names_awk_lib) has <Folder> among its dotted parts, else cross-cutting
 #   table 2 (out2)    source|test: src/**/Foo.cs (not under a Migrations folder) with tests/**/FooTests.cs, when Foo.cs occurs once under
 #                     src/ and FooTests.cs once under tests/
 #   out3              "<test .cs files> <names skipped>": the names with both a source and a test file of which one occurs more than once
 # bin and obj folders are skipped. Errors (exit 3, the message in errfile): a folder whose name matches two building blocks (the area
 # would be a guess); a .cs file directly under tests/, outside a test project.
 # shellcheck disable=SC2016
-tests_awk='
+tests_awk="$names_awk_lib"'
 function fail(msg) { print msg > errfile; failed = 1; exit 3 }
-function ends_with(s, t) { return length(s) >= length(t) && substr(s, length(s) - length(t) + 1) == t }
-function area_of(fold, where,   d, hit, cnt, list) {
+function area_of(fold, where,   d, nm, hit, cnt, list) {
   if (fold in mods) return fold
   cnt = 0; list = ""
-  for (d in bbs) if (index(d, "." fold ".") > 0 || ends_with(d, "." fold)) { cnt++; hit = d; list = list " " d }
+  for (d in bbs) { nm = block_name(d); if (index("." nm ".", "." fold ".") > 0) { cnt++; hit = nm; list = list " " d } }
   if (cnt > 1) fail("tests: the folder " where " matches more than one building block under src/BuildingBlocks (" substr(list, 2) "); the source area would be a guess")
-  if (cnt == 1) { sub(/^[^.]*\./, "", hit); return hit }
+  if (cnt == 1) return hit
   return "cross-cutting"
 }
 {

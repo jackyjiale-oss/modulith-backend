@@ -363,6 +363,29 @@ case_find_excludes_build_dirs() {
   assert_eq "| a.cs | //#if | notifications |" "$(rows markers)" "find_excludes_build_dirs: bin and obj are skipped without git"
 }
 
+# A tree without git (an export of the tracked files) gives the same shards as the git tree it came from: the file walk and
+# git ls-files agree, a nested .git directory and build output are skipped, and write mode has nothing to warn about.
+case_no_git_same_shards() {
+  make_tree
+  make_git_tree
+  put src/Modules/A/A/Tracked.cs "$(printf '//#if (notifications)\n//#endif')"
+  put docs/a.md "$(printf '<!--#if (includeSample)-->\ntext\n<!--#endif-->')"
+  put tests/T.UnitTests/A/TrackedTests.cs 'class TrackedTests {}'
+  must git -C "$tree" add src docs tests
+  generate
+  write_map
+  check
+  assert_eq "0" "$status" "no_git_same_shards: the git tree passes --check"
+  rm -rf "$tree/.git"
+  put vendor/.git/hooks/sample.cs "$(printf '//#if (caching == "redis")\n//#endif')"
+  put src/Modules/A/A/obj/Gen.cs "$(printf '//#if (includeSample)\n//#endif')"
+  check
+  assert_eq "0" "$status" "no_git_same_shards: the same tree without .git passes --check against the shards of the git tree (output: $combined)"
+  run_gen --root "$tree" --out "$idx"
+  assert_eq "0" "$status" "no_git_same_shards: write mode without git: exit code"
+  assert_eq "" "$err" "no_git_same_shards: write mode without git: no warning"
+}
+
 case_check_stale() {
   make_tree
   put a.cs "$(printf '//#if (notifications)\n//#endif')"
@@ -888,6 +911,347 @@ A|GET|/api/v1/a/{code:length(3,8)}|GetQuery|Admin|src/Modules/A/A/Endpoints/AEnd
     "routes_shapes: policy names (one, two, a constant) and commas inside the route"
 }
 
+# The scope of an extension ends with its body: a method below it, with or without an access modifier, is never read as part of it.
+case_routes_scopes() {
+  local a='src/Modules/A/A/Endpoints/AEndpoints.cs'
+  # A helper without an access modifier, called with a nested group, must not take the prefix of the extension's own `group`.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("x", GetAsync).RequireAuthorization();
+        var mfa = group.MapGroup("mfa");
+        MapMfa(mfa);
+        return app;
+    }
+
+    static void MapMfa(RouteGroupBuilder group)
+    {
+        group.MapPost("verify", VerifyAsync).RequireAuthorization();
+    }
+}'
+  routes_fails "routes_scopes: helper without an access modifier" "cannot resolve the group prefix of group in $a"
+  # The same when the declaration starts with an attribute and its signature is split: no line of it looks like a method.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("x", GetAsync).RequireAuthorization();
+        var mfa = group.MapGroup("mfa");
+        MapMfa(mfa);
+        return app;
+    }
+
+    [SuppressMessage("Design", "CA1062")] static void MapMfa(
+        RouteGroupBuilder group)
+    {
+        group.MapPost("verify", VerifyAsync).RequireAuthorization();
+    }
+}'
+  routes_fails "routes_scopes: helper behind an attribute, split signature" "cannot resolve the group prefix of group in $a"
+  # An expression-bodied extension ends at its semicolon.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+        => app.MapChildEndpoints();
+
+    [Obsolete] static void More(IEndpointRouteBuilder app)
+    {
+        app.MapGet("y", YAsync).AllowAnonymous();
+    }
+}'
+  put src/Modules/A/A/Endpoints/ChildEndpoints.cs 'internal static class ChildEndpoints
+{
+    internal static IEndpointRouteBuilder MapChildEndpoints(this IEndpointRouteBuilder a)
+    {
+        a.MapGet("child", GetAsync).AllowAnonymous();
+        return a;
+    }
+}'
+  routes_fails "routes_scopes: helper below an expression-bodied extension" "cannot resolve the group prefix of app in $a"
+  # A local function whose parameter hides the group of the extension: its routes have the prefix of its argument, which is not read.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        var mfa = group.MapGroup("mfa");
+        Add(mfa);
+        return app;
+
+        void Add(RouteGroupBuilder group)
+        {
+            group.MapPost("verify", VerifyAsync).RequireAuthorization();
+        }
+    }
+}'
+  routes_fails "routes_scopes: local function with a group parameter" "cannot resolve the group prefix of group in $a"
+  # A helper in a module file that calls an endpoints extension on its own parameter.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("x", GetAsync).RequireAuthorization();
+        return app;
+    }
+}'
+  put src/Host/H/Program.cs $'var api = app.MapGroup("/api/v1");\napi.MapAModuleEndpoints();'
+  put src/Modules/A/A/AModule.cs 'public static class AModule
+{
+    public static IEndpointRouteBuilder MapAModuleEndpoints(this IEndpointRouteBuilder app)
+    {
+        MapAll(app.MapGroup("inner"));
+        return app;
+    }
+
+    static void MapAll(IEndpointRouteBuilder app)
+    {
+        app.MapAEndpoints();
+    }
+}'
+  routes_fails "routes_scopes: helper without an access modifier in a module file" "cannot resolve the group prefix of app in $a"
+  # A local function of Program.cs is not the top level of the host: its parameter is not the root.
+  put src/Modules/A/A/AModule.cs 'public static class AModule { }'
+  put src/Host/H/Program.cs 'var app = builder.Build();
+MapModules(app.MapGroup("/api/v1"));
+app.Run();
+
+static void MapModules(RouteGroupBuilder api)
+{
+    api.MapAEndpoints();
+}'
+  routes_fails "routes_scopes: local function in Program.cs" "cannot resolve the group prefix of app in $a"
+  # A host group whose prefix is not a string literal has a prefix the parser cannot read: not the root.
+  put src/Host/H/Program.cs 'var app = builder.Build();
+var api = app.MapGroup(ApiRoutes.Prefix);
+api.MapAEndpoints();
+app.Run();'
+  routes_fails "routes_scopes: host group with a prefix that is not a literal" "cannot resolve the group prefix of app in $a"
+  # A lambda parameter that hides the group of the extension, on one line and with a block.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("x", GetAsync).RequireAuthorization();
+        var mfa = group.MapGroup("mfa");
+        Configure(mfa, group => group.MapPost("verify", VerifyAsync).RequireAuthorization());
+        return app;
+    }
+}'
+  routes_fails "routes_scopes: lambda parameter hiding the group, one line" "cannot resolve the group prefix of group in $a"
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        var mfa = group.MapGroup("mfa");
+        Configure(mfa, (name, group) =>
+        {
+            group.MapPost("verify", VerifyAsync).RequireAuthorization();
+        });
+        group.MapGet("x", GetAsync).RequireAuthorization();
+        return app;
+    }
+}'
+  routes_fails "routes_scopes: lambda parameter hiding the group, block" "cannot resolve the group prefix of group in $a"
+}
+
+# Shapes the scope rules must keep reading: an extension whose `=>` is on the next line, a local function without routes in the middle
+# of an extension (the routes after it still belong to the extension), a handler method without an access modifier (its handler type
+# belongs to it, not to the method above), a record and a nested class beside the endpoints class.
+case_routes_scopes_ok() {
+  routes_one_module 'internal sealed record Paging(int Size);
+
+internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("keys", GetKeys).AllowAnonymous();
+
+        static string Tag(string name) { return "a-" + name; }
+        Configure(group, (name, other) =>
+        {
+            other.WithTags(name);
+        });
+
+        group.MapGet("list", ListAsync).RequireAuthorization();
+        group.MapGet("/{id}", GetAsync).RequireAuthorization();
+        return app;
+    }
+
+    private static IResult GetKeys(IKeyProvider keys) => TypedResults.Ok();
+
+    static async Task<IResult> ListAsync(
+        IQueryHandler<ListQuery, Item> handler)
+    {
+        var braces = "}{";
+        return TypedResults.Ok();
+    }
+
+    private sealed class Marker(string name)
+    {
+        public string Name { get; } = name;
+    }
+}'
+  put src/Host/H/Program.cs $'var api = app.MapGroup("/api/v1");
+api.MapAModuleEndpoints();'
+  put src/Modules/A/A/AModule.cs 'public static class AModule
+{
+    public static IEndpointRouteBuilder MapAModuleEndpoints(this IEndpointRouteBuilder app)
+        => app.MapAEndpoints();
+
+    static void Unrelated(IServiceCollection services) { }
+}'
+  routes_of_tree
+  assert_eq "0" "$status" "routes_scopes_ok: exit code (output: $combined)"
+  assert_eq 'A|GET|/api/v1/a/keys|-|anonymous|src/Modules/A/A/Endpoints/AEndpoints.cs
+A|GET|/api/v1/a/list|ListQuery|authenticated|src/Modules/A/A/Endpoints/AEndpoints.cs
+A|GET|/api/v1/a/{id}|-|authenticated|src/Modules/A/A/Endpoints/AEndpoints.cs' "$combined" \
+    "routes_scopes_ok: prefixes and handlers (next-line =>, local function, handler without an access modifier)"
+}
+
+# Authorization set on a group in a statement of its own is refused like the chained form: the permission column would omit it.
+case_routes_group_auth() {
+  local a='src/Modules/A/A/Endpoints/AEndpoints.cs'
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.RequirePermission(APermissions.View);
+        group.MapGet("/", ListAsync).RequireAuthorization();
+        return app;
+    }
+}'
+  routes_fails "routes_group_auth: a statement on the group variable" "group-level authorization is not read in $a"
+  # The same over several lines, after the routes.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("/", ListAsync).RequirePermission(APermissions.View);
+        group
+            .WithTags("A")
+            .RequireAuthorization("Admin");
+        return app;
+    }
+}'
+  routes_fails "routes_group_auth: a chain on the group variable over several lines" "group-level authorization is not read in $a"
+  # On the result of an endpoints extension, which returns the group it was given.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("a");
+        group.MapGet("/", ListAsync).RequireAuthorization();
+        group.MapChildEndpoints().RequirePermission(APermissions.View);
+        return app;
+    }
+}'
+  put src/Modules/A/A/Endpoints/ChildEndpoints.cs 'internal static class ChildEndpoints
+{
+    internal static RouteGroupBuilder MapChildEndpoints(this RouteGroupBuilder a)
+    {
+        a.MapGet("child", GetAsync).AllowAnonymous();
+        return a;
+    }
+}'
+  routes_fails "routes_group_auth: on the result of an endpoints extension" "group-level authorization is not read in $a"
+  # On the group of the host, in Program.cs.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("x", GetAsync).RequirePermission(APermissions.View);
+        return app;
+    }
+}' 'api.RequireAuthorization();'
+  routes_fails "routes_group_auth: on the group of the host" "group-level authorization is not read in src/Host/H/Program.cs"
+  # Not a group: a hub mapped in Program.cs may carry its authorization in a statement of its own, and a comment is no statement.
+  routes_one_module 'internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        // group.RequireAuthorization() is not written here.
+        app.MapGet("x", GetAsync).RequirePermission(APermissions.View);
+        return app;
+    }
+}' $'var hub = app.MapHub<AHub>("/hubs/a");\nhub.RequireAuthorization();'
+  routes_of_tree
+  assert_eq "0" "$status" "routes_group_auth: a hub statement in Program.cs: exit code (output: $combined)"
+  assert_eq "A|GET|/api/v1/x|-|APermissions.View|$a" "$combined" "routes_group_auth: a hub statement in Program.cs: the row"
+}
+
+# A route mapped in a module file the parser does not read would be missing from the shard, whatever its extension is called.
+case_routes_elsewhere() {
+  local endpoints='internal static class AEndpoints
+{
+    internal static IEndpointRouteBuilder MapAEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("x", GetAsync).RequireAuthorization();
+        return app;
+    }
+}'
+  # An extension not named Map...Endpoints, declared outside Endpoints/ and called from the module file.
+  routes_one_module "$endpoints" 'api.UseARoutes();'
+  put src/Modules/A/A/AModule.cs 'public static class AModule
+{
+    public static IEndpointRouteBuilder UseARoutes(this IEndpointRouteBuilder app)
+    {
+        app.MapARoutes();
+        return app;
+    }
+}'
+  put src/Modules/A/A/Infrastructure/ARouting.cs 'internal static class ARouting
+{
+    internal static IEndpointRouteBuilder MapARoutes(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("hidden", HiddenAsync).RequireAuthorization();
+        return app;
+    }
+}'
+  routes_fails "routes_elsewhere: an extension outside Endpoints/" \
+    "src/Modules/A/A/Infrastructure/ARouting.cs maps a route (.MapGet at line 5) outside an endpoints file"
+  # A route mapped in the module file itself.
+  routes_one_module "$endpoints" 'api.UseARoutes();'
+  put src/Modules/A/A/AModule.cs 'public static class AModule
+{
+    public static IEndpointRouteBuilder UseARoutes(this IEndpointRouteBuilder app)
+    {
+        app.MapPost(
+            "hidden", HiddenAsync).RequireAuthorization();
+        return app;
+    }
+}'
+  routes_fails "routes_elsewhere: a route in the module file" \
+    "src/Modules/A/A/AModule.cs maps a route (.MapPost at line 5) outside an endpoints file"
+  # A method that is no extension, in a file of the Endpoints folder not named *Endpoints.cs.
+  routes_one_module "$endpoints"
+  put src/Modules/A/A/Endpoints/Extra.cs 'internal static class Extra
+{
+    internal static void Add(RouteGroupBuilder group) => group.MapMethods("y", ["HEAD"], HeadAsync);
+}'
+  routes_fails "routes_elsewhere: a helper in the Endpoints folder" \
+    "src/Modules/A/A/Endpoints/Extra.cs maps a route (.MapMethods at line 3) outside an endpoints file"
+  # A comment, a string and a block comment that only mention a mapping are not routes; the host may map routes of its own.
+  routes_one_module "$endpoints" 'app.MapGet("/", () => "ok");'
+  put src/Modules/A/A/Infrastructure/Notes.cs 'internal static class Notes
+{
+    // group.MapGet("a", Nothing) is how a route is mapped.
+    /* and so is
+       group.MapPut("b", Nothing) */
+    internal const string Hint = "call app.MapDelete(\"c\", Nothing)";
+}'
+  routes_of_tree
+  assert_eq "0" "$status" "routes_elsewhere: mentions only: exit code (output: $combined)"
+  assert_eq "A|GET|/api/v1/x|-|authenticated|src/Modules/A/A/Endpoints/AEndpoints.cs" "$combined" "routes_elsewhere: mentions only: the row"
+}
+
 # emit_of_tree <emit function...>: runs the emit functions of the sourced script on the current tree, one after the other (no full
 # generator run); sets status and combined (the rows of each, sorted, each block followed by a "--" line, or the error output).
 emit_of_tree() {
@@ -1159,6 +1523,51 @@ case_permissions_shapes() {
   emit_of_tree emit_permissions
   assert_eq "0" "$status" "permissions_shapes: exit code"
   assert_eq "$permissions_rows"$'\n--' "$combined" "permissions_shapes: two constants on one line, Domain/RolePermissions.cs ignored"
+}
+
+# A record that names its constant without the class is not read, so a positional admin flag in it would be lost (the row would say
+# no): it fails, with or without a flag.
+case_permissions_unqualified() {
+  local src='src/Modules/A/A/Application/APermissionSource.cs'
+  make_tree
+  permissions_fixture
+  put "$src" 'using static A.APermissions;
+
+class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        Define(APermissions.Edit, "Edit", "d"),
+        new(View, ModuleName, "View", "d", true),
+    ];
+}'
+  emit_fails "permissions_unqualified: positional flag under using static" \
+    "the first argument View of the record at line 8 of $src is a permission constant without its class" emit_permissions
+  put "$src" 'using P = A.APermissions;
+
+class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        Define(APermissions.Edit, "Edit", "d"),
+        Define(
+            P.View, "View", "d", true),
+    ];
+}'
+  emit_fails "permissions_unqualified: positional flag through an alias" \
+    "the first argument P.View of the record at line 8 of $src is a permission constant without its class" emit_permissions
+  put "$src" 'using static A.APermissions;
+
+class APermissionSource
+{
+    private static readonly PermissionDefinition[] All =
+    [
+        Define(APermissions.Edit, "Edit", "d"),
+        Define(Delete, "Delete", "d"),
+    ];
+}'
+  emit_fails "permissions_unqualified: no flag at all" \
+    "the first argument Delete of the record at line 8 of $src is a permission constant without its class" emit_permissions
 }
 
 # The runner refuses a case name it does not know rather than passing without running it.
@@ -2054,9 +2463,50 @@ case_config_loud() {
   emit_fails "config_loud: a SectionName that is not a configuration path" "line 1 of $opt" emit_config
 }
 
-# tests_fixture: two test projects: T.UnitTests with module and building-block folders (nested files counted, a non-.cs file and a
-# bin folder not counted), a cross-cutting folder, a folder that matches a module and a building block (the module wins) and a loose
-# file at its root; T.ArchitectureTests with no folder. Sources: a module, building blocks, pairs and decoys.
+# A fenced code block ends only at a fence of the same character, at least as long as the one that opened it and with nothing after it;
+# a line indented four spaces is not a fence. A fence line inside a block must not switch the reader on or off.
+case_config_fences() {
+  make_tree
+  config_fixture
+  # An opening-style line (with an info string) inside a block does not close it: the heading after the block is read.
+  put docs/modules/f.md '# F
+
+```md
+```json
+{ }
+```
+
+### `Caching`'
+  # A block of four backticks holding one of three; a tilde line inside a backtick block; a four-space "fence" (indented code).
+  put docs/modules/g.md '# G
+
+````md
+```
+### `Auth`
+```
+````
+
+```
+~~~
+### `Serilog`
+```
+
+    ```
+### `Caching`
+
+~~~
+### `Auth`
+~~~~'
+  emit_of_tree emit_config
+  assert_eq "0" "$status" "config_fences: exit code (output: $combined)"
+  assert_eq $'Auth|A|docs/modules/a.md\nCaching|Infrastructure.Common, Platform.Redis|docs/modules/f.md, docs/modules/g.md\nSerilog|Host|docs/services/api.md\n--' \
+    "$combined" "config_fences: only headings outside a block count"
+}
+
+# tests_fixture: two test projects: T.UnitTests with module and building-block folders (one with a file in a nested folder, which
+# gives no row of its own; a non-.cs file and a bin folder, which are not read), a cross-cutting folder, a folder that matches a
+# module and a building block (the module wins) and a loose file at its root; T.ArchitectureTests with no folder. Sources: a module,
+# building blocks, pairs and decoys.
 tests_fixture() {
   put src/Modules/Auth/Auth/Application/Login/Login.cs 'class Login {}'
   put src/Modules/Redis/Redis/RedisModule.cs 'class RedisModule {}'
@@ -2148,6 +2598,67 @@ case_tests_loud() {
   emit_fails "tests_loud: a .cs file outside a test project" "tests/Stray.cs" emit_tests
 }
 
+# A project prefix with a dot (Acme.Shop): the name of a building block is its directory without the whole prefix, which the module
+# projects (<Prefix>.Modules.<Name>) give. Errors, events, jobs, configuration owners and test areas all use it.
+case_dotted_prefix() {
+  make_tree
+  local bb='src/BuildingBlocks/Acme.Shop' mod='src/Modules/A/Acme.Shop.Modules.A'
+  put "$mod/Domain/AErrors.cs" 'internal static class AErrors
+{
+    public static readonly Error Missing = Error.NotFound("a.missing", "m");
+}'
+  put "$bb.Web.Common/Errors/CommonErrors.cs" 'public static class CommonErrors
+{
+    public static readonly Error Bad = Error.Validation("common.bad", "m");
+}'
+  put "$bb.SharedKernel/IIntegrationEvent.cs" 'public interface IIntegrationEvent { }'
+  put "$mod.Contracts/IntegrationEvents/ThingIntegrationEvent.cs" 'public sealed record ThingIntegrationEvent(Guid Id) : IIntegrationEvent;'
+  put "$bb.Infrastructure.Common/Auditing/Writer.cs" 'internal sealed class Writer(IIntegrationEventPublisher publisher)
+{
+    public Task WriteAsync(Guid id) => publisher.PublishAsync(new ThingIntegrationEvent(id));
+}'
+  put "$bb.Infrastructure.Common/Jobs/IRecurringJob.cs" 'public interface IRecurringJob { string Name { get; } }'
+  put "$bb.Infrastructure.Common/Jobs/SweepJob.cs" 'internal sealed class SweepJob : IRecurringJob
+{
+    public string Name => "Sweep";
+}'
+  put "$bb.Infrastructure.Common/Jobs/Registration.cs" 'public static class Registration
+{
+    public static IServiceCollection AddSweep(this IServiceCollection services)
+    {
+        services.AddRecurringJob<SweepJob>();
+        return services;
+    }
+}'
+  put src/Host/Acme.Shop.Api/appsettings.json '{
+  "Caching": {}
+}'
+  put "$bb.Infrastructure.Common/Caching/CachingOptions.cs" 'public sealed class CachingOptions
+{
+    public const string SectionName = "Caching";
+}'
+  put tests/Acme.Shop.UnitTests/A/AErrorsTests.cs 'class AErrorsTests {}'
+  put tests/Acme.Shop.UnitTests/Web/CommonErrorsTests.cs 'class CommonErrorsTests {}'
+  put tests/Acme.Shop.UnitTests/Shop/ShopTests.cs 'class ShopTests {}'
+  emit_of_tree emit_errors emit_events emit_jobs emit_config
+  assert_eq "0" "$status" "dotted_prefix: exit code (output: $combined)"
+  assert_eq "a.missing|A|404|-|$mod/Domain/AErrors.cs
+common.bad|Web.Common|400|-|$bb.Web.Common/Errors/CommonErrors.cs
+--
+ThingIntegrationEvent|Infrastructure.Common ($bb.Infrastructure.Common/Auditing/Writer.cs)|-
+--
+Sweep|Infrastructure.Common|Jobs:Sweep:Enabled, Jobs:Sweep:Interval|$bb.Infrastructure.Common/Jobs/SweepJob.cs
+--
+Caching|Infrastructure.Common|-
+--" "$combined" "dotted_prefix: errors, events, jobs and configuration name the building block without the prefix"
+  emit_of_tree emit_tests
+  assert_eq "0" "$status" "dotted_prefix: tests: exit code (output: $combined)"
+  assert_eq 'Acme.Shop.UnitTests|A|A
+Acme.Shop.UnitTests|Shop|cross-cutting
+Acme.Shop.UnitTests|Web|Web.Common
+--' "$combined" "dotted_prefix: test areas (a folder named like a part of the prefix matches no building block)"
+}
+
 # Each case runs in a subshell so that its tree and variables do not leak into the next.
 # The subshell reports its failures through its exit code, since variables do not cross the boundary.
 run_case() {
@@ -2174,11 +2685,15 @@ case_real_tree() {
 all_cases="case_usage_errors case_markers_shard case_markers_kinds_and_expressions case_markers_zero_rows case_stub_shards
   case_two_table_shard case_atomic_write
   case_determinism case_untracked_ignored case_untracked_warning case_git_file_marker case_find_excludes_build_dirs
+  case_no_git_same_shards
   case_check_stale case_check_missing_and_unknown case_map_rules case_need_rows
   case_routes case_routes_zero case_routes_module_absent case_routes_loud case_routes_shapes
-  case_permissions case_permissions_loud case_permissions_shapes case_errors case_errors_zero case_errors_loud
+  case_routes_scopes case_routes_scopes_ok case_routes_group_auth case_routes_elsewhere
+  case_permissions case_permissions_loud case_permissions_shapes case_permissions_unqualified
+  case_errors case_errors_zero case_errors_loud
   case_events case_events_zero case_events_loud case_jobs case_jobs_zero case_jobs_loud
-  case_config case_config_loud case_tests_folders case_tests_pairs case_tests_loud case_unknown_case_name case_real_tree"
+  case_config case_config_loud case_config_fences case_tests_folders case_tests_pairs case_tests_loud case_dotted_prefix
+  case_unknown_case_name case_real_tree"
 
 # With arguments, only the named cases run (for iterating on one case); without, all of them. Every argument is checked against the
 # registered list before anything runs: run_case ignores set -e, so a misspelled name would otherwise print "command not found" and pass.
