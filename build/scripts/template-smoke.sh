@@ -32,8 +32,9 @@
 #   --output DIR    keep the generated project in DIR, an absolute path that must not exist (use a short path such as C:/w/g1 on Windows).
 # With no arguments it generates with every switch on, builds and runs the unit and architecture tests.
 #
-# A full run also runs the repo-only script tests (build/scripts/tests/module-anchors.test.sh, module-template-files.test.sh,
-# add-module.test.sh and release-package.test.sh; add-module takes about 5 minutes) in one step, "Running the repo-only script tests".
+# A full run also runs the repo-only script tests (build/scripts/tests/static-rules.test.sh, module-anchors.test.sh,
+# module-template-files.test.sh, add-module.test.sh and release-package.test.sh; add-module takes about 5 minutes) in one step,
+# "Running the repo-only script tests".
 #
 # CI runs the integration tests of the default project in the build-test job; --integration is for a machine with Docker.
 # Every `dotnet new` call uses a private template hive inside the temporary directory, so the user's global
@@ -294,6 +295,7 @@ for forbidden in \
   build/scripts/tests/add-module.test.sh \
   build/scripts/release-package.sh \
   build/scripts/tests/release-package.test.sh \
+  build/scripts/tests/static-rules.test.sh \
   templates \
   .github/workflows/template-matrix.yml \
   .github/workflows/project-index.yml \
@@ -425,7 +427,7 @@ if [[ "$all_on" == "true" ]]; then
       [[ "$excluded" == true ]] && break
     done
     [[ "$excluded" == true ]] || fail "$tracked is tracked but not generated with every switch on, and no unconditional exclude of template.json leaves it out"
-  done < <(git -C "$repo_root" ls-files)
+  done < <(git -C "$repo_root" -c core.quotepath=off ls-files)
 fi
 
 step "Checking which parts of the template were generated"
@@ -538,6 +540,10 @@ if [[ "$from_package" == "true" ]]; then
       cat "$tmp/module-$module_install.txt" >&2
       fail "dotnet new modulith-module from the $module_install exited $module_status, expected 104 (post-action not run)"
     fi
+    # Equal trees prove nothing when both lack the same file, so the marker the post-action needs is asserted on its own: it is a
+    # dotfile, the kind of file a pack drops, and the post-action was not run, so it must still be there.
+    [[ -f "$module_dir/.modulith-module" ]] ||
+      fail "dotnet new modulith-module from the $module_install wrote no .modulith-module marker file"
     module_trees+=("$module_dir")
   done
   if [[ -d "${module_trees[0]}" && -d "${module_trees[1]}" ]]; then
@@ -569,8 +575,8 @@ fi
 # The scripts of the module item template and the release-package script are repo-only (template.json leaves them and their tests out
 # of every generated project), so they are tested here, in one step, and only by a full run: add-module.test.sh takes about 5 minutes,
 # which --generate-only must not pay.
-step "Running the repo-only script tests (module-anchors, module-template-files, add-module, release-package: about 6 minutes)"
-for repo_test in module-anchors module-template-files add-module release-package; do
+step "Running the repo-only script tests (static-rules, module-anchors, module-template-files, add-module, release-package: about 6 minutes)"
+for repo_test in static-rules module-anchors module-template-files add-module release-package; do
   bash "$repo_root/build/scripts/tests/$repo_test.test.sh"
 done
 

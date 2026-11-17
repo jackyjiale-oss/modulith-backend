@@ -458,7 +458,7 @@ finish_module() {
     git status --short
     # A new folder is listed as one line above, so the new packages.lock.json files (the Dockerfile COPY lines and the locked-mode
     # restore of CI need them) are named one by one; a tracked one that changed is in the list above already.
-    git ls-files --others --exclude-standard -- '*packages.lock.json'
+    git -c core.quotepath=off ls-files --others --exclude-standard -- '*packages.lock.json'
   else
     echo "add-module: this is not a git repository: commit the new module folders (src/Modules/$1, docs/modules/$(kebab_case "$1").md), the packages.lock.json files they gained, and the edited shared files."
   fi
