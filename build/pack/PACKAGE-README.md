@@ -8,8 +8,8 @@ The package holds two templates: `modulith-backend` (the whole solution) and `mo
 
 ```bash
 dotnet new install Modulith.Backend.Templates
-# a prerelease, by version
-dotnet new install Modulith.Backend.Templates::<version>
+# one exact version, for example a release candidate
+dotnet new install Modulith.Backend.Templates@<version>
 ```
 
 ## Generate
