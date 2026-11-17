@@ -147,7 +147,7 @@ done
 
 # Every tracked file is in the package under content/, except the plan documents and the pack project itself.
 sed -n 's|^content/||p' "$entries" > "$tmp/content-entries.txt"
-(cd "$repo_root" && git ls-files | grep -vE '^(docs/superpowers/|build/pack/)' | LC_ALL=C sort) > "$tmp/tracked.txt"
+(cd "$repo_root" && git -c core.quotepath=off ls-files | grep -vE '^(docs/superpowers/|build/pack/)' | LC_ALL=C sort) > "$tmp/tracked.txt"
 missing="$(LC_ALL=C comm -23 "$tmp/tracked.txt" "$tmp/content-entries.txt")"
 [[ -z "$missing" ]] || fail_package "$(printf '%s\n' "$missing" | wc -l | tr -d ' ') tracked files missing from the package, the first 10:"$'\n'"$(printf '%s\n' "$missing" | head -n 10)"
 
@@ -195,6 +195,38 @@ checkout_ref() {
     /^      - / { in_checkout = ($0 ~ /uses: actions\/checkout@/) }
     in_checkout && /^[[:space:]]+ref:[[:space:]]/ { sub(/^[[:space:]]+ref:[[:space:]]+/, ""); print; exit }
   '
+}
+
+# publish_order_error <workflow>: prints what is wrong with the step order of the publish-package job, or nothing. The four named
+# steps must all exist, in the order prove, attach, log in, push, and the push must be the last step of the job: it cannot be taken
+# back, so everything that can fail comes before it and nothing may fail after it.
+publish_order_error() {
+  job_block "$1" publish-package | awk '
+    BEGIN { split("Prove the package|Attach to the release|NuGet login|Push to nuget.org", wanted, "|") }
+    /^      - / { steps++ }
+    /^      - name: / || /^        name: / {
+      name = $0
+      sub(/^[[:space:]]*(- )?name:[[:space:]]*/, "", name)
+      sub(/[[:space:]]+$/, "", name)
+      position[name] = steps
+    }
+    END {
+      previous = 0
+      for (i = 1; i <= 4; i++) {
+        if (!(wanted[i] in position)) { print "the publish-package job has no step named \047" wanted[i] "\047"; exit }
+        if (position[wanted[i]] <= previous) { print "the step \047" wanted[i] "\047 does not come after \047" wanted[i - 1] "\047"; exit }
+        previous = position[wanted[i]]
+      }
+      after = steps - previous
+      if (after > 0) print "\047" wanted[4] "\047 is not the last step of the publish-package job: " after " step(s) follow it"
+    }
+  '
+}
+
+# scratch_job <step name>...: prints a publish-package job with one named step per argument, for the order check's own test.
+scratch_job() {
+  printf '  publish-package:\n    steps:\n'
+  printf '      - name: %s\n        run: true\n' "$@"
 }
 
 if [[ ! -f "$workflow" ]]; then
@@ -250,6 +282,21 @@ else
   elif [[ -z "$check_tag_line" || "$ancestry_line" -ge "$check_tag_line" ]]; then
     fail "release.yml: the ancestry check (line $ancestry_line) does not come before release-package.sh check-tag (line ${check_tag_line:-none})"
   fi
+
+  # The push is the last step, and the proof, the upload and the login come before it in that order.
+  order_error="$(publish_order_error "$workflow")"
+  [[ -z "$order_error" ]] || fail "release.yml: $order_error"
+
+  # The order check must reject a push before the login, a step after the push and a missing step, and accept the right order
+  # (scratch jobs, never the real file).
+  scratch_job 'Prove the package' 'Attach to the release' 'Push to nuget.org' 'NuGet login' > "$tmp/bad-order.yml"
+  [[ -n "$(publish_order_error "$tmp/bad-order.yml")" ]] || fail "the step-order check accepted a push before the login"
+  scratch_job 'Prove the package' 'Attach to the release' 'NuGet login' 'Push to nuget.org' 'Announce' > "$tmp/bad-last.yml"
+  [[ -n "$(publish_order_error "$tmp/bad-last.yml")" ]] || fail "the step-order check accepted a step after the push"
+  scratch_job 'Attach to the release' 'NuGet login' 'Push to nuget.org' > "$tmp/bad-missing.yml"
+  [[ -n "$(publish_order_error "$tmp/bad-missing.yml")" ]] || fail "the step-order check accepted a job without the proof step"
+  scratch_job 'Pack' 'Prove the package' 'Attach to the release' 'NuGet login' 'Push to nuget.org' > "$tmp/good-order.yml"
+  [[ -z "$(publish_order_error "$tmp/good-order.yml")" ]] || fail "the step-order check rejected the right order: $(publish_order_error "$tmp/good-order.yml")"
 fi
 
 # find_python <candidate>...: prints the first candidate that really runs python (a Windows Store stub or a missing name does not), else fails.

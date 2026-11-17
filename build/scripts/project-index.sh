@@ -1609,7 +1609,7 @@ main() {
 warn_untracked() {
   local paths=() shown
   [[ -e "$root/.git" ]] || return 0
-  mapfile -t paths < <(git -C "$root" ls-files --others --exclude-standard -- src tests docs 2> /dev/null || true)
+  mapfile -t paths < <(git -C "$root" -c core.quotepath=off ls-files --others --exclude-standard -- src tests docs 2> /dev/null || true)
   (( ${#paths[@]} > 0 )) || return 0
   shown="${paths[*]:0:3}"
   if (( ${#paths[@]} > 3 )); then shown+=" ..."; fi
