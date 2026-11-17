@@ -1,6 +1,7 @@
 # Modulith Backend
 
 [![CI](https://github.com/jackyjiale-oss/modulith-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/jackyjiale-oss/modulith-backend/actions/workflows/ci.yml)
+[![NuGet](https://img.shields.io/nuget/vpre/Modulith.Backend.Templates.svg)](https://www.nuget.org/packages/Modulith.Backend.Templates)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
 
 Modulith is a `dotnet new` template for production-ready backends: an ASP.NET Core 10 modular monolith on SQL Server. Each business module owns its code, schema and migrations behind a compiler-enforced boundary, and talks to other modules only through its `Contracts` project. The plumbing every service needs (errors, validation, persistence, reliable events, observability and HTTP hardening) is already wired and tested, so a new project starts with features instead of infrastructure.
@@ -26,7 +27,7 @@ Modulith is a `dotnet new` template for production-ready backends: an ASP.NET Co
 
 ## Status
 
-Pre-release: Plan 1 (foundation and core baseline), Plan 2 (the Auth module), Plan 3 (notifications), Plan 4 (two-step verification) and Plan 5 (platform services: cleanup jobs, optional Redis, HTTP resilience), Plan 5b (the Audit module), Plan 5c (the API and database versioning policy) and social login (Google, Apple, Microsoft, Facebook and a generic OpenID Connect provider) are implemented; phone-number OTP login, push and SMS channels, delivery and packaging follow. Expect breaking changes until the first release. The Malay and Simplified Chinese messages are drafts awaiting native review (release checklist in [`CONTRIBUTING.md`](CONTRIBUTING.md), Section 5).
+Pre-release: Plan 1 (foundation and core baseline), Plan 2 (the Auth module), Plan 3 (notifications), Plan 4 (two-step verification) and Plan 5 (platform services: cleanup jobs, optional Redis, HTTP resilience), Plan 5b (the Audit module), Plan 5c (the API and database versioning policy) and social login (Google, Apple, Microsoft, Facebook and a generic OpenID Connect provider) are implemented, and so are delivery (Plan 6: the container image and the deployment pipeline) and packaging (Plan 7: the template switches, the module template and the NuGet package); phone-number OTP login and the push and SMS channels follow. The package is on nuget.org as a release candidate (`1.0.0-rc.1`). Expect breaking changes until 1.0. The Malay and Simplified Chinese messages are drafts awaiting native review (release checklist in [`CONTRIBUTING.md`](CONTRIBUTING.md), Section 5).
 
 ## Prerequisites
 
@@ -44,13 +45,27 @@ Windows stops at 260 characters per path unless long paths are enabled. The long
 
 ## Using the template
 
+Install the package [`Modulith.Backend.Templates`](https://www.nuget.org/packages/Modulith.Backend.Templates) from nuget.org:
+
+```bash
+dotnet new install Modulith.Backend.Templates
+```
+
+It holds both templates: `modulith-backend` (the whole solution) and `modulith-module` (one more module for a generated project). Only release candidates are published so far, and while no stable version exists this command installs the newest candidate. To install one exact version, name it after an `@`:
+
+```bash
+dotnet new install Modulith.Backend.Templates@1.0.0-rc.1
+```
+
+To change the template itself, install it from a checkout instead:
+
 ```bash
 git clone https://github.com/jackyjiale-oss/modulith-backend.git
 cd modulith-backend
 dotnet new install .
 ```
 
-The release workflow publishes the template as the NuGet package `Modulith.Backend.Templates` (the maintainers' runbook is `docs/releasing.md` in the repository). Until the first release candidate is out, the checkout route above is the way to install; this section changes once the package is on nuget.org.
+The release workflow publishes the package (the maintainers' runbook is `docs/releasing.md` in the repository).
 
 Then generate a project:
 
@@ -68,7 +83,9 @@ Three options leave a part out; with none of them the project is the whole templ
 
 The generated project's `README.md` (section "Switches") and [ADR 0035](docs/adr/0035-template-switches-by-engine-conditionals.md) say more.
 
-From here the generated project's own `README.md` takes over. `dotnet new uninstall .` (from the repository folder) removes the template again.
+From here the generated project's own `README.md` takes over.
+
+`dotnet new update --check-only` says whether a newer version of the package exists and `dotnet new update` installs it; a newer release candidate is installed by its version, as above. `dotnet new uninstall Modulith.Backend.Templates` removes the templates again (`dotnet new uninstall .` from the repository folder after a checkout install).
 
 ## Run the backend
 

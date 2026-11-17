@@ -121,7 +121,7 @@ CI (`.github/workflows/ci.yml`) also checks formatting (`dotnet format --verify-
 
 ### Adding a module
 
-Install the template once from a checkout of the template repository (`dotnet new install <path>` registers `modulith-module` next to `modulith-backend`), then run this at the solution root, with your own module name (PascalCase):
+Install the template package once (`dotnet new install Modulith.Backend.Templates`, or `dotnet new install <path>` from a checkout of the template repository; either registers `modulith-module` next to `modulith-backend`), then run this at the solution root, with your own module name (PascalCase):
 
 ```bash
 dotnet new modulith-module -n Billing --prefix TemplateName [--contracts true] --allow-scripts yes
