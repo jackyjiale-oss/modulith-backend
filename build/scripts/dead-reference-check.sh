@@ -81,6 +81,9 @@ if [[ "$notifications" == "false" ]]; then
   # Its test email transport (RecordingEmailSender, Factory.EmailSender) and its delivery worker, as code and prose name them.
   scan 'Notifications|Mailpit|mailpit|\bnotify\b|\bnotifications\.[a-z_]|/notifications\b|notifications-hub|EmailSender|delivery worker' '--notifications false' "${allow[@]}"
   kept_names=""
+  # Its commit scope: in the list of the commit-message check (a|notifications|b), as an example header (fix(notifications): ...) and
+  # in the scopes table of CONTRIBUTING.md (`notifications`). Allowed: the ADR tables, which name the switch `notifications`.
+  scan '\|notifications(\||"|[[:space:]]|$)|\(notifications\)|`notifications`' '--notifications false' '^docs/(README|architecture/overview)\.md$'
 fi
 
 if [[ "$include_sample" == "false" ]]; then
@@ -101,8 +104,6 @@ if [[ "$include_sample" == "false" ]]; then
   allow+=(
     # The code examples of an aggregate and an endpoint group use the leave request.
     '^docs/building-blocks/(shared-kernel|web-common)\.md$'
-    # The Conventional Commit examples.
-    '^CONTRIBUTING\.md$'
     # Doc comments that give "LeaveRequest" as an example of an entity type name.
     '^src/BuildingBlocks/[^/]+\.SharedKernel/Auditing/EntityChange\.cs$'
     '^src/Modules/Audit/[^/]+/Application/Trails/List/AuditTrailResponse\.cs$'
@@ -113,6 +114,8 @@ if [[ "$include_sample" == "false" ]]; then
   )
   # "sample" and 'sample' as a string, sample.Table, sample.permission_code.
   scan 'LeaveRequest|leave request|"sample"|'"'sample'"'|\bsample\.[A-Za-z_]' '--includeSample false' "${allow[@]}"
+  # Its commit scope (see the scope of Notifications above). Allowed: the naming conventions, which give `sample` as a schema name.
+  scan '\|sample(\||"|[[:space:]]|$)|\(sample\)|`sample`' '--includeSample false' '^docs/coding-conventions\.md$'
 fi
 
 if [[ "$caching" == "memory" ]]; then

@@ -299,6 +299,11 @@ case_sample_allowlist() {
   put tests/Acme.IntegrationTests/Audit/AuditTrailEndpointTests.cs "$(printf 'string module = "sample",\nVALUES (NEWID(), '"'sample'"')')"
   run_check true false redis
   assert_eq "0" "$status" "sample_allowlist: the schema as test data of the audit trail"
+  # The Conventional Commit examples are written for a module every project has, so the contributing guide is not allowed.
+  make_tree
+  put CONTRIBUTING.md 'feat: add leave request cancellation'
+  run_check true false redis
+  assert_eq "1" "$status" "sample_allowlist: the contributing guide is not an exception"
 }
 
 case_sample_schema() {
@@ -317,6 +322,52 @@ case_sample_schema() {
     run_check true false redis
     assert_eq "0" "$status" "sample_schema: '$q' is not the schema"
   done
+}
+
+# The commit scope of a removed module must be gone from the list of the commit-message check (a|sample|b), from the scopes table
+# of CONTRIBUTING.md (`sample`) and from its example headers (feat(sample): ...).
+case_commit_scopes() {
+  local p q bt='`'
+  for p in 'ALLOWED_SCOPES="web|sample|auth"' 'OPTIONAL_SCOPES="$OPTIONAL_SCOPES|sample"' "| Modules | ${bt}sample${bt}, ${bt}auth${bt} |" \
+    "| ${bt}feat(sample): add a thing${bt} | x |" 'revert: fix(sample)!: undo a thing'; do
+    make_tree
+    put CONTRIBUTING.md "$p"
+    run_check true false redis
+    assert_eq "1" "$status" "commit_scopes: sample: '$p'"
+    assert_contains "CONTRIBUTING.md:1" "$out" "commit_scopes: sample: '$p' names file and line"
+    run_check true true redis
+    assert_eq "0" "$status" "commit_scopes: sample kept: '$p'"
+  done
+  for p in 'ALLOWED_SCOPES="web|notifications|auth"' 'OPTIONAL_SCOPES="$OPTIONAL_SCOPES|notifications"' \
+    "| Modules | ${bt}auth${bt}, ${bt}notifications${bt} |" "| ${bt}fix(notifications): retry a delivery${bt} | x |"; do
+    make_tree
+    put build/scripts/check-commit-msg.sh "$p"
+    run_check false true redis
+    assert_eq "1" "$status" "commit_scopes: notifications: '$p'"
+    run_check true true redis
+    assert_eq "0" "$status" "commit_scopes: notifications kept: '$p'"
+  done
+  # Not a scope: the word in prose, a longer name, a table cell with spaces; the naming conventions give `sample` as a schema name,
+  # and the ADR tables of the document index and the architecture overview name the switch `notifications`.
+  for q in 'a|sampler|b' 'take a (sample of the) rows' '| sample | rows |' "${bt}sample-rate${bt}"; do
+    make_tree
+    put docs/x.md "$q"
+    run_check true false redis
+    assert_eq "0" "$status" "commit_scopes: '$q' is not the scope"
+  done
+  make_tree
+  put docs/coding-conventions.md "| DB schema | lower-case module name | ${bt}sample${bt}, ${bt}auth${bt} |"
+  run_check true false redis
+  assert_eq "0" "$status" "commit_scopes: the naming conventions give sample as a schema name"
+  make_tree
+  put docs/README.md "| 0035 | three generation switches (${bt}notifications${bt}, ${bt}includeSample${bt}) |"
+  put docs/architecture/overview.md "| 0035 | three generation switches (${bt}notifications${bt}, ${bt}includeSample${bt}) |"
+  run_check false true redis
+  assert_eq "0" "$status" "commit_scopes: the ADR tables name the switch"
+  make_tree
+  put docs/modules/auth.md "the ${bt}notifications${bt} scope"
+  run_check false true redis
+  assert_eq "1" "$status" "commit_scopes: the scope on any other page"
 }
 
 case_each_part_checked_only_when_removed() {
@@ -389,7 +440,7 @@ run_case() {
 for c in \
   case_all_switches_on case_notifications_removed_hit case_notifications_other_patterns case_hit_line_number \
   case_ignored_paths case_flag_text_line_allowed case_redis_allowlist case_redis_other_patterns \
-  case_notifications_allowlist case_notifications_kept_names case_notifications_schema case_notifications_email_transport_and_worker case_sample_removed case_sample_other_patterns case_sample_allowlist case_sample_schema \
+  case_notifications_allowlist case_notifications_kept_names case_notifications_schema case_notifications_email_transport_and_worker case_sample_removed case_sample_other_patterns case_sample_allowlist case_sample_schema case_commit_scopes \
   case_each_part_checked_only_when_removed case_caching_redis_never_checked case_usage_errors case_grep_error; do
   run_case "$c"
 done
