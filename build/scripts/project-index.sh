@@ -335,7 +335,7 @@ function scan_file(i,   f, line, full, m, decl, nm, prm, rc, isdecl) {
     }
     # A method declaration: a line that starts (after attributes) with a modifier and has a name before its first parenthesis. With an
     # access modifier it is a member of a class, so every open scope is over; without one it may be a local function.
-    if (match(line, /^[ \t]*(\[[^]]*\][ \t]*)*(public|private|internal|protected|static|async|unsafe|extern|partial)([ \t][^=;(]*)?[ \t][A-Za-z_][A-Za-z0-9_]*[ \t]*\(/)) {
+    if (match(line, /^[ \t]*(\[[^[]*\][ \t]*)*(public|private|internal|protected|static|async|unsafe|extern|partial)([ \t][^=;(]*)?[ \t][A-Za-z_][A-Za-z0-9_]*[ \t]*\(/)) {
       m = substr(line, RSTART, RLENGTH)
       if (m ~ /(^|[^A-Za-z0-9_])(public|private|internal|protected)[ \t]/) sp = 0
       sub(/[ \t]*\($/, "", m); sub(/^.*[ \t]/, "", m)
