@@ -417,7 +417,13 @@ if [[ "$all_on" == "true" ]]; then
     /"exclude": \[/ { listing = 1; next } listing && /\]/ { listing = 0; next }
     listing && (!modifiers || condition ~ /\(caching == \\"redis\\"\)/) { gsub(/^[ \t]*"|",?[ \t\r]*$/, ""); print }' \
     "$repo_root/.template.config/template.json")
+  # An empty list would make every excluded file look like a missing one, with no hint why; a git failure inside the loop's own
+  # process substitution would not stop the script and would leave nothing to check. Both stop the check here instead.
+  (( ${#all_on_excludes[@]} > 0 )) || fail "no exclude pattern was read from .template.config/template.json (one pattern per line is expected)"
+  tracked_files="$(git -C "$repo_root" -c core.quotepath=off ls-files)" || fail "git ls-files failed in $repo_root"
+  [[ -n "$tracked_files" ]] || fail "no tracked file was listed in $repo_root"
   while IFS= read -r tracked; do
+    [[ -n "$tracked" ]] || continue
     [[ -e "$out/${tracked//TemplateName/$project_name}" ]] && continue
     excluded=false
     for pattern in "${all_on_excludes[@]}"; do
@@ -427,7 +433,7 @@ if [[ "$all_on" == "true" ]]; then
       [[ "$excluded" == true ]] && break
     done
     [[ "$excluded" == true ]] || fail "$tracked is tracked but not generated with every switch on, and no unconditional exclude of template.json leaves it out"
-  done < <(git -C "$repo_root" -c core.quotepath=off ls-files)
+  done <<< "$tracked_files"
 fi
 
 step "Checking which parts of the template were generated"

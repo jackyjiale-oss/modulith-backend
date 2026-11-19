@@ -8,6 +8,9 @@
 #      A value reaches a step through env: and is read there as a shell variable.
 #   2. Every `git ls-files` reads its names with -z or with core.quotepath=off. By default git prints a path that holds a
 #      non-ASCII character in quotes with escape sequences, and a script that compares that text with a file name gets it wrong.
+#   3. No switch marker (//#if, //#endif and the like, ADR 0035) between two lines of one C# doc comment (///). In the template's
+#      own tree the marker line splits the comment into two halves that are not valid XML; the generated project never sees it.
+#      A sentence that depends on a switch goes after the doc comment, as a plain comment inside the marker.
 #
 # Usage: bash build/scripts/tests/static-rules.test.sh   (from any directory)
 set -euo pipefail
@@ -108,6 +111,47 @@ if ((${#sources[@]} == 0)); then
 else
   found="$(cd "$repo_root" && unsafe_ls_files "${sources[@]}")"
   [[ -z "$found" ]] || fail "git ls-files is read without -z and without core.quotepath=off (a non-ASCII path would come back quoted):"$'\n'"$found"
+fi
+
+# markers_in_doc_comments <file>...: prints "file:line: text" for each switch marker line whose nearest lines above and below that
+# are not marker lines are both doc comment lines (///).
+markers_in_doc_comments() {
+  awk '
+    FNR == 1 { after_doc = 0; pending = "" }
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      if (line ~ /^[[:space:]]*\/\/#(if|elseif|else|endif)([[:space:]]|\(|$)/) {
+        if (after_doc) pending = pending FILENAME ":" FNR ": " line "\n"
+        next
+      }
+      is_doc = (line ~ /^[[:space:]]*\/\/\//)
+      if (is_doc && pending != "") printf "%s", pending
+      pending = ""
+      after_doc = is_doc
+    }
+  ' "$@"
+}
+
+# Rule 3, proven on scratch files.
+printf '%s\n' '/// <summary>' '/// Always.' '//#if (notifications)' '/// Only with Notifications.' '//#endif' '/// </summary>' \
+  'public sealed class A;' > "$tmp/bad-doc.cs"
+found="$(markers_in_doc_comments "$tmp/bad-doc.cs")"
+[[ "$(wc -l <<< "$found")" -eq 2 && "$found" == *":3: "* && "$found" == *":5: "* ]] ||
+  fail "the doc-comment rule did not report lines 3 and 5 of a doc comment split by a marker; it printed: $found"
+printf '%s\n' '/// <summary>' '/// Always.' '/// </summary>' '//#if (notifications)' '// Only with Notifications.' '//#endif' \
+  'public sealed class A' '{' '    //#if (notifications)' '    private int b;' '    //#endif' '    /// <summary>One.</summary>' \
+  '    //#if (includeSample)' '    private int c;' '    //#endif' '}' > "$tmp/good-doc.cs"
+found="$(markers_in_doc_comments "$tmp/good-doc.cs")"
+[[ -z "$found" ]] || fail "the doc-comment rule rejected a marker outside a doc comment: $found"
+
+# Rule 3 on the real C# files.
+mapfile -t csharp_files < <(cd "$repo_root" && git -c core.quotepath=off ls-files -- '*.cs')
+if ((${#csharp_files[@]} == 0)); then
+  fail "no tracked C# file was found"
+else
+  found="$(cd "$repo_root" && markers_in_doc_comments "${csharp_files[@]}")"
+  [[ -z "$found" ]] || fail "a switch marker splits a doc comment (put the switch-dependent sentence after it as a plain comment):"$'\n'"$found"
 fi
 
 if ((failures > 0)); then

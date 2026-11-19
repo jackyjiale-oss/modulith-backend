@@ -20,11 +20,11 @@ namespace TemplateName.IntegrationTests.Auth;
 
 /// <summary>
 /// <c>POST /api/v1/auth/password/forgot</c>, <c>/reset</c> and <c>/change</c> through the running host.
-//#if (notifications)
-/// Neither the outbox nor the delivery worker runs by itself in tests, so the tests dispatch both (<c>DispatchNotificationsAsync</c>)
-/// and read the reset links <see cref="RecordingEmailSender"/> kept.
-//#endif
 /// </summary>
+//#if (notifications)
+// Neither the outbox nor the delivery worker runs by itself in tests, so the tests dispatch both (DispatchNotificationsAsync) and
+// read the reset links RecordingEmailSender kept.
+//#endif
 public sealed class PasswordTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)
 {
     private const string ForgotRoute = "/api/v1/auth/password/forgot";

@@ -23,12 +23,12 @@ namespace TemplateName.IntegrationTests.Auth;
 
 /// <summary>
 /// Registration, email confirmation and resending the confirmation through the running host.
-//#if (notifications)
-/// Neither the outbox nor the delivery worker runs by itself in tests, so every test dispatches both after a call
-/// (<c>DispatchNotificationsAsync</c>: Auth's outbox publishes, the Notifications module renders and sends) and reads the emails
-/// <see cref="RecordingEmailSender"/> kept.
-//#endif
 /// </summary>
+//#if (notifications)
+// Neither the outbox nor the delivery worker runs by itself in tests, so every test dispatches both after a call
+// (DispatchNotificationsAsync: Auth's outbox publishes, the Notifications module renders and sends) and reads the emails
+// RecordingEmailSender kept.
+//#endif
 public sealed class RegistrationTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)
 {
     private const string RegisterRoute = "/api/v1/auth/register";
