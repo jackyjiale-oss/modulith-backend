@@ -167,3 +167,9 @@ For mobile apps consider telemetry, a minimum supported app version (the templat
 - Do not support an old version indefinitely without a customer or business reason.
 
 Before shipping a change, ask: is it visible to API clients; is it compatible for the clients that exist; if not, must old and new coexist; does a migration affect an endpoint, job, report or integration; can the old contract be kept by mapping from the current schema; what evidence will show that the old column or version is safe to remove; and who owns the migration, the monitoring, the communication and the retirement.
+
+## Preconditions (`If-Match`)
+
+- Adding an optional request header, such as `If-Match` on an update (ADR 0038), is compatible: a client that does not send it sees no change.
+- Adding a response header, such as `ETag`, is compatible.
+- Making `If-Match` required (428 Precondition Required for an update without it) is **breaking**: every client that does not send it starts failing. Ship it with `!` and a `BREAKING CHANGE:` footer.

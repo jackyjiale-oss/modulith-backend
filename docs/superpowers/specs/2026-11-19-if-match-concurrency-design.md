@@ -1,6 +1,6 @@
 # ETag and If-Match on the update endpoints — design
 
-- Status: approved 2026-11-19; implementation plan `docs/superpowers/plans/2026-11-19-if-match-concurrency.md`.
+- Status: implemented 2026-11-19 (ADR 0038); approved 2026-11-19; implementation plan `docs/superpowers/plans/2026-11-19-if-match-concurrency.md`.
 - Date: 2026-11-19
 - Roadmap row: new. `BACKEND_TEMPLATE_BLUEPRINT.md` line 308 (API conventions) asks for "`ETag` / `If-Match` for optimistic concurrency on updates where needed"; `docs/blueprint-review.md` never took it up, and no ADR declined it. Adding its own row is part of this plan.
 - Builds on: the core baseline's `DbUpdateConcurrencyException` → 409 `concurrency.conflict` (ADR 0006), ADR 0009 (error messages in three languages), ADR 0031 (API compatibility policy).

@@ -566,6 +566,10 @@ What to watch and what the module does not do. Metrics and logs: [Observability]
 - **Admin retries are not audited** beyond a log line with the delivery id and the administrator's id ([Delivery administration](#delivery-administration)).
 - **Not built (D17):** scheduling and cancellation, digests, push (FCM, APNs) and SMS channels (planned as their own plan, each channel switched on by an `Enabled` setting and off by default), webhooks, provider callbacks and delivery tracking beyond `Sent`, a suppression list, bulk sends, attachments, fallback channels, an admin template editor with preview and test send, a global mute and a synced `NotificationTypes` table. Each is a backlog item with its blueprint section.
 
+## Concurrency (`ETag` and `If-Match`)
+
+`PUT /api/v1/notifications/preferences` and `PUT /api/v1/notifications/preferences/quiet-hours` take an optional `If-Match` and answer a stale one with 412 `concurrency.precondition_failed` (ADR 0038); `GET` of both and their successful updates carry the version as `ETag`. The preferences version covers every (type, channel, enabled) of the view `GET` returns; the quiet-hours version covers start and end (both null without a window or a settings row), not the time zone, which belongs to Auth. Without `If-Match` both keep their behaviour ("the last one wins" after a conflict). With it, each attempt of the save retry checks the version against its own fresh read, so a change made in between answers 412 instead of being overwritten.
+
 ## Changelog
 
 <!-- Link to the changelog entries for this module's commit scope. -->

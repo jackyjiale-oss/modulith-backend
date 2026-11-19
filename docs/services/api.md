@@ -194,7 +194,7 @@ For example `Resilience__Pipelines__hibp__Retries=0` (the pipeline name is part 
 |---|---|---|---|
 | `AllowedOrigins` | `[]` (no cross-origin caller) | `*` is rejected | Origins allowed to call with credentials, e.g. `https://app.example.com`. Any header and method are allowed for them. |
 
-The policy exposes `X-Trace-Id`, `Location`, `Retry-After` and `Idempotency-Replayed` (`Access-Control-Expose-Headers`), so browser code on an allowed origin can read them.
+The policy exposes `X-Trace-Id`, `Location`, `Retry-After`, `Idempotency-Replayed` and `ETag` (`Access-Control-Expose-Headers`), so browser code on an allowed origin can read them.
 
 <!--#if (notifications)-->
 **The notification hub.** A browser on an allowed origin calls `POST /api/v1/notifications/hub-tickets` and the hub's negotiate request through this policy like any route. Browsers do not apply CORS to the WebSocket request itself, and the hub does not check its `Origin`: the hub accepts no cookie, so there is no ambient credential for a hostile page to use (cross-site WebSocket hijacking), and a page cannot get a ticket without the user's access token ([ADR 0021](../adr/0021-signalr-hub-tickets.md)).

@@ -204,3 +204,12 @@ These are part of public contracts or operations. Changing one is a breaking cha
 | Architecture tests | Role suffixes (Command, Query, Handler, Validator, DomainEvent, Repository, DbContext, Configuration), forbidden suffixes (G5), `Async` on Task-returning methods, `CancellationToken cancellationToken` as the last parameter (these three over every `src` assembly, the `*.Contracts` ones included), sealed/internal rules, module layering, translation completeness, audited entities (application-generated keys, no owned types, secret names ignored or masked, store-generated columns ignored) | `tests/TemplateName.ArchitectureTests/` |
 | Commit-message hook + CI PR-title check | Conventional Commits format, allowed types and scopes, length | `.githooks/commit-msg`, `build/scripts/check-commit-msg.sh`, `.github/workflows/pr-title.yml` |
 | Code review | Everything marked *review*: meaning, domain language, abbreviations | `.github/pull_request_template.md` |
+
+## Updates that take `If-Match`
+
+Every `PUT` under `/api/v1/` returns an `ETag` and takes an optional `If-Match` (ADR 0038); `EntityTagCoverageTests` fails for one that does neither, unless it is on that test's `ExcludedPuts` list with a reason. To opt a new update in:
+
+1. Write one version function for the resource, `internal static class {Resource}Version { public static EntityTag Of(...) }`, over exactly the values its `PUT` writes (an `EntityTagBuilder` with the resource kind). The read and the update both call it.
+2. Give the command `public IfMatch IfMatch { get; init; } = IfMatch.None;`. In the handler, after loading and before any change: `if (!command.IfMatch.IsSatisfiedBy(current)) return ConcurrencyErrors.PreconditionFailed;`. A 204 update returns the new version (`ICommand<EntityTag>`); a 200 update returns its body and lets the endpoint compute the version from it.
+3. In the endpoint, bind `[FromHeader(Name = "If-Match")] string? ifMatch`, answer `IfMatchHeader.Malformed()` when `IfMatchHeader.TryParse` fails, and answer success with `.WithEntityTag(...)`. Declare the route with `.ProducesEntityTag()` and `.ProducesProblem(StatusCodes.Status412PreconditionFailed)`, and its read with `.ProducesEntityTag()`.
+4. Test it as the existing `*EntityTagTests` do: a matching tag, a stale one (412 and nothing changed), none, `*`, a weak and a malformed one.
