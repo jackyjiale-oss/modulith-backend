@@ -2,7 +2,7 @@
 
 # Tests
 
-Rows: 217
+Rows: 218
 
 ## Folders
 
@@ -128,6 +128,7 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/ExternalLogins/Login/ExternalLoginCommandValidator.cs | tests/TemplateName.UnitTests/Auth/ExternalLoginCommandValidatorTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/ExternalLogins/Providers/ListExternalProvidersQueryHandler.cs | tests/TemplateName.UnitTests/Auth/ListExternalProvidersQueryHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/ExternalLogins/Unlink/UnlinkExternalLoginCommandHandler.cs | tests/TemplateName.UnitTests/Auth/UnlinkExternalLoginCommandHandlerTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/Me/ProfileVersion.cs | tests/TemplateName.UnitTests/Auth/ProfileVersionTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Me/Update/UpdateProfileCommandHandler.cs | tests/TemplateName.UnitTests/Auth/UpdateProfileCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Me/Update/UpdateProfileCommandValidator.cs | tests/TemplateName.UnitTests/Auth/UpdateProfileCommandValidatorTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Mfa/ConfirmTotp/ConfirmTotpCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Mfa/ConfirmTotpCommandHandlerTests.cs |

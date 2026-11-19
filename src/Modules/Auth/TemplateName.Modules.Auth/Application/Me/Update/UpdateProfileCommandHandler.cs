@@ -1,7 +1,9 @@
+using TemplateName.Application.Common.Concurrency;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Application.Me.GetMe;
+using TemplateName.Modules.Auth.Application.Me;
 using TemplateName.Modules.Auth.Domain.Audit;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.SharedKernel;
@@ -34,6 +36,11 @@ internal sealed class UpdateProfileCommandHandler(
         if (user is null || user.Status == UserStatus.Suspended)
         {
             return Result.Failure<MeResponse>(UserErrors.NotFound(userId));
+        }
+
+        if (!command.IfMatch.IsSatisfiedBy(ProfileVersion.Of(user.DisplayName, user.Locale, user.TimeZone)))
+        {
+            return Result.Failure<MeResponse>(ConcurrencyErrors.PreconditionFailed);
         }
 
         // The validator has accepted the locale before the handler runs, so this cannot fail.

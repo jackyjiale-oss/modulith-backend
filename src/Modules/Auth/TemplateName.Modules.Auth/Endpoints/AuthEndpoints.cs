@@ -1,7 +1,9 @@
+using Microsoft.AspNetCore.Mvc;
 using System.Globalization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using TemplateName.Application.Common.Concurrency;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Application.Common.Pagination;
 using TemplateName.Modules.Auth.Application.Authentication;
@@ -11,6 +13,7 @@ using TemplateName.Modules.Auth.Application.Authentication.LogoutAll;
 using TemplateName.Modules.Auth.Application.Authentication.Refresh;
 using TemplateName.Modules.Auth.Application.Me.GetMe;
 using TemplateName.Modules.Auth.Application.Me.Update;
+using TemplateName.Modules.Auth.Application.Me;
 using TemplateName.Modules.Auth.Application.Passwords.Change;
 using TemplateName.Modules.Auth.Application.Passwords.Forgot;
 using TemplateName.Modules.Auth.Application.Passwords.Reset;
@@ -22,6 +25,7 @@ using TemplateName.Modules.Auth.Application.Sessions.Revoke;
 using TemplateName.Modules.Auth.Application.StepUp;
 using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.SharedKernel;
+using TemplateName.Web.Common.Concurrency;
 using TemplateName.Web.Common.Results;
 using TemplateName.Web.Common.Security;
 
@@ -102,14 +106,17 @@ internal static class AuthEndpoints
             .RequireAuthorization()
             .WithNoStore()
             .Produces<MeResponse>()
+            .ProducesEntityTag()
             .ProducesProblem(StatusCodes.Status401Unauthorized);
 
         group.MapPut("me", UpdateProfileAsync)
             .WithName("UpdateProfile")
             .RequireAuthorization()
             .Produces<MeResponse>()
+            .ProducesEntityTag()
             .ProducesValidationProblem()
-            .ProducesProblem(StatusCodes.Status401Unauthorized);
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status412PreconditionFailed);
 
         group.MapGet("sessions", ListSessionsAsync)
             .WithName("ListSessions")
@@ -288,25 +295,36 @@ internal static class AuthEndpoints
 
     // The handler fails only when the token's user can no longer sign in (unknown, soft-deleted or suspended). Fail closed with the same
     // body-less 401 a request without a valid token gets; UseStatusCodePages turns it into the http.401 problem.
+    // 200 with the profile version as ETag (ADR 0038), for GET me and PUT me alike.
+    private static IResult OkWithVersion(MeResponse me)
+        => TypedResults.Ok(me).WithEntityTag(ProfileVersion.Of(me.DisplayName, me.Locale, me.TimeZone));
+
     private static async Task<IResult> GetMeAsync(IQueryHandler<GetMeQuery, MeResponse> handler, CancellationToken cancellationToken)
     {
         var result = await handler.HandleAsync(new GetMeQuery(), cancellationToken);
 
-        return result.IsSuccess ? TypedResults.Ok(result.Value) : TypedResults.Unauthorized();
+        return result.IsSuccess ? OkWithVersion(result.Value) : TypedResults.Unauthorized();
     }
 
     // 200 with the updated profile as GET me returns it; a token whose user is gone or suspended gets the body-less 401 of a request
     // without a valid token, as GET me does. The new language reaches the access token with the next refresh.
     private static async Task<IResult> UpdateProfileAsync(
         UpdateProfileRequest request,
+        [FromHeader(Name = "If-Match")] string? ifMatch,
         ICommandHandler<UpdateProfileCommand, MeResponse> handler,
         CancellationToken cancellationToken)
     {
-        var result = await handler.HandleAsync(new UpdateProfileCommand(request.DisplayName, request.Locale, request.TimeZone), cancellationToken);
+        if (!IfMatchHeader.TryParse(ifMatch, out var precondition))
+        {
+            return IfMatchHeader.Malformed();
+        }
+
+        var result = await handler.HandleAsync(
+            new UpdateProfileCommand(request.DisplayName, request.Locale, request.TimeZone) { IfMatch = precondition }, cancellationToken);
 
         if (result.IsSuccess)
         {
-            return TypedResults.Ok(result.Value);
+            return OkWithVersion(result.Value);
         }
 
         return result.Error.Type == ErrorType.NotFound ? TypedResults.Unauthorized() : result.ToProblem();
