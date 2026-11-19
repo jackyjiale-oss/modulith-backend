@@ -1,3 +1,5 @@
+using TemplateName.Modules.Auth.Application.Admin.Users;
+using TemplateName.Application.Common.Concurrency;
 using NSubstitute;
 using TemplateName.Modules.Auth.Application.Admin.Users.AssignRoles;
 using TemplateName.Modules.Auth.Domain.Audit;
@@ -199,5 +201,35 @@ public sealed class AssignRolesCommandHandlerTests : AdminHandlerTestBase
         result.IsSuccess.ShouldBeTrue();
         target.Roles.Select(role => role.RoleId).ShouldBe([powerful.Id]);
         await PermissionChecker.DidNotReceiveWithAnyArgs().HasPermissionAsync(default, default!, Ct);
+    }
+
+    [Fact]
+    public async Task A_stale_if_match_is_precondition_failed_and_changes_nothing()
+    {
+        GivenActorIsSuperAdmin();
+        var support = GivenRole("Support");
+        var target = GivenUser(UserRole);
+
+        var result = await _sut.HandleAsync(
+            new AssignRolesCommand(ActorId, target.Id, [support.Id]) { IfMatch = IfMatch.Of([new EntityTag("stale")]) }, Ct);
+
+        result.Error.ShouldBe(ConcurrencyErrors.PreconditionFailed);
+        target.Roles.Select(role => role.RoleId).ShouldBe([UserRole.Id]);
+        AuditEntries.ShouldBeEmpty();
+        await UnitOfWork.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_matching_if_match_assigns_and_returns_the_new_version()
+    {
+        GivenActorIsSuperAdmin();
+        var support = GivenRole("Support");
+        var target = GivenUser(UserRole);
+
+        var result = await _sut.HandleAsync(
+            new AssignRolesCommand(ActorId, target.Id, [UserRole.Id, support.Id]) { IfMatch = IfMatch.Of([AdministeredUserVersion.Of([UserRole.Id])]) },
+            Ct);
+
+        result.Value.ShouldBe(AdministeredUserVersion.Of([UserRole.Id, support.Id]));
     }
 }

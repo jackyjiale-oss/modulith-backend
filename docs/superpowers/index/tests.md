@@ -2,7 +2,7 @@
 
 # Tests
 
-Rows: 216
+Rows: 217
 
 ## Folders
 
@@ -106,6 +106,7 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Roles/RoleVersion.cs | tests/TemplateName.UnitTests/Auth/Admin/RoleVersionTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Roles/SetPermissions/SetRolePermissionsCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/SetRolePermissionsCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Roles/Update/UpdateRoleCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/UpdateRoleCommandHandlerTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Users/AdministeredUserVersion.cs | tests/TemplateName.UnitTests/Auth/Admin/AdministeredUserVersionTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Users/AssignRoles/AssignRolesCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/AssignRolesCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Users/Create/CreateUserCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/CreateUserCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Users/ForcePasswordReset/ForcePasswordResetCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/ForcePasswordResetCommandHandlerTests.cs |

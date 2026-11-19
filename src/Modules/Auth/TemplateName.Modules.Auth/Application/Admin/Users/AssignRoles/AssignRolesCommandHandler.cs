@@ -1,3 +1,4 @@
+using TemplateName.Application.Common.Concurrency;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Domain.Audit;
@@ -24,28 +25,35 @@ internal sealed class AssignRolesCommandHandler(
     IPermissionCache permissionCache,
     IAuthAuditWriter auditWriter,
     IUnitOfWork unitOfWork,
-    TimeProvider timeProvider) : ICommandHandler<AssignRolesCommand>
+    TimeProvider timeProvider) : ICommandHandler<AssignRolesCommand, EntityTag>
 {
-    public async Task<Result> HandleAsync(AssignRolesCommand command, CancellationToken cancellationToken)
+    public async Task<Result<EntityTag>> HandleAsync(AssignRolesCommand command, CancellationToken cancellationToken)
     {
         var user = await users.GetByIdAsync(command.UserId, cancellationToken);
         if (user is null)
         {
-            return Result.Failure(UserErrors.NotFound(command.UserId));
+            return Result.Failure<EntityTag>(UserErrors.NotFound(command.UserId));
+        }
+
+        // The version covers the roles that still exist, as GET user lists them: a link to a soft-deleted role counts on neither side.
+        var held = await roles.GetByIdsAsync([.. user.Roles.Select(assignment => assignment.RoleId)], cancellationToken);
+        if (!command.IfMatch.IsSatisfiedBy(AdministeredUserVersion.Of(held.Select(role => role.Id))))
+        {
+            return Result.Failure<EntityTag>(ConcurrencyErrors.PreconditionFailed);
         }
 
         var scope = await superAdminRules.GetScopeAsync(command.ActorId, cancellationToken);
         var allowed = scope.EnsureCanManage(user);
         if (allowed.IsFailure)
         {
-            return allowed;
+            return Result.Failure<EntityTag>(allowed.Error);
         }
 
         var requested = command.RoleIds.Distinct().ToList();
         var found = (await roles.GetByIdsAsync(requested, cancellationToken)).ToDictionary(role => role.Id);
         if (requested.Where(id => !found.ContainsKey(id)).Select(id => (Guid?)id).FirstOrDefault() is { } unknownId)
         {
-            return Result.Failure(RoleErrors.NotFound(unknownId));
+            return Result.Failure<EntityTag>(RoleErrors.NotFound(unknownId));
         }
 
         allowed = scope.EnsureCanGrant(requested);
@@ -64,7 +72,7 @@ internal sealed class AssignRolesCommandHandler(
 
         if (allowed.IsFailure)
         {
-            return allowed;
+            return Result.Failure<EntityTag>(allowed.Error);
         }
 
         var now = timeProvider.GetUtcNow();
@@ -83,6 +91,6 @@ internal sealed class AssignRolesCommandHandler(
         await unitOfWork.SaveChangesAsync(cancellationToken);
         await permissionCache.InvalidateUsersAsync([user.Id], CancellationToken.None);
 
-        return Result.Success();
+        return AdministeredUserVersion.Of(requested);
     }
 }
