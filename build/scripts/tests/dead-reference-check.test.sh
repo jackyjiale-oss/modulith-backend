@@ -2,6 +2,10 @@
 # Tests for dead-reference-check.sh (template switches design): a generated tree must not name a part that a switch removed.
 # Each case builds its own throwaway tree, runs the script on it and checks stdout and the exit code.
 #
+# The cases are independent, so they run side by side: up to DEAD_REFERENCE_TEST_JOBS at a time (default 8; 1 runs them one after
+# another). Each check run starts a few greps, which costs milliseconds on Linux but a few seconds under Git Bash on Windows, where
+# one case after another takes about four minutes. Each case's output is printed whole, in the order of the list below.
+#
 # Usage: bash build/scripts/tests/dead-reference-check.test.sh
 set -euo pipefail
 
@@ -429,20 +433,43 @@ exit 2
   assert_contains "grep failed (exit 2)" "$err" "grep_error: names the failure"
 }
 
-# Each case runs in a subshell so that its tree and variables do not leak into the next.
-# The subshell reports its failures through its exit code, since variables do not cross the boundary.
+# Each case runs in a subshell so that its tree and variables do not leak into the next. The subshell reports its failures through
+# its exit code, since variables do not cross the boundary, and runs on the left of || (where bash ignores set -e, as must expects).
+# run_case <index> <name>: runs one case in the background; its stdout, stderr and exit code go to files named by the index.
+case_dir="$tmp_root/cases"
+mkdir -p "$case_dir"
 run_case() {
-  local name="$1" rc=0
-  ( failures=0; "$name"; exit $(( failures > 0 ? 1 : 0 )) ) || rc=$?
-  if (( rc != 0 )); then failures=$((failures + 1)); fi
+  local index="$1" name="$2"
+  {
+    rc=0
+    ( failures=0; "$name"; exit $(( failures > 0 ? 1 : 0 )) ) || rc=$?
+    echo "$rc" > "$case_dir/$index.rc"
+  } > "$case_dir/$index.out" 2> "$case_dir/$index.err" &
 }
 
-for c in \
-  case_all_switches_on case_notifications_removed_hit case_notifications_other_patterns case_hit_line_number \
-  case_ignored_paths case_flag_text_line_allowed case_redis_allowlist case_redis_other_patterns \
-  case_notifications_allowlist case_notifications_kept_names case_notifications_schema case_notifications_email_transport_and_worker case_sample_removed case_sample_other_patterns case_sample_allowlist case_sample_schema case_commit_scopes \
-  case_each_part_checked_only_when_removed case_caching_redis_never_checked case_usage_errors case_grep_error; do
-  run_case "$c"
+max_jobs="${DEAD_REFERENCE_TEST_JOBS:-8}"
+[[ "$max_jobs" =~ ^[1-9][0-9]*$ ]] || { echo "DEAD_REFERENCE_TEST_JOBS must be a positive integer, got '$max_jobs'" >&2; exit 2; }
+cases=(
+  case_all_switches_on case_notifications_removed_hit case_notifications_other_patterns case_hit_line_number
+  case_ignored_paths case_flag_text_line_allowed case_redis_allowlist case_redis_other_patterns
+  case_notifications_allowlist case_notifications_kept_names case_notifications_schema case_notifications_email_transport_and_worker case_sample_removed case_sample_other_patterns case_sample_allowlist case_sample_schema case_commit_scopes
+  case_each_part_checked_only_when_removed case_caching_redis_never_checked case_usage_errors case_grep_error
+)
+for index in "${!cases[@]}"; do
+  while (( $(jobs -rp | wc -l) >= max_jobs )); do wait -n || true; done
+  run_case "$index" "${cases[$index]}"
+done
+wait || true
+
+# A case whose exit code file is missing died before it could write it; that counts as a failure.
+for index in "${!cases[@]}"; do
+  cat "$case_dir/$index.out"
+  cat "$case_dir/$index.err" >&2
+  rc="$(cat "$case_dir/$index.rc" 2> /dev/null || echo missing)"
+  if [[ "$rc" != 0 ]]; then
+    failures=$((failures + 1))
+    [[ "$rc" == missing ]] && echo "FAIL: ${cases[$index]} ended without an exit code" >&2
+  fi
 done
 
 if (( failures > 0 )); then
