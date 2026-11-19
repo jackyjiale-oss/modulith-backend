@@ -20,6 +20,7 @@ using TemplateName.Modules.Sample;
 using TemplateName.Platform.Redis;
 //#endif
 using TemplateName.Web.Common;
+using TemplateName.Web.Common.Concurrency;
 using TemplateName.Web.Common.Localization;
 using TemplateName.Web.Common.Observability;
 using TemplateName.Web.Common.Security;
@@ -46,7 +47,7 @@ builder.Services.AddWebCommon();
 builder.Services.AddApiLocalization(builder.Configuration);
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 // The Bearer scheme, required by every operation that carries authorization data (RequirePermission, RequireAuthorization).
-builder.Services.AddOpenApi("v1", options => options.AddBearerSecurity());
+builder.Services.AddOpenApi("v1", options => options.AddBearerSecurity().AddEntityTagHeaders());
 builder.Services.AddHealthChecks();
 builder.Services.AddHttpSecurity(builder.Configuration);
 // The fallback policy requires an authenticated user everywhere an endpoint does not say otherwise. It needs the explicit

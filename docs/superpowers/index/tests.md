@@ -2,7 +2,7 @@
 
 # Tests
 
-Rows: 213
+Rows: 215
 
 ## Folders
 
@@ -80,6 +80,8 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/BuildingBlocks/TemplateName.SharedKernel/Auditing/EntityChangeAction.cs | tests/TemplateName.UnitTests/SharedKernel/Auditing/EntityChangeActionTests.cs |
 | src/BuildingBlocks/TemplateName.SharedKernel/Result.cs | tests/TemplateName.UnitTests/SharedKernel/ResultTests.cs |
 | src/BuildingBlocks/TemplateName.SharedKernel/SequentialGuid.cs | tests/TemplateName.UnitTests/SharedKernel/SequentialGuidTests.cs |
+| src/BuildingBlocks/TemplateName.Web.Common/Concurrency/EntityTagResult.cs | tests/TemplateName.UnitTests/Web/EntityTagResultTests.cs |
+| src/BuildingBlocks/TemplateName.Web.Common/Concurrency/IfMatchHeader.cs | tests/TemplateName.UnitTests/Web/IfMatchHeaderTests.cs |
 | src/BuildingBlocks/TemplateName.Web.Common/Errors/GlobalExceptionHandler.cs | tests/TemplateName.UnitTests/Web/GlobalExceptionHandlerTests.cs |
 | src/BuildingBlocks/TemplateName.Web.Common/Identity/HttpContextCurrentUser.cs | tests/TemplateName.UnitTests/Web/HttpContextCurrentUserTests.cs |
 | src/BuildingBlocks/TemplateName.Web.Common/Localization/ApiLocalizationOptions.cs | tests/TemplateName.UnitTests/Localization/ApiLocalizationOptionsTests.cs |

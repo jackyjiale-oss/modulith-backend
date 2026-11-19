@@ -45,7 +45,7 @@ public static class HttpSecurityExtensions
                 .AllowCredentials()
 
                 // Response headers browser code needs that are not CORS-safelisted.
-                .WithExposedHeaders("X-Trace-Id", "Location", "Retry-After", "Idempotency-Replayed")));
+                .WithExposedHeaders("X-Trace-Id", "Location", "Retry-After", "Idempotency-Replayed", "ETag")));
 
         services.TryAddSingleton<IFixedWindowLimiterFactory, InMemoryFixedWindowLimiterFactory>();
         services.AddRateLimiter(options => options.OnRejected = WriteRateLimitProblemAsync);

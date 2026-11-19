@@ -52,7 +52,7 @@ public sealed class HttpSecurityTests(IntegrationTestWebAppFactory factory) : In
         var exposed = response.Headers.GetValues("Access-Control-Expose-Headers")
             .SelectMany(value => value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
             .ToList();
-        exposed.ShouldBe(["X-Trace-Id", "Location", "Retry-After", "Idempotency-Replayed"], ignoreOrder: true);
+        exposed.ShouldBe(["X-Trace-Id", "Location", "Retry-After", "Idempotency-Replayed", "ETag"], ignoreOrder: true);
     }
 
     [Fact]
