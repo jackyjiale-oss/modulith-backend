@@ -2,7 +2,7 @@
 
 # Error codes
 
-Rows: 71
+Rows: 72
 
 ## Declared codes
 
@@ -51,6 +51,7 @@ Rows: 71
 | auth.system_role_protected | Auth | 409 | auth.system_role_protected | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Roles/RoleErrors.cs |
 | auth.trusted_device_not_found | Auth | 404 | auth.trusted_device_not_found | src/Modules/Auth/TemplateName.Modules.Auth/Domain/TrustedDevices/TrustedDeviceErrors.cs |
 | auth.user_not_found | Auth | 404 | auth.user_not_found | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Users/UserErrors.cs |
+| concurrency.precondition_failed | Application.Common | 412 | concurrency.precondition_failed | src/BuildingBlocks/TemplateName.Application.Common/Concurrency/ConcurrencyErrors.cs |
 | leave.invalid_date_range | Sample | 400 | leave.invalid_date_range | src/Modules/Sample/TemplateName.Modules.Sample/Domain/LeaveRequests/LeaveRequestErrors.cs |
 | leave.not_found | Sample | 404 | leave.not_found | src/Modules/Sample/TemplateName.Modules.Sample/Domain/LeaveRequests/LeaveRequestErrors.cs |
 | leave.not_pending | Sample | 409 | leave.not_pending | src/Modules/Sample/TemplateName.Modules.Sample/Domain/LeaveRequests/LeaveRequestErrors.cs |
@@ -65,6 +66,7 @@ Rows: 71
 | pagination.cursor_mismatch | Application.Common | 400 | pagination.cursor_mismatch | src/BuildingBlocks/TemplateName.Application.Common/Pagination/PaginationErrors.cs |
 | pagination.invalid_cursor | Application.Common | 400 | pagination.invalid_cursor | src/BuildingBlocks/TemplateName.Application.Common/Pagination/PaginationErrors.cs |
 | pagination.invalid_sort | Application.Common | 400 | pagination.invalid_sort | src/BuildingBlocks/TemplateName.Application.Common/Pagination/PaginationErrors.cs |
+| request.malformed | Application.Common | 400 | request.malformed | src/BuildingBlocks/TemplateName.Application.Common/Concurrency/ConcurrencyErrors.cs |
 
 ## Resource-only keys
 
@@ -83,6 +85,5 @@ Neutral resource keys that no `*Errors.cs` file declares: codes set as string co
 | idempotency.invalid_key | - | src/BuildingBlocks/TemplateName.Infrastructure.Common/Resources/InfrastructureErrorMessages.resx |
 | idempotency.key_reused | - | src/BuildingBlocks/TemplateName.Infrastructure.Common/Resources/InfrastructureErrorMessages.resx |
 | rate_limit.exceeded | - | src/BuildingBlocks/TemplateName.Web.Common/Resources/CommonErrorMessages.resx |
-| request.malformed | - | src/BuildingBlocks/TemplateName.Web.Common/Resources/CommonErrorMessages.resx |
 | server.unexpected_error | - | src/BuildingBlocks/TemplateName.Web.Common/Resources/CommonErrorMessages.resx |
 | validation.failed | - | src/BuildingBlocks/TemplateName.Web.Common/Resources/CommonErrorMessages.resx |

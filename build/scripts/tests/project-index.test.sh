@@ -1602,7 +1602,7 @@ errors_fixture() {
             Parameters = new Dictionary<string, object?> { ["id"] = id },
         };
 }'
-  put_raw src/BuildingBlocks/TemplateName.Application.Common/Paging/PagingErrors.cs 'public static class PagingErrors\r\n{\r\n    public static readonly Error Down = SharedKernel.Error.Unavailable("paging.down", "Down.");\r\n\r\n    public static readonly Error Fail = Error.Failure(\r\n        "paging.fail",\r\n        "Failed.");\r\n}\r\n'
+  put_raw src/BuildingBlocks/TemplateName.Application.Common/Paging/PagingErrors.cs 'public static class PagingErrors\r\n{\r\n    public static readonly Error Down = SharedKernel.Error.Unavailable("paging.down", "Down.");\r\n\r\n    public static readonly Error Fail = Error.Failure(\r\n        "paging.fail",\r\n        "Failed.");\r\n\r\n    public static readonly Error Stale = Error.PreconditionFailed("paging.stale", "Stale.");\r\n}\r\n'
   put src/Modules/A/A/Resources/AErrorMessages.resx '<?xml version="1.0" encoding="utf-8"?>
 <root>
   <!--
@@ -1638,6 +1638,7 @@ a.locked|A|400|a.locked|src/Modules/A/A/Domain/AErrors.cs
 a.missing|A|404|a.missing|src/Modules/A/A/Domain/AErrors.cs
 paging.down|Application.Common|503|paging.down|src/BuildingBlocks/TemplateName.Application.Common/Paging/PagingErrors.cs
 paging.fail|Application.Common|500|-|src/BuildingBlocks/TemplateName.Application.Common/Paging/PagingErrors.cs
+paging.stale|Application.Common|412|-|src/BuildingBlocks/TemplateName.Application.Common/Paging/PagingErrors.cs
 --
 http.404|404|src/Modules/A/A/Resources/AErrorMessages.resx
 validation.failed|-|src/Modules/A/A/Resources/AErrorMessages.resx
@@ -1656,7 +1657,7 @@ case_errors() {
   generate
   local text
   text="$(<"$idx/errors.md")"
-  assert_contains $'Rows: 7\n\n## Declared codes\n\n| code | module | http | resource key | file |\n| --- | --- | --- | --- | --- |\n| a.busy | A | 409 | a.busy | src/Modules/A/A/Domain/AErrors.cs |' \
+  assert_contains $'Rows: 8\n\n## Declared codes\n\n| code | module | http | resource key | file |\n| --- | --- | --- | --- | --- |\n| a.busy | A | 409 | a.busy | src/Modules/A/A/Domain/AErrors.cs |' \
     "$text" "errors: rendered first table"
   assert_contains $'## Resource-only keys\n\n' "$text" "errors: second heading"
   assert_contains $'| key | http | resx file |\n| --- | --- | --- |\n| http.404 | 404 | src/Modules/A/A/Resources/AErrorMessages.resx |\n| validation.failed | - | src/Modules/A/A/Resources/AErrorMessages.resx |' \

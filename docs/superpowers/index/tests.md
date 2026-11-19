@@ -2,7 +2,7 @@
 
 # Tests
 
-Rows: 210
+Rows: 213
 
 ## Folders
 
@@ -27,6 +27,7 @@ Rows: 210
 | TemplateName.UnitTests | Application | Application.Common |
 | TemplateName.UnitTests | Audit | Audit |
 | TemplateName.UnitTests | Auth | Auth |
+| TemplateName.UnitTests | Concurrency | cross-cutting |
 | TemplateName.UnitTests | Infrastructure | Infrastructure.Common |
 | TemplateName.UnitTests | Localization | cross-cutting |
 | TemplateName.UnitTests | Notifications | Notifications |
@@ -42,6 +43,8 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 
 | source | test |
 | --- | --- |
+| src/BuildingBlocks/TemplateName.Application.Common/Concurrency/EntityTagBuilder.cs | tests/TemplateName.UnitTests/Concurrency/EntityTagBuilderTests.cs |
+| src/BuildingBlocks/TemplateName.Application.Common/Concurrency/IfMatch.cs | tests/TemplateName.UnitTests/Concurrency/IfMatchTests.cs |
 | src/BuildingBlocks/TemplateName.Application.Common/Localization/ErrorMessageLocalizer.cs | tests/TemplateName.UnitTests/Localization/ErrorMessageLocalizerTests.cs |
 | src/BuildingBlocks/TemplateName.Application.Common/Messaging/LoggingDecorator.cs | tests/TemplateName.UnitTests/Application/LoggingDecoratorTests.cs |
 | src/BuildingBlocks/TemplateName.Application.Common/Messaging/ValidationDecorator.cs | tests/TemplateName.UnitTests/Application/ValidationDecoratorTests.cs |
