@@ -91,4 +91,8 @@
     <value>排序无效。可排序字段：{allowed}。</value>
     <comment>Draft – needs native review</comment>
   </data>
+  <data name="concurrency.precondition_failed" xml:space="preserve">
+    <value>自您读取后，该资源已被更改。请重新读取，并使用其当前的 ETag 重试。</value>
+    <comment>Draft – needs native review</comment>
+  </data>
 </root>

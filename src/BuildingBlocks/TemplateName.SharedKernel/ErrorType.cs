@@ -12,4 +12,7 @@ public enum ErrorType
 
     /// <summary>A dependency the request needs (an external service) cannot be reached right now; the caller may retry later.</summary>
     Unavailable,
+
+    /// <summary>The caller's precondition (an <c>If-Match</c> version) no longer holds: the resource changed since they read it.</summary>
+    PreconditionFailed,
 }
