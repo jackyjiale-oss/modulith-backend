@@ -326,7 +326,7 @@
           "FluentValidation": "[12.2.0, )",
           "FluentValidation.DependencyInjectionExtensions": "[12.2.0, )",
           "Scrutor": "[7.0.0, )",
-          "TemplateName.SharedKernel": "[0.0.0, )"
+          "TemplateName.SharedKernel": "[1.0.0-rc.1, )"
         }
       },
       "templatename.sharedkernel": {
