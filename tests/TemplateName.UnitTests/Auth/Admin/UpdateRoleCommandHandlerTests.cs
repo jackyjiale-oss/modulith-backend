@@ -1,3 +1,5 @@
+using TemplateName.Modules.Auth.Application.Admin.Roles;
+using TemplateName.Application.Common.Concurrency;
 using NSubstitute;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Application.Admin.Roles.Update;
@@ -93,5 +95,31 @@ public sealed class UpdateRoleCommandHandlerTests : AdminRoleHandlerTestBase
         result.Error.Code.ShouldBe("auth.role_not_found");
         result.Error.Type.ShouldBe(ErrorType.NotFound);
         result.Error.Parameters!["id"].ShouldBe(unknown);
+    }
+
+    [Fact]
+    public async Task A_stale_if_match_is_precondition_failed_and_changes_nothing()
+    {
+        var role = GivenStoredRole("Support");
+
+        var result = await _sut.HandleAsync(
+            new UpdateRoleCommand(ActorId, role.Id, "Helpdesk", "x") { IfMatch = IfMatch.Of([new EntityTag("stale")]) }, Ct);
+
+        result.Error.ShouldBe(ConcurrencyErrors.PreconditionFailed);
+        role.Name.ShouldBe("Support");
+        AuditEntries.ShouldBeEmpty();
+        await UnitOfWork.DidNotReceive().SaveChangesUnlessDuplicateAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_matching_if_match_updates_and_returns_the_new_version()
+    {
+        var role = GivenStoredRole("Support");
+        var read = RoleVersion.Of(role.Name, role.Description, role.Permissions.Select(grant => grant.PermissionId));
+
+        var result = await _sut.HandleAsync(new UpdateRoleCommand(ActorId, role.Id, "Helpdesk", "x") { IfMatch = IfMatch.Of([read]) }, Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        result.Value.ShouldBe(RoleVersion.Of("Helpdesk", "x", []));
     }
 }

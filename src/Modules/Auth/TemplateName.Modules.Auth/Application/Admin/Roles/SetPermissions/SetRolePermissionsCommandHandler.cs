@@ -1,3 +1,4 @@
+using TemplateName.Application.Common.Concurrency;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Domain.Roles;
@@ -29,14 +30,19 @@ internal sealed class SetRolePermissionsCommandHandler(
     RolePermissionCacheInvalidator cacheInvalidator,
     IAuthAuditWriter auditWriter,
     IUnitOfWork unitOfWork,
-    TimeProvider timeProvider) : ICommandHandler<SetRolePermissionsCommand>
+    TimeProvider timeProvider) : ICommandHandler<SetRolePermissionsCommand, EntityTag>
 {
-    public async Task<Result> HandleAsync(SetRolePermissionsCommand command, CancellationToken cancellationToken)
+    public async Task<Result<EntityTag>> HandleAsync(SetRolePermissionsCommand command, CancellationToken cancellationToken)
     {
         var role = await roles.GetByIdAsync(command.RoleId, cancellationToken);
         if (role is null)
         {
-            return Result.Failure(RoleErrors.NotFound(command.RoleId));
+            return Result.Failure<EntityTag>(RoleErrors.NotFound(command.RoleId));
+        }
+
+        if (!command.IfMatch.IsSatisfiedBy(RoleVersion.Of(role)))
+        {
+            return Result.Failure<EntityTag>(ConcurrencyErrors.PreconditionFailed);
         }
 
         var requested = command.PermissionIds.Distinct().ToList();
@@ -47,25 +53,25 @@ internal sealed class SetRolePermissionsCommandHandler(
         var known = (await permissions.GetByIdsAsync([.. requested, .. removed], cancellationToken)).ToDictionary(permission => permission.Id);
         if (requested.Exists(id => !known.ContainsKey(id)) || added.Exists(id => known[id].IsDeprecated))
         {
-            return Result.Failure(RoleErrors.PermissionNotFound);
+            return Result.Failure<EntityTag>(RoleErrors.PermissionNotFound);
         }
 
         var held = await grantRules.EnsureActorHoldsAsync(command.ActorId, added.Select(id => known[id].Code), cancellationToken);
         if (held.IsFailure)
         {
-            return held;
+            return Result.Failure<EntityTag>(held.Error);
         }
 
         // The domain refuses SuperAdmin, also when the set would not change.
         var set = role.SetPermissions(requested);
         if (set.IsFailure)
         {
-            return set;
+            return Result.Failure<EntityTag>(set.Error);
         }
 
         if (added.Count == 0 && removed.Count == 0)
         {
-            return Result.Success();
+            return RoleVersion.Of(role);
         }
 
         auditWriter.Record(RoleAudit.PermissionsChanged(
@@ -78,7 +84,7 @@ internal sealed class SetRolePermissionsCommandHandler(
         await unitOfWork.SaveChangesAsync(cancellationToken);
         await cacheInvalidator.InvalidateAsync(role.Id);
 
-        return Result.Success();
+        return RoleVersion.Of(role);
     }
 
     private static List<string> CodesOf(IEnumerable<Guid> ids, Dictionary<Guid, Permission> known)

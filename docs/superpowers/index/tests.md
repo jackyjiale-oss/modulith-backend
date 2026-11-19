@@ -2,7 +2,7 @@
 
 # Tests
 
-Rows: 215
+Rows: 216
 
 ## Folders
 
@@ -103,6 +103,7 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Audit/TemplateName.Modules.Audit/Infrastructure/Retention/AuditTrailsCleanupJob.cs | tests/TemplateName.IntegrationTests/Audit/AuditTrailsCleanupJobTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Roles/Create/CreateRoleCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/CreateRoleCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Roles/Delete/DeleteRoleCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/DeleteRoleCommandHandlerTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Roles/RoleVersion.cs | tests/TemplateName.UnitTests/Auth/Admin/RoleVersionTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Roles/SetPermissions/SetRolePermissionsCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/SetRolePermissionsCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Roles/Update/UpdateRoleCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/UpdateRoleCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Users/AssignRoles/AssignRolesCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/AssignRolesCommandHandlerTests.cs |

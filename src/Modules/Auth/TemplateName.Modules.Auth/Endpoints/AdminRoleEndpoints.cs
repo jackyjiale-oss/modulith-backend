@@ -1,9 +1,12 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
+using TemplateName.Application.Common.Concurrency;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Application.Common.Pagination;
+using TemplateName.Modules.Auth.Application.Admin.Roles;
 using TemplateName.Modules.Auth.Application;
 using TemplateName.Modules.Auth.Application.Admin.Permissions.List;
 using TemplateName.Modules.Auth.Application.Admin.Roles.Create;
@@ -12,6 +15,7 @@ using TemplateName.Modules.Auth.Application.Admin.Roles.Get;
 using TemplateName.Modules.Auth.Application.Admin.Roles.List;
 using TemplateName.Modules.Auth.Application.Admin.Roles.SetPermissions;
 using TemplateName.Modules.Auth.Application.Admin.Roles.Update;
+using TemplateName.Web.Common.Concurrency;
 using TemplateName.Web.Common.Results;
 using TemplateName.Web.Common.Security;
 
@@ -43,6 +47,7 @@ internal static class AdminRoleEndpoints
             .WithName(GetByIdRouteName)
             .RequirePermission(AuthPermissions.RoleView)
             .Produces<RoleResponse>()
+            .ProducesEntityTag()
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         roles.MapPost("/", CreateAsync)
@@ -56,9 +61,11 @@ internal static class AdminRoleEndpoints
             .WithName("UpdateRole")
             .RequirePermission(AuthPermissions.RoleManage)
             .Produces(StatusCodes.Status204NoContent)
+            .ProducesEntityTag()
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status409Conflict);
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status412PreconditionFailed);
 
         roles.MapDelete("/{id:guid}", DeleteAsync)
             .WithName("DeleteRole")
@@ -71,9 +78,11 @@ internal static class AdminRoleEndpoints
             .WithName("SetRolePermissions")
             .RequirePermission(AuthPermissions.RoleManage)
             .Produces(StatusCodes.Status204NoContent)
+            .ProducesEntityTag()
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status409Conflict);
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status412PreconditionFailed);
 
         var permissions = app.MapGroup("admin/auth/permissions")
             .WithTags("Auth administration")
@@ -109,8 +118,13 @@ internal static class AdminRoleEndpoints
     private static async Task<IResult> GetByIdAsync(Guid id, IQueryHandler<GetRoleQuery, RoleResponse> handler, CancellationToken cancellationToken)
     {
         var result = await handler.HandleAsync(new GetRoleQuery(id), cancellationToken);
+        if (result.IsFailure)
+        {
+            return result.ToProblem();
+        }
 
-        return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
+        var role = result.Value;
+        return TypedResults.Ok(role).WithEntityTag(RoleVersion.Of(role.Name, role.Description, role.Permissions.Select(permission => permission.Id)));
     }
 
     // 201 with the new id and its Location; 409 auth.role_name_taken.
@@ -137,33 +151,51 @@ internal static class AdminRoleEndpoints
         return TypedResults.Created(location, new CreateRoleResponse(result.Value));
     }
 
-    // 204; 404 auth.role_not_found; 409 auth.role_name_taken, 409 auth.system_role_protected.
-    private static Task<IResult> UpdateAsync(
+    // 204 with the new ETag; 400 request.malformed (If-Match); 404 auth.role_not_found; 409 auth.role_name_taken, 409
+    // auth.system_role_protected; 412 concurrency.precondition_failed.
+    private static async Task<IResult> UpdateAsync(
         Guid id,
         RoleRequest request,
+        [FromHeader(Name = "If-Match")] string? ifMatch,
         ICurrentUser currentUser,
-        ICommandHandler<UpdateRoleCommand> handler,
+        ICommandHandler<UpdateRoleCommand, EntityTag> handler,
         CancellationToken cancellationToken)
-        => AdminActor.RunAsync(
+    {
+        if (!IfMatchHeader.TryParse(ifMatch, out var precondition))
+        {
+            return IfMatchHeader.Malformed();
+        }
+
+        return await AdminActor.RunAsync(
             currentUser,
-            actorId => handler.HandleAsync(new UpdateRoleCommand(actorId, id, request.Name, request.Description), cancellationToken),
-            TypedResults.NoContent());
+            actorId => handler.HandleAsync(
+                new UpdateRoleCommand(actorId, id, request.Name, request.Description) { IfMatch = precondition }, cancellationToken));
+    }
 
     // 204 (a soft delete); 404 auth.role_not_found; 409 auth.system_role_protected.
     private static Task<IResult> DeleteAsync(Guid id, ICurrentUser currentUser, ICommandHandler<DeleteRoleCommand> handler, CancellationToken cancellationToken)
         => AdminActor.RunAsync(currentUser, actorId => handler.HandleAsync(new DeleteRoleCommand(actorId, id), cancellationToken), TypedResults.NoContent());
 
-    // 204; 400 auth.permission_not_found; 403 auth.permission_grant_not_allowed; 404 auth.role_not_found; 409 auth.system_role_protected.
-    private static Task<IResult> SetPermissionsAsync(
+    // 204 with the new ETag; 400 auth.permission_not_found, 400 request.malformed (If-Match); 403 auth.permission_grant_not_allowed;
+    // 404 auth.role_not_found; 409 auth.system_role_protected; 412 concurrency.precondition_failed.
+    private static async Task<IResult> SetPermissionsAsync(
         Guid id,
         SetRolePermissionsRequest request,
+        [FromHeader(Name = "If-Match")] string? ifMatch,
         ICurrentUser currentUser,
-        ICommandHandler<SetRolePermissionsCommand> handler,
+        ICommandHandler<SetRolePermissionsCommand, EntityTag> handler,
         CancellationToken cancellationToken)
-        => AdminActor.RunAsync(
+    {
+        if (!IfMatchHeader.TryParse(ifMatch, out var precondition))
+        {
+            return IfMatchHeader.Malformed();
+        }
+
+        return await AdminActor.RunAsync(
             currentUser,
-            actorId => handler.HandleAsync(new SetRolePermissionsCommand(actorId, id, request.PermissionIds), cancellationToken),
-            TypedResults.NoContent());
+            actorId => handler.HandleAsync(
+                new SetRolePermissionsCommand(actorId, id, request.PermissionIds) { IfMatch = precondition }, cancellationToken));
+    }
 
     // Sorted by code (the only sort, also descending with a leading -); permissions that no module declares any more only with
     // includeDeprecated=true.
