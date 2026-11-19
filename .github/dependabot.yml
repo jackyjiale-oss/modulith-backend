@@ -10,7 +10,13 @@ updates:
     # These ship in step with the .NET major version (the projects target net10.0) and depend on each other,
     # so a single major bump fails restore with NU1109. Move to the next .NET as one deliberate change
     # (target framework, global.json, base images and these packages together), not one pull request at a time.
+    # Serilog's ASP.NET Core and hosting packages follow the .NET major too: Serilog.AspNetCore 11 needs
+    # Microsoft.Extensions.* 11 (seen on 2026-11-19), so they move with the rest.
     ignore:
+      - dependency-name: "Serilog.AspNetCore"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Serilog.Extensions.*"
+        update-types: ["version-update:semver-major"]
       - dependency-name: "Microsoft.AspNetCore.*"
         update-types: ["version-update:semver-major"]
       - dependency-name: "Microsoft.Extensions.*"
