@@ -48,7 +48,7 @@ public sealed partial class EndpointDocumentationTests(IntegrationTestWebAppFact
         failures.ShouldBeEmpty(string.Join(Environment.NewLine, failures));
     }
 
-    /// <summary>A group's root route is <c>/api/v1/sample/leave-requests/</c> in the route pattern; documents write it without the slash.</summary>
+    /// <summary>A group's root route is <c>/api/v1/admin/auth/users/</c> in the route pattern; documents write it without the slash.</summary>
     private static string Normalize(string route) => route.TrimEnd('/');
 
     /// <summary>A whole <c>METHOD /api/v1/…</c> route; it ends at whitespace, a backtick, a table pipe, a query string or a closing parenthesis.</summary>

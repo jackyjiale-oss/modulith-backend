@@ -12,7 +12,15 @@ set -euo pipefail
 export LC_ALL=C
 
 ALLOWED_TYPES="feat|fix|perf|refactor|test|docs|build|ci|chore|style|revert"
-ALLOWED_SCOPES="shared-kernel|application|infrastructure|web|host|persistence|outbox|idempotency|observability|security|i18n|architecture|sample|auth|notifications|platform|audit|ci|deps|template|docker|adr|release"
+# The scopes of the optional modules this project has; they follow the fixed ones in ALLOWED_SCOPES.
+OPTIONAL_SCOPES=""
+#if (includeSample)
+OPTIONAL_SCOPES="$OPTIONAL_SCOPES|sample"
+#endif
+#if (notifications)
+OPTIONAL_SCOPES="$OPTIONAL_SCOPES|notifications"
+#endif
+ALLOWED_SCOPES="shared-kernel|application|infrastructure|web|host|persistence|outbox|idempotency|observability|security|i18n|architecture|auth|platform|audit|ci|deps|template|docker|adr|release$OPTIONAL_SCOPES"
 MAX_HEADER_LENGTH=72
 
 allow_autosquash=false

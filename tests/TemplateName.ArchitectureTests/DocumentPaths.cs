@@ -20,8 +20,8 @@ public static class DocumentPaths
     public static string ModuleDocument(string moduleName) => Path.Combine(DocsDirectory, "modules", $"{KebabCase(moduleName)}.md");
 
     /// <summary>
-    /// The module an API route belongs to, as its route segment: the segment after <c>/api/v1/</c> (<c>/api/v1/sample/…</c> →
-    /// <c>sample</c>), or for an administration route the segment after <c>/api/v1/admin/</c> (<c>/api/v1/admin/auth/users</c> →
+    /// The module an API route belongs to, as its route segment: the segment after <c>/api/v1/</c> (<c>/api/v1/auth/…</c> →
+    /// <c>auth</c>), or for an administration route the segment after <c>/api/v1/admin/</c> (<c>/api/v1/admin/auth/users</c> →
     /// <c>auth</c>). Case-insensitive, like routing.
     /// </summary>
     /// <exception cref="ArgumentException">The route does not start with <c>/api/v1/</c>.</exception>

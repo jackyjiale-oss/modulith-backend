@@ -78,14 +78,20 @@ A scope is the area the change lives in. Use one from this list, or leave it out
 |---|---|
 | Building blocks | `shared-kernel`, `application`, `infrastructure`, `web`, `platform`, `host` |
 | Cross-cutting | `persistence`, `outbox`, `idempotency`, `observability`, `security`, `i18n`, `architecture` |
-| Modules | `sample`, `auth`, `notifications`, `audit`<!-- modulith:module-scopes --> |
+| Modules | `auth`, `audit`<!-- modulith:module-scopes --> |
 | Repository | `ci`, `deps`, `template`, `docker`, `adr`, `release` |
+<!--#if (includeSample)-->
+| Sample module | `sample` |
+<!--#endif-->
+<!--#if (notifications)-->
+| Notifications module | `notifications` |
+<!--#endif-->
 
 ### 2.4 Examples
 
 | ✅ Good | ❌ Bad | Why it's bad |
 |---|---|---|
-| `feat(sample): add leave request cancellation` | `Added cancel feature` | no type; past tense; capitalized |
+| `feat(audit): add an export of the audit trail` | `Added export feature` | no type; past tense; capitalized |
 | `fix(outbox): release lease when a handler throws` | `fix: bug fix` | says nothing |
 | `refactor(persistence): extract UTC converter` | `refactor(persistence): Extract UTC converter.` | capitalized subject; trailing period |
 | `feat(auth)!: require MFA for admin roles` | `feat(auth): require MFA for admin roles (BREAKING)` | breaking change not marked with `!` / footer |
@@ -108,7 +114,7 @@ Refs: #142
 Revert:
 
 ```
-revert: feat(sample): add leave request cancellation
+revert: feat(audit): add an export of the audit trail
 
 This reverts commit 3f2c1ab.
 ```

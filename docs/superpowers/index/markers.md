@@ -2,14 +2,16 @@
 
 # Template switch markers
 
-Rows: 59
+Rows: 61
 
 | file | kinds | expressions |
 | --- | --- | --- |
 | BACKEND_TEMPLATE_BLUEPRINT.md | //#if | notifications |
+| CONTRIBUTING.md | <!--#if | includeSample; notifications |
 | Directory.Packages.props | <!--#if | caching == "redis"; notifications |
 | TemplateName.slnx | <!--#if | caching == "redis"; includeSample; notifications |
 | build/docker/Dockerfile | #if | caching == "redis"; includeSample; notifications |
+| build/scripts/check-commit-msg.sh | #if | includeSample; notifications |
 | build/scripts/container-verify.sh | #if | caching == "redis"; notifications |
 | build/template-content/CLAUDE.md | <!--#if | notifications |
 | build/template-content/README.md | <!--#if | caching == "redis"; includeSample; notifications |

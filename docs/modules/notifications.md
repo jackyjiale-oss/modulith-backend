@@ -97,7 +97,7 @@ Codes are `notifications.{resource}.{action}`. `NotificationsPermissionSource` (
 - **Authentication.** Each connection is two requests, negotiate (`POST /hubs/notifications/negotiate`) and the WebSocket (`GET /hubs/notifications?id=...`), and each needs its own **ticket** from `POST /api/v1/notifications/hub-tickets`: a ticket works for one request, within 30 seconds, on this path only. The SignalR clients ask their token factory again for each request, so a factory that fetches a new ticket on every call is all a client needs; a factory that caches its value fails the WebSocket request with 401. A WebSockets-only client can also skip negotiate (`skipNegotiation: true` in JavaScript, `SkipNegotiation` in .NET): the connection is then **one** request with one ticket, which works whatever the client does with its factory. The .NET client's behaviour was verified against a running server (`HubTests`, both with and without negotiate); the JavaScript client's was read from its source only (ADR 0021), not run. The `HubTicket` scheme reads the ticket from `access_token` (where a browser client puts it) or `Authorization: Bearer` (negotiate, and clients that can send headers). A client that can send headers may instead send its **access token** in `Authorization: Bearer`; an access token in `access_token` is always refused (401). An unknown, used or expired ticket is 401 too, without saying which.
 - **Connection lifetime.** A connection opened with a ticket closes `Notifications:Hub:ConnectionLifetime` (10 minutes) after its ticket was consumed (`CloseOnAuthenticationExpiration`); one opened with an access token closes when that token expires. The client then starts again, with new tickets.
 - **Users.** A connection belongs to the user in its `sub` claim (`SubClaimUserIdProvider`, the id in `Guid` form); `SignalRInAppNotificationPusher` sends with `Clients.User(userId)`, so every tab of the user receives it and nobody else does.
-- **More than one instance.** Without Redis a push reaches only the connections on the instance that delivered the notification (D13).
+- **More than one instance.** By default a push reaches only the connections on the instance that delivered the notification (D13).
   <!--#if (caching == "redis")-->
   With `Caching:Provider = redis` it reaches the user's connections on every instance through SignalR's Redis backplane, which `AddPlatformRedis` registers ([platform-redis](../building-blocks/platform-redis.md#signalr-backplane)). While Redis is down the push fails, the pusher logs a Warning and the delivery is still `Sent` with its inbox row; new connections are closed right after the handshake until Redis is back.
   <!--#endif-->
@@ -554,7 +554,7 @@ What to watch and what the module does not do. Metrics and logs: [Observability]
 
 **Known limits**
 
-- **Live pushes are per instance without Redis (D13).** Only the connections on the instance that delivered a notification receive its push, and each instance counts tickets alone.
+- **Live pushes are per instance by default (D13).** Only the connections on the instance that delivered a notification receive its push, and each instance counts tickets alone.
   <!--#if (caching == "redis")-->
   With `Caching:Provider = redis` a push reaches the user's connections on every instance (the Redis backplane) and the ticket limit is one shared count. While Redis is down no push is live (not even on the delivering instance), new hub connections are closed, and the ticket limit is counted per instance again.
   <!--#endif-->
