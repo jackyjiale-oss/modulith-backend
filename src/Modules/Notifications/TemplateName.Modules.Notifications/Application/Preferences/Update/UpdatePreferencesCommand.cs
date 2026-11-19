@@ -1,3 +1,4 @@
+using TemplateName.Application.Common.Concurrency;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Notifications.Application.Preferences.Get;
 using TemplateName.Modules.Notifications.Domain.Notifications;
@@ -9,7 +10,11 @@ namespace TemplateName.Modules.Notifications.Application.Preferences.Update;
 /// or nothing. Two items for the same type and channel are applied in order, so the last one wins.
 /// </summary>
 /// <param name="Items">The choices to apply.</param>
-internal sealed record UpdatePreferencesCommand(IReadOnlyList<ChannelPreferenceUpdate> Items) : ICommand<PreferencesResponse>;
+internal sealed record UpdatePreferencesCommand(IReadOnlyList<ChannelPreferenceUpdate> Items) : ICommand<PreferencesResponse>
+{
+    /// <summary>The <c>If-Match</c> precondition of the caller; none when the header is absent.</summary>
+    public IfMatch IfMatch { get; init; } = IfMatch.None;
+}
 
 /// <summary>The caller's choice for one channel of one notification type.</summary>
 /// <param name="TypeCode">The notification type.</param>

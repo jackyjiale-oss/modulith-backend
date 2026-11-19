@@ -18,22 +18,6 @@ internal sealed class GetPreferencesQueryHandler(NotificationCatalog catalog, IP
     public async Task<Result<PreferencesResponse>> HandleAsync(GetPreferencesQuery query, CancellationToken cancellationToken)
     {
         var userId = currentUser.UserId ?? Guid.Empty;
-        var switchedOff = (await preferences.ListAsync(userId, cancellationToken))
-            .Where(preference => !preference.IsEnabled)
-            .Select(preference => (preference.TypeCode, preference.Channel))
-            .ToHashSet();
-
-        var types = catalog.All
-            .OrderBy(type => type.Code, StringComparer.Ordinal)
-            .Select(type => new TypePreferenceResponse(
-                type.Code,
-                type.Category,
-                [.. type.DefaultChannels.Order().Select(channel => new ChannelPreferenceResponse(
-                    channel,
-                    Enabled: type.IsMandatory(channel) || !switchedOff.Contains((type.Code, channel)),
-                    Mandatory: type.IsMandatory(channel)))]))
-            .ToList();
-
-        return new PreferencesResponse(types);
+        return PreferencesView.Build(catalog, await preferences.ListAsync(userId, cancellationToken));
     }
 }
