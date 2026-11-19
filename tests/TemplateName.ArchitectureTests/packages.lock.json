@@ -971,7 +971,7 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.AspNetCore.OpenApi": "[10.0.15, )",
-          "Scalar.AspNetCore": "[2.21.0, )",
+          "Scalar.AspNetCore": "[3.0.2, )",
           "TemplateName.Application.Common": "[1.0.0-rc.1, )",
           "TemplateName.Infrastructure.Common": "[1.0.0-rc.1, )",
           "TemplateName.Modules.Audit": "[1.0.0-rc.1, )",
@@ -1341,9 +1341,9 @@
       },
       "Scalar.AspNetCore": {
         "type": "CentralTransitive",
-        "requested": "[2.21.0, )",
-        "resolved": "2.21.0",
-        "contentHash": "pDaxW7B1HqQIU5T64Jn1Txn2JKyVqoOvskCAqTb/lffZyUS8hBxhxmOkJum4wbzFmhc2LsKULVQ/4GDHLb7yjQ=="
+        "requested": "[3.0.2, )",
+        "resolved": "3.0.2",
+        "contentHash": "KRhMircgczP/Pf0irR3Z9vs6psmaq8fxWXFCZLFr8RUe76lABeks4l31FGf84SXvbaGcE+kNFsA4AjFekY3aWA=="
       },
       "Scriban": {
         "type": "CentralTransitive",
