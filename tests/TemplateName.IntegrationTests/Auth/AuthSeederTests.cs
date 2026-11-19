@@ -144,7 +144,10 @@ public sealed class AuthSeederTests(IntegrationTestWebAppFactory factory) : Inte
         admin.ShouldNotContain(AuthPermissions.UserAssignRoles);
         admin.ShouldNotContain(AuthPermissions.RoleManage);
 
-        // The only additions are the other modules' flagged permissions (Sample and Audit flag none).
+        // The only additions are the other modules' flagged permissions (Audit flags none).
+        //#if (includeSample)
+        // Sample flags none either.
+        //#endif
         //#if (notifications)
         // Notifications flags two.
         //#endif
