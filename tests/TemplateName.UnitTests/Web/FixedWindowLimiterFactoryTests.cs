@@ -22,10 +22,10 @@ namespace TemplateName.UnitTests.Web;
 /// <see cref="IFixedWindowLimiterFactory"/>: the in-memory default behaves as the built-in fixed window always did, and the
 /// fixed-window policies get their limiters from whatever factory is registered, so another factory (a distributed one) can swap in its
 /// own. From <c>AddHttpSecurity</c>: <c>global</c> and <c>auth-strict</c>.
-//#if (notifications)
-/// From the Notifications module: <c>notifications-hub-tickets</c>.
-//#endif
 /// </summary>
+//#if (notifications)
+// From the Notifications module: notifications-hub-tickets.
+//#endif
 public sealed class FixedWindowLimiterFactoryTests
 {
     private const string AddressHeader = "Test-Remote-Address";
