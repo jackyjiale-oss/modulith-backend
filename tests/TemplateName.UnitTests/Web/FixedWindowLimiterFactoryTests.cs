@@ -72,17 +72,28 @@ public sealed class FixedWindowLimiterFactoryTests
 
         (await SendAsync(client, "/anonymous", subject: null)).ShouldBe(HttpStatusCode.OK);
         (await SendAsync(client, "/strict", subject: null)).ShouldBe(HttpStatusCode.OK);
+        (await SendAsync(client, "/anonymous", Subject)).ShouldBe(HttpStatusCode.OK);
         //#if (notifications)
         (await SendAsync(client, "/tickets", Subject)).ShouldBe(HttpStatusCode.OK);
         //#endif
 
         factory.Received(1).Create("global", $"ip:{Address}", 300, TimeSpan.FromMinutes(1));
         factory.Received(1).Create("auth-strict", $"ip:{Address}", 10, TimeSpan.FromMinutes(1));
-        //#if (notifications)
         factory.Received(1).Create("global", $"user:{Subject}", 300, TimeSpan.FromMinutes(1));
+        //#if (notifications)
         factory.Received(1).Create("notifications-hub-tickets", $"user:{Subject}", 30, TimeSpan.FromMinutes(1));
-        factory.ReceivedCalls().Count().ShouldBe(4);
         //#endif
+        // One limiter per policy and partition, and no other: a second request of a partition reuses its limiter.
+        factory.ReceivedCalls().Select(call => (string)call.GetArguments()[0]!).ShouldBe(
+            [
+                "global",
+                "auth-strict",
+                "global",
+                //#if (notifications)
+                "notifications-hub-tickets",
+                //#endif
+            ],
+            ignoreOrder: true);
     }
 
     [Fact]

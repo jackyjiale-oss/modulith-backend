@@ -411,7 +411,7 @@ HTTP security:
 
 <!--#if (notifications)-->
 Notifications:
-- Without Redis the SignalR hub pushes only to the connections on the instance that delivered the notification, and each instance counts hub tickets alone.
+- By default the SignalR hub pushes only to the connections on the instance that delivered the notification, and each instance counts hub tickets alone.
   <!--#if (caching == "redis")-->
   With `Caching:Provider = redis` it pushes to the user's connections on every instance (the Redis backplane) and the per-user hub ticket limit is one count shared by the instances; while Redis is down no push is live.
   <!--#endif-->
