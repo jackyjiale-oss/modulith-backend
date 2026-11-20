@@ -789,7 +789,7 @@ function read_errors(i,   f, pos, abs, tok, fac, st, p, a, code, id, nm, decl, a
     pos = abs + RLENGTH
     at = line_at(abs + 1)
     fac = tok; sub(/^.*Error\./, "", fac); sub(/[ \t\n]*\($/, "", fac)
-    if (!(fac in status)) fail("errors: unknown factory Error." fac " at line " at " of " f " (known: Validation, Unauthorized, Forbidden, NotFound, Conflict, Failure, Unavailable)")
+    if (!(fac in status)) fail("errors: unknown factory Error." fac " at line " at " of " f " (known: Validation, Unauthorized, Forbidden, NotFound, Conflict, Failure, Unavailable, PreconditionFailed)")
     a = substr(MASK, pos); match(a, /^[ \t\n]*/); p = pos + RLENGTH; a = substr(MASK, p)
     if (match(a, /^"_*"[ \t\n]*[,)]/)) {
       code = substr(RAW, p + 1, index(substr(a, 2), "\"") - 1)
@@ -819,7 +819,7 @@ function read_errors(i,   f, pos, abs, tok, fac, st, p, a, code, id, nm, decl, a
 }
 BEGIN {
   status["Validation"] = 400; status["Unauthorized"] = 401; status["Forbidden"] = 403; status["NotFound"] = 404
-  status["Conflict"] = 409; status["Failure"] = 500; status["Unavailable"] = 503
+  status["Conflict"] = 409; status["Failure"] = 500; status["Unavailable"] = 503; status["PreconditionFailed"] = 412
 }
 {
   sub(/\r$/, "")

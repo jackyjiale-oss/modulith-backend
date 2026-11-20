@@ -121,3 +121,7 @@ Endpoints inject the handler interface (`ICommandHandler<ApproveLeaveRequestComm
 ## Tests
 
 `tests/TemplateName.UnitTests/Application/` (handler registration, both decorators for every handler shape), `Localization/ErrorMessageLocalizerTests`, and `Pagination/` (`CursorCodecTests`, `SortSpecificationTests`, `KeysetSqlBuilderTests`, `CursorPageBuilderTests`).
+
+## Concurrency (`If-Match`)
+
+`Concurrency/` holds what a command needs for ADR 0038: `EntityTag` (a version, sent quoted as `ETag`), `EntityTagBuilder` (the canonical form of a resource's editable values and its SHA-256 hash: `new EntityTagBuilder("kind").Add(...).AddSet(...).Build()`), `IfMatch` (the precondition a command carries: `None`, `Any` or a set of strong tags, with `IsSatisfiedBy(current)`) and `ConcurrencyErrors` (`PreconditionFailed`, 412 `concurrency.precondition_failed`; `MalformedIfMatch`, 400 `request.malformed`).

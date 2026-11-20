@@ -1,3 +1,5 @@
+using TemplateName.Modules.Notifications.Application.Preferences;
+using TemplateName.Application.Common.Concurrency;
 using NSubstitute;
 using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Preferences.Get;
@@ -186,4 +188,49 @@ public sealed class UpdatePreferencesCommandHandlerTests
 
     private Task<Result<PreferencesResponse>> UpdateAsync(params ChannelPreferenceUpdate[] items)
         => _harness.CreateUpdateHandler().HandleAsync(new UpdatePreferencesCommand(items), Ct);
+
+    [Fact]
+    public async Task A_change_between_attempts_is_412_on_the_retry()
+    {
+        var read = PreferencesVersion.Of(PreferencesView.Build(_harness.Catalog, []));
+        _harness.UnitOfWork.SaveChangesUnlessConflictAsync(Arg.Any<CancellationToken>())
+            .Returns(false, true)
+            .AndDoes(_ =>
+            {
+                // Another request of the same user switched the email channel off between the first attempt and the retry.
+                if (_harness.Stored.Count == 0)
+                {
+                    _harness.Stored.Add(_harness.Disabled(Welcome, NotificationChannel.Email));
+                }
+            });
+
+        var result = await _harness.CreateUpdateHandler().HandleAsync(
+            new UpdatePreferencesCommand([Item(Welcome, NotificationChannel.InApp, false)]) { IfMatch = IfMatch.Of([read]) }, Ct);
+
+        result.Error.ShouldBe(ConcurrencyErrors.PreconditionFailed);
+        await _harness.UnitOfWork.Received(1).SaveChangesUnlessConflictAsync(Arg.Any<CancellationToken>());
+        await _harness.UnitOfWork.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Without_if_match_the_retry_still_saves()
+    {
+        _harness.UnitOfWork.SaveChangesUnlessConflictAsync(Arg.Any<CancellationToken>()).Returns(false, true);
+
+        var result = await UpdateAsync(Item(Welcome, NotificationChannel.Email, false));
+
+        result.IsSuccess.ShouldBeTrue();
+        await _harness.UnitOfWork.Received(2).SaveChangesUnlessConflictAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_stale_if_match_is_412_and_saves_nothing()
+    {
+        var result = await _harness.CreateUpdateHandler().HandleAsync(
+            new UpdatePreferencesCommand([Item(Welcome, NotificationChannel.Email, false)]) { IfMatch = IfMatch.Of([new EntityTag("stale")]) }, Ct);
+
+        result.Error.ShouldBe(ConcurrencyErrors.PreconditionFailed);
+        _harness.Preferences.DidNotReceive().Add(Arg.Any<UserPreference>());
+        await _harness.UnitOfWork.DidNotReceive().SaveChangesUnlessConflictAsync(Arg.Any<CancellationToken>());
+    }
 }

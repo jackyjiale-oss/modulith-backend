@@ -1,3 +1,4 @@
+using TemplateName.Application.Common.Concurrency;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Notifications.Application.Abstractions;
@@ -50,10 +51,25 @@ internal sealed class UpdatePreferencesCommandHandler(
         }
 
         var now = timeProvider.GetUtcNow();
-        await ConflictRetry.SaveAsync(
+        // Each attempt checks If-Match against its own fresh read, so a change made between attempts answers 412 (ADR 0038).
+        var saved = await ConflictRetry.SaveAsync(
             unitOfWork,
-            async token => Stage(await preferences.ListAsync(userId, token), wanted, userId, now),
+            async token =>
+            {
+                var rows = await preferences.ListAsync(userId, token);
+                if (!command.IfMatch.IsSatisfiedBy(PreferencesVersion.Of(PreferencesView.Build(catalog, rows))))
+                {
+                    return Result.Failure(ConcurrencyErrors.PreconditionFailed);
+                }
+
+                Stage(rows, wanted, userId, now);
+                return Result.Success();
+            },
             cancellationToken);
+        if (saved.IsFailure)
+        {
+            return Result.Failure<PreferencesResponse>(saved.Error);
+        }
 
         return await getPreferences.HandleAsync(new GetPreferencesQuery(), cancellationToken);
     }

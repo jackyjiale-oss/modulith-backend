@@ -87,6 +87,16 @@ jobs:
           --report-xunit-trx
           --results-directory TestResults
 
+      # Verify writes a .received file next to a snapshot that no longer matches (the OpenAPI snapshot, for one): keep it, so the change
+      # can be checked and accepted without running the tests locally.
+      - name: Upload changed snapshots
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: received-snapshots
+          path: tests/**/*.received.*
+          if-no-files-found: ignore
+
       - name: Coverage report
         run: |
           dotnet tool restore

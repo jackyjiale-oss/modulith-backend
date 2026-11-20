@@ -2,7 +2,7 @@
 
 # Tests
 
-Rows: 210
+Rows: 218
 
 ## Folders
 
@@ -27,6 +27,7 @@ Rows: 210
 | TemplateName.UnitTests | Application | Application.Common |
 | TemplateName.UnitTests | Audit | Audit |
 | TemplateName.UnitTests | Auth | Auth |
+| TemplateName.UnitTests | Concurrency | cross-cutting |
 | TemplateName.UnitTests | Infrastructure | Infrastructure.Common |
 | TemplateName.UnitTests | Localization | cross-cutting |
 | TemplateName.UnitTests | Notifications | Notifications |
@@ -42,6 +43,8 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 
 | source | test |
 | --- | --- |
+| src/BuildingBlocks/TemplateName.Application.Common/Concurrency/EntityTagBuilder.cs | tests/TemplateName.UnitTests/Concurrency/EntityTagBuilderTests.cs |
+| src/BuildingBlocks/TemplateName.Application.Common/Concurrency/IfMatch.cs | tests/TemplateName.UnitTests/Concurrency/IfMatchTests.cs |
 | src/BuildingBlocks/TemplateName.Application.Common/Localization/ErrorMessageLocalizer.cs | tests/TemplateName.UnitTests/Localization/ErrorMessageLocalizerTests.cs |
 | src/BuildingBlocks/TemplateName.Application.Common/Messaging/LoggingDecorator.cs | tests/TemplateName.UnitTests/Application/LoggingDecoratorTests.cs |
 | src/BuildingBlocks/TemplateName.Application.Common/Messaging/ValidationDecorator.cs | tests/TemplateName.UnitTests/Application/ValidationDecoratorTests.cs |
@@ -77,6 +80,8 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/BuildingBlocks/TemplateName.SharedKernel/Auditing/EntityChangeAction.cs | tests/TemplateName.UnitTests/SharedKernel/Auditing/EntityChangeActionTests.cs |
 | src/BuildingBlocks/TemplateName.SharedKernel/Result.cs | tests/TemplateName.UnitTests/SharedKernel/ResultTests.cs |
 | src/BuildingBlocks/TemplateName.SharedKernel/SequentialGuid.cs | tests/TemplateName.UnitTests/SharedKernel/SequentialGuidTests.cs |
+| src/BuildingBlocks/TemplateName.Web.Common/Concurrency/EntityTagResult.cs | tests/TemplateName.UnitTests/Web/EntityTagResultTests.cs |
+| src/BuildingBlocks/TemplateName.Web.Common/Concurrency/IfMatchHeader.cs | tests/TemplateName.UnitTests/Web/IfMatchHeaderTests.cs |
 | src/BuildingBlocks/TemplateName.Web.Common/Errors/GlobalExceptionHandler.cs | tests/TemplateName.UnitTests/Web/GlobalExceptionHandlerTests.cs |
 | src/BuildingBlocks/TemplateName.Web.Common/Identity/HttpContextCurrentUser.cs | tests/TemplateName.UnitTests/Web/HttpContextCurrentUserTests.cs |
 | src/BuildingBlocks/TemplateName.Web.Common/Localization/ApiLocalizationOptions.cs | tests/TemplateName.UnitTests/Localization/ApiLocalizationOptionsTests.cs |
@@ -98,8 +103,10 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Audit/TemplateName.Modules.Audit/Infrastructure/Retention/AuditTrailsCleanupJob.cs | tests/TemplateName.IntegrationTests/Audit/AuditTrailsCleanupJobTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Roles/Create/CreateRoleCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/CreateRoleCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Roles/Delete/DeleteRoleCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/DeleteRoleCommandHandlerTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Roles/RoleVersion.cs | tests/TemplateName.UnitTests/Auth/Admin/RoleVersionTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Roles/SetPermissions/SetRolePermissionsCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/SetRolePermissionsCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Roles/Update/UpdateRoleCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/UpdateRoleCommandHandlerTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Users/AdministeredUserVersion.cs | tests/TemplateName.UnitTests/Auth/Admin/AdministeredUserVersionTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Users/AssignRoles/AssignRolesCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/AssignRolesCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Users/Create/CreateUserCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/CreateUserCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Admin/Users/ForcePasswordReset/ForcePasswordResetCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Admin/ForcePasswordResetCommandHandlerTests.cs |
@@ -121,6 +128,7 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/ExternalLogins/Login/ExternalLoginCommandValidator.cs | tests/TemplateName.UnitTests/Auth/ExternalLoginCommandValidatorTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/ExternalLogins/Providers/ListExternalProvidersQueryHandler.cs | tests/TemplateName.UnitTests/Auth/ListExternalProvidersQueryHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/ExternalLogins/Unlink/UnlinkExternalLoginCommandHandler.cs | tests/TemplateName.UnitTests/Auth/UnlinkExternalLoginCommandHandlerTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/Me/ProfileVersion.cs | tests/TemplateName.UnitTests/Auth/ProfileVersionTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Me/Update/UpdateProfileCommandHandler.cs | tests/TemplateName.UnitTests/Auth/UpdateProfileCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Me/Update/UpdateProfileCommandValidator.cs | tests/TemplateName.UnitTests/Auth/UpdateProfileCommandValidatorTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Mfa/ConfirmTotp/ConfirmTotpCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Mfa/ConfirmTotpCommandHandlerTests.cs |

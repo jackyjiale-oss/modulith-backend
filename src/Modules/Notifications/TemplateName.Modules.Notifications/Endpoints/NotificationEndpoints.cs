@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using TemplateName.Application.Common.Concurrency;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Application.Common.Pagination;
@@ -14,6 +16,8 @@ using TemplateName.Modules.Notifications.Application.Preferences.Get;
 using TemplateName.Modules.Notifications.Application.Preferences.GetQuietHours;
 using TemplateName.Modules.Notifications.Application.Preferences.Update;
 using TemplateName.Modules.Notifications.Application.Preferences.UpdateQuietHours;
+using TemplateName.Modules.Notifications.Application.Preferences;
+using TemplateName.Web.Common.Concurrency;
 using TemplateName.Web.Common.Results;
 using TemplateName.Web.Common.Security;
 
@@ -75,29 +79,35 @@ internal static class NotificationEndpoints
             .WithName("GetNotificationPreferences")
             .RequireAuthorization()
             .Produces<PreferencesResponse>()
+            .ProducesEntityTag()
             .ProducesProblem(StatusCodes.Status401Unauthorized);
 
         group.MapPut("preferences", UpdatePreferencesAsync)
             .WithName("UpdateNotificationPreferences")
             .RequireAuthorization()
             .Produces<PreferencesResponse>()
+            .ProducesEntityTag()
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status409Conflict);
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status412PreconditionFailed);
 
         group.MapGet("preferences/quiet-hours", GetQuietHoursAsync)
             .WithName("GetNotificationQuietHours")
             .RequireAuthorization()
             .Produces<QuietHoursResponse>()
+            .ProducesEntityTag()
             .ProducesProblem(StatusCodes.Status401Unauthorized);
 
         group.MapPut("preferences/quiet-hours", UpdateQuietHoursAsync)
             .WithName("UpdateNotificationQuietHours")
             .RequireAuthorization()
             .Produces<QuietHoursResponse>()
+            .ProducesEntityTag()
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status409Conflict);
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status412PreconditionFailed);
 
         return app;
     }
@@ -159,21 +169,27 @@ internal static class NotificationEndpoints
     {
         var result = await handler.HandleAsync(new GetPreferencesQuery(), cancellationToken);
 
-        return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
+        return result.IsSuccess ? TypedResults.Ok(result.Value).WithEntityTag(PreferencesVersion.Of(result.Value)) : result.ToProblem();
     }
 
     // 200 with the updated preferences. All or nothing: 400 notifications.unknown_type, notifications.channel_not_supported or
     // notifications.channel_mandatory for the first invalid item, and nothing is stored.
     private static async Task<IResult> UpdatePreferencesAsync(
         UpdatePreferencesRequest request,
+        [FromHeader(Name = "If-Match")] string? ifMatch,
         ICommandHandler<UpdatePreferencesCommand, PreferencesResponse> handler,
         CancellationToken cancellationToken)
     {
+        if (!IfMatchHeader.TryParse(ifMatch, out var precondition))
+        {
+            return IfMatchHeader.Malformed();
+        }
+
         // A missing list or a null item reaches the validator as null, which answers 400 validation.failed.
         var items = request.Items?.Select(item => item is null ? null! : new ChannelPreferenceUpdate(item.TypeCode, item.Channel, item.Enabled)).ToList();
-        var result = await handler.HandleAsync(new UpdatePreferencesCommand(items!), cancellationToken);
+        var result = await handler.HandleAsync(new UpdatePreferencesCommand(items!) { IfMatch = precondition }, cancellationToken);
 
-        return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
+        return result.IsSuccess ? TypedResults.Ok(result.Value).WithEntityTag(PreferencesVersion.Of(result.Value)) : result.ToProblem();
     }
 
     // 200 { start, end, timeZone }: the window (null, null without one) and the caller's Auth time zone, read-only here.
@@ -183,18 +199,28 @@ internal static class NotificationEndpoints
     {
         var result = await handler.HandleAsync(new GetQuietHoursQuery(), cancellationToken);
 
-        return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
+        return result.IsSuccess
+            ? TypedResults.Ok(result.Value).WithEntityTag(QuietHoursVersion.Of(result.Value.Start, result.Value.End))
+            : result.ToProblem();
     }
 
     // Both times null (or missing) clears the window; exactly one null, or equal times, is 400 notifications.invalid_quiet_hours.
     private static async Task<IResult> UpdateQuietHoursAsync(
         UpdateQuietHoursRequest request,
+        [FromHeader(Name = "If-Match")] string? ifMatch,
         ICommandHandler<UpdateQuietHoursCommand, QuietHoursResponse> handler,
         CancellationToken cancellationToken)
     {
-        var result = await handler.HandleAsync(new UpdateQuietHoursCommand(request.Start, request.End), cancellationToken);
+        if (!IfMatchHeader.TryParse(ifMatch, out var precondition))
+        {
+            return IfMatchHeader.Malformed();
+        }
 
-        return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
+        var result = await handler.HandleAsync(new UpdateQuietHoursCommand(request.Start, request.End) { IfMatch = precondition }, cancellationToken);
+
+        return result.IsSuccess
+            ? TypedResults.Ok(result.Value).WithEntityTag(QuietHoursVersion.Of(result.Value.Start, result.Value.End))
+            : result.ToProblem();
     }
 
     // 204, also when it was already read (the first read time is kept); 404 notifications.notification_not_found for an unknown id and

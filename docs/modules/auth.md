@@ -1591,6 +1591,18 @@ Two-step verification end to end: `MfaFlowTests.Enroll_sign_in_step_up_trust_and
 
 Retention and cleanup: `AuthRetentionOptionsTests` (unit) pins the defaults (audit logs off), that a negative value is refused at start and that zero or empty is accepted. `AuthCleanupJobTests` (integration, real SQL Server) seeds rows either side of each cutoff and asserts exactly what goes: for each of the six jobs a row exactly at the retention stays and one second older goes; the unexpired tokens of a live session stay while its expired ones go; a used token inside its lifetime stays; a revoked session goes after 90 days with its tokens, and so does one that expired long ago and was never revoked; a revoked trusted device with a far expiry goes 30 days after its revocation; audit logs are kept by default; a retention of zero or empty turns each job off; a backlog of sessions drains over several runs with its tokens; the constructors open no connection; and a refresh-token reuse after a cleanup run still revokes the session. `A_used_refresh_token_answers_reuse_until_its_cleanup_and_invalid_refresh_token_after` pins what the cleanup changes: a used token past its expiry still answers `auth.refresh_token_reused` and revokes until it is deleted, and answers `auth.invalid_refresh_token` without revoking afterwards. `Each_auth_job_reads_its_own_retention_key` sets one non-default retention per job over rows at every age and checks that only that job's table changes. `Cleanup_predicates_use_their_indexes` reads the execution plan of the `RefreshTokens` and `UserSessions` statements.
 
+## Concurrency (`ETag` and `If-Match`)
+
+Four updates take an optional `If-Match` and answer a stale one with 412 `concurrency.precondition_failed` before changing anything (ADR 0038); their reads and their successful responses carry the current version as `ETag`. Without `If-Match` they behave as before. `*` matches; a weak tag answers 412; a malformed header answers 400 `request.malformed`.
+
+| Update | Read that returns the `ETag` | The version covers |
+|---|---|---|
+| `PUT /api/v1/admin/auth/roles/{id}` and `PUT /api/v1/admin/auth/roles/{id}/permissions` (one shared version) | `GET /api/v1/admin/auth/roles/{id}` | name, description, granted permission ids |
+| `PUT /api/v1/admin/auth/users/{id}/roles` | `GET /api/v1/admin/auth/users/{id}` | the ids of the roles that are not deleted |
+| `PUT /api/v1/auth/me` | `GET /api/v1/auth/me` | display name, locale, time zone |
+
+A version covers only what its update writes: a sign-in, a lock or a role change of the caller changes nothing in the version a profile or role update checks, and a client should not assume more. For the role update and the profile update the `rowversion` still guards the save itself (409 `concurrency.conflict`). The permission and role-assignment updates write only link rows, which carry no `rowversion`: two requests sent with the same `If-Match` within the same milliseconds can both pass the check, and both sets are applied. The precondition refuses every change made before the check (ADR 0038).
+
 ## Changelog
 
 <!-- Link to the changelog entries for this module's commit scope. -->

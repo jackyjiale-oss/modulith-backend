@@ -79,3 +79,7 @@ New ids come from `SequentialGuid.Create(timeProvider.GetUtcNow())`. Every error
 ## Tests
 
 `tests/TemplateName.UnitTests/SharedKernel/`: `ResultTests`, `AggregateRootTests`, `SequentialGuidTests` (including SQL Server sort order), `Auditing/EntityChangesRecordedEventTests` (the domain event round-trips through System.Text.Json; the attributes' targets and inheritance).
+
+## Preconditions
+
+`ErrorType.PreconditionFailed` (`Error.PreconditionFailed(code, message)`) is the failure of an `If-Match` precondition: the resource changed since the caller read it. The web layer answers it with 412 (ADR 0038).

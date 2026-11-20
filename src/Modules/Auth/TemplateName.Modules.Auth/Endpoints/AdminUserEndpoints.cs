@@ -1,10 +1,13 @@
+using Microsoft.AspNetCore.Mvc;
 using System.Globalization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using TemplateName.Application.Common.Concurrency;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Application.Common.Pagination;
+using TemplateName.Modules.Auth.Application.Admin.Users;
 using TemplateName.Modules.Auth.Application;
 using TemplateName.Modules.Auth.Application.Admin.Users.AssignRoles;
 using TemplateName.Modules.Auth.Application.Admin.Users.Create;
@@ -15,6 +18,7 @@ using TemplateName.Modules.Auth.Application.Admin.Users.Lock;
 using TemplateName.Modules.Auth.Application.Admin.Users.ResetMfa;
 using TemplateName.Modules.Auth.Application.Admin.Users.RevokeSessions;
 using TemplateName.Modules.Auth.Application.Admin.Users.Unlock;
+using TemplateName.Web.Common.Concurrency;
 using TemplateName.Web.Common.Results;
 using TemplateName.Web.Common.Security;
 
@@ -43,6 +47,7 @@ internal static class AdminUserEndpoints
             .WithName(GetByIdRouteName)
             .RequirePermission(AuthPermissions.UserView)
             .Produces<UserResponse>()
+            .ProducesEntityTag()
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapPost("/", CreateAsync)
@@ -91,9 +96,11 @@ internal static class AdminUserEndpoints
             .WithName("AssignUserRoles")
             .RequirePermission(AuthPermissions.UserAssignRoles)
             .Produces(StatusCodes.Status204NoContent)
+            .ProducesEntityTag()
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status409Conflict);
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status412PreconditionFailed);
 
         return app;
     }
@@ -122,8 +129,12 @@ internal static class AdminUserEndpoints
         CancellationToken cancellationToken)
     {
         var result = await handler.HandleAsync(new GetUserQuery(id), cancellationToken);
+        if (result.IsFailure)
+        {
+            return result.ToProblem();
+        }
 
-        return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
+        return TypedResults.Ok(result.Value).WithEntityTag(AdministeredUserVersion.Of(result.Value.Roles.Select(role => role.Id)));
     }
 
     // 201 with the new id and its Location; the user sets a password through the emailed reset link. 409 auth.email_taken.
@@ -185,15 +196,23 @@ internal static class AdminUserEndpoints
     private static Task<IResult> ResetMfaAsync(Guid id, ICurrentUser currentUser, ICommandHandler<ResetUserMfaCommand> handler, CancellationToken cancellationToken)
         => AdminActor.RunAsync(currentUser, actorId => handler.HandleAsync(new ResetUserMfaCommand(id, actorId), cancellationToken), TypedResults.NoContent());
 
-    // 204; 404 auth.user_not_found or auth.role_not_found; 409 auth.last_super_admin.
-    private static Task<IResult> AssignRolesAsync(
+    // 204 with the new ETag; 400 request.malformed (If-Match); 404 auth.user_not_found or auth.role_not_found; 409 auth.last_super_admin;
+    // 412 concurrency.precondition_failed.
+    private static async Task<IResult> AssignRolesAsync(
         Guid id,
         AssignRolesRequest request,
+        [FromHeader(Name = "If-Match")] string? ifMatch,
         ICurrentUser currentUser,
-        ICommandHandler<AssignRolesCommand> handler,
+        ICommandHandler<AssignRolesCommand, EntityTag> handler,
         CancellationToken cancellationToken)
-        => AdminActor.RunAsync(
+    {
+        if (!IfMatchHeader.TryParse(ifMatch, out var precondition))
+        {
+            return IfMatchHeader.Malformed();
+        }
+
+        return await AdminActor.RunAsync(
             currentUser,
-            actorId => handler.HandleAsync(new AssignRolesCommand(actorId, id, request.RoleIds), cancellationToken),
-            TypedResults.NoContent());
+            actorId => handler.HandleAsync(new AssignRolesCommand(actorId, id, request.RoleIds) { IfMatch = precondition }, cancellationToken));
+    }
 }

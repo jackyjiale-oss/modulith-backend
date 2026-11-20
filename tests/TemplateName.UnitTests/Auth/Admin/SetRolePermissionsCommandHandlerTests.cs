@@ -1,3 +1,5 @@
+using TemplateName.Modules.Auth.Application.Admin.Roles;
+using TemplateName.Application.Common.Concurrency;
 using NSubstitute;
 using TemplateName.Modules.Auth.Application;
 using TemplateName.Modules.Auth.Application.Admin.Roles.SetPermissions;
@@ -171,5 +173,30 @@ public sealed class SetRolePermissionsCommandHandlerTests : AdminRoleHandlerTest
 
         result.Error.Code.ShouldBe("auth.role_not_found");
         await UnitOfWork.DidNotReceiveWithAnyArgs().SaveChangesAsync(Ct);
+    }
+
+    [Fact]
+    public async Task A_stale_if_match_is_precondition_failed_and_changes_nothing()
+    {
+        var role = GivenStoredRole("Support");
+
+        var result = await _sut.HandleAsync(
+            new SetRolePermissionsCommand(ActorId, role.Id, [_view.Id]) { IfMatch = IfMatch.Of([new EntityTag("stale")]) }, Ct);
+
+        result.Error.ShouldBe(ConcurrencyErrors.PreconditionFailed);
+        role.Permissions.ShouldBeEmpty();
+        AuditEntries.ShouldBeEmpty();
+        await UnitOfWork.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task An_unchanged_set_returns_the_current_version()
+    {
+        var role = GivenStoredRole("Support");
+        var read = RoleVersion.Of(role.Name, role.Description, []);
+
+        var result = await _sut.HandleAsync(new SetRolePermissionsCommand(ActorId, role.Id, []) { IfMatch = IfMatch.Of([read]) }, Ct);
+
+        result.Value.ShouldBe(read);
     }
 }

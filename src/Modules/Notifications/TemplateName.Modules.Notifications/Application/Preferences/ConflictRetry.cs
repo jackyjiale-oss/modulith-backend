@@ -1,3 +1,4 @@
+using TemplateName.SharedKernel;
 using TemplateName.Modules.Notifications.Application.Abstractions;
 
 namespace TemplateName.Modules.Notifications.Application.Preferences;
@@ -14,25 +15,47 @@ internal static class ConflictRetry
     /// <summary>The attempts made in all, the last of them a plain save.</summary>
     public const int MaxAttempts = 3;
 
-    /// <param name="unitOfWork">Saves the module's changes.</param>
-    /// <param name="stageChangesAsync">Reads the current rows and stages the request's changes on them; called once per attempt.</param>
+    /// <param name="unitOfWork">Saves the module changes.</param>
+    /// <param name="stageChangesAsync">
+    /// Reads the current rows and stages the request changes on them; called once per attempt. A failure (an <c>If-Match</c> that no
+    /// longer holds against the fresh read, ADR 0038) ends the loop at once with that failure and nothing saved.
+    /// </param>
     /// <param name="cancellationToken">Cancels the work.</param>
-    public static async Task SaveAsync(IUnitOfWork unitOfWork, Func<CancellationToken, Task> stageChangesAsync, CancellationToken cancellationToken)
+    public static async Task<Result> SaveAsync(
+        IUnitOfWork unitOfWork, Func<CancellationToken, Task<Result>> stageChangesAsync, CancellationToken cancellationToken)
     {
         for (var attempt = 1; ; attempt++)
         {
-            await stageChangesAsync(cancellationToken);
+            var staged = await stageChangesAsync(cancellationToken);
+            if (staged.IsFailure)
+            {
+                return staged;
+            }
 
             if (attempt == MaxAttempts)
             {
                 await unitOfWork.SaveChangesAsync(cancellationToken);
-                return;
+                return Result.Success();
             }
 
             if (await unitOfWork.SaveChangesUnlessConflictAsync(cancellationToken))
             {
-                return;
+                return Result.Success();
             }
         }
+    }
+
+    /// <summary>The same loop for a caller whose staging cannot fail (the delivery retry): it stages and saves as before.</summary>
+    public static Task SaveAsync(IUnitOfWork unitOfWork, Func<CancellationToken, Task> stageChangesAsync, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(stageChangesAsync);
+        return SaveAsync(
+            unitOfWork,
+            async token =>
+            {
+                await stageChangesAsync(token);
+                return Result.Success();
+            },
+            cancellationToken);
     }
 }

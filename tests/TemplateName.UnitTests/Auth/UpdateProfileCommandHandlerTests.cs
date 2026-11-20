@@ -1,3 +1,5 @@
+using TemplateName.Modules.Auth.Application.Me;
+using TemplateName.Application.Common.Concurrency;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using TemplateName.Application.Common.Identity;
@@ -90,5 +92,31 @@ public sealed class UpdateProfileCommandHandlerTests
 
         result.IsFailure.ShouldBeTrue();
         await _users.DidNotReceiveWithAnyArgs().GetByIdAsync(default, Ct);
+    }
+
+    [Fact]
+    public async Task A_stale_if_match_is_precondition_failed_and_changes_nothing()
+    {
+        var displayName = _user.DisplayName;
+
+        var result = await _sut.HandleAsync(
+            new UpdateProfileCommand("Alicia", "en", "UTC") { IfMatch = IfMatch.Of([new EntityTag("stale")]) }, Ct);
+
+        result.Error.ShouldBe(ConcurrencyErrors.PreconditionFailed);
+        _user.DisplayName.ShouldBe(displayName);
+        await _unitOfWork.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_matching_if_match_updates()
+    {
+        var read = ProfileVersion.Of(_user.DisplayName, _user.Locale, _user.TimeZone);
+        _getMe.HandleAsync(Arg.Any<GetMeQuery>(), Arg.Any<CancellationToken>())
+            .Returns(new MeResponse(_user.Id, "alice@example.com", true, "Alicia", "en", "UTC", [], []));
+
+        var result = await _sut.HandleAsync(new UpdateProfileCommand("Alicia", "en", "UTC") { IfMatch = IfMatch.Of([read]) }, Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        _user.DisplayName.ShouldBe("Alicia");
     }
 }

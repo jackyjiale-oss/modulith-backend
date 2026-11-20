@@ -91,4 +91,8 @@
     <value>Isihan tidak sah. Medan yang boleh diisih: {allowed}.</value>
     <comment>Draft – needs native review</comment>
   </data>
+  <data name="concurrency.precondition_failed" xml:space="preserve">
+    <value>Sumber ini telah diubah sejak anda membacanya. Baca semula dan cuba lagi dengan ETag semasanya.</value>
+    <comment>Draft – needs native review</comment>
+  </data>
 </root>

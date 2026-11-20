@@ -78,4 +78,7 @@
   <data name="pagination.invalid_sort" xml:space="preserve">
     <value>The sort is not valid. Sortable fields: {allowed}.</value>
   </data>
+  <data name="concurrency.precondition_failed" xml:space="preserve">
+    <value>The resource was changed since you read it. Read it again and retry with its current ETag.</value>
+  </data>
 </root>

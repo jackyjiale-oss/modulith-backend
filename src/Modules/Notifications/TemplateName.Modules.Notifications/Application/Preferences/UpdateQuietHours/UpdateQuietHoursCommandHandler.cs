@@ -1,3 +1,4 @@
+using TemplateName.Application.Common.Concurrency;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Notifications.Application.Abstractions;
@@ -45,19 +46,29 @@ internal sealed class UpdateQuietHoursCommandHandler(
         }
 
         var now = timeProvider.GetUtcNow();
-        await ConflictRetry.SaveAsync(unitOfWork, token => StageAsync(userId, window, now, token), cancellationToken);
+        var saved = await ConflictRetry.SaveAsync(unitOfWork, token => StageAsync(userId, window, command.IfMatch, now, token), cancellationToken);
+        if (saved.IsFailure)
+        {
+            return Result.Failure<QuietHoursResponse>(saved.Error);
+        }
 
         return await getQuietHours.HandleAsync(new GetQuietHoursQuery(), cancellationToken);
     }
 
-    private async Task StageAsync(Guid userId, QuietHours? window, DateTimeOffset now, CancellationToken cancellationToken)
+    // Checks If-Match against this attempt's fresh read before staging anything (ADR 0038).
+    private async Task<Result> StageAsync(Guid userId, QuietHours? window, IfMatch ifMatch, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var profile = await preferences.GetSettingsAsync(userId, cancellationToken);
+        if (!ifMatch.IsSatisfiedBy(QuietHoursVersion.Of(profile?.QuietHours?.Start, profile?.QuietHours?.End)))
+        {
+            return Result.Failure(ConcurrencyErrors.PreconditionFailed);
+        }
+
         if (profile is null)
         {
             if (window is null)
             {
-                return;
+                return Result.Success();
             }
 
             profile = UserNotificationProfile.Create(userId, now);
@@ -65,5 +76,6 @@ internal sealed class UpdateQuietHoursCommandHandler(
         }
 
         profile.SetQuietHours(window, now);
+        return Result.Success();
     }
 }
