@@ -45,6 +45,15 @@ public sealed class EntityTagBuilderTests
     public void Strings_are_taken_as_stored()
         => new EntityTagBuilder("k").Add("A ").Build().ShouldNotBe(new EntityTagBuilder("k").Add("a").Build());
 
+    // Test data is built here, not in [InlineData]: xUnit's case serialization cannot carry a lone surrogate.
+    [Fact]
+    public void A_lone_surrogate_is_not_replaced_before_hashing()
+    {
+        string[] values = ["a\uD800", "a\uDC00", "a�", "\uDC00\uD800", "��"];
+
+        values.Select(value => new EntityTagBuilder("k").Add(value).Build()).Distinct().Count().ShouldBe(values.Length);
+    }
+
     [Fact]
     public void Build_is_the_first_16_bytes_of_sha256_in_base64url()
     {

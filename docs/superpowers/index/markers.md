@@ -2,7 +2,7 @@
 
 # Template switch markers
 
-Rows: 61
+Rows: 62
 
 | file | kinds | expressions |
 | --- | --- | --- |
@@ -21,6 +21,7 @@ Rows: 61
 | docs/adr/0020-secrets-in-cross-module-events.md | <!--#if | notifications |
 | docs/adr/0021-signalr-hub-tickets.md | <!--#if | caching == "redis" |
 | docs/adr/0028-retention-policy-and-the-inbox-window.md | <!--#if | notifications |
+| docs/adr/0038-etag-over-editable-state.md | <!--#if | notifications |
 | docs/api-compatibility.md | <!--#if | notifications && includeSample |
 | docs/architecture/overview.md | %%#if, <!--#if | caching == "redis"; includeSample; includeSample && notifications; notifications |
 | docs/building-blocks/application-common.md | <!--#if | includeSample |

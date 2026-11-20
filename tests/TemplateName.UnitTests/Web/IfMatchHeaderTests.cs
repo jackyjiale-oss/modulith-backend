@@ -15,6 +15,12 @@ public sealed class IfMatchHeaderTests
     [InlineData("W/\"abc\", \"def\"", "abc", false)]
     [InlineData("W/\"abc\", \"def\"", "def", true)]
     [InlineData("\"\"", "", true)]
+    [InlineData("\"a,b\"", "a,b", true)]
+    [InlineData("\"a,b\"", "a", false)]
+    [InlineData("\"a\",,\"b\"", "b", true)]
+    [InlineData("\"a\",", "a", true)]
+    [InlineData(", \"a\"", "a", true)]
+    [InlineData(" , \"a\" ,, W/\"b,c\" , ", "a", true)]
     public void Parses_tags(string header, string current, bool satisfied)
     {
         IfMatchHeader.TryParse(header, out var ifMatch).ShouldBeTrue();
@@ -51,8 +57,11 @@ public sealed class IfMatchHeaderTests
     [InlineData("abc\"")]
     [InlineData("*, \"abc\"")]
     [InlineData("\"abc\", *")]
-    [InlineData("\"a\",,\"b\"")]
-    [InlineData("\"a\",")]
+    [InlineData(",")]
+    [InlineData(" , ,, ")]
+    [InlineData("\"a\" \"b\"")]
+    [InlineData("\"a\"x")]
+    [InlineData("\"a,b")]
     [InlineData("\"a b\"")]
     [InlineData("\"a\"b\"")]
     [InlineData("w/\"abc\"")]

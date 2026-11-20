@@ -232,4 +232,23 @@ public sealed class AssignRolesCommandHandlerTests : AdminHandlerTestBase
 
         result.Value.ShouldBe(AdministeredUserVersion.Of([UserRole.Id, support.Id]));
     }
+
+    [Fact]
+    public async Task The_held_and_the_requested_roles_are_read_in_one_query()
+    {
+        GivenActorIsSuperAdmin();
+        var support = GivenRole("Support");
+        var auditor = GivenRole("Auditor");
+        var target = GivenUser(UserRole, support);
+
+        var result = await _sut.HandleAsync(
+            new AssignRolesCommand(ActorId, target.Id, [support.Id, auditor.Id]) { IfMatch = IfMatch.Of([AdministeredUserVersion.Of([UserRole.Id, support.Id])]) },
+            Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        await Roles.Received(1).GetByIdsAsync(
+            Arg.Is<IReadOnlyCollection<Guid>>(ids => ids.ToHashSet().SetEquals(new[] { UserRole.Id, support.Id, auditor.Id })),
+            Arg.Any<CancellationToken>());
+        await Roles.ReceivedWithAnyArgs(1).GetByIdsAsync(default!, Ct);
+    }
 }

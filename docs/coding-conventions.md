@@ -207,7 +207,7 @@ These are part of public contracts or operations. Changing one is a breaking cha
 
 ## Updates that take `If-Match`
 
-Every `PUT` under `/api/v1/` returns an `ETag` and takes an optional `If-Match` (ADR 0038); `EntityTagCoverageTests` fails for one that does neither, unless it is on that test's `ExcludedPuts` list with a reason. To opt a new update in:
+Every `PUT` under `/api/v1/` returns an `ETag` and takes an optional `If-Match` (ADR 0038); `EntityTagCoverageTests` fails for one that does not declare `.ProducesEntityTag()` or does not bind `If-Match` with `[FromHeader]`, unless it is on that test's `ExcludedPuts` list with a reason. To opt a new update in:
 
 1. Write one version function for the resource, `internal static class {Resource}Version { public static EntityTag Of(...) }`, over exactly the values its `PUT` writes (an `EntityTagBuilder` with the resource kind). The read and the update both call it.
 2. Give the command `public IfMatch IfMatch { get; init; } = IfMatch.None;`. In the handler, after loading and before any change: `if (!command.IfMatch.IsSatisfiedBy(current)) return ConcurrencyErrors.PreconditionFailed;`. A 204 update returns the new version (`ICommand<EntityTag>`); a 200 update returns its body and lets the endpoint compute the version from it.
