@@ -1,7 +1,10 @@
+using System.Buffers;
+using System.Buffers.Binary;
 using System.Buffers.Text;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Unicode;
 
 namespace TemplateName.Application.Common.Concurrency;
 
@@ -9,7 +12,8 @@ namespace TemplateName.Application.Common.Concurrency;
 /// Writes a resource's editable values in a canonical form and hashes it into an <see cref="EntityTag"/>. The form starts with the format
 /// version (<c>v1</c>) and the resource kind; each value is a length-prefixed token (<c>s{length}:{text};</c>, or <c>n;</c> for null), so no
 /// two different sequences of values give the same text; a set is <c>l{count}:</c> and its items in ordinal order, so their order does not
-/// matter. The tag is the first 16 bytes of the SHA-256 of the form's UTF-8, in base64url without padding. Changing the form means a new
+/// matter. The tag is the first 16 bytes of the SHA-256 of the form's UTF-8 (a form holding a lone surrogate is hashed as 0xFF and its
+/// UTF-16 code units instead, as UTF-8 cannot carry it), in base64url without padding. Changing the form means a new
 /// format version: old tags then stop matching, which answers 412 and makes the client read again.
 /// </summary>
 public sealed class EntityTagBuilder
@@ -78,8 +82,28 @@ public sealed class EntityTagBuilder
     /// <summary>Hashes the canonical form into the tag.</summary>
     public EntityTag Build()
     {
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(CanonicalText));
+        var hash = SHA256.HashData(Encode(CanonicalText));
         return new EntityTag(Base64Url.EncodeToString(hash.AsSpan(0, TagBytes)));
+    }
+
+    // UTF-8 for well-formed text. UTF-8 cannot carry a lone surrogate (an encoder replaces it with U+FFFD, so two different values would
+    // share a tag), so text that has one is hashed as its UTF-16 code units, little-endian, after a 0xFF byte that UTF-8 never contains.
+    private static byte[] Encode(string text)
+    {
+        var utf8 = new byte[Encoding.UTF8.GetMaxByteCount(text.Length)];
+        if (Utf8.FromUtf16(text, utf8, out _, out var written, replaceInvalidSequences: false) == OperationStatus.Done)
+        {
+            return utf8[..written];
+        }
+
+        var utf16 = new byte[1 + (2 * text.Length)];
+        utf16[0] = 0xFF;
+        for (var index = 0; index < text.Length; index++)
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(utf16.AsSpan(1 + (2 * index)), text[index]);
+        }
+
+        return utf16;
     }
 
     private void AppendString(string value)

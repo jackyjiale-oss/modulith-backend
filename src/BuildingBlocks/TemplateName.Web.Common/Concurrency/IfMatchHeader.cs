@@ -8,8 +8,9 @@ namespace TemplateName.Web.Common.Concurrency;
 /// <summary>
 /// Reads an <c>If-Match</c> header (RFC 9110, 13.1.1) into the <see cref="IfMatch"/> a command carries (ADR 0038). Absent is
 /// <see cref="IfMatch.None"/>; <c>*</c> alone is <see cref="IfMatch.Any"/>; otherwise a comma-separated list of quoted tags, where a weak
-/// tag (<c>W/"..."</c>) is accepted but never matches. Anything else (an empty value, a missing quote, a character outside a tag's
-/// characters, an empty list element, <c>*</c> beside a tag) is malformed: a client bug answered with 400 <c>request.malformed</c>.
+/// tag (<c>W/"..."</c>) is accepted but never matches. A tag is read whole, so a comma inside its quotes belongs to it; empty list elements
+/// are ignored (RFC 9110, 5.6.1.2). Anything else (no tag at all, a missing quote, a character outside a tag's characters, two tags without
+/// a comma, <c>*</c> beside a tag) is malformed: a client bug answered with 400 <c>request.malformed</c>.
 /// </summary>
 public static class IfMatchHeader
 {
@@ -24,33 +25,47 @@ public static class IfMatchHeader
             return true;
         }
 
-        var trimmed = header.Trim();
-        if (trimmed == "*")
+        if (header.Trim(' ', '\t') == "*")
         {
             ifMatch = IfMatch.Any;
             return true;
         }
 
-        if (trimmed.Length == 0)
-        {
-            return false;
-        }
-
         var strongTags = new List<EntityTag>();
-        foreach (var element in trimmed.Split(','))
+        var tagCount = 0;
+        var position = Skip(header, 0, includingCommas: true);
+        while (position < header.Length)
         {
-            var item = element.Trim();
-            var weak = item.StartsWith(WeakPrefix, StringComparison.Ordinal);
-            var quoted = weak ? item[WeakPrefix.Length..] : item;
-            if (!IsQuotedTag(quoted))
+            var weak = string.CompareOrdinal(header, position, WeakPrefix, 0, WeakPrefix.Length) == 0;
+            if (weak)
+            {
+                position += WeakPrefix.Length;
+            }
+
+            if (!TryReadQuotedTag(header, ref position, out var tag))
             {
                 return false;
             }
 
+            tagCount++;
             if (!weak)
             {
-                strongTags.Add(new EntityTag(quoted[1..^1]));
+                strongTags.Add(tag);
             }
+
+            // After a tag comes only whitespace, then a comma or the end.
+            position = Skip(header, position, includingCommas: false);
+            if (position < header.Length && header[position] != ',')
+            {
+                return false;
+            }
+
+            position = Skip(header, position, includingCommas: true);
+        }
+
+        if (tagCount == 0)
+        {
+            return false;
         }
 
         ifMatch = IfMatch.Of(strongTags);
@@ -60,21 +75,44 @@ public static class IfMatchHeader
     /// <summary>The 400 problem for a malformed header (<c>request.malformed</c>).</summary>
     public static IResult Malformed() => Result.Failure(ConcurrencyErrors.MalformedIfMatch).ToProblem();
 
-    private static bool IsQuotedTag(string value)
+    // Skips optional whitespace (RFC 9110 OWS: space and tab) and, between list elements, commas: an empty element is ignored.
+    private static int Skip(string header, int position, bool includingCommas)
     {
-        if (value.Length < 2 || value[0] != '"' || value[^1] != '"')
+        while (position < header.Length && (header[position] is ' ' or '\t' || (includingCommas && header[position] == ',')))
+        {
+            position++;
+        }
+
+        return position;
+    }
+
+    // Reads "..." at position into the text between the quotes and moves past the closing quote.
+    private static bool TryReadQuotedTag(string header, ref int position, out EntityTag tag)
+    {
+        tag = default;
+        if (position >= header.Length || header[position] != '"')
         {
             return false;
         }
 
-        foreach (var character in value.AsSpan(1, value.Length - 2))
+        var end = position + 1;
+        while (end < header.Length && header[end] != '"')
         {
-            if (!IsTagCharacter(character))
+            if (!IsTagCharacter(header[end]))
             {
                 return false;
             }
+
+            end++;
         }
 
+        if (end == header.Length)
+        {
+            return false;
+        }
+
+        tag = new EntityTag(header[(position + 1)..end]);
+        position = end + 1;
         return true;
     }
 

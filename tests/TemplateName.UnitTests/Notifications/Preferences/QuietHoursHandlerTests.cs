@@ -1,8 +1,10 @@
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
+using TemplateName.Application.Common.Concurrency;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Modules.Auth.Contracts.Users;
 using TemplateName.Modules.Notifications.Application.Abstractions;
+using TemplateName.Modules.Notifications.Application.Preferences;
 using TemplateName.Modules.Notifications.Application.Preferences.GetQuietHours;
 using TemplateName.Modules.Notifications.Application.Preferences.UpdateQuietHours;
 using TemplateName.Modules.Notifications.Domain.Preferences;
@@ -142,6 +144,60 @@ public sealed class QuietHoursHandlerTests
     }
 
     [Fact]
+    public async Task A_stale_if_match_is_precondition_failed_and_changes_nothing()
+    {
+        _profile = UserNotificationProfile.Create(_userId, Now.AddDays(-1));
+        _profile.SetQuietHours(new QuietHours(new TimeOnly(1, 0), new TimeOnly(2, 0)), Now.AddDays(-1));
+        var seenBeforeTheChange = QuietHoursVersion.Of(null, null);
+
+        var result = await UpdateAsync(Night, Morning, IfMatch.Of([seenBeforeTheChange]));
+
+        result.Error.ShouldBe(ConcurrencyErrors.PreconditionFailed);
+        _profile.QuietHours.ShouldBe(new QuietHours(new TimeOnly(1, 0), new TimeOnly(2, 0)));
+        await _unitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessConflictAsync(Ct);
+        await _unitOfWork.DidNotReceiveWithAnyArgs().SaveChangesAsync(Ct);
+    }
+
+    [Fact]
+    public async Task A_stale_if_match_without_a_profile_creates_none()
+    {
+        var result = await UpdateAsync(Night, Morning, IfMatch.Of([new EntityTag("stale")]));
+
+        result.Error.ShouldBe(ConcurrencyErrors.PreconditionFailed);
+        _preferences.DidNotReceive().Add(Arg.Any<UserNotificationProfile>());
+    }
+
+    [Fact]
+    public async Task A_matching_if_match_updates_the_window()
+    {
+        _profile = UserNotificationProfile.Create(_userId, Now.AddDays(-1));
+        _profile.SetQuietHours(new QuietHours(new TimeOnly(1, 0), new TimeOnly(2, 0)), Now.AddDays(-1));
+
+        var result = await UpdateAsync(Night, Morning, IfMatch.Of([QuietHoursVersion.Of(new TimeOnly(1, 0), new TimeOnly(2, 0))]));
+
+        result.Value.ShouldBe(new QuietHoursResponse(Night, Morning, "Asia/Kuala_Lumpur"));
+        _profile.QuietHours.ShouldBe(new QuietHours(Night, Morning));
+    }
+
+    [Fact]
+    public async Task A_change_between_two_attempts_is_precondition_failed_on_the_retry()
+    {
+        // The first save conflicts; meanwhile another request set a window, which the retry's fresh read sees.
+        _profile = UserNotificationProfile.Create(_userId, Now.AddDays(-1));
+        var seen = QuietHoursVersion.Of(null, null);
+        _unitOfWork.SaveChangesUnlessConflictAsync(Arg.Any<CancellationToken>()).Returns(false, true);
+        var other = UserNotificationProfile.Create(_userId, Now.AddDays(-1));
+        other.SetQuietHours(new QuietHours(new TimeOnly(1, 0), new TimeOnly(2, 0)), Now);
+        _preferences.GetSettingsAsync(_userId, Arg.Any<CancellationToken>()).Returns(_profile, other);
+
+        var result = await UpdateAsync(Night, Morning, IfMatch.Of([seen]));
+
+        result.Error.ShouldBe(ConcurrencyErrors.PreconditionFailed);
+        other.QuietHours.ShouldBe(new QuietHours(new TimeOnly(1, 0), new TimeOnly(2, 0)));
+        await _unitOfWork.Received(1).SaveChangesUnlessConflictAsync(Ct);
+    }
+
+    [Fact]
     public async Task A_caller_without_a_user_id_changes_nothing()
     {
         _currentUser.UserId.Returns((Guid?)null);
@@ -196,7 +252,7 @@ public sealed class QuietHoursHandlerTests
 
     private GetQuietHoursQueryHandler CreateGetHandler() => new(_preferences, _contacts, _currentUser);
 
-    private Task<Result<QuietHoursResponse>> UpdateAsync(TimeOnly? start, TimeOnly? end)
+    private Task<Result<QuietHoursResponse>> UpdateAsync(TimeOnly? start, TimeOnly? end, IfMatch? ifMatch = null)
         => new UpdateQuietHoursCommandHandler(_preferences, _currentUser, _unitOfWork, CreateGetHandler(), _time)
-            .HandleAsync(new UpdateQuietHoursCommand(start, end), Ct);
+            .HandleAsync(new UpdateQuietHoursCommand(start, end) { IfMatch = ifMatch ?? IfMatch.None }, Ct);
 }

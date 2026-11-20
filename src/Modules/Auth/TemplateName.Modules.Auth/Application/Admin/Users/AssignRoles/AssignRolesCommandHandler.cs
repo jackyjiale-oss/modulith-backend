@@ -35,9 +35,13 @@ internal sealed class AssignRolesCommandHandler(
             return Result.Failure<EntityTag>(UserErrors.NotFound(command.UserId));
         }
 
+        // One read for the roles the user holds and the roles requested; only those that exist and are not deleted come back.
+        var current = user.Roles.Select(assignment => assignment.RoleId).ToHashSet();
+        var requested = command.RoleIds.Distinct().ToList();
+        var found = (await roles.GetByIdsAsync([.. current.Union(requested)], cancellationToken)).ToDictionary(role => role.Id);
+
         // The version covers the roles that still exist, as GET user lists them: a link to a soft-deleted role counts on neither side.
-        var held = await roles.GetByIdsAsync([.. user.Roles.Select(assignment => assignment.RoleId)], cancellationToken);
-        if (!command.IfMatch.IsSatisfiedBy(AdministeredUserVersion.Of(held.Select(role => role.Id))))
+        if (!command.IfMatch.IsSatisfiedBy(AdministeredUserVersion.Of(current.Where(found.ContainsKey))))
         {
             return Result.Failure<EntityTag>(ConcurrencyErrors.PreconditionFailed);
         }
@@ -49,8 +53,6 @@ internal sealed class AssignRolesCommandHandler(
             return Result.Failure<EntityTag>(allowed.Error);
         }
 
-        var requested = command.RoleIds.Distinct().ToList();
-        var found = (await roles.GetByIdsAsync(requested, cancellationToken)).ToDictionary(role => role.Id);
         if (requested.Where(id => !found.ContainsKey(id)).Select(id => (Guid?)id).FirstOrDefault() is { } unknownId)
         {
             return Result.Failure<EntityTag>(RoleErrors.NotFound(unknownId));
@@ -60,7 +62,6 @@ internal sealed class AssignRolesCommandHandler(
         if (allowed.IsSuccess)
         {
             // Only the roles the user does not hold yet grant anything new; keeping or removing a role escalates nothing.
-            var current = user.Roles.Select(assignment => assignment.RoleId).ToHashSet();
             var newlyGranted = requested.Where(id => !current.Contains(id)).Select(id => found[id]);
             allowed = await grantRules.EnsureActorHoldsRolesAsync(command.ActorId, newlyGranted, cancellationToken);
         }

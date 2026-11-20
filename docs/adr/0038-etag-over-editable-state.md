@@ -31,6 +31,9 @@ Two clients that read the same record and update it minutes apart lose one updat
 - A version covers only what its update writes: the module pages list it per endpoint, so a client does not assume more protection than it has.
 - Responses carry `ETag`; CORS exposes it, and the OpenAPI document shows the header and the optional `If-Match` parameter.
 - Changing the canonical form means a new format version: old tags stop matching and clients read again (412), which fails safe.
+<!--#if (notifications)-->
+- The notification preferences' version covers the view `GET` returns, defaults included (the editable state the client sees, not only the rows stored for choices that differ from a default): a release that adds a type or a channel, or changes a default, answers a tag read before it with 412 once.
+<!--#endif-->
 - An update that ever gains `Idempotency-Key` needs the idempotency middleware to store and replay `ETag` and to hash `If-Match`.
 - Requiring `If-Match` later is a breaking change under ADR 0031 (428, an `!` release).
 

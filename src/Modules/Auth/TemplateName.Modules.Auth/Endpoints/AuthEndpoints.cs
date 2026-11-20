@@ -293,12 +293,12 @@ internal static class AuthEndpoints
         return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
     }
 
-    // The handler fails only when the token's user can no longer sign in (unknown, soft-deleted or suspended). Fail closed with the same
-    // body-less 401 a request without a valid token gets; UseStatusCodePages turns it into the http.401 problem.
     // 200 with the profile version as ETag (ADR 0038), for GET me and PUT me alike.
     private static IResult OkWithVersion(MeResponse me)
         => TypedResults.Ok(me).WithEntityTag(ProfileVersion.Of(me.DisplayName, me.Locale, me.TimeZone));
 
+    // The handler fails only when the token's user can no longer sign in (unknown, soft-deleted or suspended). Fail closed with the same
+    // body-less 401 a request without a valid token gets; UseStatusCodePages turns it into the http.401 problem.
     private static async Task<IResult> GetMeAsync(IQueryHandler<GetMeQuery, MeResponse> handler, CancellationToken cancellationToken)
     {
         var result = await handler.HandleAsync(new GetMeQuery(), cancellationToken);
