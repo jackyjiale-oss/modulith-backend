@@ -67,7 +67,7 @@ public sealed class IfMatchHeaderTests
     [InlineData("w/\"abc\"")]
     [InlineData("W/abc")]
     [InlineData("\u000B*")]
-    [InlineData("* ")]
+    [InlineData("*\u00A0")]
     public void Malformed_is_refused(string header) => IfMatchHeader.TryParse(header, out _).ShouldBeFalse();
 
     [Fact]

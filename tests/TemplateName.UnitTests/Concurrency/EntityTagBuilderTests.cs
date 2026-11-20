@@ -49,7 +49,7 @@ public sealed class EntityTagBuilderTests
     [Fact]
     public void A_lone_surrogate_is_not_replaced_before_hashing()
     {
-        string[] values = ["a\uD800", "a\uDC00", "a�", "\uDC00\uD800", "��"];
+        string[] values = ["a\uD800", "a\uDC00", "a\uFFFD", "\uDC00\uD800", "\uFFFD\uFFFD"];
 
         values.Select(value => new EntityTagBuilder("k").Add(value).Build()).Distinct().Count().ShouldBe(values.Length);
     }
