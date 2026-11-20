@@ -1601,7 +1601,7 @@ Four updates take an optional `If-Match` and answer a stale one with 412 `concur
 | `PUT /api/v1/admin/auth/users/{id}/roles` | `GET /api/v1/admin/auth/users/{id}` | the ids of the roles that are not deleted |
 | `PUT /api/v1/auth/me` | `GET /api/v1/auth/me` | display name, locale, time zone |
 
-A version covers only what its update writes: a sign-in, a lock or a role change of the caller changes nothing in the version a profile or role update checks, and a client should not assume more. For the role update and the profile update the `rowversion` still guards the save itself (409 `concurrency.conflict`). The permission and role-assignment updates write only link rows, which carry no `rowversion`: two requests sent with the same `If-Match` within the same milliseconds can both pass the check, and both sets are applied. The precondition refuses every change made before the check (ADR 0038).
+A version covers only what its update writes: a sign-in, a lock or a role change of the caller changes nothing in the version a profile or role update checks, and a client should not assume more. For the role, role-permission and profile updates the `rowversion` still guards the save itself (409 `concurrency.conflict`); a permissions change marks the role row updated so that it does. The role-assignment update writes only link rows and leaves the user row alone (every sign-in updates it): two requests sent with the same `If-Match` within the same milliseconds can both pass the check, and both sets are applied. The precondition refuses every change made before the check (ADR 0038).
 
 ## Changelog
 

@@ -199,4 +199,25 @@ public sealed class SetRolePermissionsCommandHandlerTests : AdminRoleHandlerTest
 
         result.Value.ShouldBe(read);
     }
+
+    [Fact]
+    public async Task A_changed_set_marks_the_role_row_updated_so_its_rowversion_guards_the_save()
+    {
+        var role = GivenStoredRole("Support");
+
+        var result = await _sut.HandleAsync(new SetRolePermissionsCommand(ActorId, role.Id, [_view.Id]), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        Roles.Received(1).MarkUpdated(role);
+    }
+
+    [Fact]
+    public async Task An_unchanged_set_does_not_mark_the_role_row()
+    {
+        var role = GivenStoredRole("Support");
+
+        (await _sut.HandleAsync(new SetRolePermissionsCommand(ActorId, role.Id, []), Ct)).IsSuccess.ShouldBeTrue();
+
+        Roles.DidNotReceiveWithAnyArgs().MarkUpdated(default!);
+    }
 }
