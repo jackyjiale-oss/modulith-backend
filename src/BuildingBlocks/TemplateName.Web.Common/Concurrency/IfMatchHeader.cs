@@ -25,7 +25,7 @@ public static class IfMatchHeader
             return true;
         }
 
-        if (header.Trim() == "*")
+        if (header.Trim(' ', '\t') == "*")
         {
             ifMatch = IfMatch.Any;
             return true;

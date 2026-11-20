@@ -45,7 +45,7 @@ public sealed class IfMatchHeaderTests
     [Fact]
     public void Star_is_any()
     {
-        IfMatchHeader.TryParse(" * ", out var ifMatch).ShouldBeTrue();
+        IfMatchHeader.TryParse(" \t* ", out var ifMatch).ShouldBeTrue();
         ifMatch.ShouldBeSameAs(IfMatch.Any);
     }
 
@@ -66,6 +66,8 @@ public sealed class IfMatchHeaderTests
     [InlineData("\"a\"b\"")]
     [InlineData("w/\"abc\"")]
     [InlineData("W/abc")]
+    [InlineData("\u000B*")]
+    [InlineData("* ")]
     public void Malformed_is_refused(string header) => IfMatchHeader.TryParse(header, out _).ShouldBeFalse();
 
     [Fact]
