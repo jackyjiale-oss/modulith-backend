@@ -7,6 +7,8 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence;
 
 internal sealed class RoleRepository(AuthDbContext context) : IRoleRepository
 {
+    public void MarkUpdated(Role role) => context.Entry(role).Property(stored => stored.UpdatedAt).IsModified = true;
+
     public Task<Role?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
         => Roles().SingleOrDefaultAsync(role => role.Id == id, cancellationToken);
 

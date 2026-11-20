@@ -2,7 +2,9 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using TemplateName.IntegrationTests.Infrastructure;
+using Microsoft.EntityFrameworkCore;
 using TemplateName.Modules.Auth.Application;
+using TemplateName.Modules.Auth.Domain.Roles;
 
 namespace TemplateName.IntegrationTests.Auth;
 
@@ -120,4 +122,20 @@ public sealed class RoleEntityTagTests(IntegrationTestWebAppFactory factory) : A
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         return await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
     }
+
+    [Fact]
+    public async Task A_permissions_change_bumps_the_role_rowversion_so_a_simultaneous_save_conflicts()
+    {
+        var (id, read) = await GivenRoleAsync();
+        var before = await RowVersionAsync(id);
+        var view = await PermissionIdAsync(AuthPermissions.RoleView);
+
+        using var granted = await Client.PutJsonAsync($"{RolesRoute}/{id}/permissions", new { permissionIds = new[] { view } }, read, Ct);
+
+        granted.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        (await RowVersionAsync(id)).ShouldNotBe(before);
+    }
+
+    private Task<byte[]> RowVersionAsync(Guid id)
+        => QueryAsync(context => context.Set<Role>().Where(role => role.Id == id).Select(role => role.RowVersion).SingleAsync(Ct));
 }

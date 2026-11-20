@@ -74,6 +74,8 @@ internal sealed class SetRolePermissionsCommandHandler(
             return RoleVersion.Of(role);
         }
 
+        // Only link rows change; touching the role row makes the save check its RowVersion, so a simultaneous save loses with 409.
+        roles.MarkUpdated(role);
         auditWriter.Record(RoleAudit.PermissionsChanged(
             command.ActorId,
             role,
