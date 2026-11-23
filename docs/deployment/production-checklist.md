@@ -40,6 +40,15 @@ The environment of a .NET host that is not told otherwise is `Production`, and t
 
 **Yours:** the template reads secrets from environment variables and user secrets; it ships no key vault integration. Inject them from your vault into the container, the app pool or the orchestrator, and keep `Auth:Seed:AdminPassword` set only for the first start.
 
+<!--#if (notifications)-->
+## Push credentials, if push is on
+
+- Push is off by default (`Notifications:Push:Enabled`); a project that turns it on sets `Notifications:Push:Fcm:ProjectId` and either `Notifications:Push:Fcm:CredentialsJson` (the service-account JSON, from the environment or the vault, never a file) or Google's application default credentials on the host. The host does not start with push on and no project id, or with credentials that are not a service-account JSON ([notifications](../modules/notifications.md#push-channel)).
+- iOS devices are reached through FCM: upload the app's APNs key to the Firebase project, or FCM answers `THIRD_PARTY_AUTH_ERROR` and every iOS push is retried and then dead-lettered (`fcm_third_party_auth_error`).
+
+**Yours:** create the Firebase project and its service account (role Firebase Cloud Messaging API Admin), keep the key in your vault, and rotate it as you rotate other keys.
+<!--#endif-->
+
 ## Data Protection keys persisted and protected
 
 **Persisted: yes.** The key ring is stored in `auth.DataProtectionKeys` (`PersistKeysToDbContext<AuthDbContext>`, ADR 0017), so every instance and every restart reads the same keys; keep `Auth:DataProtection:ApplicationName` the same on every instance and never truncate the table or restore the rest of the schema without it ([Auth module](../modules/auth.md#recovering-access)).

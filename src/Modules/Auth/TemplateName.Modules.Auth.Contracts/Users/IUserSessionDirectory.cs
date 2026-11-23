@@ -1,9 +1,9 @@
 namespace TemplateName.Modules.Auth.Contracts.Users;
 
 /// <summary>
-/// Lets another module ask which of a user's sign-in sessions are still active, so it never reads the Auth tables. The Notifications
-/// module binds each push device to the session that registered it and asks before it schedules and before it sends a push. The
-/// answer is always current: a session that was revoked or expired a moment ago is not in it.
+/// Lets another module ask which of a user's sign-in sessions are still active, so it never reads the Auth tables: a module that binds
+/// something to a session (such as a push device) asks before it acts on it. The answer is always current: a session that was revoked
+/// or expired a moment ago is not in it.
 /// </summary>
 public interface IUserSessionDirectory
 {

@@ -9,7 +9,7 @@ using TemplateName.Modules.Auth.Infrastructure.Persistence;
 namespace TemplateName.IntegrationTests.Auth;
 
 /// <summary>
-/// <see cref="IUserSessionDirectory"/> as the Notifications module calls it: one Dapper query on <c>auth.UserSessions</c> that must
+/// <see cref="IUserSessionDirectory"/> as a consuming module calls it: one Dapper query on <c>auth.UserSessions</c> that must
 /// repeat the rule of <see cref="UserSession.IsActive"/> (not revoked, before its expiry) and keep to the one user.
 /// </summary>
 public sealed class UserSessionDirectoryTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)

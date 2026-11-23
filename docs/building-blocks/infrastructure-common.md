@@ -235,6 +235,7 @@ services.AddExternalHttpClient("email-api", ResiliencePipelines.Critical);
 }
 ```
 
+<!--#if (notifications)-->
 The Notifications module's push channel is one such provider: the FCM transport sends through the client `push-provider` on the pipeline of the same name, registered only while `Notifications:Push:Enabled` is true ([notifications](../modules/notifications.md#push-channel)). It starts from the `external-default` values; suggested settings are below. A send is a `POST`, so the pipeline does not retry it unless `RetryUnsafeMethods` is set: leave it off, so a lost answer cannot show a push twice, and let the delivery worker's schedule (1, 5, 15, 60 minutes) retry instead.
 
 ```json
@@ -246,6 +247,7 @@ The Notifications module's push channel is one such provider: the FCM transport 
   }
 }
 ```
+<!--#endif-->
 
 The Auth module's social login does exactly this with two custom names, `AddExternalHttpClient("oidc-discovery", "oidc-discovery")` (a provider's discovery document and signing keys) and `AddExternalHttpClient("facebook-graph", "facebook-graph")` (Facebook's Graph API); both use the `external-default` values until `Resilience:Pipelines:oidc-discovery` or `Resilience:Pipelines:facebook-graph` says otherwise.
 

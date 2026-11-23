@@ -1,6 +1,6 @@
 # Push notifications channel — design
 
-- Status: draft, waiting for the user's review (2026-11-23).
+- Status: implemented 2026-11-23 (ADR 0039); approved 2026-11-23; implementation plan `docs/superpowers/plans/2026-11-23-push-channel.md`, whose "Deviations from the spec" section and ledger rulings record the changes made while building it.
 - Date: 2026-11-23
 - Roadmap row: "Push and SMS channels" in `docs/blueprint-review.md` (decided by the user on 2026-10-20). The user split it on 2026-11-23: this spec is the **push** half; the phone number in Auth and the SMS channel are a second spec, and phone-number OTP login a third. All three gate 1.0.0 (decided 2026-11-20).
 - Builds on: the Notifications module (Plan 3: catalog, scheduler, delivery worker, preferences, quiet hours; ADR 0018, ADR 0020), the external HTTP clients and resilience pipelines (`AddExternalHttpClient`, Plan 5), sessions and the `sid` claim (Plan 2), ADR 0035 (switch markers), ADR 0038 (preferences `ETag`).
@@ -71,7 +71,7 @@ New configuration (validated on start; a message names the key, never a value):
 | `Notifications:Push:Fcm:CredentialsJson` | empty (user secrets or environment) | The service-account JSON. Empty means Google's application default credentials (`GOOGLE_APPLICATION_CREDENTIALS`, workload identity). When set, it must parse as a service-account JSON, or the host does not start. Never set it in a file. |
 | `Notifications:Retention:PushDevices` | `30.00:00:00` | How long a deactivated device is kept before the daily cleanup deletes it; `00:00:00` turns the cleanup off. |
 
-New resilience pipeline name `push-provider`, documented with suggested values (attempt timeout 10 s, total 30 s, 2 retries), starting from `external-default` like any unnamed pipeline.
+New resilience pipeline name `push-provider`, documented with suggested values (attempt timeout 10 s, total 30 s), starting from `external-default` like any unnamed pipeline. The building block does not retry a `POST` unless `RetryUnsafeMethods` is set, and it stays off, so the worker's schedule is the retry (changed while building: the earlier "2 retries" would not apply to a POST and could show a push twice).
 
 New table `notify.PushDevices`, migration `AddPushDevices`.
 
@@ -115,6 +115,7 @@ The worker renders a push delivery from two template parts, `title` and `body`, 
 |---|---|---|
 | The device row no longer exists (the cleanup removed it) | permanent `device_not_found` | — |
 | The device is deactivated | permanent `device_inactive` | — |
+| Another user registered the device since (a phone that changed hands) | permanent `device_reassigned` | kept (added while planning) |
 | Its session is no longer active (`IUserSessionDirectory`) | permanent `session_ended` | deactivated, `SessionEnded` |
 | Otherwise | sends through `IPushTransport` (5.4) | per 5.4 |
 
@@ -162,7 +163,7 @@ Templates: `Templates/Push/{type}.{culture}.title.scriban` and `{type}.{culture}
 ### 5.6 Disabled channel, removed module
 
 - `Enabled` off: no push delivery is created; the preferences API hides and refuses the channel; device registration still works; a push delivery already pending (created while it was on) is dead-lettered by the worker with `channel_unavailable`, the existing rule for an unregistered channel, because the push channel is registered only while enabled.
-- `--notifications false`: everything in this spec goes with the module. `IUserSessionDirectory` and its Auth implementation are used only by Notifications, so they sit in `//#if (notifications)` regions (ADR 0035), checked by the switch-off smoke runs.
+- `--notifications false`: everything in this spec goes with the module. `IUserSessionDirectory` and its Auth implementation are used only by Notifications but carry no switch marker, following `IUserContactDirectory` (changed while planning): a project generated without Notifications keeps the small query, unused.
 
 ## 6. Where it lands
 
