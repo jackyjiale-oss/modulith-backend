@@ -141,7 +141,7 @@ Failures throw `PushSendException(isPermanent, reason, deactivateDevice)`; the r
 | FCM answer | Reason | Kind | Device |
 |---|---|---|---|
 | `UNREGISTERED` (404) | `fcm_unregistered` | permanent | deactivated |
-| `SENDER_ID_MISMATCH` (403) | `fcm_sender_id_mismatch` | permanent | deactivated |
+| `SENDER_ID_MISMATCH` (403) | `fcm_sender_id_mismatch` | permanent | kept (changed in the final review: a misconfigured project would otherwise silence every device) |
 | `INVALID_ARGUMENT` (400) | `fcm_invalid_argument` | permanent | kept (may be the payload) |
 | `QUOTA_EXCEEDED` (429) | `fcm_quota_exceeded` | transient | kept |
 | `UNAVAILABLE` (503), `INTERNAL` (500) | `fcm_unavailable`, `fcm_internal` | transient | kept |

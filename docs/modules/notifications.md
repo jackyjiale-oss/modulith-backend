@@ -344,7 +344,7 @@ Plan 2's Auth module sent its emails itself (`IEmailSender`, `AuthEmails` and tw
 
 Push is **off by default** (`Notifications:Push:Enabled`, [Configuration](#configuration)); turning it on and adding a Firebase project and credentials delivers the types that declare push to every device the user is signed in on. Decided in [ADR 0039](../adr/0039-session-bound-push-devices.md): FCM only (iOS through FCM with the APNs key uploaded to Firebase), devices bound to the session that registered them, one delivery per device.
 
-**Devices.** The app registers its FCM token after each sign-in and whenever FCM rotates it (`POST /api/v1/notifications/devices`, [Endpoints](#endpoints)). A registration is an upsert by the token's hash: a token seen before moves to the caller and the current session (the access token's `sid`) and is reactivated, so a phone signed in again, or one that changed hands, keeps one row. Beyond `Notifications:Push:MaxDevicesPerUser` (10) active devices the oldest registrations are deactivated (`Replaced`). Two registrations of one token at once collide on the unique hash and are staged again from fresh reads (`ConflictRetry`). The routes work while push is off, so an app can register before an operator turns it on.
+**Devices.** The app registers its FCM token on every start (and after each sign-in, and whenever FCM rotates it): the call is an idempotent upsert, so a device deactivated for any reason comes back with the app's next start rather than its next sign-in (`POST /api/v1/notifications/devices`, [Endpoints](#endpoints)). A registration is an upsert by the token's hash: a token seen before moves to the caller and the current session (the access token's `sid`) and is reactivated, so a phone signed in again, or one that changed hands, keeps one row. Beyond `Notifications:Push:MaxDevicesPerUser` (10) active devices the oldest registrations are deactivated (`Replaced`). Two registrations of one token at once collide on the unique hash and are staged again from fresh reads (`ConflictRetry`). The routes work while push is off, so an app can register before an operator turns it on.
 
 **Sending.** `PushChannel` (`Infrastructure/Channels/Push/`, registered only while push is enabled) loads the device in the worker's scope, so a deactivation is saved with the delivery's outcome:
 
@@ -363,7 +363,7 @@ The title and body are the `title` and `body` parts, cut to 200 and 1000 charact
 | FCM answer | Reason | Kind | Device |
 |---|---|---|---|
 | `UNREGISTERED` | `fcm_unregistered` | permanent | deactivated, `RejectedByProvider` |
-| `SENDER_ID_MISMATCH` | `fcm_sender_id_mismatch` | permanent | deactivated, `RejectedByProvider` |
+| `SENDER_ID_MISMATCH` | `fcm_sender_id_mismatch` | permanent | kept: most often the server's own Firebase project is wrong, and deactivating would silence every device |
 | `INVALID_ARGUMENT` | `fcm_invalid_argument` | permanent | kept (may be the payload) |
 | `QUOTA_EXCEEDED`, `UNAVAILABLE`, `INTERNAL` | `fcm_quota_exceeded`, `fcm_unavailable`, `fcm_internal` | transient | kept |
 | `THIRD_PARTY_AUTH_ERROR` (the APNs key in Firebase is wrong) | `fcm_third_party_auth_error` | transient (a configuration fault) | kept |

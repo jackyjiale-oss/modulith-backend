@@ -22,7 +22,7 @@ The Notifications module delivered by email and in-app only. Projects that ship 
 - One push delivery per device: the domain allows several push deliveries per notification, one per device id; email and in-app keep one per channel.
 - `FcmPushTransport` uses the named client `push-provider` on the pipeline of the same name, which does not retry the `POST`; the delivery worker's schedule retries.
 - The token is stored in clear (it is the address FCM sends to and grants nothing without the project's service account), kept out of logs, responses and exceptions; its SHA-256 is the unique key a registration is matched by.
-- Only an explicit FCM `UNREGISTERED` or `SENDER_ID_MISMATCH` deactivates a device; a status alone never does.
+- Only an explicit FCM `UNREGISTERED` deactivates a device; `SENDER_ID_MISMATCH` (most often the server's own project misconfigured) and a status alone never do. Apps register on every start, so any deactivated device returns with the next start.
 - Push goes on `auth.new_device_login`, `auth.token_reuse_detected` and `auth.account_locked`, optional for the user.
 
 ## Consequences

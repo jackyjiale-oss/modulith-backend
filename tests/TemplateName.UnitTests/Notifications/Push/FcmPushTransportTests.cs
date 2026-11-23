@@ -26,7 +26,8 @@ public sealed class FcmPushTransportTests
     public static TheoryData<HttpStatusCode, string?, string, bool, bool> FailureTable => new()
     {
         { HttpStatusCode.NotFound, "UNREGISTERED", "fcm_unregistered", true, true },
-        { HttpStatusCode.Forbidden, "SENDER_ID_MISMATCH", "fcm_sender_id_mismatch", true, true },
+        // A sender mismatch is most often the server's own Firebase project being wrong: deactivating would wipe every user's devices.
+        { HttpStatusCode.Forbidden, "SENDER_ID_MISMATCH", "fcm_sender_id_mismatch", true, false },
         { HttpStatusCode.BadRequest, "INVALID_ARGUMENT", "fcm_invalid_argument", true, false },
         { HttpStatusCode.TooManyRequests, "QUOTA_EXCEEDED", "fcm_quota_exceeded", false, false },
         { HttpStatusCode.ServiceUnavailable, "UNAVAILABLE", "fcm_unavailable", false, false },
@@ -92,6 +93,21 @@ public sealed class FcmPushTransportTests
 
         failure.Reason.ShouldBe("fcm_http_502");
         failure.IsPermanent.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("""{"error":{"details":[{"@type":1,"errorCode":"UNREGISTERED"}]}}""")]
+    [InlineData("""{"error":{"details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":{"x":1}}]}}""")]
+    [InlineData("""{"error":"not an object"}""")]
+    [InlineData("""[1,2]""")]
+    public async Task A_json_error_of_an_unexpected_shape_falls_back_to_the_status(string body)
+    {
+        _handler.Respond(HttpStatusCode.NotFound, body);
+
+        var failure = await Should.ThrowAsync<PushSendException>(() => Transport().SendAsync(Message(), Ct));
+
+        failure.Reason.ShouldBe("fcm_http_404");
+        failure.DeactivateDevice.ShouldBeFalse();
     }
 
     [Fact]

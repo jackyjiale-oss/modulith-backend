@@ -15,8 +15,8 @@ namespace TemplateName.Modules.Notifications.Infrastructure.Channels.Push;
 /// the named client <see cref="ClientName"/> (its resilience pipeline of the same name; a POST is not retried inside an attempt unless
 /// that pipeline sets <c>RetryUnsafeMethods</c>, so a lost answer cannot send twice there), with the bearer token of
 /// <see cref="IFcmAccessTokenSource"/>. A failure is classified by the FCM <c>errorCode</c> in the answer's details, else by the status
-/// alone; only <c>UNREGISTERED</c> and <c>SENDER_ID_MISMATCH</c> deactivate the device, because a status without a code (a 403 or 404)
-/// may be the project's configuration rather than the token. The answer's body is never logged or attached: it can quote the token.
+/// alone; only <c>UNREGISTERED</c> deactivates the device, because a sender mismatch or a status without a code (a 403 or 404) may be
+/// the server's own configuration rather than the token. The answer's body is never logged or attached: it can quote the token.
 /// </summary>
 internal sealed partial class FcmPushTransport(
     IHttpClientFactory httpClientFactory,
@@ -104,7 +104,9 @@ internal sealed partial class FcmPushTransport(
     private static PushSendException Classify(HttpStatusCode status, string? errorCode) => errorCode switch
     {
         "UNREGISTERED" => new PushSendException(isPermanent: true, "fcm_unregistered", deactivateDevice: true),
-        "SENDER_ID_MISMATCH" => new PushSendException(isPermanent: true, "fcm_sender_id_mismatch", deactivateDevice: true),
+        // Most often the server's own Firebase project is wrong (staging and production mixed up): deactivating would silence every
+        // user's devices, and fixing the configuration would not bring them back. The device is kept; the Warning names the reason.
+        "SENDER_ID_MISMATCH" => new PushSendException(isPermanent: true, "fcm_sender_id_mismatch", deactivateDevice: false),
         "INVALID_ARGUMENT" => new PushSendException(isPermanent: true, "fcm_invalid_argument", deactivateDevice: false),
         "QUOTA_EXCEEDED" => new PushSendException(isPermanent: false, "fcm_quota_exceeded", deactivateDevice: false),
         "UNAVAILABLE" => new PushSendException(isPermanent: false, "fcm_unavailable", deactivateDevice: false),
@@ -135,10 +137,13 @@ internal sealed partial class FcmPushTransport(
 
             foreach (var detail in details.EnumerateArray())
             {
+                // Every value is checked for its kind first: GetString throws on a number or an object (a proxy's own JSON).
                 if (detail.ValueKind == JsonValueKind.Object
                     && detail.TryGetProperty("@type", out var type)
-                    && type.GetString()?.EndsWith(FcmErrorType, StringComparison.Ordinal) == true
-                    && detail.TryGetProperty("errorCode", out var errorCode))
+                    && type.ValueKind == JsonValueKind.String
+                    && type.GetString()!.EndsWith(FcmErrorType, StringComparison.Ordinal)
+                    && detail.TryGetProperty("errorCode", out var errorCode)
+                    && errorCode.ValueKind == JsonValueKind.String)
                 {
                     return errorCode.GetString();
                 }

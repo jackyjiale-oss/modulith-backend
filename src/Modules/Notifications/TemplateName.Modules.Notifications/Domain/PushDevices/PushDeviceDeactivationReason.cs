@@ -9,7 +9,7 @@ internal enum PushDeviceDeactivationReason : byte
     /// <summary>The sign-in session that registered it was logged out, revoked or expired.</summary>
     SessionEnded = 2,
 
-    /// <summary>The push provider answered that the token is no longer valid (FCM <c>UNREGISTERED</c>, <c>SENDER_ID_MISMATCH</c>).</summary>
+    /// <summary>The push provider answered that the token is no longer valid (FCM <c>UNREGISTERED</c>).</summary>
     RejectedByProvider = 3,
 
     /// <summary>The user registered more devices than <c>Notifications:Push:MaxDevicesPerUser</c>; the oldest made way.</summary>
