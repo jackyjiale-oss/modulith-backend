@@ -226,6 +226,12 @@ internal sealed partial class NotificationScheduler(
         var deliveries = new List<(NotificationChannel Channel, string? Destination)>();
         foreach (var channel in type.DefaultChannels.Where(channel => type.IsMandatory(channel) || !switchedOff.Contains(channel)))
         {
+            // Push is not scheduled yet: it needs one delivery per signed-in device.
+            if (channel == NotificationChannel.Push)
+            {
+                continue;
+            }
+
             if (channel != NotificationChannel.Email)
             {
                 deliveries.Add((channel, null));

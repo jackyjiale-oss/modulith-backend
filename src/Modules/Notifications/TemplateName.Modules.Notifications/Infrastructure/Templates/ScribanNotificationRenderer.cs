@@ -49,7 +49,7 @@ internal sealed class ScribanNotificationRenderer(EmbeddedTemplateStore store, I
         return channel switch
         {
             NotificationChannel.Email => RenderEmail(request),
-            NotificationChannel.InApp => new RenderedMessage(
+            NotificationChannel.InApp or NotificationChannel.Push => new RenderedMessage(
                 SingleLine(RenderPart(request, "title", isHtml: false)),
                 RenderPart(request, "body", isHtml: false),
                 null),
