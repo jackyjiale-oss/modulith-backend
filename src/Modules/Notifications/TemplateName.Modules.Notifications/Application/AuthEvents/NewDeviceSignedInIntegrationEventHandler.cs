@@ -19,11 +19,11 @@ internal sealed class NewDeviceSignedInIntegrationEventHandler(NotificationSched
         ArgumentNullException.ThrowIfNull(integrationEvent);
 
         var variables = new Dictionary<string, string> { ["ip_address"] = integrationEvent.IpAddress ?? string.Empty };
+        var request = AuthEventRequests.Notice(AuthNotificationTypes.NewDeviceLogin, integrationEvent, integrationEvent.UserId, GetType(), variables) with
+        {
+            ExcludedSessionId = integrationEvent.SessionId,
+        };
 
-        return scheduler.ScheduleAsync(
-            AuthEventRequests.Notice(AuthNotificationTypes.NewDeviceLogin, integrationEvent, integrationEvent.UserId, GetType(), variables)
-                with { ExcludedSessionId = integrationEvent.SessionId },
-            AuthEventRequests.LocalTime("occurred_at", integrationEvent.OccurredAt),
-            cancellationToken);
+        return scheduler.ScheduleAsync(request, AuthEventRequests.LocalTime("occurred_at", integrationEvent.OccurredAt), cancellationToken);
     }
 }
