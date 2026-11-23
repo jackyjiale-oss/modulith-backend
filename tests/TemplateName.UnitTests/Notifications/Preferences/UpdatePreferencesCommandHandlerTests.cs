@@ -190,9 +190,30 @@ public sealed class UpdatePreferencesCommandHandlerTests
         => _harness.CreateUpdateHandler().HandleAsync(new UpdatePreferencesCommand(items), Ct);
 
     [Fact]
+    public async Task Updating_push_while_disabled_is_channel_not_supported()
+    {
+        var result = await UpdateAsync(Item("auth.token_reuse_detected", NotificationChannel.Push, false));
+
+        result.Error.Code.ShouldBe("notifications.channel_not_supported");
+        await _harness.UnitOfWork.DidNotReceive().SaveChangesUnlessConflictAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Push_can_be_switched_off_while_enabled()
+    {
+        _harness.Push.Enabled = true;
+
+        var result = await UpdateAsync(Item("auth.token_reuse_detected", NotificationChannel.Push, false));
+
+        result.IsSuccess.ShouldBeTrue();
+        _harness.Preferences.Received(1).Add(Arg.Is<UserPreference>(preference =>
+            preference.TypeCode == "auth.token_reuse_detected" && preference.Channel == NotificationChannel.Push && !preference.IsEnabled));
+    }
+
+    [Fact]
     public async Task A_change_between_attempts_is_412_on_the_retry()
     {
-        var read = PreferencesVersion.Of(PreferencesView.Build(_harness.Catalog, []));
+        var read = PreferencesVersion.Of(PreferencesView.Build(_harness.Catalog, [], pushEnabled: false));
         _harness.UnitOfWork.SaveChangesUnlessConflictAsync(Arg.Any<CancellationToken>())
             .Returns(false, true)
             .AndDoes(_ =>

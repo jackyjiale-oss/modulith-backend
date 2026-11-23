@@ -1,8 +1,10 @@
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
+using TemplateName.Modules.Notifications.Application.Devices;
 using TemplateName.Modules.Notifications.Application.Preferences.Get;
 using TemplateName.Modules.Notifications.Application.Preferences.Update;
 using TemplateName.Modules.Notifications.Domain.Notifications;
@@ -42,10 +44,13 @@ internal sealed class PreferenceHandlerHarness
     /// <summary>The rows the repository answers with; a test fills it before it calls a handler.</summary>
     public List<UserPreference> Stored { get; } = [];
 
-    public GetPreferencesQueryHandler CreateGetHandler() => new(Catalog, Preferences, CurrentUser);
+    /// <summary>The push settings the handlers read; push is off unless a test turns it on.</summary>
+    public PushOptions Push { get; } = new();
+
+    public GetPreferencesQueryHandler CreateGetHandler() => new(Catalog, Preferences, CurrentUser, Options.Create(Push));
 
     public UpdatePreferencesCommandHandler CreateUpdateHandler()
-        => new(Catalog, Preferences, CurrentUser, UnitOfWork, CreateGetHandler(), new FakeTimeProvider(Now));
+        => new(Catalog, Preferences, CurrentUser, UnitOfWork, CreateGetHandler(), new FakeTimeProvider(Now), Options.Create(Push));
 
     public UserPreference Disabled(string typeCode, NotificationChannel channel)
         => UserPreference.Create(UserId, typeCode, channel, isEnabled: false, Now);

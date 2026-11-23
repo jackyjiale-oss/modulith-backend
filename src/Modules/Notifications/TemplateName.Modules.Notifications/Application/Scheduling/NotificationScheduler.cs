@@ -2,12 +2,15 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using TemplateName.Application.Common.Security;
 using TemplateName.Modules.Auth.Contracts.Users;
 using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
+using TemplateName.Modules.Notifications.Application.Devices;
 using TemplateName.Modules.Notifications.Domain.Deliveries;
 using TemplateName.Modules.Notifications.Domain.Notifications;
+using TemplateName.Modules.Notifications.Domain.PushDevices;
 
 namespace TemplateName.Modules.Notifications.Application.Scheduling;
 
@@ -33,12 +36,15 @@ namespace TemplateName.Modules.Notifications.Application.Scheduling;
 /// <item>
 /// The channels are the type's defaults minus those the recipient switched off (a mandatory channel is always kept). An email goes to
 /// the request's <see cref="NotificationRequest.EmailOverride"/> (the address a link was issued for), else the contact's address, and
-/// is skipped with a Warning naming only the user id when that is not one valid address (<see cref="EmailDestination"/>).
+/// is skipped with a Warning naming only the user id when that is not one valid address (<see cref="EmailDestination"/>). Push, while
+/// <see cref="PushOptions.Enabled"/>, gets one delivery per active device of the recipient (<see cref="PushDestination"/>), except the
+/// devices of <see cref="NotificationRequest.ExcludedSessionId"/>; <see cref="IUserSessionDirectory"/> says which of the devices'
+/// sessions are still active, and a device whose session ended is deactivated in the same save.
 /// </item>
 /// <item>
-/// Every delivery is due now, except an email of a type that is not <see cref="NotificationPriority.Critical"/> inside the recipient's
-/// quiet hours, which waits for their end in the recipient's time zone (<see cref="TimeZoneResolver"/>; an unusable zone means UTC
-/// and logs a Warning naming only the user id). In-app deliveries are never deferred.
+/// Every delivery is due now, except an email or a push of a type that is not <see cref="NotificationPriority.Critical"/> inside the
+/// recipient's quiet hours, which waits for their end in the recipient's time zone (<see cref="TimeZoneResolver"/>; an unusable zone
+/// means UTC and logs a Warning naming only the user id). In-app deliveries are never deferred.
 /// </item>
 /// <item>
 /// The inbox record and the rows are saved together with <see cref="IUnitOfWork.SaveChangesUnlessInboxDuplicateAsync"/>: a concurrent
@@ -54,6 +60,9 @@ internal sealed partial class NotificationScheduler(
     IUserContactDirectory contacts,
     IPreferenceRepository preferences,
     INotificationRepository notifications,
+    IPushDeviceRepository pushDevices,
+    IUserSessionDirectory sessions,
+    IOptions<PushOptions> pushOptions,
     IUnitOfWork unitOfWork,
     ISecretProtector secretProtector,
     INotificationsMetrics metrics,
@@ -107,16 +116,16 @@ internal sealed partial class NotificationScheduler(
             LogTimeZoneFallback(logger, request.RecipientUserId);
         }
 
-        var deliveries = await DeliveriesAsync(type, request, contact, cancellationToken);
+        var now = timeProvider.GetUtcNow();
+        var deliveries = await DeliveriesAsync(type, request, contact, now, cancellationToken);
         if (deliveries.Count == 0)
         {
             LogNothingToDeliver(logger, request.SourceMessageId, type.Code);
             return await RecordOnlyAsync(request, ScheduleOutcome.NothingToDeliver, cancellationToken);
         }
 
-        var now = timeProvider.GetUtcNow();
-        var emailDueAt = deliveries.Exists(delivery => delivery.Channel == NotificationChannel.Email)
-            ? await EmailDueAtAsync(type, request.RecipientUserId, zone, now, cancellationToken)
+        var deferrableDueAt = deliveries.Exists(delivery => IsDeferrable(delivery.Channel))
+            ? await DeferrableDueAtAsync(type, request.RecipientUserId, zone, now, cancellationToken)
             : now;
 
         var notification = Notification.Create(
@@ -132,7 +141,7 @@ internal sealed partial class NotificationScheduler(
             now);
         foreach (var (channel, destination) in deliveries)
         {
-            notification.AddDelivery(channel, destination, channel == NotificationChannel.Email ? emailDueAt : now, now);
+            notification.AddDelivery(channel, destination, IsDeferrable(channel) ? deferrableDueAt : now, now);
         }
 
         notifications.Add(notification);
@@ -213,6 +222,7 @@ internal sealed partial class NotificationScheduler(
         NotificationTypeDefinition type,
         NotificationRequest request,
         UserContact contact,
+        DateTimeOffset now,
         CancellationToken cancellationToken)
     {
         // Only a type with an optional channel can have a preference that changes anything (D10).
@@ -226,9 +236,13 @@ internal sealed partial class NotificationScheduler(
         var deliveries = new List<(NotificationChannel Channel, string? Destination)>();
         foreach (var channel in type.DefaultChannels.Where(channel => type.IsMandatory(channel) || !switchedOff.Contains(channel)))
         {
-            // Push is not scheduled yet: it needs one delivery per signed-in device.
             if (channel == NotificationChannel.Push)
             {
+                if (pushOptions.Value.Enabled)
+                {
+                    deliveries.AddRange(await PushDeliveriesAsync(request, now, cancellationToken));
+                }
+
                 continue;
             }
 
@@ -252,7 +266,43 @@ internal sealed partial class NotificationScheduler(
         return deliveries;
     }
 
-    private async Task<DateTimeOffset> EmailDueAtAsync(
+    // One push per active device whose session is still active, except the excluded session's devices (left as they are). A device whose
+    // session ended is deactivated here, staged with the inbox record, so it is saved whatever the outcome.
+    private async Task<IEnumerable<(NotificationChannel Channel, string? Destination)>> PushDeliveriesAsync(
+        NotificationRequest request,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var devices = (await pushDevices.ListActiveAsync(request.RecipientUserId, cancellationToken))
+            .Where(device => device.SessionId != request.ExcludedSessionId)
+            .ToList();
+        if (devices.Count == 0)
+        {
+            return [];
+        }
+
+        var activeSessions = await sessions.GetActiveSessionIdsAsync(
+            request.RecipientUserId, [.. devices.Select(device => device.SessionId).Distinct()], cancellationToken);
+        var deliveries = new List<(NotificationChannel Channel, string? Destination)>();
+        foreach (var device in devices)
+        {
+            if (activeSessions.Contains(device.SessionId))
+            {
+                deliveries.Add((NotificationChannel.Push, PushDestination.For(device.Id)));
+            }
+            else
+            {
+                device.Deactivate(PushDeviceDeactivationReason.SessionEnded, now);
+            }
+        }
+
+        return deliveries;
+    }
+
+    // Email and push respect quiet hours; in-app never waits (D11).
+    private static bool IsDeferrable(NotificationChannel channel) => channel is NotificationChannel.Email or NotificationChannel.Push;
+
+    private async Task<DateTimeOffset> DeferrableDueAtAsync(
         NotificationTypeDefinition type,
         Guid userId,
         TimeZoneInfo zone,
