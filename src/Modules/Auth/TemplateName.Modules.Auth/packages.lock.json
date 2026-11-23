@@ -438,7 +438,7 @@
           "FluentValidation": "[12.2.0, )",
           "FluentValidation.DependencyInjectionExtensions": "[12.2.0, )",
           "Scrutor": "[7.0.0, )",
-          "TemplateName.SharedKernel": "[1.0.0-rc.1, )"
+          "TemplateName.SharedKernel": "[1.0.0-rc.4, )"
         }
       },
       "templatename.infrastructure.common": {
@@ -449,14 +449,14 @@
           "Microsoft.Extensions.Caching.Hybrid": "[10.11.0, )",
           "Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore": "[10.0.15, )",
           "Microsoft.Extensions.Http.Resilience": "[10.11.0, )",
-          "TemplateName.Application.Common": "[1.0.0-rc.1, )",
-          "TemplateName.SharedKernel": "[1.0.0-rc.1, )"
+          "TemplateName.Application.Common": "[1.0.0-rc.4, )",
+          "TemplateName.SharedKernel": "[1.0.0-rc.4, )"
         }
       },
       "templatename.modules.auth.contracts": {
         "type": "Project",
         "dependencies": {
-          "TemplateName.SharedKernel": "[1.0.0-rc.1, )"
+          "TemplateName.SharedKernel": "[1.0.0-rc.4, )"
         }
       },
       "templatename.sharedkernel": {
@@ -476,8 +476,8 @@
           "Serilog.AspNetCore": "[10.0.0, )",
           "Serilog.Formatting.Compact": "[3.0.0, )",
           "Serilog.Sinks.OpenTelemetry": "[4.2.0, )",
-          "TemplateName.Application.Common": "[1.0.0-rc.1, )",
-          "TemplateName.SharedKernel": "[1.0.0-rc.1, )"
+          "TemplateName.Application.Common": "[1.0.0-rc.4, )",
+          "TemplateName.SharedKernel": "[1.0.0-rc.4, )"
         }
       },
       "Dapper": {

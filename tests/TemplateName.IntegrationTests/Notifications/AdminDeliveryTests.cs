@@ -493,6 +493,30 @@ public sealed class AdminDeliveryTests(IntegrationTestWebAppFactory factory) : A
         return notification.Deliveries.ShouldHaveSingleItem().Id;
     }
 
+    [Fact]
+    public async Task A_push_destination_is_the_device_id_unmasked()
+    {
+        var deviceId = Guid.NewGuid();
+        var now = Factory.Time.GetUtcNow();
+        var notification = Notification.Create(
+            "auth.token_reuse_detected", NotificationPriority.Critical, Guid.NewGuid(), "en", "{}", null, Guid.NewGuid(), null, null, now);
+        var push = notification.AddDelivery(NotificationChannel.Push, PushDestination.For(deviceId), now, now);
+        await using (var scope = Factory.Services.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<NotificationsDbContext>();
+            context.Add(notification);
+            await context.SaveChangesAsync(Ct);
+        }
+
+        await SignInAsync(NotificationsPermissions.DeliveryView);
+
+        var page = await GetPageAsync("?channel=Push");
+
+        page.Ids.ShouldBe([push.Id]);
+        page.Items[0].GetProperty("channel").GetString().ShouldBe("Push");
+        page.Items[0].GetProperty("destination").GetString().ShouldBe(deviceId.ToString("D"));
+    }
+
     private Task<Delivery> DeliveryAsync(Guid id)
         => QueryAsync(context => context.Set<Delivery>().AsNoTracking().SingleAsync(delivery => delivery.Id == id, Ct));
 

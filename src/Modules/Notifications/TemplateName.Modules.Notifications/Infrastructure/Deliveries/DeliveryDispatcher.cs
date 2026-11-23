@@ -297,7 +297,14 @@ internal sealed partial class DeliveryDispatcher(
         }
 
         var work = new DeliveryWork(
-            delivery.Id, notification.Id, notification.RecipientUserId, notification.TypeCode, type.Category, delivery.Destination, message);
+            delivery.Id,
+            notification.Id,
+            notification.RecipientUserId,
+            notification.TypeCode,
+            type.Category,
+            delivery.Destination,
+            message,
+            notification.Priority);
         try
         {
             return (await channel.SendAsync(work, cancellationToken), message.Subject);

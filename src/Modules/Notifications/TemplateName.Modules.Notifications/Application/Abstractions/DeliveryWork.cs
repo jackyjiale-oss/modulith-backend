@@ -14,8 +14,9 @@ namespace TemplateName.Modules.Notifications.Application.Abstractions;
 /// <param name="RecipientUserId">The user the message is for.</param>
 /// <param name="TypeCode">The notification type code.</param>
 /// <param name="Category">The type's category.</param>
-/// <param name="Destination">The address an email goes to; <see langword="null"/> for in-app.</param>
+/// <param name="Destination">The address an email goes to, the device id a push goes to; <see langword="null"/> for in-app.</param>
 /// <param name="Message">The message rendered for the delivery's channel in the notification's culture.</param>
+/// <param name="Priority">The notification's priority (a push of a <c>Critical</c> or <c>High</c> one is urgent).</param>
 internal sealed record DeliveryWork(
     Guid DeliveryId,
     Guid NotificationId,
@@ -23,7 +24,8 @@ internal sealed record DeliveryWork(
     string TypeCode,
     NotificationCategory Category,
     string? Destination,
-    RenderedMessage Message)
+    RenderedMessage Message,
+    NotificationPriority Priority = NotificationPriority.Normal)
 {
     private bool PrintMembers(StringBuilder builder)
     {

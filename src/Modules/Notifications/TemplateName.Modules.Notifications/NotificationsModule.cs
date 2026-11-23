@@ -13,6 +13,7 @@ using OpenTelemetry.Metrics;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
+using TemplateName.Infrastructure.Common.Http;
 using TemplateName.Infrastructure.Common.Inbox;
 using TemplateName.Infrastructure.Common.Jobs;
 using TemplateName.Infrastructure.Common.Persistence;
@@ -24,6 +25,7 @@ using TemplateName.Modules.Notifications.Application.Scheduling;
 using TemplateName.Modules.Notifications.Infrastructure.Catalog;
 using TemplateName.Modules.Notifications.Infrastructure.Channels.Email;
 using TemplateName.Modules.Notifications.Infrastructure.Channels.InApp;
+using TemplateName.Modules.Notifications.Infrastructure.Channels.Push;
 using TemplateName.Modules.Notifications.Infrastructure.Deliveries;
 using TemplateName.Modules.Notifications.Infrastructure.Hubs;
 using TemplateName.Modules.Notifications.Infrastructure.Observability;
@@ -108,9 +110,12 @@ public static class NotificationsModule
     }
 
     /// <summary>
-    /// Registers the push channel's settings: <see cref="PushOptions"/> (<c>Notifications:Push</c>, validated on start) and the rate-limit
-    /// policy of the device registration route (<see cref="PushDeviceRateLimit"/>). The device routes work whether or not push is
-    /// enabled.
+    /// Registers the push channel: <see cref="PushOptions"/> (<c>Notifications:Push</c>) and <see cref="FcmOptions"/>
+    /// (<c>Notifications:Push:Fcm</c>, whose project id and credentials are checked while push is enabled), both validated on start; the
+    /// rate-limit policy of the device registration route (<see cref="PushDeviceRateLimit"/>; the device routes work whether or not push
+    /// is enabled); and, only while <c>Notifications:Push:Enabled</c> is true, the <see cref="PushChannel"/>, the
+    /// <see cref="FcmPushTransport"/> on the named client and resilience pipeline <c>push-provider</c>, and the Google token source. With
+    /// push off no channel is registered, so a push delivery left pending is dead-lettered with <c>channel_unavailable</c>.
     /// </summary>
     internal static void AddPush(IServiceCollection services, IConfiguration configuration)
     {
@@ -118,9 +123,24 @@ public static class NotificationsModule
             .Bind(configuration.GetSection(PushOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+        var enabled = configuration.GetValue<bool>($"{PushOptions.SectionName}:{nameof(PushOptions.Enabled)}");
+        services.AddOptions<FcmOptions>()
+            .Bind(configuration.GetSection(FcmOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<FcmOptions>>(new FcmOptionsValidation(enabled));
         services.AddOptions<RateLimiterOptions>()
             .Configure<IOptions<PushOptions>, IFixedWindowLimiterFactory>(
                 (limiterOptions, pushOptions, limiterFactory) => PushDeviceRateLimit.AddPolicy(limiterOptions, pushOptions.Value, limiterFactory));
+
+        if (!enabled)
+        {
+            return;
+        }
+
+        services.AddScoped<INotificationChannel, PushChannel>();
+        services.AddSingleton<IPushTransport, FcmPushTransport>();
+        services.AddSingleton<IFcmAccessTokenSource, GoogleFcmAccessTokenSource>();
+        services.AddExternalHttpClient(FcmPushTransport.ClientName, FcmPushTransport.ClientName);
     }
 
     /// <summary>
