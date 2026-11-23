@@ -69,6 +69,7 @@ public static class NotificationsModule
         services.AddScoped<IInAppNotificationRepository, InAppNotificationRepository>();
         services.AddScoped<IPreferenceRepository, PreferenceRepository>();
         services.AddScoped<IHubTicketRepository, HubTicketRepository>();
+        services.AddScoped<IPushDeviceRepository, PushDeviceRepository>();
         services.AddScoped<IUnitOfWork>(serviceProvider => serviceProvider.GetRequiredService<NotificationsDbContext>());
         services.AddScoped<NotificationScheduler>();
 
@@ -130,10 +131,10 @@ public static class NotificationsModule
     }
 
     /// <summary>
-    /// Registers <c>Notifications:Retention</c> (validated on start: a negative value is refused) and the three recurring cleanup jobs that
+    /// Registers <c>Notifications:Retention</c> (validated on start: a negative value is refused) and the four recurring cleanup jobs that
     /// delete what it covers: <c>NotificationsHubTicketsCleanup</c> hourly, <c>NotificationsRowsCleanup</c> (notifications with their
-    /// deliveries, unless one is still pending) and <c>NotificationsInAppCleanup</c> daily. Requires <c>AddInfrastructureCommon</c>, which
-    /// registers the scheduler and the batch settings.
+    /// deliveries, unless one is still pending), <c>NotificationsInAppCleanup</c> and <c>NotificationsPushDevicesCleanup</c> (deactivated
+    /// push devices) daily. Requires <c>AddInfrastructureCommon</c>, which registers the scheduler and the batch settings.
     /// </summary>
     internal static void AddRetention(IServiceCollection services, IConfiguration configuration)
     {
@@ -145,6 +146,7 @@ public static class NotificationsModule
         services.AddRecurringJob<HubTicketsCleanupJob>();
         services.AddRecurringJob<NotificationsCleanupJob>();
         services.AddRecurringJob<InAppNotificationsCleanupJob>();
+        services.AddRecurringJob<PushDevicesCleanupJob>();
     }
 
     /// <summary>

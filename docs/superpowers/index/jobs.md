@@ -2,7 +2,7 @@
 
 # Recurring jobs
 
-Rows: 15
+Rows: 16
 
 | job | module | config keys | file |
 | --- | --- | --- | --- |
@@ -19,5 +19,6 @@ Rows: 15
 | NotificationsHubTicketsCleanup | Notifications | Jobs:NotificationsHubTicketsCleanup:Enabled, Jobs:NotificationsHubTicketsCleanup:Interval | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Retention/HubTicketsCleanupJob.cs |
 | NotificationsInAppCleanup | Notifications | Jobs:NotificationsInAppCleanup:Enabled, Jobs:NotificationsInAppCleanup:Interval | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Retention/InAppNotificationsCleanupJob.cs |
 | NotificationsInboxCleanup | Notifications | Jobs:NotificationsInboxCleanup:Enabled, Jobs:NotificationsInboxCleanup:Interval | src/BuildingBlocks/TemplateName.Infrastructure.Common/Inbox/InboxCleanupJob.cs |
+| NotificationsPushDevicesCleanup | Notifications | Jobs:NotificationsPushDevicesCleanup:Enabled, Jobs:NotificationsPushDevicesCleanup:Interval | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Retention/PushDevicesCleanupJob.cs |
 | NotificationsRowsCleanup | Notifications | Jobs:NotificationsRowsCleanup:Enabled, Jobs:NotificationsRowsCleanup:Interval | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Retention/NotificationsCleanupJob.cs |
 | SampleOutboxCleanup | Sample | Jobs:SampleOutboxCleanup:Enabled, Jobs:SampleOutboxCleanup:Interval | src/BuildingBlocks/TemplateName.Infrastructure.Common/Outbox/OutboxCleanupJob.cs |
