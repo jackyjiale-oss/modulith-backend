@@ -19,6 +19,7 @@ using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Notifications.Application;
 using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
+using TemplateName.Modules.Notifications.Application.Devices;
 using TemplateName.Modules.Notifications.Application.Scheduling;
 using TemplateName.Modules.Notifications.Infrastructure.Catalog;
 using TemplateName.Modules.Notifications.Infrastructure.Channels.Email;
@@ -100,9 +101,26 @@ public static class NotificationsModule
         services.AddScoped<INotificationChannel, InAppChannel>();
         AddEmailChannel(services, configuration);
         AddHub(services, configuration);
+        AddPush(services, configuration);
         AddRetention(services, configuration);
 
         return services;
+    }
+
+    /// <summary>
+    /// Registers the push channel's settings: <see cref="PushOptions"/> (<c>Notifications:Push</c>, validated on start) and the rate-limit
+    /// policy of the device registration route (<see cref="PushDeviceRateLimit"/>). The device routes work whether or not push is
+    /// enabled.
+    /// </summary>
+    internal static void AddPush(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<PushOptions>()
+            .Bind(configuration.GetSection(PushOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddOptions<RateLimiterOptions>()
+            .Configure<IOptions<PushOptions>, IFixedWindowLimiterFactory>(
+                (limiterOptions, pushOptions, limiterFactory) => PushDeviceRateLimit.AddPolicy(limiterOptions, pushOptions.Value, limiterFactory));
     }
 
     /// <summary>

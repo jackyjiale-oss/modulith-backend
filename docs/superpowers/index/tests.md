@@ -2,7 +2,7 @@
 
 # Tests
 
-Rows: 220
+Rows: 224
 
 ## Folders
 
@@ -195,6 +195,10 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Application/Catalog/NotificationCatalog.cs | tests/TemplateName.UnitTests/Notifications/NotificationCatalogTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Application/Catalog/RecipientCulture.cs | tests/TemplateName.UnitTests/Notifications/RecipientCultureTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Application/Catalog/TimeZoneResolver.cs | tests/TemplateName.UnitTests/Notifications/TimeZoneResolverTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Application/Devices/PushOptions.cs | tests/TemplateName.UnitTests/Notifications/Devices/PushOptionsTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Application/Devices/Register/RegisterDeviceCommandHandler.cs | tests/TemplateName.UnitTests/Notifications/Devices/RegisterDeviceCommandHandlerTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Application/Devices/Register/RegisterDeviceCommandValidator.cs | tests/TemplateName.UnitTests/Notifications/Devices/RegisterDeviceCommandValidatorTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Application/Devices/Unregister/UnregisterDeviceCommandHandler.cs | tests/TemplateName.UnitTests/Notifications/Devices/UnregisterDeviceCommandHandlerTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Application/HubTickets/HubOptions.cs | tests/TemplateName.UnitTests/Notifications/HubOptionsTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Application/HubTickets/Issue/IssueHubTicketCommandHandler.cs | tests/TemplateName.UnitTests/Notifications/IssueHubTicketCommandHandlerTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Application/Inbox/List/ListInboxQueryValidator.cs | tests/TemplateName.UnitTests/Notifications/Inbox/ListInboxQueryValidatorTests.cs |
