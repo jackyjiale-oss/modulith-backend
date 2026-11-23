@@ -345,6 +345,7 @@ Declared in the domain (`Domain/Deliveries/DeliveryErrors.cs`, `Domain/InApp/InA
 | `notifications.delivery_expired` | 409 | none | The delivery has expired and cannot be retried. |
 | `notifications.delivery_not_found` | 404 | `id` | Delivery '{id}' was not found. |
 | `notifications.notification_not_found` | 404 | `id` | Notification '{id}' was not found. |
+| `notifications.device_not_found` | 404 | `id` | Device '{id}' was not found. |
 | `notifications.invalid_quiet_hours` | 400 | none | Quiet hours need both a start and an end time, and the two must differ. Send both as null to clear them. |
 | `notifications.unknown_type` | 400 | `typeCode` | Notification type '{typeCode}' does not exist. |
 | `notifications.channel_not_supported` | 400 | `typeCode`, `channel` | Notification type '{typeCode}' is not delivered through the '{channel}' channel. |

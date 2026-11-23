@@ -5,4 +5,7 @@ internal enum NotificationChannel : byte
 {
     Email = 1,
     InApp = 2,
+
+    /// <summary>A push to one of the recipient's devices (FCM); one delivery per device.</summary>
+    Push = 3,
 }

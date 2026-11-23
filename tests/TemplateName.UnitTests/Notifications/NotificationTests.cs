@@ -171,4 +171,62 @@ public sealed class NotificationTests
     public void Create_rejects_a_blank_type_code(string typeCode) =>
         Should.Throw<ArgumentException>(() => Notification.Create(
             typeCode, NotificationPriority.Normal, Guid.NewGuid(), "en", "{}", null, Guid.NewGuid(), null, null, Now));
+
+    [Fact]
+    public void Two_push_deliveries_for_different_devices_are_allowed()
+    {
+        var notification = Create();
+
+        var first = notification.AddDelivery(NotificationChannel.Push, PushDestination.For(Guid.NewGuid()), Now, Now);
+        var second = notification.AddDelivery(NotificationChannel.Push, PushDestination.For(Guid.NewGuid()), Now, Now);
+
+        notification.Deliveries.Count.ShouldBe(2);
+        first.Destination.ShouldNotBe(second.Destination);
+    }
+
+    [Fact]
+    public void The_same_device_twice_is_refused()
+    {
+        var notification = Create();
+        var destination = PushDestination.For(Guid.NewGuid());
+        notification.AddDelivery(NotificationChannel.Push, destination, Now, Now);
+
+        Should.Throw<InvalidOperationException>(() => notification.AddDelivery(NotificationChannel.Push, destination, Now, Now));
+        notification.Deliveries.Count.ShouldBe(1);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("device-7")]
+    [InlineData("alice@example.com")]
+    public void A_push_destination_that_is_not_a_guid_is_refused(string? destination)
+    {
+        var notification = Create();
+
+        var exception = Should.Throw<ArgumentException>(() => notification.AddDelivery(NotificationChannel.Push, destination, Now, Now));
+        if (!string.IsNullOrEmpty(destination))
+        {
+            exception.Message.ShouldNotContain(destination);
+        }
+    }
+
+    [Fact]
+    public void A_second_in_app_delivery_is_still_refused()
+    {
+        var notification = Create();
+        notification.AddDelivery(NotificationChannel.InApp, null, Now, Now);
+
+        Should.Throw<InvalidOperationException>(() => notification.AddDelivery(NotificationChannel.InApp, null, Now, Now));
+    }
+
+    [Fact]
+    public void Push_destinations_are_device_ids_in_d_format()
+    {
+        var deviceId = Guid.NewGuid();
+
+        PushDestination.For(deviceId).ShouldBe(deviceId.ToString("D"));
+        PushDestination.DeviceIdOf(PushDestination.For(deviceId)).ShouldBe(deviceId);
+        PushDestination.IsValid(deviceId.ToString("N")).ShouldBeFalse();
+    }
 }

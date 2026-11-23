@@ -51,6 +51,9 @@
   <data name="notifications.notification_not_found" xml:space="preserve">
     <value>Notification '{id}' was not found.</value>
   </data>
+  <data name="notifications.device_not_found" xml:space="preserve">
+    <value>Device '{id}' was not found.</value>
+  </data>
   <data name="notifications.invalid_quiet_hours" xml:space="preserve">
     <value>Quiet hours need both a start and an end time, and the two must differ. Send both as null to clear them.</value>
   </data>

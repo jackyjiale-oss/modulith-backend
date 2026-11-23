@@ -2,7 +2,7 @@
 
 # Tests
 
-Rows: 218
+Rows: 220
 
 ## Folders
 
@@ -175,6 +175,7 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Authorization/PermissionChecker.cs | tests/TemplateName.IntegrationTests/Auth/PermissionCheckerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Authorization/PermissionSynchronizer.cs | tests/TemplateName.UnitTests/Auth/PermissionSynchronizerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Contracts/UserContactDirectory.cs | tests/TemplateName.IntegrationTests/Auth/UserContactDirectoryTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Contracts/UserSessionDirectory.cs | tests/TemplateName.IntegrationTests/Auth/UserSessionDirectoryTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/External/ExternalLoginOptions.cs | tests/TemplateName.UnitTests/Auth/External/ExternalLoginOptionsTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/External/ExternalNonceGate.cs | tests/TemplateName.UnitTests/Auth/External/ExternalNonceGateTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/External/ExternalProviderCatalog.cs | tests/TemplateName.UnitTests/Auth/External/ExternalProviderCatalogTests.cs |
@@ -211,6 +212,7 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Domain/Preferences/QuietHours.cs | tests/TemplateName.UnitTests/Notifications/QuietHoursTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Domain/Preferences/UserNotificationProfile.cs | tests/TemplateName.UnitTests/Notifications/UserNotificationProfileTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Domain/Preferences/UserPreference.cs | tests/TemplateName.UnitTests/Notifications/UserPreferenceTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Domain/PushDevices/PushDevice.cs | tests/TemplateName.UnitTests/Notifications/PushDeviceTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Email/EmailChannel.cs | tests/TemplateName.UnitTests/Notifications/EmailChannelTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Email/EmailOptions.cs | tests/TemplateName.UnitTests/Notifications/EmailOptionsTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Email/LegacyEmailSettingsCheck.cs | tests/TemplateName.UnitTests/Notifications/LegacyEmailSettingsCheckTests.cs |
