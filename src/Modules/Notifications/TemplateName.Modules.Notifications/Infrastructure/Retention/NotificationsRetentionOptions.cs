@@ -27,6 +27,9 @@ internal sealed class NotificationsRetentionOptions : IValidatableObject
     /// <summary>How long an inbox row is kept after its <c>CreatedAt</c>, read or unread, whatever became of its notification.</summary>
     public TimeSpan? InAppNotifications { get; set; } = TimeSpan.FromDays(180);
 
+    /// <summary>How long a push device is kept after its <c>DeactivatedAt</c>; an active device is never deleted.</summary>
+    public TimeSpan? PushDevices { get; set; } = TimeSpan.FromDays(30);
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         foreach (var (name, value) in new (string Name, TimeSpan? Value)[]
@@ -34,6 +37,7 @@ internal sealed class NotificationsRetentionOptions : IValidatableObject
             (nameof(HubTickets), HubTickets),
             (nameof(Notifications), Notifications),
             (nameof(InAppNotifications), InAppNotifications),
+            (nameof(PushDevices), PushDevices),
         })
         {
             if (value < TimeSpan.Zero)

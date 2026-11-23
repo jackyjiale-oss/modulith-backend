@@ -20,6 +20,9 @@ namespace TemplateName.Modules.Notifications.Application.Scheduling;
 /// </param>
 /// <param name="EmailOverride">The address to email instead of the recipient's current one (the address a link was issued for).</param>
 /// <param name="ExpiresAt">When the notification stops being worth delivering (a link's expiry); <see langword="null"/> never.</param>
+/// <param name="ExcludedSessionId">
+/// A sign-in session whose push devices get no push of this notification: the new device a new-sign-in notice is about.
+/// </param>
 internal sealed record NotificationRequest(
     string TypeCode,
     Guid RecipientUserId,
@@ -28,7 +31,8 @@ internal sealed record NotificationRequest(
     IReadOnlyDictionary<string, string> Variables,
     IReadOnlyDictionary<string, string> ProtectedVariables,
     string? EmailOverride,
-    DateTimeOffset? ExpiresAt)
+    DateTimeOffset? ExpiresAt,
+    Guid? ExcludedSessionId = null)
 {
     private bool PrintMembers(StringBuilder builder)
     {
@@ -39,7 +43,8 @@ internal sealed record NotificationRequest(
             .Append(", Variables = [").AppendJoin(", ", Variables.Keys.Order(StringComparer.Ordinal))
             .Append("], ProtectedVariables = [").AppendJoin(", ", ProtectedVariables.Keys.Order(StringComparer.Ordinal))
             .Append("], HasEmailOverride = ").Append(EmailOverride is not null)
-            .Append(", ExpiresAt = ").Append(ExpiresAt?.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+            .Append(", ExpiresAt = ").Append(ExpiresAt?.ToString("O", System.Globalization.CultureInfo.InvariantCulture))
+            .Append(", ExcludedSessionId = ").Append(ExcludedSessionId);
         return true;
     }
 }

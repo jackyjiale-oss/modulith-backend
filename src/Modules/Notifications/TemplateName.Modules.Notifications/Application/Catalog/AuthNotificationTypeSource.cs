@@ -7,7 +7,9 @@ namespace TemplateName.Modules.Notifications.Application.Catalog;
 /// <see cref="NotificationCategory.Security"/>, priority <see cref="NotificationPriority.Critical"/> (so it ignores quiet hours) and a
 /// mandatory email channel. Only <see cref="AuthNotificationTypes.PasswordChanged"/>, <see cref="AuthNotificationTypes.TokenReuseDetected"/>,
 /// <see cref="AuthNotificationTypes.ExternalLoginLinked"/> and <see cref="AuthNotificationTypes.ExternalLoginUnlinked"/> also have an
-/// in-app channel, which the user can switch off. The four types that
+/// in-app channel, which the user can switch off. <see cref="AuthNotificationTypes.NewDeviceLogin"/>,
+/// <see cref="AuthNotificationTypes.TokenReuseDetected"/> and <see cref="AuthNotificationTypes.AccountLocked"/> also have a push channel,
+/// optional too (a password change ends every other session, so its push would reach no other device). The four types that
 /// carry a single-use link declare <c>action_url</c> as a secret variable, which only their email text and HTML may show. The templates
 /// are in <c>Templates/</c> of this project.
 /// </summary>
@@ -25,6 +27,8 @@ internal sealed class AuthNotificationTypeSource : INotificationTypeSource
 
     private static readonly NotificationChannel[] EmailOnly = [NotificationChannel.Email];
     private static readonly NotificationChannel[] EmailAndInApp = [NotificationChannel.Email, NotificationChannel.InApp];
+    private static readonly NotificationChannel[] EmailAndPush = [NotificationChannel.Email, NotificationChannel.Push];
+    private static readonly NotificationChannel[] EmailInAppAndPush = [NotificationChannel.Email, NotificationChannel.InApp, NotificationChannel.Push];
 
     public IReadOnlyCollection<NotificationTypeDefinition> Types { get; } =
     [
@@ -34,10 +38,10 @@ internal sealed class AuthNotificationTypeSource : INotificationTypeSource
         Link(AuthNotificationTypes.AccountCreated),
         Notice(AuthNotificationTypes.RegistrationAttempted, EmailOnly, DisplayName),
         Notice(AuthNotificationTypes.PasswordChanged, EmailAndInApp, DisplayName, OccurredAt, TimeZone),
-        Notice(AuthNotificationTypes.AccountLocked, EmailOnly, DisplayName, LockedUntil, TimeZone),
-        Notice(AuthNotificationTypes.TokenReuseDetected, EmailAndInApp, DisplayName, OccurredAt, TimeZone),
+        Notice(AuthNotificationTypes.AccountLocked, EmailAndPush, DisplayName, LockedUntil, TimeZone),
+        Notice(AuthNotificationTypes.TokenReuseDetected, EmailInAppAndPush, DisplayName, OccurredAt, TimeZone),
         Notice(AuthNotificationTypes.MfaChanged, EmailOnly, DisplayName, Change, OccurredAt, TimeZone),
-        Notice(AuthNotificationTypes.NewDeviceLogin, EmailOnly, DisplayName, OccurredAt, TimeZone, IpAddress),
+        Notice(AuthNotificationTypes.NewDeviceLogin, EmailAndPush, DisplayName, OccurredAt, TimeZone, IpAddress),
         Notice(AuthNotificationTypes.ExternalLoginLinked, EmailAndInApp, DisplayName, Provider, OccurredAt, TimeZone),
         Notice(AuthNotificationTypes.ExternalLoginUnlinked, EmailAndInApp, DisplayName, Provider, OccurredAt, TimeZone),
     ];

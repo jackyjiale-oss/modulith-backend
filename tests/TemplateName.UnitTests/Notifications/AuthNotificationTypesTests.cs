@@ -66,8 +66,7 @@ public sealed class AuthNotificationTypesTests
 
     [Theory]
     [InlineData(AuthNotificationTypes.MfaChanged, "auth.mfa_changed")]
-    [InlineData(AuthNotificationTypes.NewDeviceLogin, "auth.new_device_login")]
-    public void Mfa_and_new_device_types_are_security_critical_email_only(string code, string expectedCode)
+    public void The_mfa_type_is_security_critical_email_only(string code, string expectedCode)
     {
         code.ShouldBe(expectedCode);
         var type = Source.Types.Single(candidate => candidate.Code == code);
@@ -110,7 +109,7 @@ public sealed class AuthNotificationTypesTests
         var optional = Source.Types.Where(type => type.IsConfigurable).Select(type => type.Code).ToList();
 
         withInApp.ShouldBe(expected, ignoreOrder: true);
-        optional.ShouldBe(expected, ignoreOrder: true);
+        optional.ShouldBe([.. expected, AuthNotificationTypes.NewDeviceLogin, AuthNotificationTypes.AccountLocked], ignoreOrder: true);
 
         foreach (var code in withInApp)
         {
@@ -121,7 +120,38 @@ public sealed class AuthNotificationTypesTests
 
         foreach (var type in Source.Types.Where(type => !withInApp.Contains(type.Code)))
         {
-            type.DefaultChannels.ShouldBe([NotificationChannel.Email], type.Code);
+            type.DefaultChannels.Where(channel => channel != NotificationChannel.Push).ShouldBe([NotificationChannel.Email], type.Code);
+        }
+    }
+
+    [Fact]
+    public void The_three_alert_types_offer_optional_push()
+    {
+        var expected = new Dictionary<string, NotificationChannel[]>
+        {
+            [AuthNotificationTypes.NewDeviceLogin] = [NotificationChannel.Email, NotificationChannel.Push],
+            [AuthNotificationTypes.TokenReuseDetected] = [NotificationChannel.Email, NotificationChannel.InApp, NotificationChannel.Push],
+            [AuthNotificationTypes.AccountLocked] = [NotificationChannel.Email, NotificationChannel.Push],
+        };
+
+        foreach (var (code, channels) in expected)
+        {
+            var type = Source.Types.Single(candidate => candidate.Code == code);
+            type.DefaultChannels.ShouldBe(channels, ignoreOrder: true, customMessage: code);
+            type.IsMandatory(NotificationChannel.Push).ShouldBeFalse(code);
+            type.MandatoryChannels.ShouldBe([NotificationChannel.Email], code);
+            type.IsConfigurable.ShouldBeTrue(code);
+        }
+    }
+
+    [Fact]
+    public void Other_auth_types_have_no_push()
+    {
+        string[] withPush = [AuthNotificationTypes.NewDeviceLogin, AuthNotificationTypes.TokenReuseDetected, AuthNotificationTypes.AccountLocked];
+
+        foreach (var type in Source.Types.Where(type => !withPush.Contains(type.Code)))
+        {
+            type.DefaultChannels.ShouldNotContain(NotificationChannel.Push, type.Code);
         }
     }
 

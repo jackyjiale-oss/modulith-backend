@@ -51,6 +51,9 @@
   <data name="notifications.notification_not_found" xml:space="preserve">
     <value>未找到通知“{id}”。</value>
   </data>
+  <data name="notifications.device_not_found" xml:space="preserve">
+    <value>未找到设备“{id}”。</value>
+  </data>
   <data name="notifications.invalid_quiet_hours" xml:space="preserve">
     <value>免打扰时段需要同时提供开始时间和结束时间，且两者不能相同。要清除时段，请将两者都设为 null。</value>
   </data>

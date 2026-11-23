@@ -5,6 +5,7 @@ using Dapper;
 using TemplateName.Application.Common.Data;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Application.Common.Pagination;
+using TemplateName.Modules.Notifications.Domain.Notifications;
 using TemplateName.SharedKernel;
 
 namespace TemplateName.Modules.Notifications.Application.Admin.Deliveries.List;
@@ -105,7 +106,8 @@ internal sealed class ListDeliveriesQueryHandler(IDbConnectionFactory connection
         // carry exactly the millisecond values SQL Server stored.
         var items = rows.Select(row => row with
         {
-            Destination = DestinationMask.Mask(row.Destination),
+            // A push destination is a device id, not personal data: shown as stored. An email address is masked.
+            Destination = row.Channel == NotificationChannel.Push ? row.Destination : DestinationMask.Mask(row.Destination),
             NextAttemptAt = AsUtc(row.NextAttemptAt),
             CreatedAt = DateTime.SpecifyKind(row.CreatedAt, DateTimeKind.Utc),
             SentAt = AsUtc(row.SentAt),

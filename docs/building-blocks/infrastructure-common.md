@@ -235,6 +235,20 @@ services.AddExternalHttpClient("email-api", ResiliencePipelines.Critical);
 }
 ```
 
+<!--#if (notifications)-->
+The Notifications module's push channel is one such provider: the FCM transport sends through the client `push-provider` on the pipeline of the same name, registered only while `Notifications:Push:Enabled` is true ([notifications](../modules/notifications.md#push-channel)). It starts from the `external-default` values; suggested settings are below. A send is a `POST`, so the pipeline does not retry it unless `RetryUnsafeMethods` is set: leave it off, so a lost answer cannot show a push twice, and let the delivery worker's schedule (1, 5, 15, 60 minutes) retry instead.
+
+```json
+{
+  "Resilience": {
+    "Pipelines": {
+      "push-provider": { "AttemptTimeout": "00:00:10", "TotalTimeout": "00:00:30" }
+    }
+  }
+}
+```
+<!--#endif-->
+
 The Auth module's social login does exactly this with two custom names, `AddExternalHttpClient("oidc-discovery", "oidc-discovery")` (a provider's discovery document and signing keys) and `AddExternalHttpClient("facebook-graph", "facebook-graph")` (Facebook's Graph API); both use the `external-default` values until `Resilience:Pipelines:oidc-discovery` or `Resilience:Pipelines:facebook-graph` says otherwise.
 
 A name that is not built in needs no further code: it starts from the `external-default` values and reads only the keys you set. Two clients on one pipeline name share its settings but each has its own breaker, so a provider that is down does not open the circuit of another. Then:

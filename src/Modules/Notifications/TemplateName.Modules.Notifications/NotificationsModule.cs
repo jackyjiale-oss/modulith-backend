@@ -13,16 +13,19 @@ using OpenTelemetry.Metrics;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Localization;
 using TemplateName.Application.Common.Messaging;
+using TemplateName.Infrastructure.Common.Http;
 using TemplateName.Infrastructure.Common.Inbox;
 using TemplateName.Infrastructure.Common.Jobs;
 using TemplateName.Infrastructure.Common.Persistence;
 using TemplateName.Modules.Notifications.Application;
 using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
+using TemplateName.Modules.Notifications.Application.Devices;
 using TemplateName.Modules.Notifications.Application.Scheduling;
 using TemplateName.Modules.Notifications.Infrastructure.Catalog;
 using TemplateName.Modules.Notifications.Infrastructure.Channels.Email;
 using TemplateName.Modules.Notifications.Infrastructure.Channels.InApp;
+using TemplateName.Modules.Notifications.Infrastructure.Channels.Push;
 using TemplateName.Modules.Notifications.Infrastructure.Deliveries;
 using TemplateName.Modules.Notifications.Infrastructure.Hubs;
 using TemplateName.Modules.Notifications.Infrastructure.Observability;
@@ -69,6 +72,7 @@ public static class NotificationsModule
         services.AddScoped<IInAppNotificationRepository, InAppNotificationRepository>();
         services.AddScoped<IPreferenceRepository, PreferenceRepository>();
         services.AddScoped<IHubTicketRepository, HubTicketRepository>();
+        services.AddScoped<IPushDeviceRepository, PushDeviceRepository>();
         services.AddScoped<IUnitOfWork>(serviceProvider => serviceProvider.GetRequiredService<NotificationsDbContext>());
         services.AddScoped<NotificationScheduler>();
 
@@ -99,9 +103,44 @@ public static class NotificationsModule
         services.AddScoped<INotificationChannel, InAppChannel>();
         AddEmailChannel(services, configuration);
         AddHub(services, configuration);
+        AddPush(services, configuration);
         AddRetention(services, configuration);
 
         return services;
+    }
+
+    /// <summary>
+    /// Registers the push channel: <see cref="PushOptions"/> (<c>Notifications:Push</c>) and <see cref="FcmOptions"/>
+    /// (<c>Notifications:Push:Fcm</c>, whose project id and credentials are checked while push is enabled), both validated on start; the
+    /// rate-limit policy of the device registration route (<see cref="PushDeviceRateLimit"/>; the device routes work whether or not push
+    /// is enabled); and, only while <c>Notifications:Push:Enabled</c> is true, the <see cref="PushChannel"/>, the
+    /// <see cref="FcmPushTransport"/> on the named client and resilience pipeline <c>push-provider</c>, and the Google token source. With
+    /// push off no channel is registered, so a push delivery left pending is dead-lettered with <c>channel_unavailable</c>.
+    /// </summary>
+    internal static void AddPush(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<PushOptions>()
+            .Bind(configuration.GetSection(PushOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        var enabled = configuration.GetValue<bool>($"{PushOptions.SectionName}:{nameof(PushOptions.Enabled)}");
+        services.AddOptions<FcmOptions>()
+            .Bind(configuration.GetSection(FcmOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<FcmOptions>>(new FcmOptionsValidation(enabled));
+        services.AddOptions<RateLimiterOptions>()
+            .Configure<IOptions<PushOptions>, IFixedWindowLimiterFactory>(
+                (limiterOptions, pushOptions, limiterFactory) => PushDeviceRateLimit.AddPolicy(limiterOptions, pushOptions.Value, limiterFactory));
+
+        if (!enabled)
+        {
+            return;
+        }
+
+        services.AddScoped<INotificationChannel, PushChannel>();
+        services.AddSingleton<IPushTransport, FcmPushTransport>();
+        services.AddSingleton<IFcmAccessTokenSource, GoogleFcmAccessTokenSource>();
+        services.AddExternalHttpClient(FcmPushTransport.ClientName, FcmPushTransport.ClientName);
     }
 
     /// <summary>
@@ -130,10 +169,10 @@ public static class NotificationsModule
     }
 
     /// <summary>
-    /// Registers <c>Notifications:Retention</c> (validated on start: a negative value is refused) and the three recurring cleanup jobs that
+    /// Registers <c>Notifications:Retention</c> (validated on start: a negative value is refused) and the four recurring cleanup jobs that
     /// delete what it covers: <c>NotificationsHubTicketsCleanup</c> hourly, <c>NotificationsRowsCleanup</c> (notifications with their
-    /// deliveries, unless one is still pending) and <c>NotificationsInAppCleanup</c> daily. Requires <c>AddInfrastructureCommon</c>, which
-    /// registers the scheduler and the batch settings.
+    /// deliveries, unless one is still pending), <c>NotificationsInAppCleanup</c> and <c>NotificationsPushDevicesCleanup</c> (deactivated
+    /// push devices) daily. Requires <c>AddInfrastructureCommon</c>, which registers the scheduler and the batch settings.
     /// </summary>
     internal static void AddRetention(IServiceCollection services, IConfiguration configuration)
     {
@@ -145,6 +184,7 @@ public static class NotificationsModule
         services.AddRecurringJob<HubTicketsCleanupJob>();
         services.AddRecurringJob<NotificationsCleanupJob>();
         services.AddRecurringJob<InAppNotificationsCleanupJob>();
+        services.AddRecurringJob<PushDevicesCleanupJob>();
     }
 
     /// <summary>

@@ -8,7 +8,8 @@ namespace TemplateName.Modules.Notifications.Application.AuthEvents;
 /// <summary>
 /// Consumes <see cref="NewDeviceSignedInIntegrationEvent"/> as <see cref="AuthNotificationTypes.NewDeviceLogin"/>, with
 /// <c>occurred_at</c> in the recipient's local time and <c>ip_address</c>, the address the server observed (empty when it observed
-/// none, which the template reads as "show no address"). The event carries no device name or user agent, so the email has none.
+/// none, which the template reads as "show no address"). The event carries no device name or user agent, so the email has none. The
+/// devices of the new session itself get no push: the notice is for the user's other devices.
 /// </summary>
 internal sealed class NewDeviceSignedInIntegrationEventHandler(NotificationScheduler scheduler)
     : IIntegrationEventHandler<NewDeviceSignedInIntegrationEvent>
@@ -18,10 +19,11 @@ internal sealed class NewDeviceSignedInIntegrationEventHandler(NotificationSched
         ArgumentNullException.ThrowIfNull(integrationEvent);
 
         var variables = new Dictionary<string, string> { ["ip_address"] = integrationEvent.IpAddress ?? string.Empty };
+        var request = AuthEventRequests.Notice(AuthNotificationTypes.NewDeviceLogin, integrationEvent, integrationEvent.UserId, GetType(), variables) with
+        {
+            ExcludedSessionId = integrationEvent.SessionId,
+        };
 
-        return scheduler.ScheduleAsync(
-            AuthEventRequests.Notice(AuthNotificationTypes.NewDeviceLogin, integrationEvent, integrationEvent.UserId, GetType(), variables),
-            AuthEventRequests.LocalTime("occurred_at", integrationEvent.OccurredAt),
-            cancellationToken);
+        return scheduler.ScheduleAsync(request, AuthEventRequests.LocalTime("occurred_at", integrationEvent.OccurredAt), cancellationToken);
     }
 }

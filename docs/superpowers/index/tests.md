@@ -2,7 +2,7 @@
 
 # Tests
 
-Rows: 218
+Rows: 227
 
 ## Folders
 
@@ -175,6 +175,7 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Authorization/PermissionChecker.cs | tests/TemplateName.IntegrationTests/Auth/PermissionCheckerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Authorization/PermissionSynchronizer.cs | tests/TemplateName.UnitTests/Auth/PermissionSynchronizerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Contracts/UserContactDirectory.cs | tests/TemplateName.IntegrationTests/Auth/UserContactDirectoryTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Contracts/UserSessionDirectory.cs | tests/TemplateName.IntegrationTests/Auth/UserSessionDirectoryTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/External/ExternalLoginOptions.cs | tests/TemplateName.UnitTests/Auth/External/ExternalLoginOptionsTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/External/ExternalNonceGate.cs | tests/TemplateName.UnitTests/Auth/External/ExternalNonceGateTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/External/ExternalProviderCatalog.cs | tests/TemplateName.UnitTests/Auth/External/ExternalProviderCatalogTests.cs |
@@ -194,6 +195,10 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Application/Catalog/NotificationCatalog.cs | tests/TemplateName.UnitTests/Notifications/NotificationCatalogTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Application/Catalog/RecipientCulture.cs | tests/TemplateName.UnitTests/Notifications/RecipientCultureTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Application/Catalog/TimeZoneResolver.cs | tests/TemplateName.UnitTests/Notifications/TimeZoneResolverTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Application/Devices/PushOptions.cs | tests/TemplateName.UnitTests/Notifications/Devices/PushOptionsTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Application/Devices/Register/RegisterDeviceCommandHandler.cs | tests/TemplateName.UnitTests/Notifications/Devices/RegisterDeviceCommandHandlerTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Application/Devices/Register/RegisterDeviceCommandValidator.cs | tests/TemplateName.UnitTests/Notifications/Devices/RegisterDeviceCommandValidatorTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Application/Devices/Unregister/UnregisterDeviceCommandHandler.cs | tests/TemplateName.UnitTests/Notifications/Devices/UnregisterDeviceCommandHandlerTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Application/HubTickets/HubOptions.cs | tests/TemplateName.UnitTests/Notifications/HubOptionsTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Application/HubTickets/Issue/IssueHubTicketCommandHandler.cs | tests/TemplateName.UnitTests/Notifications/IssueHubTicketCommandHandlerTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Application/Inbox/List/ListInboxQueryValidator.cs | tests/TemplateName.UnitTests/Notifications/Inbox/ListInboxQueryValidatorTests.cs |
@@ -211,11 +216,15 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Domain/Preferences/QuietHours.cs | tests/TemplateName.UnitTests/Notifications/QuietHoursTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Domain/Preferences/UserNotificationProfile.cs | tests/TemplateName.UnitTests/Notifications/UserNotificationProfileTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Domain/Preferences/UserPreference.cs | tests/TemplateName.UnitTests/Notifications/UserPreferenceTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Domain/PushDevices/PushDevice.cs | tests/TemplateName.UnitTests/Notifications/PushDeviceTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Email/EmailChannel.cs | tests/TemplateName.UnitTests/Notifications/EmailChannelTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Email/EmailOptions.cs | tests/TemplateName.UnitTests/Notifications/EmailOptionsTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Email/LegacyEmailSettingsCheck.cs | tests/TemplateName.UnitTests/Notifications/LegacyEmailSettingsCheckTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Email/SmtpEmailTransport.cs | tests/TemplateName.IntegrationTests/Notifications/SmtpEmailTransportTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/InApp/InAppChannel.cs | tests/TemplateName.IntegrationTests/Notifications/InAppChannelTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Push/FcmOptions.cs | tests/TemplateName.UnitTests/Notifications/Push/FcmOptionsTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Push/FcmPushTransport.cs | tests/TemplateName.UnitTests/Notifications/Push/FcmPushTransportTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Push/PushChannel.cs | tests/TemplateName.UnitTests/Notifications/Push/PushChannelTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Deliveries/DeliveryDispatcher.cs | tests/TemplateName.IntegrationTests/Notifications/DeliveryDispatcherTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Deliveries/DeliveryOptions.cs | tests/TemplateName.UnitTests/Notifications/DeliveryOptionsTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Hubs/HubTicketAuthenticationHandler.cs | tests/TemplateName.UnitTests/Notifications/HubTicketAuthenticationHandlerTests.cs |

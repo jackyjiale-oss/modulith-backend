@@ -28,11 +28,14 @@ internal sealed class EmbeddedTemplateStore(NotificationCatalog catalog)
     /// <summary>The assembly that holds the email layouts: this module's.</summary>
     public static Assembly LayoutAssembly { get; } = typeof(EmbeddedTemplateStore).Assembly;
 
-    /// <summary>The parts a channel's templates have: <c>subject</c>, <c>text</c> and <c>html</c> for email; <c>title</c> and <c>body</c> in-app.</summary>
+    /// <summary>
+    /// The parts a channel's templates have: <c>subject</c>, <c>text</c> and <c>html</c> for email; <c>title</c> and <c>body</c> in-app and
+    /// for push (<c>Templates/Push/</c>).
+    /// </summary>
     public static IReadOnlyList<string> PartsOf(NotificationChannel channel) => channel switch
     {
         NotificationChannel.Email => EmailParts,
-        NotificationChannel.InApp => InAppParts,
+        NotificationChannel.InApp or NotificationChannel.Push => InAppParts,
         _ => [],
     };
 

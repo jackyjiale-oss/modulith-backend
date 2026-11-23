@@ -2,7 +2,7 @@
 
 # Error codes
 
-Rows: 72
+Rows: 73
 
 ## Declared codes
 
@@ -60,6 +60,7 @@ Rows: 72
 | notifications.delivery_expired | Notifications | 409 | notifications.delivery_expired | src/Modules/Notifications/TemplateName.Modules.Notifications/Domain/Deliveries/DeliveryErrors.cs |
 | notifications.delivery_not_found | Notifications | 404 | notifications.delivery_not_found | src/Modules/Notifications/TemplateName.Modules.Notifications/Domain/Deliveries/DeliveryErrors.cs |
 | notifications.delivery_not_retryable | Notifications | 409 | notifications.delivery_not_retryable | src/Modules/Notifications/TemplateName.Modules.Notifications/Domain/Deliveries/DeliveryErrors.cs |
+| notifications.device_not_found | Notifications | 404 | notifications.device_not_found | src/Modules/Notifications/TemplateName.Modules.Notifications/Domain/PushDevices/PushDeviceErrors.cs |
 | notifications.invalid_quiet_hours | Notifications | 400 | notifications.invalid_quiet_hours | src/Modules/Notifications/TemplateName.Modules.Notifications/Domain/Preferences/PreferenceErrors.cs |
 | notifications.notification_not_found | Notifications | 404 | notifications.notification_not_found | src/Modules/Notifications/TemplateName.Modules.Notifications/Domain/InApp/InAppNotificationErrors.cs |
 | notifications.unknown_type | Notifications | 400 | notifications.unknown_type | src/Modules/Notifications/TemplateName.Modules.Notifications/Domain/Preferences/PreferenceErrors.cs |

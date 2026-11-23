@@ -371,7 +371,7 @@ public sealed class NotificationsPersistenceTests(IntegrationTestWebAppFactory f
 
         // Every table is in schema notify and there is no outbox table (nothing here raises domain events).
         var tables = await StringsAsync(context, "SELECT name FROM sys.tables WHERE SCHEMA_NAME(schema_id) = 'notify' ORDER BY name");
-        tables.ShouldBe(["Deliveries", "HubTickets", "InAppNotifications", "InboxMessages", "Notifications", "UserPreferences", "UserSettings", "__EFMigrationsHistory"], ignoreOrder: true);
+        tables.ShouldBe(["Deliveries", "HubTickets", "InAppNotifications", "InboxMessages", "Notifications", "PushDevices", "UserPreferences", "UserSettings", "__EFMigrationsHistory"], ignoreOrder: true);
 
         // Column types: enums as tinyint, the sizes of the domain constants, the ticket hash as varbinary(32).
         (await ColumnTypeAsync(context, "Notifications", "Priority")).ShouldBe("tinyint");
@@ -394,6 +394,12 @@ public sealed class NotificationsPersistenceTests(IntegrationTestWebAppFactory f
         (await ColumnTypeAsync(context, "UserSettings", "RowVersion")).ShouldBe("timestamp");
         (await ColumnTypeAsync(context, "UserSettings", "QuietHoursStart")).ShouldBe("time");
         (await ColumnTypeAsync(context, "HubTickets", "TokenHash")).ShouldBe("varbinary(32)");
+        (await ColumnTypeAsync(context, "PushDevices", "TokenHash")).ShouldBe("varbinary(32)");
+        (await ColumnTypeAsync(context, "PushDevices", "Token")).ShouldBe("nvarchar(max)");
+        (await ColumnTypeAsync(context, "PushDevices", "Platform")).ShouldBe("tinyint");
+        (await ColumnTypeAsync(context, "PushDevices", "DeactivationReason")).ShouldBe("tinyint");
+        (await ColumnTypeAsync(context, "PushDevices", "DeviceName")).ShouldBe("nvarchar(100)");
+        (await ColumnTypeAsync(context, "PushDevices", "AppVersion")).ShouldBe("nvarchar(50)");
 
         // Primary keys.
         (await PrimaryKeyColumnsAsync(context, "Notifications")).ShouldBe(["Id"]);
@@ -411,6 +417,10 @@ public sealed class NotificationsPersistenceTests(IntegrationTestWebAppFactory f
         indexes["IX_InAppNotifications_UserId_CreatedAt_Id"].ShouldBe("(UserId, CreatedAt DESC, Id DESC)");
         indexes["IX_InAppNotifications_UserId"].ShouldBe("(UserId) WHERE ([ReadAt] IS NULL)");
         indexes["IX_Deliveries_NotificationId"].ShouldBe("(NotificationId)");
+        indexes["IX_PushDevices_TokenHash"].ShouldBe("UNIQUE (TokenHash)");
+        indexes["IX_PushDevices_UserId"].ShouldBe("(UserId) WHERE ([DeactivatedAt] IS NULL)");
+        indexes["IX_PushDevices_DeactivatedAt"].ShouldBe("(DeactivatedAt)");
+        (await PrimaryKeyColumnsAsync(context, "PushDevices")).ShouldBe(["Id"]);
     }
 
     public override async ValueTask DisposeAsync()

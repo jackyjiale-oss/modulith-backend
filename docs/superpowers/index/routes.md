@@ -2,7 +2,7 @@
 
 # Routes
 
-Rows: 62
+Rows: 65
 
 | module | method | route | handler | permission | file |
 | --- | --- | --- | --- | --- | --- |
@@ -53,12 +53,15 @@ Rows: 62
 | Auth | PUT | /api/v1/admin/auth/roles/{id:guid}/permissions | SetRolePermissionsCommand | AuthPermissions.RoleManage | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/AdminRoleEndpoints.cs |
 | Auth | PUT | /api/v1/admin/auth/users/{id:guid}/roles | AssignRolesCommand | AuthPermissions.UserAssignRoles | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/AdminUserEndpoints.cs |
 | Auth | PUT | /api/v1/auth/me | UpdateProfileCommand | authenticated | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/AuthEndpoints.cs |
+| Notifications | DELETE | /api/v1/notifications/devices/{id:guid} | UnregisterDeviceCommand | authenticated | src/Modules/Notifications/TemplateName.Modules.Notifications/Endpoints/NotificationEndpoints.cs |
 | Notifications | GET | /api/v1/admin/notifications/deliveries | ListDeliveriesQuery | NotificationsPermissions.DeliveryView | src/Modules/Notifications/TemplateName.Modules.Notifications/Endpoints/AdminDeliveryEndpoints.cs |
+| Notifications | GET | /api/v1/notifications/devices | ListDevicesQuery | authenticated | src/Modules/Notifications/TemplateName.Modules.Notifications/Endpoints/NotificationEndpoints.cs |
 | Notifications | GET | /api/v1/notifications/inbox | ListInboxQuery | authenticated | src/Modules/Notifications/TemplateName.Modules.Notifications/Endpoints/NotificationEndpoints.cs |
 | Notifications | GET | /api/v1/notifications/inbox/unread-count | GetUnreadCountQuery | authenticated | src/Modules/Notifications/TemplateName.Modules.Notifications/Endpoints/NotificationEndpoints.cs |
 | Notifications | GET | /api/v1/notifications/preferences | GetPreferencesQuery | authenticated | src/Modules/Notifications/TemplateName.Modules.Notifications/Endpoints/NotificationEndpoints.cs |
 | Notifications | GET | /api/v1/notifications/preferences/quiet-hours | GetQuietHoursQuery | authenticated | src/Modules/Notifications/TemplateName.Modules.Notifications/Endpoints/NotificationEndpoints.cs |
 | Notifications | POST | /api/v1/admin/notifications/deliveries/{id:guid}/retry | RetryDeliveryCommand | NotificationsPermissions.DeliveryRetry | src/Modules/Notifications/TemplateName.Modules.Notifications/Endpoints/AdminDeliveryEndpoints.cs |
+| Notifications | POST | /api/v1/notifications/devices | RegisterDeviceCommand | authenticated | src/Modules/Notifications/TemplateName.Modules.Notifications/Endpoints/NotificationEndpoints.cs |
 | Notifications | POST | /api/v1/notifications/hub-tickets | IssueHubTicketCommand | authenticated | src/Modules/Notifications/TemplateName.Modules.Notifications/Endpoints/NotificationEndpoints.cs |
 | Notifications | POST | /api/v1/notifications/inbox/read-all | MarkAllReadCommand | authenticated | src/Modules/Notifications/TemplateName.Modules.Notifications/Endpoints/NotificationEndpoints.cs |
 | Notifications | POST | /api/v1/notifications/inbox/{id:guid}/read | MarkReadCommand | authenticated | src/Modules/Notifications/TemplateName.Modules.Notifications/Endpoints/NotificationEndpoints.cs |

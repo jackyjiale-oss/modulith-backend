@@ -19,12 +19,14 @@ public sealed class NotificationsRetentionOptionsTests
         options.HubTickets.ShouldBe(TimeSpan.FromHours(1));
         options.Notifications.ShouldBe(TimeSpan.FromDays(180));
         options.InAppNotifications.ShouldBe(TimeSpan.FromDays(180));
+        options.PushDevices.ShouldBe(TimeSpan.FromDays(30));
     }
 
     [Theory]
     [InlineData("HubTickets")]
     [InlineData("Notifications")]
     [InlineData("InAppNotifications")]
+    [InlineData("PushDevices")]
     public void Negative_retention_is_rejected(string key)
     {
         using var services = BuildServices(new Dictionary<string, string?> { [$"Notifications:Retention:{key}"] = "-1.00:00:00" });
@@ -39,6 +41,7 @@ public sealed class NotificationsRetentionOptionsTests
     [InlineData("HubTickets")]
     [InlineData("Notifications")]
     [InlineData("InAppNotifications")]
+    [InlineData("PushDevices")]
     public void Zero_and_null_turn_a_cleanup_off_and_are_accepted(string key)
     {
         using var zero = BuildServices(new Dictionary<string, string?> { [$"Notifications:Retention:{key}"] = "00:00:00" });

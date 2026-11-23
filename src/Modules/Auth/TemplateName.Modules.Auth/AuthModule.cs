@@ -82,6 +82,7 @@ public static class AuthModule
         services.AddScoped<PasswordResetLinkIssuer>();
         services.AddScoped<SessionStarter>();
         services.AddScoped<IUserContactDirectory, UserContactDirectory>();
+        services.AddScoped<IUserSessionDirectory, UserSessionDirectory>();
 
         services.AddHttpContextAccessor();
         services.AddScoped<IClientContext, HttpClientContext>();

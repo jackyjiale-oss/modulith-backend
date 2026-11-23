@@ -19,7 +19,7 @@ namespace TemplateName.Modules.Notifications.Infrastructure.Persistence.Migratio
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("notify")
-                .HasAnnotation("ProductVersion", "10.0.12")
+                .HasAnnotation("ProductVersion", "10.0.15")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -305,6 +305,66 @@ namespace TemplateName.Modules.Notifications.Infrastructure.Persistence.Migratio
                     b.HasKey("UserId", "TypeCode", "Channel");
 
                     b.ToTable("UserPreferences", "notify");
+                });
+
+            modelBuilder.Entity("TemplateName.Modules.Notifications.Domain.PushDevices.PushDevice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AppVersion")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime?>("DeactivatedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<byte?>("DeactivationReason")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("DeviceName")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("LastRegisteredAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<byte>("Platform")
+                        .HasColumnType("tinyint");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<byte[]>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("varbinary(32)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeactivatedAt");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId")
+                        .HasFilter("[DeactivatedAt] IS NULL");
+
+                    b.ToTable("PushDevices", "notify");
                 });
 
             modelBuilder.Entity("TemplateName.Modules.Notifications.Domain.Deliveries.Delivery", b =>

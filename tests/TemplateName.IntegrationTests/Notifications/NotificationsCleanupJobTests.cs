@@ -10,6 +10,7 @@ using TemplateName.Modules.Notifications.Domain.Deliveries;
 using TemplateName.Modules.Notifications.Domain.HubTickets;
 using TemplateName.Modules.Notifications.Domain.InApp;
 using TemplateName.Modules.Notifications.Domain.Notifications;
+using TemplateName.Modules.Notifications.Domain.PushDevices;
 using TemplateName.Modules.Notifications.Infrastructure.Persistence;
 using TemplateName.Modules.Notifications.Infrastructure.Retention;
 
@@ -35,6 +36,7 @@ public sealed class NotificationsCleanupJobTests(IntegrationTestWebAppFactory fa
         HubTicketsCleanupJob.JobName,
         NotificationsCleanupJob.JobName,
         InAppNotificationsCleanupJob.JobName,
+        PushDevicesCleanupJob.JobName,
     ];
 
     private static readonly TimeSpan[] AgeGrid =
@@ -70,7 +72,7 @@ public sealed class NotificationsCleanupJobTests(IntegrationTestWebAppFactory fa
     private DateTimeOffset Now => Factory.Time.GetUtcNow();
 
     [Fact]
-    public async Task The_three_notification_cleanup_jobs_are_registered_with_their_intervals()
+    public async Task The_four_notification_cleanup_jobs_are_registered_with_their_intervals()
     {
         await using var scope = Factory.Services.CreateAsyncScope();
         var jobs = scope.ServiceProvider.GetServices<RecurringJobRegistration>()
@@ -84,6 +86,7 @@ public sealed class NotificationsCleanupJobTests(IntegrationTestWebAppFactory fa
                 ["NotificationsHubTicketsCleanup"] = OneHour,
                 ["NotificationsRowsCleanup"] = OneDay,
                 ["NotificationsInAppCleanup"] = OneDay,
+                ["NotificationsPushDevicesCleanup"] = OneDay,
             },
             ignoreOrder: true);
     }
@@ -291,8 +294,9 @@ public sealed class NotificationsCleanupJobTests(IntegrationTestWebAppFactory fa
         await SeedTicketAsync(longAgo);
         var notification = await SeedNotificationAsync(longAgo, DeliveryStatus.Sent);
         await SeedInAppAsync(longAgo, read: true, notification);
+        await SeedDeviceAsync(deactivatedAt: longAgo);
         TimeSpan? off = zero ? TimeSpan.Zero : null;
-        var retention = new NotificationsRetentionOptions { HubTickets = off, Notifications = off, InAppNotifications = off };
+        var retention = new NotificationsRetentionOptions { HubTickets = off, Notifications = off, InAppNotifications = off, PushDevices = off };
 
         var result = await RunAsync(jobName, retention);
 
@@ -301,6 +305,7 @@ public sealed class NotificationsCleanupJobTests(IntegrationTestWebAppFactory fa
         (await NotificationIdsAsync()).Count.ShouldBe(1);
         (await DeliveryOwnersAsync()).Count.ShouldBe(1);
         (await InAppIdsAsync()).Count.ShouldBe(1);
+        (await DeviceIdsAsync()).Count.ShouldBe(1);
     }
 
     [Theory]
@@ -326,11 +331,13 @@ public sealed class NotificationsCleanupJobTests(IntegrationTestWebAppFactory fa
         var tickets = new Dictionary<TimeSpan, string>();
         var notifications = new Dictionary<TimeSpan, Guid>();
         var inApp = new Dictionary<TimeSpan, Guid>();
+        var devices = new Dictionary<TimeSpan, Guid>();
         foreach (var age in AgeGrid)
         {
             tickets[age] = await SeedTicketAsync(Now - age);
             notifications[age] = await SeedNotificationAsync(Now - age, DeliveryStatus.Sent);
             inApp[age] = await SeedInAppAsync(Now - age, read: false);
+            devices[age] = await SeedDeviceAsync(deactivatedAt: Now - age);
         }
 
         var retention = new NotificationsRetentionOptions();
@@ -341,6 +348,9 @@ public sealed class NotificationsCleanupJobTests(IntegrationTestWebAppFactory fa
                 break;
             case NotificationsCleanupJob.JobName:
                 retention.Notifications = TimeSpan.FromDays(7);
+                break;
+            case PushDevicesCleanupJob.JobName:
+                retention.PushDevices = TimeSpan.FromDays(1);
                 break;
             default:
                 retention.InAppNotifications = TimeSpan.FromDays(365);
@@ -355,6 +365,23 @@ public sealed class NotificationsCleanupJobTests(IntegrationTestWebAppFactory fa
         (await TicketKeysAsync()).ShouldBe(Survivors(tickets, retention.HubTickets), ignoreOrder: true);
         (await NotificationIdsAsync()).ShouldBe(Survivors(notifications, retention.Notifications), ignoreOrder: true);
         (await InAppIdsAsync()).ShouldBe(Survivors(inApp, retention.InAppNotifications), ignoreOrder: true);
+        (await DeviceIdsAsync()).ShouldBe(Survivors(devices, retention.PushDevices), ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task Push_devices_deactivated_more_than_thirty_days_ago_go_and_active_ones_stay()
+    {
+        var thirtyDays = TimeSpan.FromDays(30);
+        var exactly = await SeedDeviceAsync(deactivatedAt: Now - thirtyDays);
+        var justOver = await SeedDeviceAsync(deactivatedAt: Now - thirtyDays - OneSecond);
+        var active = await SeedDeviceAsync(deactivatedAt: null, registeredAt: Now - TimeSpan.FromDays(400));
+
+        var result = await RunAsync(PushDevicesCleanupJob.JobName);
+
+        result.Processed.ShouldBe(1);
+        var remaining = await DeviceIdsAsync();
+        remaining.ShouldBe([exactly, active], ignoreOrder: true);
+        remaining.ShouldNotContain(justOver);
     }
 
     [Fact]
@@ -432,6 +459,7 @@ public sealed class NotificationsCleanupJobTests(IntegrationTestWebAppFactory fa
             HubTicketsCleanupJob.JobName => new HubTicketsCleanupJob(context, Factory.Time, jobs, batching, notifications),
             NotificationsCleanupJob.JobName => new NotificationsCleanupJob(context, Factory.Time, jobs, batching, notifications),
             InAppNotificationsCleanupJob.JobName => new InAppNotificationsCleanupJob(context, Factory.Time, jobs, batching, notifications),
+            PushDevicesCleanupJob.JobName => new PushDevicesCleanupJob(context, Factory.Time, jobs, batching, notifications),
             _ => throw new ArgumentOutOfRangeException(nameof(name), name, "Not a Notifications cleanup job."),
         };
     }
@@ -445,6 +473,31 @@ public sealed class NotificationsCleanupJobTests(IntegrationTestWebAppFactory fa
         await using var scope = Factory.Services.CreateAsyncScope();
         return await CreateJob(jobName, scope, retention, batchSize, maxBatchesPerRun).RunAsync(Ct);
     }
+
+    /// <summary>
+    /// A push device of <see cref="_userId"/> registered at <paramref name="registeredAt"/> (an hour before the deactivation by default) and
+    /// deactivated at <paramref name="deactivatedAt"/>, or still active when it is null. Returns its id.
+    /// </summary>
+    private async Task<Guid> SeedDeviceAsync(DateTimeOffset? deactivatedAt, DateTimeOffset? registeredAt = null)
+    {
+        var device = PushDevice.Register(
+            _userId,
+            Guid.NewGuid(),
+            PushPlatform.Android,
+            Convert.ToHexString(NewHash()),
+            null,
+            null,
+            registeredAt ?? (deactivatedAt ?? Now) - OneHour);
+        if (deactivatedAt is { } at)
+        {
+            device.Deactivate(PushDeviceDeactivationReason.RemovedByUser, at);
+        }
+
+        await SaveAsync(device);
+        return device.Id;
+    }
+
+    private Task<List<Guid>> DeviceIdsAsync() => QueryAsync(context => context.Set<PushDevice>().Select(row => row.Id).ToListAsync(Ct));
 
     /// <summary>
     /// A ticket that expires at exactly <paramref name="expiresAt"/> (issued thirty seconds before, as the module issues them). A consumed

@@ -7,6 +7,10 @@ using TemplateName.Application.Common.Concurrency;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Application.Common.Pagination;
+using TemplateName.Modules.Notifications.Application.Devices;
+using TemplateName.Modules.Notifications.Application.Devices.List;
+using TemplateName.Modules.Notifications.Application.Devices.Register;
+using TemplateName.Modules.Notifications.Application.Devices.Unregister;
 using TemplateName.Modules.Notifications.Application.HubTickets.Issue;
 using TemplateName.Modules.Notifications.Application.Inbox.List;
 using TemplateName.Modules.Notifications.Application.Inbox.MarkAllRead;
@@ -74,6 +78,31 @@ internal static class NotificationEndpoints
             .Produces<HubTicketResponse>()
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        // Push device registration: an upsert by token, so a POST (no version to send back) that works whether or not push is enabled.
+        // Each registration writes a row, so it is limited per user.
+        group.MapPost("devices", RegisterDeviceAsync)
+            .WithName("RegisterPushDevice")
+            .RequireAuthorization()
+            .RequireRateLimiting(PushDeviceRateLimit.PolicyName)
+            .Produces<DeviceResponse>()
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        group.MapGet("devices", ListDevicesAsync)
+            .WithName("ListPushDevices")
+            .RequireAuthorization()
+            .Produces<DevicesResponse>()
+            .ProducesProblem(StatusCodes.Status401Unauthorized);
+
+        group.MapDelete("devices/{id:guid}", UnregisterDeviceAsync)
+            .WithName("UnregisterPushDevice")
+            .RequireAuthorization()
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapGet("preferences", GetPreferencesAsync)
             .WithName("GetNotificationPreferences")
@@ -160,6 +189,36 @@ internal static class NotificationEndpoints
         var result = await handler.HandleAsync(new IssueHubTicketCommand(), cancellationToken);
 
         return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
+    }
+
+    // 200 { id, platform, deviceName, appVersion, registeredAt }: the device registered (or moved to the caller) with this token, bound
+    // to the access token's session. The token is never returned.
+    private static async Task<IResult> RegisterDeviceAsync(
+        RegisterDeviceRequest request,
+        ICommandHandler<RegisterDeviceCommand, DeviceResponse> handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(
+            new RegisterDeviceCommand(request.Platform, request.Token, request.DeviceName, request.AppVersion), cancellationToken);
+
+        return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
+    }
+
+    // 200 { items: [...] }: the caller's active devices, the latest registration first; not paged.
+    private static async Task<IResult> ListDevicesAsync(IQueryHandler<ListDevicesQuery, DevicesResponse> handler, CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new ListDevicesQuery(), cancellationToken);
+
+        return result.IsSuccess ? TypedResults.Ok(result.Value) : result.ToProblem();
+    }
+
+    // 204, also when the device was already inactive; 404 notifications.device_not_found for an unknown id and for another user's device
+    // alike (never 403).
+    private static async Task<IResult> UnregisterDeviceAsync(Guid id, ICommandHandler<UnregisterDeviceCommand> handler, CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new UnregisterDeviceCommand(id), cancellationToken);
+
+        return result.IsSuccess ? TypedResults.NoContent() : result.ToProblem();
     }
 
     // 200 { types: [{ typeCode, category, channels: [{ channel, enabled, mandatory }] }] }: every notification type, by code, not paged.

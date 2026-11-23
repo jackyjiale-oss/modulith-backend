@@ -71,7 +71,7 @@ public sealed class AuthNotificationRenderTests
             message.TextBody.ShouldNotBeNullOrWhiteSpace();
             message.TextBody.ShouldNotContain("{{");
 
-            if (channel == NotificationChannel.InApp)
+            if (channel is NotificationChannel.InApp or NotificationChannel.Push)
             {
                 message.HtmlBody.ShouldBeNull();
                 message.TextBody.ShouldNotContain("http", Case.Insensitive);
@@ -144,6 +144,27 @@ public sealed class AuthNotificationRenderTests
             message.Subject.ShouldNotContain("example.test");
             message.TextBody.ShouldNotContain("example.test");
             message.TextBody.ShouldNotContain("token=abc");
+        }
+    }
+
+    // A push shows on a lock screen: the server-observed address of a new sign-in stays in the email.
+    [Theory]
+    [InlineData(AuthNotificationTypes.NewDeviceLogin)]
+    [InlineData(AuthNotificationTypes.TokenReuseDetected)]
+    [InlineData(AuthNotificationTypes.AccountLocked)]
+    public void Push_messages_show_no_address_and_stay_short(string typeCode)
+    {
+        var type = Catalog.Find(typeCode).ShouldNotBeNull();
+        var variables = VariablesOf(type, "Aisha");
+
+        foreach (var culture in RecipientCulture.Supported)
+        {
+            var message = Renderer.Render(typeCode, NotificationChannel.Push, culture, variables);
+
+            message.Subject.Length.ShouldBeLessThanOrEqualTo(200, $"{typeCode} {culture}");
+            message.TextBody.Length.ShouldBeLessThan(300, $"{typeCode} {culture}");
+            message.TextBody.ShouldNotContain(IpAddress);
+            message.HtmlBody.ShouldBeNull();
         }
     }
 

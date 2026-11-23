@@ -87,10 +87,15 @@ internal sealed class Notification : AggregateRoot<Guid>
     /// <summary>
     /// Adds the delivery for <paramref name="channel"/>, first due at <paramref name="firstAttemptAt"/> (later than <paramref name="now"/>
     /// when quiet hours defer it). It inherits the notification's expiry. An email delivery needs one plain address as
-    /// <paramref name="destination"/> (<see cref="EmailDestination"/>).
+    /// <paramref name="destination"/> (<see cref="EmailDestination"/>); a push delivery a device id (<see cref="PushDestination"/>).
+    /// Email and in-app have at most one delivery each; push has one per device.
     /// </summary>
-    /// <exception cref="ArgumentException">An email delivery without a single valid address; the message does not quote it.</exception>
-    /// <exception cref="InvalidOperationException">The notification already has a delivery for the channel.</exception>
+    /// <exception cref="ArgumentException">
+    /// An email delivery without a single valid address, or a push delivery without a device id; the message does not quote it.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The notification already has a delivery for the channel (for push: for the same device).
+    /// </exception>
     public Delivery AddDelivery(NotificationChannel channel, string? destination, DateTimeOffset firstAttemptAt, DateTimeOffset now)
     {
         if (channel == NotificationChannel.Email && !EmailDestination.IsValid(destination))
@@ -98,9 +103,18 @@ internal sealed class Notification : AggregateRoot<Guid>
             throw new ArgumentException("An email delivery needs exactly one valid email address.", nameof(destination));
         }
 
-        if (_deliveries.Exists(delivery => delivery.Channel == channel))
+        if (channel == NotificationChannel.Push && !PushDestination.IsValid(destination))
         {
-            throw new InvalidOperationException($"The notification already has a {channel} delivery.");
+            throw new ArgumentException("A push delivery needs a device id.", nameof(destination));
+        }
+
+        if (_deliveries.Exists(delivery => delivery.Channel == channel
+            && (channel != NotificationChannel.Push || string.Equals(delivery.Destination, destination, StringComparison.Ordinal))))
+        {
+            throw new InvalidOperationException(
+                channel == NotificationChannel.Push
+                    ? "The notification already has a push delivery for this device."
+                    : $"The notification already has a {channel} delivery.");
         }
 
         var delivery = Delivery.Create(Id, channel, destination, firstAttemptAt, ExpiresAt, now);

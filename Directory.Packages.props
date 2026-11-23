@@ -35,6 +35,8 @@
 
   <!--#if (notifications)-->
   <ItemGroup Label="Notifications">
+    <!-- The FCM push transport's OAuth token (service account or application default credentials); Apache-2.0. -->
+    <PackageVersion Include="Google.Apis.Auth" Version="1.78.0" />
     <PackageVersion Include="Scriban" Version="7.6.1" />
   </ItemGroup>
   <!--#endif-->

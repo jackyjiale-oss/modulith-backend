@@ -11,6 +11,29 @@ public sealed class GetPreferencesQueryHandlerTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task Push_is_hidden_while_disabled()
+    {
+        var result = await _harness.CreateGetHandler().HandleAsync(new GetPreferencesQuery(), Ct);
+
+        result.Value.Types.SelectMany(type => type.Channels).ShouldAllBe(channel => channel.Channel != NotificationChannel.Push);
+    }
+
+    [Fact]
+    public async Task Push_is_listed_after_in_app_while_enabled()
+    {
+        _harness.Push.Enabled = true;
+
+        var result = await _harness.CreateGetHandler().HandleAsync(new GetPreferencesQuery(), Ct);
+
+        result.Value.Types.Single(type => type.TypeCode == "auth.token_reuse_detected").Channels.ShouldBe(
+        [
+            new ChannelPreferenceResponse(NotificationChannel.Email, Enabled: true, Mandatory: true),
+            new ChannelPreferenceResponse(NotificationChannel.InApp, Enabled: true, Mandatory: false),
+            new ChannelPreferenceResponse(NotificationChannel.Push, Enabled: true, Mandatory: false),
+        ]);
+    }
+
+    [Fact]
     public async Task Every_catalog_type_is_listed_in_code_order_whatever_the_registration_order()
     {
         var result = await _harness.CreateGetHandler().HandleAsync(new GetPreferencesQuery(), Ct);

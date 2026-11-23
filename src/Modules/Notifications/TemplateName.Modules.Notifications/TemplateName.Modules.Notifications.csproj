@@ -13,6 +13,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The FCM push transport's OAuth token (Infrastructure/Channels/Push/GoogleFcmAccessTokenSource.cs). -->
+    <PackageReference Include="Google.Apis.Auth" />
     <PackageReference Include="MailKit" />
     <!-- JwtBearerDefaults: the hub's policy names the host's bearer scheme next to HubTicket. -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />

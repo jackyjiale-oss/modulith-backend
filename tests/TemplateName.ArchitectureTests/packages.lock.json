@@ -109,6 +109,22 @@
         "resolved": "4.4.0",
         "contentHash": "gwJEfIGS7FhykvtZoscwXj/XwW+mJY6UbAZk+qtLKFUGWC95kfKXnj8VkxsZQnWBxJemM/q664rGLN5nf+OHZw=="
       },
+      "Google.Apis": {
+        "type": "Transitive",
+        "resolved": "1.78.0",
+        "contentHash": "pKMYqVircLwkdWwTIkNlwJ8FlUNuG9ZqkmnyJ03vJ51j/Ph59+C/Cp4XWLj0NeeTH6LmLaScweJ3kw+kjZ+clg==",
+        "dependencies": {
+          "Google.Apis.Core": "1.78.0"
+        }
+      },
+      "Google.Apis.Core": {
+        "type": "Transitive",
+        "resolved": "1.78.0",
+        "contentHash": "rkiq62czYwim6XtS4GEI80zQMOHZbB8UqP3oeFcjvj8x5bUmdWagcT7oHQeQhMR1eq9tbmpvYvNy490iDvk6bQ==",
+        "dependencies": {
+          "Newtonsoft.Json": "13.0.4"
+        }
+      },
       "Google.Protobuf": {
         "type": "Transitive",
         "resolved": "3.30.1",
@@ -699,6 +715,11 @@
         "resolved": "0.11.3",
         "contentHash": "DNYE+io5XfEE8+E+5padThTPHJARJHbz1mhbhMPNrrWGKVKKqj/KEeLvbawAmbIcT73NuxLV7itHZaYCZcVWGg=="
       },
+      "Newtonsoft.Json": {
+        "type": "Transitive",
+        "resolved": "13.0.4",
+        "contentHash": "pdgNNMai3zv51W5aq268sujXUyx7SNdE2bj1wZcWjAQrKMFZV260lbqYop1d2GM67JI1huLRwxo9ZqnfF/lC6A=="
+      },
       "OpenTelemetry": {
         "type": "Transitive",
         "resolved": "1.21.0",
@@ -827,8 +848,8 @@
       },
       "System.CodeDom": {
         "type": "Transitive",
-        "resolved": "6.0.0",
-        "contentHash": "CPc6tWO1LAer3IzfZufDBRL+UZQcj5uS207NHALQzP84Vp/z6wF0Aa0YZImOQY8iStY0A2zI/e3ihKNPfUm8XA=="
+        "resolved": "7.0.0",
+        "contentHash": "GLltyqEsE5/3IE+zYRP5sNa1l44qKl9v+bfdMcwg+M9qnQf47wK3H0SUR/T+3N4JEQXF3vV4CSuuo0rsg+nq2A=="
       },
       "System.Configuration.ConfigurationManager": {
         "type": "Transitive",
@@ -865,10 +886,10 @@
       },
       "System.Management": {
         "type": "Transitive",
-        "resolved": "6.0.1",
-        "contentHash": "10J1D0h/lioojphfJ4Fuh5ZUThT/xOVHdV9roGBittKKNP2PMjrvibEdbVTGZcPra1399Ja3tqIJLyQrc5Wmhg==",
+        "resolved": "7.0.2",
+        "contentHash": "/qEUN91mP/MUQmJnM5y5BdT7ZoPuVrtxnFlbJ8a3kBJGhe2wCzBfnPFtK2wTtEEcf3DMGR9J00GZZfg6HRI6yA==",
         "dependencies": {
-          "System.CodeDom": "6.0.0"
+          "System.CodeDom": "7.0.0"
         }
       },
       "System.Memory.Data": {
@@ -972,15 +993,15 @@
         "dependencies": {
           "Microsoft.AspNetCore.OpenApi": "[10.0.15, )",
           "Scalar.AspNetCore": "[3.0.2, )",
-          "TemplateName.Application.Common": "[1.0.0-rc.1, )",
-          "TemplateName.Infrastructure.Common": "[1.0.0-rc.1, )",
-          "TemplateName.Modules.Audit": "[1.0.0-rc.1, )",
-          "TemplateName.Modules.Auth": "[1.0.0-rc.1, )",
-          "TemplateName.Modules.Notifications": "[1.0.0-rc.1, )",
-          "TemplateName.Modules.Sample": "[1.0.0-rc.1, )",
-          "TemplateName.Platform.Redis": "[1.0.0-rc.1, )",
-          "TemplateName.SharedKernel": "[1.0.0-rc.1, )",
-          "TemplateName.Web.Common": "[1.0.0-rc.1, )"
+          "TemplateName.Application.Common": "[1.0.0-rc.4, )",
+          "TemplateName.Infrastructure.Common": "[1.0.0-rc.4, )",
+          "TemplateName.Modules.Audit": "[1.0.0-rc.4, )",
+          "TemplateName.Modules.Auth": "[1.0.0-rc.4, )",
+          "TemplateName.Modules.Notifications": "[1.0.0-rc.4, )",
+          "TemplateName.Modules.Sample": "[1.0.0-rc.4, )",
+          "TemplateName.Platform.Redis": "[1.0.0-rc.4, )",
+          "TemplateName.SharedKernel": "[1.0.0-rc.4, )",
+          "TemplateName.Web.Common": "[1.0.0-rc.4, )"
         }
       },
       "templatename.application.common": {
@@ -993,7 +1014,7 @@
           "Microsoft.Extensions.Localization": "[10.0.15, )",
           "Microsoft.Extensions.Logging.Abstractions": "[10.0.15, )",
           "Scrutor": "[7.0.0, )",
-          "TemplateName.SharedKernel": "[1.0.0-rc.1, )"
+          "TemplateName.SharedKernel": "[1.0.0-rc.4, )"
         }
       },
       "templatename.infrastructure.common": {
@@ -1004,17 +1025,17 @@
           "Microsoft.Extensions.Caching.Hybrid": "[10.11.0, )",
           "Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore": "[10.0.15, )",
           "Microsoft.Extensions.Http.Resilience": "[10.11.0, )",
-          "TemplateName.Application.Common": "[1.0.0-rc.1, )",
-          "TemplateName.SharedKernel": "[1.0.0-rc.1, )"
+          "TemplateName.Application.Common": "[1.0.0-rc.4, )",
+          "TemplateName.SharedKernel": "[1.0.0-rc.4, )"
         }
       },
       "templatename.modules.audit": {
         "type": "Project",
         "dependencies": {
-          "TemplateName.Application.Common": "[1.0.0-rc.1, )",
-          "TemplateName.Infrastructure.Common": "[1.0.0-rc.1, )",
-          "TemplateName.SharedKernel": "[1.0.0-rc.1, )",
-          "TemplateName.Web.Common": "[1.0.0-rc.1, )"
+          "TemplateName.Application.Common": "[1.0.0-rc.4, )",
+          "TemplateName.Infrastructure.Common": "[1.0.0-rc.4, )",
+          "TemplateName.SharedKernel": "[1.0.0-rc.4, )",
+          "TemplateName.Web.Common": "[1.0.0-rc.4, )"
         }
       },
       "templatename.modules.auth": {
@@ -1024,39 +1045,40 @@
           "Microsoft.AspNetCore.DataProtection.EntityFrameworkCore": "[10.0.15, )",
           "Microsoft.Extensions.Caching.Hybrid": "[10.11.0, )",
           "OpenTelemetry.Extensions.Hosting": "[1.21.0, )",
-          "TemplateName.Application.Common": "[1.0.0-rc.1, )",
-          "TemplateName.Infrastructure.Common": "[1.0.0-rc.1, )",
-          "TemplateName.Modules.Auth.Contracts": "[1.0.0-rc.1, )",
-          "TemplateName.SharedKernel": "[1.0.0-rc.1, )",
-          "TemplateName.Web.Common": "[1.0.0-rc.1, )"
+          "TemplateName.Application.Common": "[1.0.0-rc.4, )",
+          "TemplateName.Infrastructure.Common": "[1.0.0-rc.4, )",
+          "TemplateName.Modules.Auth.Contracts": "[1.0.0-rc.4, )",
+          "TemplateName.SharedKernel": "[1.0.0-rc.4, )",
+          "TemplateName.Web.Common": "[1.0.0-rc.4, )"
         }
       },
       "templatename.modules.auth.contracts": {
         "type": "Project",
         "dependencies": {
-          "TemplateName.SharedKernel": "[1.0.0-rc.1, )"
+          "TemplateName.SharedKernel": "[1.0.0-rc.4, )"
         }
       },
       "templatename.modules.notifications": {
         "type": "Project",
         "dependencies": {
+          "Google.Apis.Auth": "[1.78.0, )",
           "MailKit": "[5.0.0, )",
           "Microsoft.AspNetCore.Authentication.JwtBearer": "[10.0.15, )",
           "Scriban": "[7.6.1, )",
-          "TemplateName.Application.Common": "[1.0.0-rc.1, )",
-          "TemplateName.Infrastructure.Common": "[1.0.0-rc.1, )",
-          "TemplateName.Modules.Auth.Contracts": "[1.0.0-rc.1, )",
-          "TemplateName.SharedKernel": "[1.0.0-rc.1, )",
-          "TemplateName.Web.Common": "[1.0.0-rc.1, )"
+          "TemplateName.Application.Common": "[1.0.0-rc.4, )",
+          "TemplateName.Infrastructure.Common": "[1.0.0-rc.4, )",
+          "TemplateName.Modules.Auth.Contracts": "[1.0.0-rc.4, )",
+          "TemplateName.SharedKernel": "[1.0.0-rc.4, )",
+          "TemplateName.Web.Common": "[1.0.0-rc.4, )"
         }
       },
       "templatename.modules.sample": {
         "type": "Project",
         "dependencies": {
-          "TemplateName.Application.Common": "[1.0.0-rc.1, )",
-          "TemplateName.Infrastructure.Common": "[1.0.0-rc.1, )",
-          "TemplateName.SharedKernel": "[1.0.0-rc.1, )",
-          "TemplateName.Web.Common": "[1.0.0-rc.1, )"
+          "TemplateName.Application.Common": "[1.0.0-rc.4, )",
+          "TemplateName.Infrastructure.Common": "[1.0.0-rc.4, )",
+          "TemplateName.SharedKernel": "[1.0.0-rc.4, )",
+          "TemplateName.Web.Common": "[1.0.0-rc.4, )"
         }
       },
       "templatename.platform.redis": {
@@ -1065,10 +1087,10 @@
           "Microsoft.AspNetCore.SignalR.StackExchangeRedis": "[10.0.15, )",
           "Microsoft.Extensions.Caching.StackExchangeRedis": "[10.0.15, )",
           "StackExchange.Redis": "[3.4.35, )",
-          "TemplateName.Application.Common": "[1.0.0-rc.1, )",
-          "TemplateName.Infrastructure.Common": "[1.0.0-rc.1, )",
-          "TemplateName.SharedKernel": "[1.0.0-rc.1, )",
-          "TemplateName.Web.Common": "[1.0.0-rc.1, )"
+          "TemplateName.Application.Common": "[1.0.0-rc.4, )",
+          "TemplateName.Infrastructure.Common": "[1.0.0-rc.4, )",
+          "TemplateName.SharedKernel": "[1.0.0-rc.4, )",
+          "TemplateName.Web.Common": "[1.0.0-rc.4, )"
         }
       },
       "templatename.sharedkernel": {
@@ -1088,8 +1110,8 @@
           "Serilog.AspNetCore": "[10.0.0, )",
           "Serilog.Formatting.Compact": "[3.0.0, )",
           "Serilog.Sinks.OpenTelemetry": "[4.2.0, )",
-          "TemplateName.Application.Common": "[1.0.0-rc.1, )",
-          "TemplateName.SharedKernel": "[1.0.0-rc.1, )"
+          "TemplateName.Application.Common": "[1.0.0-rc.4, )",
+          "TemplateName.SharedKernel": "[1.0.0-rc.4, )"
         }
       },
       "Dapper": {
@@ -1112,6 +1134,17 @@
         "dependencies": {
           "FluentValidation": "12.2.0",
           "Microsoft.Extensions.DependencyInjection.Abstractions": "2.1.0"
+        }
+      },
+      "Google.Apis.Auth": {
+        "type": "CentralTransitive",
+        "requested": "[1.78.0, )",
+        "resolved": "1.78.0",
+        "contentHash": "C+Jzd1tTqZ3/2wVi5Tlkcvqt/+o67/JHvXSZCy89CfhSRwL5bm1HsKbk1KM0sBKGc/RKC8Pr/FsG6n6OZO/MFA==",
+        "dependencies": {
+          "Google.Apis": "1.78.0",
+          "Google.Apis.Core": "1.78.0",
+          "System.Management": "7.0.2"
         }
       },
       "MailKit": {

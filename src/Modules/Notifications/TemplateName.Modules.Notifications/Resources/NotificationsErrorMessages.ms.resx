@@ -51,6 +51,9 @@
   <data name="notifications.notification_not_found" xml:space="preserve">
     <value>Pemberitahuan '{id}' tidak dijumpai.</value>
   </data>
+  <data name="notifications.device_not_found" xml:space="preserve">
+    <value>Peranti '{id}' tidak dijumpai.</value>
+  </data>
   <data name="notifications.invalid_quiet_hours" xml:space="preserve">
     <value>Waktu senyap memerlukan masa mula dan masa tamat, dan kedua-duanya mestilah berbeza. Hantar kedua-duanya sebagai null untuk mengosongkannya.</value>
   </data>
