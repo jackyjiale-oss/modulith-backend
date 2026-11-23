@@ -53,7 +53,9 @@ public sealed class PreferenceEndpointTests(IntegrationTestWebAppFactory factory
             type.GetProperty("category").GetString().ShouldBe(definition.Category.ToString());
 
             var channels = type.GetProperty("channels").EnumerateArray().ToList();
-            channels.Select(channel => channel.GetProperty("channel").GetString()).ShouldBe([.. definition.DefaultChannels.Order().Select(channel => channel.ToString())]);
+            // Push is off in the shared factory (the template's default), so the channel is not offered.
+            channels.Select(channel => channel.GetProperty("channel").GetString())
+                .ShouldBe([.. definition.DefaultChannels.Where(channel => channel != NotificationChannel.Push).Order().Select(channel => channel.ToString())]);
             foreach (var channel in channels)
             {
                 channel.EnumerateObject().Select(property => property.Name).ShouldBe(["channel", "enabled", "mandatory"], ignoreOrder: true);

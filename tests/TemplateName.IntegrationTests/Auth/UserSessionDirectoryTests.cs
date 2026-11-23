@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using TemplateName.IntegrationTests.Infrastructure;
@@ -87,7 +88,7 @@ public sealed class UserSessionDirectoryTests(IntegrationTestWebAppFactory facto
             userAgent: null,
             ipAddress: null,
             user.SecurityStamp,
-            new byte[32],
+            RandomNumberGenerator.GetBytes(32),
             SlidingLifetime,
             AbsoluteLifetime,
             Factory.Time.GetUtcNow());
