@@ -1,4 +1,5 @@
 using TemplateName.Modules.Auth.Application.Mfa;
+using TemplateName.Modules.Auth.Application.PhoneSignIn;
 
 namespace TemplateName.Modules.Auth.Application.Abstractions;
 
@@ -40,4 +41,11 @@ internal interface IAuthMetrics
     /// cannot create tag values. A 400 of the validator and a 429 are not counted.
     /// </summary>
     void RecordExternalLogin(ExternalProvider? provider, ExternalLoginOutcome outcome);
+
+    /// <summary>
+    /// Counts one phone sign-in send or verify that reached the handler (<c>auth.phone_sign_ins</c>, tag <c>outcome</c> = <c>sent</c>,
+    /// <c>suppressed</c>, <c>signed_in</c>, <c>challenged</c> or <c>refused</c>). Never the number. A 400 of the validator, a 404 while
+    /// switched off and a 429 are not counted.
+    /// </summary>
+    void RecordPhoneSignIn(PhoneSignInOutcome outcome);
 }

@@ -54,6 +54,8 @@ internal static class AuthAuditEvents
     public const string ExternalRegistered = "auth.external_registered";
     public const string PhoneNumberVerified = "auth.phone_number_verified";
     public const string PhoneNumberRemoved = "auth.phone_number_removed";
+    public const string PhoneSignInRequested = "auth.phone_sign_in_requested";
+    public const string PhoneSignInFailed = "auth.phone_sign_in_failed";
 
     /// <summary>Every event type above, for the audit log's <c>eventType</c> filter.</summary>
     public static IReadOnlyCollection<string> All { get; } =

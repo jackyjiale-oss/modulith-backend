@@ -27,6 +27,48 @@ public sealed class PhoneOptionsTests
         options.ResendCooldown.ShouldBe(TimeSpan.FromMinutes(1));
         options.MaxCodesPerDay.ShouldBe(5);
         options.MaxAttempts.ShouldBe(5);
+        options.SignInEnabled.ShouldBeFalse();
+        options.SignInCodeLifetime.ShouldBe(TimeSpan.FromMinutes(5));
+        options.DeniedRoleSet().ShouldBe(["SUPERADMIN", "ADMIN"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public void Configured_denied_roles_replace_the_defaults()
+    {
+        using var services = BuildServices(new Dictionary<string, string?> { [$"{Section}:SignInDeniedRoles:0"] = "Support" });
+
+        services.GetRequiredService<IOptions<PhoneOptions>>().Value.DeniedRoleSet().ShouldBe(["SUPPORT"]);
+    }
+
+    [Fact]
+    public void Sign_in_without_phone_enabled_is_refused()
+    {
+        using var services = BuildServices(new Dictionary<string, string?> { [$"{Section}:SignInEnabled"] = "true" });
+
+        var failure = Should.Throw<OptionsValidationException>(() => services.GetRequiredService<IStartupValidator>().Validate());
+
+        failure.Message.ShouldContain("SignInEnabled");
+        failure.Message.ShouldContain("Enabled");
+    }
+
+    [Fact]
+    public void Sign_in_with_phone_enabled_starts()
+    {
+        using var services = BuildServices(new Dictionary<string, string?> { [$"{Section}:Enabled"] = "true", [$"{Section}:SignInEnabled"] = "true" });
+
+        Should.NotThrow(() => services.GetRequiredService<IStartupValidator>().Validate());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void A_blank_role_is_refused(string role)
+    {
+        using var services = BuildServices(new Dictionary<string, string?> { [$"{Section}:SignInDeniedRoles:0"] = "Admin", [$"{Section}:SignInDeniedRoles:1"] = role });
+
+        var failure = Should.Throw<OptionsValidationException>(() => services.GetRequiredService<IStartupValidator>().Validate());
+
+        failure.Message.ShouldContain("SignInDeniedRoles");
     }
 
     [Theory]
@@ -39,6 +81,8 @@ public sealed class PhoneOptionsTests
     [InlineData("MaxAttempts", "1")]
     [InlineData("MaxAttempts", "10")]
     [InlineData("AllowedRegions:0", "MY")]
+    [InlineData("SignInCodeLifetime", "00:01:00")]
+    [InlineData("SignInCodeLifetime", "00:10:00")]
     public void Values_at_the_ends_of_their_ranges_start(string key, string value)
     {
         using var services = BuildServices(new Dictionary<string, string?> { [$"{Section}:{key}"] = value });
@@ -55,6 +99,8 @@ public sealed class PhoneOptionsTests
     [InlineData("MaxCodesPerDay", "51")]
     [InlineData("MaxAttempts", "0")]
     [InlineData("MaxAttempts", "11")]
+    [InlineData("SignInCodeLifetime", "00:00:59")]
+    [InlineData("SignInCodeLifetime", "00:10:01")]
     public void Values_outside_their_ranges_stop_the_host(string key, string value)
     {
         using var services = BuildServices(new Dictionary<string, string?> { [$"{Section}:{key}"] = value });

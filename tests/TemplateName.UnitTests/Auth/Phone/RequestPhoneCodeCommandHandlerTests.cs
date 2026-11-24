@@ -52,6 +52,7 @@ public sealed class RequestPhoneCodeCommandHandlerTests
             _users,
             _sessions,
             _codes,
+            new PhoneCodeBudget(_codes),
             _mfaMethods,
             new StepUpPolicy(_currentUser, Options.Create(new StepUpOptions()), time),
             _currentUser,

@@ -13,3 +13,9 @@ internal sealed record ConfirmPhoneRequest(string Code)
     /// <summary>Only the type name, so a logged or formatted request never carries the code.</summary>
     public override string ToString() => nameof(ConfirmPhoneRequest);
 }
+
+/// <summary>The body of <c>POST phone/sign-in/send</c>. Prints its type name only.</summary>
+internal sealed record SendPhoneSignInCodeRequest(string PhoneNumber)
+{
+    public override string ToString() => nameof(SendPhoneSignInCodeRequest);
+}
