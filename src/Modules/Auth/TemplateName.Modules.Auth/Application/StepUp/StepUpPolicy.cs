@@ -23,6 +23,14 @@ internal sealed class StepUpPolicy(ICurrentUser currentUser, IOptions<StepUpOpti
     /// </summary>
     public Result Check(bool hasConfirmedMfa)
     {
+        // A texted code is never a step-up, whatever its age: whoever holds the number would pass it. A challenge answered after it
+        // (sms otp mfa) proved a code and counts.
+        if (currentUser.AuthMethods.Contains(AuthenticationMethods.Sms, StringComparer.Ordinal)
+            && !currentUser.AuthMethods.Contains(AuthenticationMethods.OneTimePassword, StringComparer.Ordinal)
+            && !currentUser.AuthMethods.Contains(AuthenticationMethods.RecoveryCode, StringComparer.Ordinal))
+        {
+            return Result.Failure(MfaErrors.StepUpRequired);
+        }
         if (currentUser.AuthTime is not { } authTime || timeProvider.GetUtcNow() - authTime >= options.Value.MaxAge)
         {
             return Result.Failure(MfaErrors.StepUpRequired);

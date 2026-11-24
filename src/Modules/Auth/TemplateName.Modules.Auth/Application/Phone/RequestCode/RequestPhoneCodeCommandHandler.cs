@@ -76,7 +76,7 @@ internal sealed class RequestPhoneCodeCommandHandler(
         }
 
         var plainCode = PhoneVerificationCode.NewCode();
-        var code = PhoneVerificationCode.Issue(user.Id, number, plainCode, secretProtector.Protect(plainCode), settings.CodeLifetime, now);
+        var code = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, number, plainCode, secretProtector.Protect(plainCode), settings.CodeLifetime, now);
         codes.Add(code);
         user.NotePhoneCodeRequested(now);
 

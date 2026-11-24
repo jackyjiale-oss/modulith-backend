@@ -43,7 +43,7 @@ internal sealed class RemovePhoneCommandHandler(
                 return stepUp;
             }
 
-            user.RemovePhoneNumber();
+            user.RemovePhoneNumber(now);
             auditWriter.Record(AuthAuditLog.Create(
                 AuthAuditEvents.PhoneNumberRemoved,
                 succeeded: true,

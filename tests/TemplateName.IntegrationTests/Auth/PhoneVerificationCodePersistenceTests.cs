@@ -27,7 +27,7 @@ public sealed class PhoneVerificationCodePersistenceTests(IntegrationTestWebAppF
     public async Task A_code_round_trips()
     {
         var user = NewUser("alice@example.com");
-        var code = PhoneVerificationCode.Issue(user.Id, Number, "042137", "protected", Lifetime, Now);
+        var code = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, Number, "042137", "protected", Lifetime, Now);
         await SaveAsync(user, code);
 
         var saved = (await Codes().GetPendingAsync(user.Id, Now, Ct)).ShouldNotBeNull();
@@ -49,9 +49,9 @@ public sealed class PhoneVerificationCodePersistenceTests(IntegrationTestWebAppF
     public async Task The_lookups_find_the_latest_pending_code_and_list_the_codes_issued_oldest_first()
     {
         var user = NewUser("alice@example.com");
-        var older = PhoneVerificationCode.Issue(user.Id, Number, "111111", "protected", Lifetime, Now.AddMinutes(-3));
-        var newer = PhoneVerificationCode.Issue(user.Id, Number, "222222", "protected", Lifetime, Now.AddMinutes(-1));
-        var expired = PhoneVerificationCode.Issue(user.Id, Number, "333333", "protected", Lifetime, Now.AddHours(-2));
+        var older = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, Number, "111111", "protected", Lifetime, Now.AddMinutes(-3));
+        var newer = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, Number, "222222", "protected", Lifetime, Now.AddMinutes(-1));
+        var expired = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, Number, "333333", "protected", Lifetime, Now.AddHours(-2));
         await SaveAsync(user, older, newer, expired);
         var codes = Codes();
 
@@ -106,7 +106,7 @@ public sealed class PhoneVerificationCodePersistenceTests(IntegrationTestWebAppF
     public async Task Parallel_wrong_attempts_never_exceed_the_maximum()
     {
         var user = NewUser("alice@example.com");
-        var code = PhoneVerificationCode.Issue(user.Id, Number, "042137", "protected", Lifetime, Now);
+        var code = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, Number, "042137", "protected", Lifetime, Now);
         await SaveAsync(user, code);
 
         var counted = await Task.WhenAll(Enumerable.Range(0, 10)
@@ -123,7 +123,7 @@ public sealed class PhoneVerificationCodePersistenceTests(IntegrationTestWebAppF
     public async Task A_wrong_attempt_below_the_maximum_keeps_the_code_pending()
     {
         var user = NewUser("alice@example.com");
-        var code = PhoneVerificationCode.Issue(user.Id, Number, "042137", "protected", Lifetime, Now);
+        var code = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, Number, "042137", "protected", Lifetime, Now);
         await SaveAsync(user, code);
 
         (await Codes().TryCountWrongAttemptAsync(code.Id, maxAttempts: 5, Now, Ct)).ShouldBeTrue();
@@ -137,7 +137,7 @@ public sealed class PhoneVerificationCodePersistenceTests(IntegrationTestWebAppF
     public async Task TryConsume_wins_once()
     {
         var user = NewUser("alice@example.com");
-        var code = PhoneVerificationCode.Issue(user.Id, Number, "042137", "protected", Lifetime, Now);
+        var code = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, Number, "042137", "protected", Lifetime, Now);
         await SaveAsync(user, code);
 
         var claims = await Task.WhenAll(
@@ -152,8 +152,8 @@ public sealed class PhoneVerificationCodePersistenceTests(IntegrationTestWebAppF
     public async Task An_expired_or_invalidated_code_cannot_be_consumed()
     {
         var user = NewUser("alice@example.com");
-        var expired = PhoneVerificationCode.Issue(user.Id, Number, "042137", "protected", Lifetime, Now.AddHours(-1));
-        var invalidated = PhoneVerificationCode.Issue(user.Id, Number, "042138", "protected", Lifetime, Now);
+        var expired = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, Number, "042137", "protected", Lifetime, Now.AddHours(-1));
+        var invalidated = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, Number, "042138", "protected", Lifetime, Now);
         invalidated.Invalidate(Now);
         await SaveAsync(user, expired, invalidated);
 

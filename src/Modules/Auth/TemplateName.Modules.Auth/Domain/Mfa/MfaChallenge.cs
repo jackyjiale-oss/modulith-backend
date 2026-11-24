@@ -30,7 +30,8 @@ internal sealed class MfaChallenge : AggregateRoot<Guid>
     public string DeviceName { get; private set; } = string.Empty;
 
     /// <summary>
-    /// How the user passed the first step: <see cref="AuthenticationMethods.Password"/> or <see cref="AuthenticationMethods.Federated"/>.
+    /// How the user passed the first step: <see cref="AuthenticationMethods.Password"/>, <see cref="AuthenticationMethods.Federated"/>
+    /// or <see cref="AuthenticationMethods.Sms"/>.
     /// The verification adds it to the <c>amr</c> of the session next to the second factor.
     /// </summary>
     public string FirstFactor { get; private set; } = AuthenticationMethods.Password;
@@ -61,9 +62,9 @@ internal sealed class MfaChallenge : AggregateRoot<Guid>
         ArgumentNullException.ThrowIfNull(tokenHash);
         ArgumentException.ThrowIfNullOrWhiteSpace(securityStamp);
         ArgumentException.ThrowIfNullOrWhiteSpace(firstFactor);
-        if (firstFactor is not (AuthenticationMethods.Password or AuthenticationMethods.Federated))
+        if (firstFactor is not (AuthenticationMethods.Password or AuthenticationMethods.Federated or AuthenticationMethods.Sms))
         {
-            throw new ArgumentException("The first factor is a password or a federated sign-in.", nameof(firstFactor));
+            throw new ArgumentException("The first factor is a password, a federated sign-in or a texted code.", nameof(firstFactor));
         }
 
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(lifetime, TimeSpan.Zero);

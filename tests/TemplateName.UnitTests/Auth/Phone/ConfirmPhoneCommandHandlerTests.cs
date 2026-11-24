@@ -34,7 +34,7 @@ public sealed class ConfirmPhoneCommandHandlerTests
     public ConfirmPhoneCommandHandlerTests()
     {
         var session = StartSession(_user);
-        _pending = PhoneVerificationCode.Issue(_user.Id, Number, Code, "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-1));
+        _pending = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.Verify, Number, Code, "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-1));
         _users.GetByIdAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_user);
         _sessions.GetByIdAsync(session.Id, Arg.Any<CancellationToken>()).Returns(session);
         _currentUser.UserId.Returns(_user.Id);

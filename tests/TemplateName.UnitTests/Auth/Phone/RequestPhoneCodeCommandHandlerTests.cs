@@ -107,7 +107,7 @@ public sealed class RequestPhoneCodeCommandHandlerTests
     [Fact]
     public async Task A_new_code_ends_the_previous_one()
     {
-        var previous = PhoneVerificationCode.Issue(_user.Id, Number, "111111", "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-5));
+        var previous = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.Verify, Number, "111111", "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-5));
         _codes.GetLastIssuedAtAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(Now.AddMinutes(-5));
         _codes.ListPendingAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([previous]);
 

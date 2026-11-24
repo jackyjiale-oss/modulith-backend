@@ -33,4 +33,11 @@ public sealed class AuthenticationMethodsTests
         AuthenticationMethods.RecoveryCode.ShouldBe("rcvr");
         AuthenticationMethods.MultiFactor.ShouldBe("mfa");
     }
+
+    [Fact]
+    public void Sms_is_sms()
+    {
+        AuthenticationMethods.Sms.ShouldBe("sms");
+        AuthenticationMethods.Join(AuthenticationMethods.Sms, AuthenticationMethods.RecoveryCode, AuthenticationMethods.MultiFactor).ShouldBe("sms rcvr mfa");
+    }
 }

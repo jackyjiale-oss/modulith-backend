@@ -5,7 +5,7 @@ namespace TemplateName.UnitTests.Auth;
 public sealed class SessionRevokedReasonTests
 {
     [Fact]
-    public void ExternalLoginChanged_is_7_and_the_others_keep_their_values()
+    public void PhoneNumberChanged_is_8_and_the_others_keep_their_values()
     {
         ((int)SessionRevokedReason.Logout).ShouldBe(0);
         ((int)SessionRevokedReason.LogoutAll).ShouldBe(1);
@@ -15,5 +15,6 @@ public sealed class SessionRevokedReasonTests
         ((int)SessionRevokedReason.Expired).ShouldBe(5);
         ((int)SessionRevokedReason.MfaChanged).ShouldBe(6);
         ((int)SessionRevokedReason.ExternalLoginChanged).ShouldBe(7);
+        ((int)SessionRevokedReason.PhoneNumberChanged).ShouldBe(8);
     }
 }

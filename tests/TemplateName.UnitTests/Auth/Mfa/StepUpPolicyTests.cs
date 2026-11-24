@@ -141,4 +141,37 @@ public sealed class StepUpPolicyTests
         AuthModule.AddMfa(services, configuration);
         return services.BuildServiceProvider();
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Fresh_sms_alone_is_refused(bool hasConfirmedMfa)
+    {
+        // An SMS sign-in is never a step-up: whoever holds the number would pass it.
+        _currentUser.AuthMethods.Returns(["sms"]);
+
+        _sut.Check(hasConfirmedMfa).Error.ShouldBe(MfaErrors.StepUpRequired);
+    }
+
+    [Theory]
+    [InlineData("otp")]
+    [InlineData("rcvr")]
+    public void Sms_with_a_code_passes_within_max_age(string factor)
+    {
+        _currentUser.AuthMethods.Returns(["sms", factor, "mfa"]);
+
+        _time.SetUtcNow(AuthTime + MaxAge - TimeSpan.FromSeconds(1));
+        _sut.Check(hasConfirmedMfa: true).IsSuccess.ShouldBeTrue();
+        _sut.Check(hasConfirmedMfa: false).IsSuccess.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Sms_otp_mfa_expires_after_max_age()
+    {
+        _currentUser.AuthMethods.Returns(["sms", "otp", "mfa"]);
+
+        _time.SetUtcNow(AuthTime + MaxAge);
+
+        _sut.Check(hasConfirmedMfa: true).Error.ShouldBe(MfaErrors.StepUpRequired);
+    }
 }

@@ -15,4 +15,7 @@ internal enum SessionRevokedReason
 
     /// <summary>The user unlinked a social login in another session, so every other session ended (linking one ends no session).</summary>
     ExternalLoginChanged = 7,
+
+    /// <summary>The verified phone number, a way to sign in, was replaced or removed; the caller's other sessions end.</summary>
+    PhoneNumberChanged = 8,
 }

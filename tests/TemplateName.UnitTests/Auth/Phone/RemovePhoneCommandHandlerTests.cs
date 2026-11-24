@@ -60,7 +60,7 @@ public sealed class RemovePhoneCommandHandlerTests
     public async Task Removes_with_step_up()
     {
         _user.VerifyPhoneNumber(Number, Now.AddDays(-1));
-        var pending = PhoneVerificationCode.Issue(_user.Id, "+60198765432", "111111", "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-1));
+        var pending = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.Verify, "+60198765432", "111111", "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-1));
         _codes.ListPendingAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([pending]);
 
         var result = await _sut.HandleAsync(new RemovePhoneCommand(), Ct);
@@ -99,7 +99,7 @@ public sealed class RemovePhoneCommandHandlerTests
     public async Task Without_a_number_succeeds_without_step_up_and_ends_pending_codes()
     {
         _currentUser.AuthTime.Returns((DateTimeOffset?)null);
-        var pending = PhoneVerificationCode.Issue(_user.Id, Number, "111111", "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-1));
+        var pending = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.Verify, Number, "111111", "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-1));
         _codes.ListPendingAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([pending]);
 
         var result = await _sut.HandleAsync(new RemovePhoneCommand(), Ct);
