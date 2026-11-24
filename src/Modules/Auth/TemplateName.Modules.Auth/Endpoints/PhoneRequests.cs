@@ -19,3 +19,9 @@ internal sealed record SendPhoneSignInCodeRequest(string PhoneNumber)
 {
     public override string ToString() => nameof(SendPhoneSignInCodeRequest);
 }
+
+/// <summary>The body of <c>POST phone/sign-in/verify</c>. Prints its type name only.</summary>
+internal sealed record VerifyPhoneSignInRequest(string PhoneNumber, string Code, string? DeviceName)
+{
+    public override string ToString() => nameof(VerifyPhoneSignInRequest);
+}

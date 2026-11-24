@@ -219,6 +219,31 @@ public sealed class VerifyMfaCommandHandlerTests
     }
 
     [Fact]
+    public async Task An_sms_challenge_verifies_to_sms_otp_mfa()
+    {
+        GivenSmsChallenge();
+
+        var result = await _sut.HandleAsync(Command(code: CurrentCode), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        _addedSessions.ShouldHaveSingleItem().AuthMethods.ShouldBe("sms otp mfa");
+    }
+
+    [Fact]
+    public async Task Remember_device_is_ignored_for_an_sms_challenge()
+    {
+        GivenSmsChallenge();
+
+        var result = await _sut.HandleAsync(Command(code: CurrentCode) with { RememberDevice = true }, Ct);
+
+        // A trusted device replaces the code, never the first factor; after a texted code it would let the SIM alone sign in.
+        result.IsSuccess.ShouldBeTrue();
+        result.Value.TrustedDeviceToken.ShouldBeNull();
+        _addedDevices.ShouldBeEmpty();
+        _auditEntries.ShouldAllBe(entry => entry.EventType != AuthAuditEvents.TrustedDeviceAdded);
+    }
+
+    [Fact]
     public async Task Wrong_code_counts_on_the_challenge_and_the_user()
     {
         var wrongCode = Totp.ComputeCode(_secret, Totp.TimeStepAt(Now) + 2);
@@ -509,6 +534,16 @@ public sealed class VerifyMfaCommandHandlerTests
     {
         var challenge = MfaChallenge.Issue(
             _user.Id, ChallengeHash, _user.SecurityStamp, DeviceName, AuthenticationMethods.Federated, TimeSpan.FromMinutes(5), IssuedAt);
+        _challenges.GetByTokenHashAsync(ChallengeHash, Arg.Any<CancellationToken>()).Returns(challenge);
+        _challenges.TryConsumeAsync(challenge.Id, Now, 5, Arg.Any<CancellationToken>()).Returns(true);
+        return challenge;
+    }
+
+    // Replaces the password challenge the constructor set up with one issued after a texted sign-in code (same token and stamp).
+    private MfaChallenge GivenSmsChallenge()
+    {
+        var challenge = MfaChallenge.Issue(
+            _user.Id, ChallengeHash, _user.SecurityStamp, DeviceName, AuthenticationMethods.Sms, TimeSpan.FromMinutes(5), IssuedAt);
         _challenges.GetByTokenHashAsync(ChallengeHash, Arg.Any<CancellationToken>()).Returns(challenge);
         _challenges.TryConsumeAsync(challenge.Id, Now, 5, Arg.Any<CancellationToken>()).Returns(true);
         return challenge;

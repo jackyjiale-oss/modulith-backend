@@ -2,7 +2,7 @@
 
 # Routes
 
-Rows: 69
+Rows: 70
 
 | module | method | route | handler | permission | file |
 | --- | --- | --- | --- | --- | --- |
@@ -50,6 +50,7 @@ Rows: 69
 | Auth | POST | /api/v1/auth/password/forgot | ForgotPasswordCommand | anonymous | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/AuthEndpoints.cs |
 | Auth | POST | /api/v1/auth/password/reset | ResetPasswordCommand | anonymous | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/AuthEndpoints.cs |
 | Auth | POST | /api/v1/auth/phone/sign-in/send | SendPhoneSignInCodeCommand | anonymous | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/PhoneSignInEndpoints.cs |
+| Auth | POST | /api/v1/auth/phone/sign-in/verify | VerifyPhoneSignInCommand | anonymous | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/PhoneSignInEndpoints.cs |
 | Auth | POST | /api/v1/auth/register | RegisterCommand | anonymous | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/AuthEndpoints.cs |
 | Auth | POST | /api/v1/auth/step-up | StepUpCommand | authenticated | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/AuthEndpoints.cs |
 | Auth | POST | /api/v1/auth/token/refresh | RefreshTokenCommand | anonymous | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/AuthEndpoints.cs |
