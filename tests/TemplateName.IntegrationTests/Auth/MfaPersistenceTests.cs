@@ -416,8 +416,7 @@ public sealed class MfaPersistenceTests(IntegrationTestWebAppFactory factory) : 
             var migrator = context.GetService<IMigrator>();
             await migrator.MigrateAsync(PreviousMigration, Ct);
             var user = NewUser("alice@example.com");
-            context.Add(user);
-            await context.SaveChangesAsync(Ct);
+            await LegacyUserRows.InsertAsync(context, user, Ct);
             var sessionId = Guid.NewGuid();
             var createdAt = new DateTime(2025, 12, 24, 8, 30, 15, 123, DateTimeKind.Utc);
             await context.Database.ExecuteSqlAsync(

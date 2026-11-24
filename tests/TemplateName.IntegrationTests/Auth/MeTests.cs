@@ -32,7 +32,7 @@ public sealed class MeTests(IntegrationTestWebAppFactory factory) : IntegrationT
 
         // Exactly these members: never a hash, a stamp or any token material.
         body.EnumerateObject().Select(property => property.Name).ShouldBe(
-            ["id", "email", "emailConfirmed", "displayName", "locale", "timeZone", "roles", "permissions"],
+            ["id", "email", "emailConfirmed", "displayName", "locale", "timeZone", "roles", "permissions", "phoneNumber", "phoneNumberVerifiedAt"],
             ignoreOrder: true);
         body.GetProperty("id").GetGuid().ShouldBe(signedIn.UserId);
         body.GetProperty("email").GetString().ShouldBe(signedIn.Email);

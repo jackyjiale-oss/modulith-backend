@@ -243,8 +243,7 @@ public sealed class ExternalLoginPersistenceTests(IntegrationTestWebAppFactory f
             var migrator = context.GetService<IMigrator>();
             await migrator.MigrateAsync(PreviousMigration, Ct);
             var user = NewUser("alice@example.com");
-            context.Add(user);
-            await context.SaveChangesAsync(Ct);
+            await LegacyUserRows.InsertAsync(context, user, Ct);
             var challengeId = Guid.NewGuid();
             var createdAt = new DateTime(2026, 10, 20, 8, 30, 15, 123, DateTimeKind.Utc);
             await context.Database.ExecuteSqlAsync(
