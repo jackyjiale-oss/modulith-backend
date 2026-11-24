@@ -94,7 +94,7 @@ public sealed class AuthNotificationRenderTests
                 message.HtmlBody.ShouldContain(variables[name], customMessage: $"{typeCode} {culture} html shows {name}");
             }
 
-            if (type.SecretVariables.Contains("action_url"))
+            if (type.SecretVariables.ContainsKey("action_url"))
             {
                 message.HtmlBody.ShouldContain($"<a href=\"{EncodedActionUrl}\"");
                 message.HtmlBody.ShouldNotContain("&amp;amp;");
@@ -183,7 +183,7 @@ public sealed class AuthNotificationRenderTests
             ["provider"] = Provider,
         };
 
-        return type.Variables.Concat(type.SecretVariables).ToDictionary(name => name, name => values[name], StringComparer.Ordinal);
+        return type.Variables.Concat(type.SecretVariables.Keys).ToDictionary(name => name, name => values[name], StringComparer.Ordinal);
     }
 
     private static NotificationCatalog BuildCatalog()

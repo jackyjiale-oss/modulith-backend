@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
+using TemplateName.Modules.Notifications.Domain.Notifications;
 
 namespace TemplateName.Modules.Notifications.Application.Catalog;
 
@@ -11,6 +12,9 @@ internal sealed partial class NotificationCatalog(IEnumerable<INotificationTypeS
 {
     /// <summary>The longest allowed type code, in characters.</summary>
     public const int MaxCodeLength = 100;
+
+    // The channels whose messages may carry a decrypted secret.
+    private static readonly NotificationChannel[] SecretChannels = [NotificationChannel.Email];
 
     private readonly Lazy<Snapshot> _snapshot = new(() => Validate(sources));
 
@@ -75,7 +79,7 @@ internal sealed partial class NotificationCatalog(IEnumerable<INotificationTypeS
             throw Invalid(type.Code, sourceType, $"has mandatory channels that are not default channels ({string.Join(", ", notDefault)})");
         }
 
-        foreach (var variable in type.Variables.Concat(type.SecretVariables))
+        foreach (var variable in type.Variables.Concat(type.SecretVariables.Keys))
         {
             if (variable is null || !VariablePattern().IsMatch(variable))
             {
@@ -83,10 +87,23 @@ internal sealed partial class NotificationCatalog(IEnumerable<INotificationTypeS
             }
         }
 
-        var overlap = type.Variables.Intersect(type.SecretVariables).Order(StringComparer.Ordinal).ToList();
+        var overlap = type.Variables.Intersect(type.SecretVariables.Keys).Order(StringComparer.Ordinal).ToList();
         if (overlap.Count > 0)
         {
             throw Invalid(type.Code, sourceType, $"lists the same name as a variable and as a secret variable ({string.Join(", ", overlap)})");
+        }
+
+        var undefinedKinds = type.SecretVariables.Where(secret => !Enum.IsDefined(secret.Value)).Select(secret => secret.Key)
+            .Order(StringComparer.Ordinal).ToList();
+        if (undefinedKinds.Count > 0)
+        {
+            throw Invalid(type.Code, sourceType, $"declares secret variables of an undefined kind ({string.Join(", ", undefinedKinds)})");
+        }
+
+        // Only email and SMS receive a secret; in-app and push texts never show one, so such a type could never use it.
+        if (type.SecretVariables.Count > 0 && !type.DefaultChannels.Any(SecretChannels.Contains))
+        {
+            throw Invalid(type.Code, sourceType, "declares a secret variable but no default channel that receives secrets (email or SMS)");
         }
     }
 

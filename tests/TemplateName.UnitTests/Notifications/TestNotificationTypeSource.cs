@@ -57,12 +57,12 @@ internal sealed class TestNotificationTypeSource : INotificationTypeSource
         Define(NoEnglish, [NotificationChannel.InApp]),
         Define(Formatting, [NotificationChannel.InApp], ["occurred_at"]),
         Define(ParseError, [NotificationChannel.InApp], ["display_name"]),
-        Define(Broken, [NotificationChannel.InApp], ["display_name"], ["action_url"]),
+        Define(Broken, [NotificationChannel.Email, NotificationChannel.InApp], ["display_name"], ["action_url"]),
         Define(IncludeAttempt, [NotificationChannel.InApp], ["display_name"]),
         Define(ImportAttempt, [NotificationChannel.InApp], ["display_name"]),
         Define(BuiltinCall, [NotificationChannel.InApp], ["display_name"]),
         Define(MemberAccess, [NotificationChannel.InApp], ["display_name"]),
-        Define(ThisAccess, [NotificationChannel.InApp], ["display_name"], ["action_url"]),
+        Define(ThisAccess, [NotificationChannel.Email, NotificationChannel.InApp], ["display_name"], ["action_url"]),
         Define(RunawayLoop, [NotificationChannel.InApp], ["display_name"]),
         Define(RunawayRecursion, [NotificationChannel.InApp], ["display_name"]),
     ];
@@ -79,5 +79,5 @@ internal sealed class TestNotificationTypeSource : INotificationTypeSource
             channels,
             [],
             new HashSet<string>(variables ?? [], StringComparer.Ordinal),
-            new HashSet<string>(secretVariables ?? [], StringComparer.Ordinal));
+            (secretVariables ?? []).ToDictionary(name => name, _ => SecretKind.Link, StringComparer.Ordinal));
 }

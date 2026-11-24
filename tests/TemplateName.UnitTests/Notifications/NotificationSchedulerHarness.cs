@@ -67,7 +67,7 @@ internal sealed class NotificationSchedulerHarness
     public RecordingLogger<NotificationScheduler> Logger { get; } = new();
 
     public NotificationCatalog Catalog { get; } =
-        new([new AuthNotificationTypeSource(), new TestNotificationTypeSource(), new PushTestTypeSource()]);
+        new([new AuthNotificationTypeSource(), new TestNotificationTypeSource(), new PushTestTypeSource(), new CodeTestTypeSource()]);
 
     public List<Notification> Added { get; } = [];
 
@@ -141,6 +141,24 @@ internal sealed class PushTestTypeSource : INotificationTypeSource
             [NotificationChannel.Email, NotificationChannel.Push],
             [NotificationChannel.Email],
             new HashSet<string>(["display_name"], StringComparer.Ordinal),
-            new HashSet<string>(StringComparer.Ordinal)),
+            new Dictionary<string, SecretKind>(StringComparer.Ordinal)),
+    ];
+}
+
+/// <summary>A <c>Critical</c> email-only type whose secret <c>code</c> is a <see cref="SecretKind.Code"/>, for the scheduler's code rule.</summary>
+internal sealed class CodeTestTypeSource : INotificationTypeSource
+{
+    public const string CodeNotice = "test.code_notice";
+
+    public IReadOnlyCollection<NotificationTypeDefinition> Types { get; } =
+    [
+        new(
+            CodeNotice,
+            NotificationCategory.Security,
+            NotificationPriority.Critical,
+            [NotificationChannel.Email],
+            [NotificationChannel.Email],
+            new HashSet<string>(StringComparer.Ordinal),
+            new Dictionary<string, SecretKind>(StringComparer.Ordinal) { ["code"] = SecretKind.Code }),
     ];
 }

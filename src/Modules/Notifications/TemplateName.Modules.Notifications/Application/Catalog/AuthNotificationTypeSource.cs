@@ -60,5 +60,5 @@ internal sealed class AuthNotificationTypeSource : INotificationTypeSource
             channels,
             EmailOnly,
             new HashSet<string>(variables, StringComparer.Ordinal),
-            new HashSet<string>(secretVariables, StringComparer.Ordinal));
+            secretVariables.ToDictionary(name => name, _ => SecretKind.Link, StringComparer.Ordinal));
 }

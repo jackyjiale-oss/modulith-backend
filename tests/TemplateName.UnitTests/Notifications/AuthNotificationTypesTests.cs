@@ -173,7 +173,7 @@ public sealed class AuthNotificationTypesTests
         var type = Source.Types.Single(candidate => candidate.Code == code);
 
         type.Variables.ShouldBe(variables.Split(','), ignoreOrder: true);
-        type.SecretVariables.ShouldBe(secrets.Split(',', StringSplitOptions.RemoveEmptyEntries), ignoreOrder: true);
+        type.SecretVariables.Keys.ShouldBe(secrets.Split(',', StringSplitOptions.RemoveEmptyEntries), ignoreOrder: true);
     }
 
     [Fact]

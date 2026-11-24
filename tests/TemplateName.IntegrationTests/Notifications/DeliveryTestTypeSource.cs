@@ -34,5 +34,5 @@ internal sealed class DeliveryTestTypeSource : INotificationTypeSource
             [channel],
             [],
             new HashSet<string>(["display_name"], StringComparer.Ordinal),
-            new HashSet<string>(StringComparer.Ordinal));
+            new Dictionary<string, SecretKind>(StringComparer.Ordinal));
 }
