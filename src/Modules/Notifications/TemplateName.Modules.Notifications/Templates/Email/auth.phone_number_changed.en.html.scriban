@@ -1,0 +1,4 @@
+<p>Hello {{ display_name }},</p>
+<p>{{ if kind == "added" }}A phone number ending in {{ last_digits }} was added to your account.{{ else if kind == "replaced" }}The phone number on your account was changed to one ending in {{ last_digits }}. Your other sessions were signed out.{{ else if kind == "removed" }}The phone number ending in {{ last_digits }} was removed from your account. Your other sessions were signed out.{{ end }}</p>
+<p>The change was made on {{ occurred_at }} ({{ time_zone }}).</p>
+<p>If this was not you, reset your password now and contact your administrator.</p>

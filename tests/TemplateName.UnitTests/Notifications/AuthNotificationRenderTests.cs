@@ -52,22 +52,25 @@ public sealed class AuthNotificationRenderTests
     }
 
     [Fact]
-    public void Catalog_holds_all_thirteen_auth_types()
+    public void Catalog_holds_all_fifteen_auth_types()
     {
-        Catalog.All.Count.ShouldBe(13);
+        Catalog.All.Count.ShouldBe(15);
     }
 
     [Theory]
-    [InlineData("en")]
-    [InlineData("ms")]
-    [InlineData("zh-Hans")]
-    public void The_sms_template_fits_one_segment(string culture)
+    [InlineData(AuthNotificationTypes.PhoneVerification, "en")]
+    [InlineData(AuthNotificationTypes.PhoneVerification, "ms")]
+    [InlineData(AuthNotificationTypes.PhoneVerification, "zh-Hans")]
+    [InlineData(AuthNotificationTypes.PhoneSignIn, "en")]
+    [InlineData(AuthNotificationTypes.PhoneSignIn, "ms")]
+    [InlineData(AuthNotificationTypes.PhoneSignIn, "zh-Hans")]
+    public void The_sms_template_fits_one_segment(string typeCode, string culture)
     {
-        var type = Catalog.Find(AuthNotificationTypes.PhoneVerification).ShouldNotBeNull();
+        var type = Catalog.Find(typeCode).ShouldNotBeNull();
         var variables = VariablesOf(type, "Aisha");
         variables["expires_in_minutes"] = "10";
 
-        var message = Renderer.Render(AuthNotificationTypes.PhoneVerification, NotificationChannel.Sms, culture, variables);
+        var message = Renderer.Render(typeCode, NotificationChannel.Sms, culture, variables);
 
         message.TextBody.ShouldContain(Code);
         message.TextBody.ShouldContain("10");
@@ -81,6 +84,44 @@ public sealed class AuthNotificationRenderTests
             message.TextBody.All(Gsm7Basic.Contains).ShouldBeTrue(message.TextBody);
             message.TextBody.Length.ShouldBeLessThanOrEqualTo(160, message.TextBody);
         }
+    }
+
+    [Theory]
+    [InlineData("added", "en")]
+    [InlineData("replaced", "en")]
+    [InlineData("removed", "en")]
+    [InlineData("added", "ms")]
+    [InlineData("replaced", "ms")]
+    [InlineData("removed", "ms")]
+    [InlineData("added", "zh-Hans")]
+    [InlineData("replaced", "zh-Hans")]
+    [InlineData("removed", "zh-Hans")]
+    public void Phone_number_changed_renders_each_kind_in_every_culture(string kind, string culture)
+    {
+        var type = Catalog.Find(AuthNotificationTypes.PhoneNumberChanged).ShouldNotBeNull();
+        var variables = VariablesOf(type, "Aisha");
+        variables["kind"] = kind;
+
+        var message = Renderer.Render(AuthNotificationTypes.PhoneNumberChanged, NotificationChannel.Email, culture, variables);
+
+        message.Subject.ShouldNotBeNullOrWhiteSpace();
+        message.TextBody.ShouldContain("789");
+        message.TextBody.ShouldContain(OccurredAt);
+        message.HtmlBody.ShouldNotBeNull().ShouldContain("789");
+    }
+
+    [Fact]
+    public void The_three_kinds_say_different_things()
+    {
+        var type = Catalog.Find(AuthNotificationTypes.PhoneNumberChanged).ShouldNotBeNull();
+        var bodies = new[] { "added", "replaced", "removed" }.Select(kind =>
+        {
+            var variables = VariablesOf(type, "Aisha");
+            variables["kind"] = kind;
+            return Renderer.Render(AuthNotificationTypes.PhoneNumberChanged, NotificationChannel.Email, "en", variables).TextBody;
+        });
+
+        bodies.Distinct(StringComparer.Ordinal).Count().ShouldBe(3);
     }
 
     [Theory]
@@ -130,8 +171,9 @@ public sealed class AuthNotificationRenderTests
             message.TextBody.ShouldContain("Aisha");
             message.TextBody.ShouldNotContain("<");
 
-            // "change" selects a sentence (MfaNotificationTemplateTests), so its value is not printed.
-            foreach (var name in type.Variables.Where(name => name is not ("display_name" or "change")))
+            // "change" and "kind" select a sentence (MfaNotificationTemplateTests, Phone_number_changed_renders_each_kind_in_every_culture),
+            // so their values are not printed.
+            foreach (var name in type.Variables.Where(name => name is not ("display_name" or "change" or "kind")))
             {
                 message.TextBody.ShouldContain(variables[name], customMessage: $"{typeCode} {culture} text shows {name}");
                 message.HtmlBody.ShouldContain(variables[name], customMessage: $"{typeCode} {culture} html shows {name}");
@@ -226,6 +268,8 @@ public sealed class AuthNotificationRenderTests
             ["time_zone"] = TimeZone,
             ["action_url"] = ActionUrl,
             ["change"] = "enabled",
+            ["kind"] = "replaced",
+            ["last_digits"] = "789",
             ["ip_address"] = IpAddress,
             ["provider"] = Provider,
             ["code"] = Code,

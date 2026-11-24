@@ -249,6 +249,50 @@ public sealed class AuthEventHandlerTests
         _harness.Inbox.Received(1).Record(_eventId, handler.GetType().FullName!);
     }
 
+    [Fact]
+    public async Task Sign_in_code_is_scheduled_to_the_events_number_with_the_protected_code_unchanged()
+    {
+        _harness.Sms.Enabled = true;
+        _harness.Decrypts("CfDJ8-protected-code", "042137");
+        var expiresAt = Now.AddMinutes(4).AddSeconds(30);
+        var handler = new PhoneSignInCodeRequestedIntegrationEventHandler(_harness.CreateScheduler(), _harness.Time);
+
+        await handler.HandleAsync(
+            new PhoneSignInCodeRequestedIntegrationEvent(_eventId, OccurredAt, _userId, "+60123456789", "CfDJ8-protected-code", expiresAt),
+            Ct);
+
+        var notification = _harness.Added.ShouldHaveSingleItem();
+        notification.TypeCode.ShouldBe(AuthNotificationTypes.PhoneSignIn);
+        notification.ExpiresAt.ShouldBe(expiresAt.UtcDateTime);
+        Variables(notification.Data).ShouldBe(new Dictionary<string, string> { ["expires_in_minutes"] = "5" });
+        Variables(notification.ProtectedData!).ShouldBe(new Dictionary<string, string> { ["code"] = "CfDJ8-protected-code" });
+        var delivery = notification.Deliveries.ShouldHaveSingleItem();
+        delivery.Channel.ShouldBe(NotificationChannel.Sms);
+        delivery.Destination.ShouldBe("+60123456789");
+    }
+
+    [Theory]
+    [InlineData(PhoneNumberChangeKind.Added, "added")]
+    [InlineData(PhoneNumberChangeKind.Replaced, "replaced")]
+    [InlineData(PhoneNumberChangeKind.Removed, "removed")]
+    public async Task Change_maps_the_kind_and_last_digits(PhoneNumberChangeKind kind, string expectedKind)
+    {
+        var handler = new PhoneNumberChangedIntegrationEventHandler(_harness.CreateScheduler());
+
+        await handler.HandleAsync(new PhoneNumberChangedIntegrationEvent(_eventId, OccurredAt, _userId, kind, "789"), Ct);
+
+        var notification = AssertNotice(AuthNotificationTypes.PhoneNumberChanged, handler.GetType());
+        Variables(notification.Data).ShouldBe(new Dictionary<string, string>
+        {
+            ["display_name"] = "Alice",
+            ["kind"] = expectedKind,
+            ["last_digits"] = "789",
+            ["occurred_at"] = "2026-03-01 16:05",
+            ["time_zone"] = KualaLumpur,
+        });
+        notification.Deliveries.ShouldHaveSingleItem().Channel.ShouldBe(NotificationChannel.Email);
+    }
+
     private void AssertLink(string typeCode, DateTimeOffset expiresAt, string expectedMinutes, Type handlerType)
     {
         var notification = _harness.Added.ShouldHaveSingleItem();

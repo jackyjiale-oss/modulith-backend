@@ -24,14 +24,18 @@ public sealed class AuthNotificationTypesTests
         AuthNotificationTypes.ExternalLoginLinked,
         AuthNotificationTypes.ExternalLoginUnlinked,
         AuthNotificationTypes.PhoneVerification,
+        AuthNotificationTypes.PhoneSignIn,
+        AuthNotificationTypes.PhoneNumberChanged,
     ];
+
+    private static readonly string[] SmsCodes = [AuthNotificationTypes.PhoneVerification, AuthNotificationTypes.PhoneSignIn];
 
     private static readonly AuthNotificationTypeSource Source = new();
 
     public static TheoryData<string> Codes => new(AllCodes);
 
     [Fact]
-    public void Source_declares_exactly_the_thirteen_auth_types()
+    public void Source_declares_exactly_the_fifteen_auth_types()
     {
         Source.Types.Select(type => type.Code).ShouldBe(
             [
@@ -48,14 +52,16 @@ public sealed class AuthNotificationTypesTests
                 "auth.external_login_linked",
                 "auth.external_login_unlinked",
                 "auth.phone_verification",
+                "auth.phone_sign_in",
+                "auth.phone_number_changed",
             ],
             ignoreOrder: true);
     }
 
     [Fact]
-    public void Every_auth_type_but_the_phone_code_is_security_critical_with_mandatory_email()
+    public void Every_auth_type_but_the_phone_codes_is_security_critical_with_mandatory_email()
     {
-        foreach (var type in Source.Types.Where(type => type.Code != AuthNotificationTypes.PhoneVerification))
+        foreach (var type in Source.Types.Where(type => !SmsCodes.Contains(type.Code)))
         {
             type.Category.ShouldBe(NotificationCategory.Security, type.Code);
             type.Priority.ShouldBe(NotificationPriority.Critical, type.Code);
@@ -66,11 +72,13 @@ public sealed class AuthNotificationTypesTests
         }
     }
 
-    [Fact]
-    public void The_phone_code_type_is_critical_mandatory_sms()
+    [Theory]
+    [InlineData(AuthNotificationTypes.PhoneVerification, "auth.phone_verification")]
+    [InlineData(AuthNotificationTypes.PhoneSignIn, "auth.phone_sign_in")]
+    public void The_phone_code_types_are_critical_mandatory_sms(string code, string expected)
     {
-        AuthNotificationTypes.PhoneVerification.ShouldBe("auth.phone_verification");
-        var type = Source.Types.Single(candidate => candidate.Code == AuthNotificationTypes.PhoneVerification);
+        code.ShouldBe(expected);
+        var type = Source.Types.Single(candidate => candidate.Code == code);
 
         type.Category.ShouldBe(NotificationCategory.Security);
         type.Priority.ShouldBe(NotificationPriority.Critical);
@@ -135,7 +143,7 @@ public sealed class AuthNotificationTypesTests
             type.MandatoryChannels.ShouldBe([NotificationChannel.Email], code);
         }
 
-        foreach (var type in Source.Types.Where(type => !withInApp.Contains(type.Code) && type.Code != AuthNotificationTypes.PhoneVerification))
+        foreach (var type in Source.Types.Where(type => !withInApp.Contains(type.Code) && !SmsCodes.Contains(type.Code)))
         {
             type.DefaultChannels.Where(channel => channel != NotificationChannel.Push).ShouldBe([NotificationChannel.Email], type.Code);
         }
@@ -186,12 +194,25 @@ public sealed class AuthNotificationTypesTests
     [InlineData(AuthNotificationTypes.ExternalLoginLinked, "display_name,provider,occurred_at,time_zone", "")]
     [InlineData(AuthNotificationTypes.ExternalLoginUnlinked, "display_name,provider,occurred_at,time_zone", "")]
     [InlineData(AuthNotificationTypes.PhoneVerification, "expires_in_minutes", "code")]
+    [InlineData(AuthNotificationTypes.PhoneSignIn, "expires_in_minutes", "code")]
+    [InlineData(AuthNotificationTypes.PhoneNumberChanged, "display_name,kind,last_digits,occurred_at,time_zone", "")]
     public void Types_declare_their_variables_and_secrets(string code, string variables, string secrets)
     {
         var type = Source.Types.Single(candidate => candidate.Code == code);
 
         type.Variables.ShouldBe(variables.Split(','), ignoreOrder: true);
         type.SecretVariables.Keys.ShouldBe(secrets.Split(',', StringSplitOptions.RemoveEmptyEntries), ignoreOrder: true);
+    }
+
+    [Fact]
+    public void The_number_change_notice_is_mandatory_email_only()
+    {
+        AuthNotificationTypes.PhoneNumberChanged.ShouldBe("auth.phone_number_changed");
+        var type = Source.Types.Single(candidate => candidate.Code == AuthNotificationTypes.PhoneNumberChanged);
+
+        type.DefaultChannels.ShouldBe([NotificationChannel.Email]);
+        type.MandatoryChannels.ShouldBe([NotificationChannel.Email]);
+        type.SecretVariables.ShouldBeEmpty();
     }
 
     [Fact]

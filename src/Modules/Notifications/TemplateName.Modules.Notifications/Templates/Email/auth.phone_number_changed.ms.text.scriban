@@ -1,0 +1,7 @@
+Helo {{ display_name }},
+
+{{ if kind == "added" }}Nombor telefon yang berakhir dengan {{ last_digits }} telah ditambah pada akaun anda.{{ else if kind == "replaced" }}Nombor telefon pada akaun anda telah ditukar kepada nombor yang berakhir dengan {{ last_digits }}. Sesi anda yang lain telah dilog keluar.{{ else if kind == "removed" }}Nombor telefon yang berakhir dengan {{ last_digits }} telah dibuang daripada akaun anda. Sesi anda yang lain telah dilog keluar.{{ end }}
+
+Perubahan ini dibuat pada {{ occurred_at }} ({{ time_zone }}).
+
+Jika ini bukan anda, tetapkan semula kata laluan anda sekarang dan hubungi pentadbir anda.

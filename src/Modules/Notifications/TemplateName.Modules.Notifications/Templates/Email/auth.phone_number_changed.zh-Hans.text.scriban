@@ -1,0 +1,7 @@
+{{ display_name }}，您好：
+
+{{ if kind == "added" }}尾号为 {{ last_digits }} 的手机号码已添加到您的账户。{{ else if kind == "replaced" }}您账户的手机号码已更换为尾号 {{ last_digits }} 的号码，您的其他会话已退出登录。{{ else if kind == "removed" }}尾号为 {{ last_digits }} 的手机号码已从您的账户中移除，您的其他会话已退出登录。{{ end }}
+
+此更改发生于 {{ occurred_at }} ({{ time_zone }})。
+
+如果这不是您本人的操作，请立即重置密码并联系管理员。

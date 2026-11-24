@@ -1,0 +1,1 @@
+{{ product_name }}：您的登录验证码是 {{ code }}，{{ expires_in_minutes }} 分钟内有效。请勿告知他人。
