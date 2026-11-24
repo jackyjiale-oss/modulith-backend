@@ -162,7 +162,7 @@ One SQL Server database, one schema per owner, each with its own `__EFMigrations
 | Schema | Owner | Context | Tables | Migrations |
 |---|---|---|---|---|
 | `platform` | Infrastructure.Common (building block) | `PlatformDbContext` | `IdempotencyKeys`, `JobStates` | `src/BuildingBlocks/TemplateName.Infrastructure.Common/Idempotency/Migrations/` |
-| `auth` | Auth module | `AuthDbContext` | `Users`, `PasswordHistory`, `UserRoles`, `Roles`, `Permissions`, `RolePermissions`, `UserExternalLogins`, `UserSessions`, `RefreshTokens`, `VerificationCodes`, `UserMfaMethods`, `RecoveryCodes`, `MfaChallenges`, `TrustedDevices`, `AuthAuditLogs`, `DataProtectionKeys`, `OutboxMessages`, `OutboxMessageConsumers` | `src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Persistence/Migrations/` |
+| `auth` | Auth module | `AuthDbContext` | `Users`, `PasswordHistory`, `UserRoles`, `Roles`, `Permissions`, `RolePermissions`, `UserExternalLogins`, `UserSessions`, `RefreshTokens`, `VerificationCodes`, `PhoneVerificationCodes`, `UserMfaMethods`, `RecoveryCodes`, `MfaChallenges`, `TrustedDevices`, `AuthAuditLogs`, `DataProtectionKeys`, `OutboxMessages`, `OutboxMessageConsumers` | `src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Persistence/Migrations/` |
 <!--#if (notifications)-->
 | `notify` | Notifications module | `NotificationsDbContext` | `Notifications`, `Deliveries`, `InAppNotifications`, `UserPreferences`, `UserSettings`, `HubTickets`, `InboxMessages` (no outbox) | `src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Persistence/Migrations/` |
 <!--#endif-->

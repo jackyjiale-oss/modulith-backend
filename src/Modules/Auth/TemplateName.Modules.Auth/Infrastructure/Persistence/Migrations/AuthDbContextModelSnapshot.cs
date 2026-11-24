@@ -18,7 +18,7 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("auth")
-                .HasAnnotation("ProductVersion", "10.0.14")
+                .HasAnnotation("ProductVersion", "10.0.15")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -679,6 +679,14 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<string>("PhoneNumber")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTime?>("PhoneNumberVerifiedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .IsRequired()
@@ -711,6 +719,11 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("IX_Users_NormalizedEmail")
                         .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("PhoneNumber")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Users_PhoneNumber")
+                        .HasFilter("[PhoneNumber] IS NOT NULL AND [IsDeleted] = 0");
 
                     b.HasIndex("CreatedAt", "Id")
                         .HasFilter("[IsDeleted] = 0");
@@ -781,6 +794,57 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                     b.HasIndex("RoleId");
 
                     b.ToTable("UserRoles", "auth");
+                });
+
+            modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Verification.PhoneVerificationCode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("varbinary(32)");
+
+                    b.Property<DateTime?>("ConsumedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime?>("InvalidatedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("PhoneNumber")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<byte[]>("Salt")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("varbinary(16)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.ToTable("PhoneVerificationCodes", "auth");
                 });
 
             modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Verification.VerificationCode", b =>
@@ -935,6 +999,15 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                         .WithMany("Roles")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("TemplateName.Modules.Auth.Domain.Verification.PhoneVerificationCode", b =>
+                {
+                    b.HasOne("TemplateName.Modules.Auth.Domain.Users.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 

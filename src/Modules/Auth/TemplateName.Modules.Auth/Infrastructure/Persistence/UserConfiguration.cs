@@ -27,11 +27,18 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(user => user.DisplayName).HasMaxLength(DisplayNameMaxLength);
         builder.Property(user => user.Locale).HasMaxLength(LocaleMaxLength);
         builder.Property(user => user.TimeZone).HasMaxLength(TimeZoneMaxLength);
+        builder.Property(user => user.PhoneNumber).HasMaxLength(User.MaxPhoneNumberLength);
         builder.Property(user => user.RowVersion).IsRowVersion();
 
         // A soft-deleted user frees the address for a new account. The name is the one handlers turn a refusal of into "taken"
         // (UniqueIndexNames.UserEmail, also EF's default name, so the schema does not change).
         builder.HasIndex(user => user.NormalizedEmail).IsUnique().HasFilter("[IsDeleted] = 0").HasDatabaseName(UniqueIndexNames.UserEmail);
+
+        // A verified number belongs to one account that is not deleted; the confirm handler turns a refusal into 409.
+        builder.HasIndex(user => user.PhoneNumber)
+            .IsUnique()
+            .HasFilter("[PhoneNumber] IS NOT NULL AND [IsDeleted] = 0")
+            .HasDatabaseName(UniqueIndexNames.UserPhoneNumber);
 
         // The user list (review P7): its email sort and prefix search use the index above, its createdAt sort this one. Both are
         // filtered like the list, which never shows soft-deleted users.

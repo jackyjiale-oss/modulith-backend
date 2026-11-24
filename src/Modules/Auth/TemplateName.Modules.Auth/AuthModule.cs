@@ -74,6 +74,7 @@ public static class AuthModule
         services.AddScoped<IPermissionRepository, PermissionRepository>();
         services.AddScoped<ISessionRepository, SessionRepository>();
         services.AddScoped<IVerificationCodeRepository, VerificationCodeRepository>();
+        services.AddScoped<IPhoneVerificationCodeRepository, PhoneVerificationCodeRepository>();
         services.AddScoped<IAuthAuditWriter, AuthAuditWriter>();
         services.AddScoped<IUnitOfWork>(serviceProvider => serviceProvider.GetRequiredService<AuthDbContext>());
         services.AddScoped<SuperAdminRules>();
@@ -267,9 +268,10 @@ public static class AuthModule
     }
 
     /// <summary>
-    /// Registers <c>Auth:Retention</c> (validated on start: a negative value is refused) and the six recurring cleanup jobs that delete what
+    /// Registers <c>Auth:Retention</c> (validated on start: a negative value is refused) and the seven recurring cleanup jobs that delete what
     /// it covers: <c>AuthVerificationCodesCleanup</c> and <c>AuthMfaChallengesCleanup</c> hourly, <c>AuthRefreshTokensCleanup</c>,
-    /// <c>AuthSessionsCleanup</c>, <c>AuthTrustedDevicesCleanup</c> and <c>AuthAuditLogsCleanup</c> daily (the last is off until
+    /// <c>AuthSessionsCleanup</c>, <c>AuthTrustedDevicesCleanup</c>, <c>AuthPhoneVerificationCodesCleanup</c> and <c>AuthAuditLogsCleanup</c>
+    /// daily (the last is off until
     /// <c>Auth:Retention:AuditLogs</c> is set). Requires <c>AddInfrastructureCommon</c>, which registers the scheduler and the batch settings.
     /// </summary>
     internal static void AddRetention(IServiceCollection services, IConfiguration configuration)
@@ -285,6 +287,7 @@ public static class AuthModule
         services.AddRecurringJob<MfaChallengesCleanupJob>();
         services.AddRecurringJob<TrustedDevicesCleanupJob>();
         services.AddRecurringJob<AuditLogsCleanupJob>();
+        services.AddRecurringJob<PhoneVerificationCodesCleanupJob>();
     }
 
     /// <summary>
