@@ -186,7 +186,7 @@ public sealed class NotificationTests
     [InlineData("")]
     [InlineData("60123456789")]
     [InlineData("+0123456789")]
-    [InlineData("+601234")]
+    [InlineData("+60123")]
     [InlineData("+6012345678901234")]
     [InlineData("+60-123-456-789")]
     public void An_sms_delivery_without_a_valid_number_is_refused_without_quoting_it(string? destination)

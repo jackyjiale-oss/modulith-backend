@@ -75,6 +75,10 @@ internal sealed class UserRepository(AuthDbContext context) : IUserRepository
             user => user.Id == userId && user.Status == UserStatus.Active && user.Roles.Any(assignment => assignment.RoleId == roleId),
             cancellationToken);
 
+    // The soft-delete query filter applies, as the unique index's filter does.
+    public Task<bool> IsPhoneNumberTakenAsync(string e164, Guid exceptUserId, CancellationToken cancellationToken)
+        => context.Set<User>().AnyAsync(user => user.PhoneNumber == e164 && user.Id != exceptUserId, cancellationToken);
+
     public Task<bool> AnyOtherActiveInRoleAsync(Guid roleId, Guid exceptUserId, CancellationToken cancellationToken)
         => context.Set<User>().AnyAsync(
             user => user.Id != exceptUserId && user.Status == UserStatus.Active && user.Roles.Any(assignment => assignment.RoleId == roleId),

@@ -119,6 +119,20 @@ public sealed class ConfirmPhoneCommandHandlerTests
     }
 
     [Fact]
+    public async Task A_number_another_account_holds_is_taken_before_any_save()
+    {
+        // Checked before saving, so the unique index (whose refusal EF Core logs with the number) is reached only by a true race.
+        _users.IsPhoneNumberTakenAsync(Number, _user.Id, Arg.Any<CancellationToken>()).Returns(true);
+
+        var result = await _sut.HandleAsync(new ConfirmPhoneCommand(Code), Ct);
+
+        result.Error.ShouldBe(PhoneErrors.PhoneNumberTaken);
+        await _codes.Received(1).TryConsumeAsync(_pending.Id, Now, Ct);
+        await _unitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(string.Empty, Ct);
+        _auditEntries.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task A_number_verified_by_someone_else_meanwhile_is_taken()
     {
         _user.VerifyPhoneNumber("+60198765432", Now.AddDays(-1));

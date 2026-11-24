@@ -9,6 +9,7 @@ using TemplateName.Application.Common.Security;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.IntegrationTests.Infrastructure;
 using TemplateName.Modules.Auth.Domain.Users;
+using TemplateName.Modules.Auth.Domain.Verification;
 using TemplateName.Modules.Auth.Domain.Verification.Events;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
 
@@ -108,6 +109,53 @@ public sealed class PhoneEndpointsTests(IntegrationTestWebAppFactory factory) : 
     }
 
     [Fact]
+    public async Task Parallel_requests_of_one_user_issue_one_code()
+    {
+        await using var host = EnabledHost();
+        var caller = await SignInAsync();
+        using var client = await CreateClientAsync(host);
+
+        var responses = await Task.WhenAll(Enumerable.Range(0, 5)
+            .Select(_ => client.PostAsJsonAsync(PhoneRoute, new { phoneNumber = Number }, Ct)));
+
+        // The user's row is written with each code, so its RowVersion lets one request through and refuses the others (409 or 429).
+        responses.Count(response => response.StatusCode == HttpStatusCode.Accepted).ShouldBe(1);
+        responses.ShouldAllBe(response => response.StatusCode == HttpStatusCode.Accepted
+            || response.StatusCode == HttpStatusCode.Conflict
+            || response.StatusCode == HttpStatusCode.TooManyRequests);
+        (await CodeCountAsync(caller.UserId)).ShouldBe(1);
+        foreach (var response in responses)
+        {
+            response.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Two_users_confirming_the_same_number_get_one_204_and_one_409()
+    {
+        await using var host = EnabledHost();
+        var first = await SignInAsync();
+        using var firstClient = await CreateClientAsync(host);
+        var second = await SignInAsync();
+        using var secondClient = await CreateClientAsync(host);
+        (await firstClient.PostAsJsonAsync(PhoneRoute, new { phoneNumber = Number }, Ct)).StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        (await secondClient.PostAsJsonAsync(PhoneRoute, new { phoneNumber = Number }, Ct)).StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        var firstCode = await CodeForAsync(host, first.UserId);
+        var secondCode = await CodeForAsync(host, second.UserId);
+
+        var confirmed = await Task.WhenAll(
+            firstClient.PostAsJsonAsync(ConfirmRoute, new { code = firstCode }, Ct),
+            secondClient.PostAsJsonAsync(ConfirmRoute, new { code = secondCode }, Ct));
+
+        confirmed.Select(response => response.StatusCode).ShouldBe([HttpStatusCode.NoContent, HttpStatusCode.Conflict], ignoreOrder: true);
+        await AssertProblemAsync(confirmed.Single(response => response.StatusCode == HttpStatusCode.Conflict), HttpStatusCode.Conflict, "auth.phone_number_taken");
+        foreach (var response in confirmed)
+        {
+            response.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task An_invalid_number_and_a_wrong_code_are_400()
     {
         await using var host = EnabledHost();
@@ -161,6 +209,33 @@ public sealed class PhoneEndpointsTests(IntegrationTestWebAppFactory factory) : 
             .Single(property => string.Equals(property.Name, "ProtectedCode", StringComparison.OrdinalIgnoreCase)).Value.GetString()!;
 
         return scope.ServiceProvider.GetRequiredService<ISecretProtector>().Unprotect(protectedCode);
+    }
+
+    /// <summary>The plain code of <paramref name="userId"/>'s newest request, decrypted from its outbox row.</summary>
+    private async Task<string> CodeForAsync(WebApplicationFactory<Program> host, Guid userId)
+    {
+        await using var scope = host.Services.CreateAsyncScope();
+        var messages = await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Set<OutboxMessage>().AsNoTracking()
+            .Where(row => row.Type == typeof(PhoneVerificationRequestedDomainEvent).FullName)
+            .OrderByDescending(row => row.OccurredAt)
+            .ToListAsync(Ct);
+        foreach (var message in messages)
+        {
+            using var content = JsonDocument.Parse(message.Content);
+            var properties = content.RootElement.EnumerateObject().ToDictionary(property => property.Name, property => property.Value.Clone(), StringComparer.OrdinalIgnoreCase);
+            if (properties["UserId"].GetGuid() == userId)
+            {
+                return scope.ServiceProvider.GetRequiredService<ISecretProtector>().Unprotect(properties["ProtectedCode"].GetString()!);
+            }
+        }
+
+        throw new InvalidOperationException("No phone code was requested for the user.");
+    }
+
+    private async Task<int> CodeCountAsync(Guid userId)
+    {
+        await using var scope = Factory.Services.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Set<PhoneVerificationCode>().CountAsync(code => code.UserId == userId, Ct);
     }
 
     private async Task SetPhoneNumberAsync(Guid userId, string number)

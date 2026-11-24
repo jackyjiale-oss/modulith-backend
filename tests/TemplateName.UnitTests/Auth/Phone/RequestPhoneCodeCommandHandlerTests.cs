@@ -85,6 +85,26 @@ public sealed class RequestPhoneCodeCommandHandlerTests
     }
 
     [Fact]
+    public async Task Issuing_a_code_writes_the_user_row_so_parallel_requests_conflict()
+    {
+        var result = await _sut.HandleAsync(new RequestPhoneCodeCommand(Number), Ct);
+
+        // The user's RowVersion guards the save: of two simultaneous requests only one can write the row, so the limits cannot be raced.
+        result.IsSuccess.ShouldBeTrue();
+        _user.PhoneCodeRequestedAt.ShouldBe(Now);
+    }
+
+    [Fact]
+    public async Task A_refused_request_does_not_touch_the_user()
+    {
+        _codes.GetLastIssuedAtAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(Now.AddSeconds(-20));
+
+        await _sut.HandleAsync(new RequestPhoneCodeCommand(Number), Ct);
+
+        _user.PhoneCodeRequestedAt.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task A_new_code_ends_the_previous_one()
     {
         var previous = PhoneVerificationCode.Issue(_user.Id, Number, "111111", "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-5));

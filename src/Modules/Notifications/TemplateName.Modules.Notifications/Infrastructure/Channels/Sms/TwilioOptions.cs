@@ -55,7 +55,7 @@ internal sealed class TwilioOptionsValidation(bool smsEnabled) : IValidateOption
         }
         else if (hasFrom && !SmsDestination.IsValid(options.From))
         {
-            failures.Add("Notifications:Sms:Twilio:From must be a number in E.164 (+ and 8 to 15 digits).");
+            failures.Add("Notifications:Sms:Twilio:From must be a number in E.164 (+ and 7 to 15 digits).");
         }
 
         return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);

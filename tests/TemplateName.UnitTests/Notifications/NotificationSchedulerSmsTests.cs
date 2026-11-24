@@ -61,7 +61,7 @@ public sealed class NotificationSchedulerSmsTests
     [InlineData(null)]
     [InlineData("0123456789")]
     [InlineData("+0123456789")]
-    [InlineData("+601234")]
+    [InlineData("+60123")]
     [InlineData("+6012345678901234")]
     [InlineData("+60 123456789")]
     public async Task No_valid_number_skips_sms(string? number)

@@ -64,6 +64,13 @@ internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
 
     public DateTimeOffset? PhoneNumberVerifiedAt { get; private set; }
 
+    /// <summary>
+    /// When the user last requested a phone code. Writing it makes each request a write of this row, so the row's version lets only one of
+    /// two simultaneous requests through and the cooldown and the daily cap cannot be raced.
+    /// </summary>
+    [AuditIgnore]
+    public DateTimeOffset? PhoneCodeRequestedAt { get; private set; }
+
     public DateTimeOffset? PasswordChangedAt { get; private set; }
 
     [AuditIgnore]
@@ -425,6 +432,9 @@ internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
         PhoneNumber = e164;
         PhoneNumberVerifiedAt = now;
     }
+
+    /// <summary>Records a phone code request (see <see cref="PhoneCodeRequestedAt"/>).</summary>
+    public void NotePhoneCodeRequested(DateTimeOffset now) => PhoneCodeRequestedAt = now;
 
     /// <summary>Removes the verified number; nothing changes when there is none.</summary>
     public void RemovePhoneNumber()

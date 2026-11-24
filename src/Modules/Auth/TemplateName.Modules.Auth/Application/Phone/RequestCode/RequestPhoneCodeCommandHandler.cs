@@ -19,8 +19,9 @@ namespace TemplateName.Modules.Auth.Application.Phone.RequestCode;
 /// <item>Replacing a verified number needs a fresh step-up (phone-number sign-in will trust that number); adding the first does not.</item>
 /// <item>The resend cooldown and the daily cap: otherwise <see cref="TooManyCodesError"/> with the time until the next code is allowed.</item>
 /// <item>Every pending code of the caller ends, a new one is issued (only its salted hash is stored) and its requested event, carrying
-/// the code encrypted with <see cref="ISecretProtector"/>, goes to the outbox in the same save. The plain code never leaves this
-/// method.</item>
+/// the code encrypted with <see cref="ISecretProtector"/>, goes to the outbox in the same save, with the user's
+/// <c>PhoneCodeRequestedAt</c>: writing the user row serializes simultaneous requests on its RowVersion. The plain code never leaves
+/// this method.</item>
 /// </list>
 /// The number is not checked against other accounts here, so the route does not tell whether a number has an account: only the person
 /// who receives the code learns, at confirmation, that it is taken.
@@ -77,8 +78,10 @@ internal sealed class RequestPhoneCodeCommandHandler(
         var plainCode = PhoneVerificationCode.NewCode();
         var code = PhoneVerificationCode.Issue(user.Id, number, plainCode, secretProtector.Protect(plainCode), settings.CodeLifetime, now);
         codes.Add(code);
+        user.NotePhoneCodeRequested(now);
 
-        // One save: the ended codes, the new code and the outbox row of its requested event.
+        // One save: the ended codes, the new code, the outbox row of its requested event and the user's request time. The user's
+        // RowVersion makes a simultaneous request's save fail (409 concurrency.conflict), so the cooldown and the cap cannot be raced.
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return new PhoneCodeResponse(code.ExpiresAt);

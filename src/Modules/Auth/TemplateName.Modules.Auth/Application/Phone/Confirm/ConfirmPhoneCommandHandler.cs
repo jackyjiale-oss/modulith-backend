@@ -18,8 +18,9 @@ namespace TemplateName.Modules.Auth.Application.Phone.Confirm;
 /// parallel guesses never exceed it; the answer is the same <see cref="PhoneErrors.InvalidCode"/> whatever the cause.</item>
 /// <item>The right code is consumed in one conditional statement (of two simultaneous confirmations exactly one goes on), the number
 /// becomes the user's, <c>auth.phone_number_verified</c> is audited, and one save commits it.</item>
-/// <item>When another account verified the number first, the unique index refuses the save: <see cref="PhoneErrors.PhoneNumberTaken"/>.
-/// The code stays used and the caller's previous number stays.</item>
+/// <item>When another account holds the number, <see cref="PhoneErrors.PhoneNumberTaken"/> without a save; when one verifies it between
+/// that check and the save, the unique index refuses the save with the same answer. Either way the code stays used and the caller's
+/// previous number stays.</item>
 /// </list>
 /// </summary>
 internal sealed class ConfirmPhoneCommandHandler(
@@ -60,6 +61,13 @@ internal sealed class ConfirmPhoneCommandHandler(
         }
 
         code.Consume(now);
+
+        // Checked before the save, so only a true race reaches the unique index, whose refusal EF Core logs with the number in it.
+        if (await users.IsPhoneNumberTakenAsync(code.PhoneNumber, user.Id, cancellationToken))
+        {
+            return Result.Failure(PhoneErrors.PhoneNumberTaken);
+        }
+
         user.VerifyPhoneNumber(code.PhoneNumber, now);
         auditWriter.Record(AuthAuditLog.Create(
             AuthAuditEvents.PhoneNumberVerified,

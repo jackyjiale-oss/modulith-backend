@@ -73,7 +73,7 @@ public sealed class AuditingTests
     {
         var ignored = AuditedTypes().ToDictionary(type => type.Name, type => MarkedPropertyNames(type, typeof(AuditIgnoreAttribute)));
 
-        ignored["User"].ShouldBe(["NormalizedEmail", "LastLoginAt", "AccessFailedCount", "PasswordHash", "SecurityStamp"], ignoreOrder: true);
+        ignored["User"].ShouldBe(["NormalizedEmail", "LastLoginAt", "AccessFailedCount", "PasswordHash", "SecurityStamp", "PhoneCodeRequestedAt"], ignoreOrder: true);
         ignored["Role"].ShouldBe(["NormalizedName"]);
         //#if (includeSample)
         ignored["LeaveRequest"].ShouldBeEmpty();
