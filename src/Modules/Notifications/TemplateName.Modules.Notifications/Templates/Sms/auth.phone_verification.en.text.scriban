@@ -1,0 +1,1 @@
+{{ product_name }}: your verification code is {{ code }}. It expires in {{ expires_in_minutes }} minutes.

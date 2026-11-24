@@ -23,6 +23,7 @@ public sealed class AuthNotificationTypesTests
         AuthNotificationTypes.NewDeviceLogin,
         AuthNotificationTypes.ExternalLoginLinked,
         AuthNotificationTypes.ExternalLoginUnlinked,
+        AuthNotificationTypes.PhoneVerification,
     ];
 
     private static readonly AuthNotificationTypeSource Source = new();
@@ -30,7 +31,7 @@ public sealed class AuthNotificationTypesTests
     public static TheoryData<string> Codes => new(AllCodes);
 
     [Fact]
-    public void Source_declares_exactly_the_twelve_auth_types()
+    public void Source_declares_exactly_the_thirteen_auth_types()
     {
         Source.Types.Select(type => type.Code).ShouldBe(
             [
@@ -46,14 +47,15 @@ public sealed class AuthNotificationTypesTests
                 "auth.new_device_login",
                 "auth.external_login_linked",
                 "auth.external_login_unlinked",
+                "auth.phone_verification",
             ],
             ignoreOrder: true);
     }
 
     [Fact]
-    public void Every_auth_type_is_security_critical_with_mandatory_email()
+    public void Every_auth_type_but_the_phone_code_is_security_critical_with_mandatory_email()
     {
-        foreach (var type in Source.Types)
+        foreach (var type in Source.Types.Where(type => type.Code != AuthNotificationTypes.PhoneVerification))
         {
             type.Category.ShouldBe(NotificationCategory.Security, type.Code);
             type.Priority.ShouldBe(NotificationPriority.Critical, type.Code);
@@ -62,6 +64,21 @@ public sealed class AuthNotificationTypesTests
             type.IsMandatory(NotificationChannel.Email).ShouldBeTrue(type.Code);
             type.Variables.ShouldContain("display_name", type.Code);
         }
+    }
+
+    [Fact]
+    public void The_phone_code_type_is_critical_mandatory_sms()
+    {
+        AuthNotificationTypes.PhoneVerification.ShouldBe("auth.phone_verification");
+        var type = Source.Types.Single(candidate => candidate.Code == AuthNotificationTypes.PhoneVerification);
+
+        type.Category.ShouldBe(NotificationCategory.Security);
+        type.Priority.ShouldBe(NotificationPriority.Critical);
+        type.DefaultChannels.ShouldBe([NotificationChannel.Sms]);
+        type.MandatoryChannels.ShouldBe([NotificationChannel.Sms]);
+        type.IsConfigurable.ShouldBeFalse();
+        type.Variables.ShouldBe(["expires_in_minutes"]);
+        type.SecretVariables.ShouldBe(new Dictionary<string, SecretKind> { ["code"] = SecretKind.Code });
     }
 
     [Theory]
@@ -118,7 +135,7 @@ public sealed class AuthNotificationTypesTests
             type.MandatoryChannels.ShouldBe([NotificationChannel.Email], code);
         }
 
-        foreach (var type in Source.Types.Where(type => !withInApp.Contains(type.Code)))
+        foreach (var type in Source.Types.Where(type => !withInApp.Contains(type.Code) && type.Code != AuthNotificationTypes.PhoneVerification))
         {
             type.DefaultChannels.Where(channel => channel != NotificationChannel.Push).ShouldBe([NotificationChannel.Email], type.Code);
         }
@@ -168,6 +185,7 @@ public sealed class AuthNotificationTypesTests
     [InlineData(AuthNotificationTypes.NewDeviceLogin, "display_name,occurred_at,time_zone,ip_address", "")]
     [InlineData(AuthNotificationTypes.ExternalLoginLinked, "display_name,provider,occurred_at,time_zone", "")]
     [InlineData(AuthNotificationTypes.ExternalLoginUnlinked, "display_name,provider,occurred_at,time_zone", "")]
+    [InlineData(AuthNotificationTypes.PhoneVerification, "expires_in_minutes", "code")]
     public void Types_declare_their_variables_and_secrets(string code, string variables, string secrets)
     {
         var type = Source.Types.Single(candidate => candidate.Code == code);

@@ -16,6 +16,7 @@ internal static class AuthEventRequests
 {
     private const string ExpiresInMinutes = "expires_in_minutes";
     private const string ActionUrl = "action_url";
+    private const string Code = "code";
     private const string TimeZone = "time_zone";
     private const string LocalTimeFormat = "yyyy-MM-dd HH:mm";
     private const string Utc = "UTC";
@@ -61,6 +62,31 @@ internal static class AuthEventRequests
             new Dictionary<string, string> { [ActionUrl] = protectedActionUrl },
             email,
             expiresAt);
+
+    /// <summary>
+    /// A one-time code: <c>code</c> is the event's ciphertext as is, the text goes to <paramref name="phoneNumber"/> (the pending number
+    /// the code was issued for), the notification expires with the code and <c>expires_in_minutes</c> is the time left, rounded up, at
+    /// least 1.
+    /// </summary>
+    public static NotificationRequest PhoneCode(
+        string typeCode,
+        IIntegrationEvent integrationEvent,
+        Guid userId,
+        string phoneNumber,
+        string protectedCode,
+        DateTimeOffset expiresAt,
+        DateTimeOffset now,
+        Type consumer) =>
+        new(
+            typeCode,
+            userId,
+            integrationEvent.Id,
+            ConsumerName(consumer),
+            new Dictionary<string, string> { [ExpiresInMinutes] = MinutesLeft(expiresAt, now) },
+            new Dictionary<string, string> { [Code] = protectedCode },
+            EmailOverride: null,
+            expiresAt,
+            SmsOverride: phoneNumber);
 
     /// <summary>The <c>contactVariables</c> callback that adds <paramref name="variable"/> (<paramref name="instant"/> in the recipient's local time) and <c>time_zone</c>.</summary>
     public static Func<UserContact, IReadOnlyDictionary<string, string>> LocalTime(string variable, DateTimeOffset instant) =>

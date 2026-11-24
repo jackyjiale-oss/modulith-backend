@@ -26,7 +26,7 @@ public sealed class TemplateCompletenessTests
 
     // The types whose email carries a single-use link (a secret variable).
     public static TheoryData<string> LinkTypeCodes => new(ProductionCatalog.All
-        .Where(type => type.SecretVariables.Count > 0)
+        .Where(type => type.SecretVariables.Values.Contains(SecretKind.Link))
         .Select(type => type.Code)
         .Order(StringComparer.Ordinal));
 

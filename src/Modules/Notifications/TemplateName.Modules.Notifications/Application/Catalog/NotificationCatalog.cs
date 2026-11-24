@@ -14,7 +14,7 @@ internal sealed partial class NotificationCatalog(IEnumerable<INotificationTypeS
     public const int MaxCodeLength = 100;
 
     // The channels whose messages may carry a decrypted secret.
-    private static readonly NotificationChannel[] SecretChannels = [NotificationChannel.Email];
+    private static readonly NotificationChannel[] SecretChannels = [NotificationChannel.Email, NotificationChannel.Sms];
 
     private readonly Lazy<Snapshot> _snapshot = new(() => Validate(sources));
 

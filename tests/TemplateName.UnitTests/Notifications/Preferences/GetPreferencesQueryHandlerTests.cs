@@ -19,6 +19,26 @@ public sealed class GetPreferencesQueryHandlerTests
     }
 
     [Fact]
+    public async Task Sms_is_hidden_while_disabled_and_a_type_left_without_channels_is_not_listed()
+    {
+        var result = await _harness.CreateGetHandler().HandleAsync(new GetPreferencesQuery(), Ct);
+
+        result.Value.Types.SelectMany(type => type.Channels).ShouldAllBe(channel => channel.Channel != NotificationChannel.Sms);
+        result.Value.Types.ShouldNotContain(type => type.TypeCode == "auth.phone_verification");
+    }
+
+    [Fact]
+    public async Task Sms_is_shown_mandatory_while_enabled()
+    {
+        _harness.Sms.Enabled = true;
+
+        var result = await _harness.CreateGetHandler().HandleAsync(new GetPreferencesQuery(), Ct);
+
+        result.Value.Types.Single(type => type.TypeCode == "auth.phone_verification").Channels.ShouldBe(
+            [new ChannelPreferenceResponse(NotificationChannel.Sms, Enabled: true, Mandatory: true)]);
+    }
+
+    [Fact]
     public async Task Push_is_listed_after_in_app_while_enabled()
     {
         _harness.Push.Enabled = true;
@@ -36,6 +56,9 @@ public sealed class GetPreferencesQueryHandlerTests
     [Fact]
     public async Task Every_catalog_type_is_listed_in_code_order_whatever_the_registration_order()
     {
+        // SMS on, so the phone code type, whose only channel is SMS, is listed too.
+        _harness.Sms.Enabled = true;
+
         var result = await _harness.CreateGetHandler().HandleAsync(new GetPreferencesQuery(), Ct);
 
         var codes = result.Value.Types.Select(type => type.TypeCode).ToList();

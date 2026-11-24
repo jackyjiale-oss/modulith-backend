@@ -21,6 +21,7 @@ using TemplateName.Modules.Notifications.Application;
 using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
 using TemplateName.Modules.Notifications.Application.Devices;
+using TemplateName.Modules.Notifications.Application.Sms;
 using TemplateName.Modules.Notifications.Application.Scheduling;
 using TemplateName.Modules.Notifications.Infrastructure.Catalog;
 using TemplateName.Modules.Notifications.Infrastructure.Channels.Email;
@@ -104,6 +105,7 @@ public static class NotificationsModule
         AddEmailChannel(services, configuration);
         AddHub(services, configuration);
         AddPush(services, configuration);
+        AddSms(services, configuration);
         AddRetention(services, configuration);
 
         return services;
@@ -141,6 +143,18 @@ public static class NotificationsModule
         services.AddSingleton<IPushTransport, FcmPushTransport>();
         services.AddSingleton<IFcmAccessTokenSource, GoogleFcmAccessTokenSource>();
         services.AddExternalHttpClient(FcmPushTransport.ClientName, FcmPushTransport.ClientName);
+    }
+
+    /// <summary>
+    /// Registers the SMS channel's settings: <see cref="SmsOptions"/> (<c>Notifications:Sms</c>, validated on start). With SMS off no SMS
+    /// delivery is created, so a type whose only channel is SMS is recorded with nothing to deliver.
+    /// </summary>
+    internal static void AddSms(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<SmsOptions>()
+            .Bind(configuration.GetSection(SmsOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
     }
 
     /// <summary>

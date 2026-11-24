@@ -53,6 +53,9 @@ internal sealed class ScribanNotificationRenderer(EmbeddedTemplateStore store, I
                 SingleLine(RenderPart(request, "title", isHtml: false)),
                 RenderPart(request, "body", isHtml: false),
                 null),
+
+            // One line of plain text: no subject and no HTML.
+            NotificationChannel.Sms => new RenderedMessage(string.Empty, SingleLine(RenderPart(request, "text", isHtml: false)), null),
             _ => throw new TemplateRenderException(typeCode, channel, culture, "the channel has no templates"),
         };
     }

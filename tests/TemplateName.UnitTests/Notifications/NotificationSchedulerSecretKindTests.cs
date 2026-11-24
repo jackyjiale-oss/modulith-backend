@@ -56,7 +56,8 @@ public sealed class NotificationSchedulerSecretKindTests
         warning.Properties["TypeCode"].ShouldBe(CodeTestTypeSource.CodeNotice);
         if (plaintext.Length > 0)
         {
-            warning.Message.ShouldNotContain(plaintext);
+            // The random event id could hold the digits by chance; the rest of the line must not.
+            warning.Message.Replace(_messageId.ToString(), string.Empty, StringComparison.Ordinal).ShouldNotContain(plaintext);
         }
     }
 

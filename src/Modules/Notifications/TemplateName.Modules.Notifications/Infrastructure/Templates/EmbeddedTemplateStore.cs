@@ -22,6 +22,7 @@ internal sealed class EmbeddedTemplateStore(NotificationCatalog catalog)
 
     private static readonly string[] EmailParts = ["subject", "text", "html"];
     private static readonly string[] InAppParts = ["title", "body"];
+    private static readonly string[] SmsParts = ["text"];
 
     private readonly ConcurrentDictionary<(Assembly Assembly, string ResourceName), Lazy<StoredTemplate?>> _templates = new();
 
@@ -30,12 +31,13 @@ internal sealed class EmbeddedTemplateStore(NotificationCatalog catalog)
 
     /// <summary>
     /// The parts a channel's templates have: <c>subject</c>, <c>text</c> and <c>html</c> for email; <c>title</c> and <c>body</c> in-app and
-    /// for push (<c>Templates/Push/</c>).
+    /// for push (<c>Templates/Push/</c>); <c>text</c> alone for SMS (<c>Templates/Sms/</c>).
     /// </summary>
     public static IReadOnlyList<string> PartsOf(NotificationChannel channel) => channel switch
     {
         NotificationChannel.Email => EmailParts,
         NotificationChannel.InApp or NotificationChannel.Push => InAppParts,
+        NotificationChannel.Sms => SmsParts,
         _ => [],
     };
 

@@ -4,6 +4,7 @@ using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
 using TemplateName.Modules.Notifications.Application.Devices;
+using TemplateName.Modules.Notifications.Application.Sms;
 using TemplateName.SharedKernel;
 
 namespace TemplateName.Modules.Notifications.Application.Preferences.Get;
@@ -18,11 +19,12 @@ internal sealed class GetPreferencesQueryHandler(
     NotificationCatalog catalog,
     IPreferenceRepository preferences,
     ICurrentUser currentUser,
-    IOptions<PushOptions> pushOptions) : IQueryHandler<GetPreferencesQuery, PreferencesResponse>
+    IOptions<PushOptions> pushOptions,
+    IOptions<SmsOptions> smsOptions) : IQueryHandler<GetPreferencesQuery, PreferencesResponse>
 {
     public async Task<Result<PreferencesResponse>> HandleAsync(GetPreferencesQuery query, CancellationToken cancellationToken)
     {
         var userId = currentUser.UserId ?? Guid.Empty;
-        return PreferencesView.Build(catalog, await preferences.ListAsync(userId, cancellationToken), pushOptions.Value.Enabled);
+        return PreferencesView.Build(catalog, await preferences.ListAsync(userId, cancellationToken), pushOptions.Value.Enabled, smsOptions.Value.Enabled);
     }
 }

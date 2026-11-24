@@ -213,7 +213,7 @@ public sealed class UpdatePreferencesCommandHandlerTests
     [Fact]
     public async Task A_change_between_attempts_is_412_on_the_retry()
     {
-        var read = PreferencesVersion.Of(PreferencesView.Build(_harness.Catalog, [], pushEnabled: false));
+        var read = PreferencesVersion.Of(PreferencesView.Build(_harness.Catalog, [], pushEnabled: false, smsEnabled: false));
         _harness.UnitOfWork.SaveChangesUnlessConflictAsync(Arg.Any<CancellationToken>())
             .Returns(false, true)
             .AndDoes(_ =>

@@ -1,0 +1,1 @@
+{{ product_name }}: kod pengesahan anda ialah {{ code }}. Kod ini tamat tempoh dalam {{ expires_in_minutes }} minit.

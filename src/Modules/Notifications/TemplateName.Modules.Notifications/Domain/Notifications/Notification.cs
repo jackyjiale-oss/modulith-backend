@@ -87,11 +87,13 @@ internal sealed class Notification : AggregateRoot<Guid>
     /// <summary>
     /// Adds the delivery for <paramref name="channel"/>, first due at <paramref name="firstAttemptAt"/> (later than <paramref name="now"/>
     /// when quiet hours defer it). It inherits the notification's expiry. An email delivery needs one plain address as
-    /// <paramref name="destination"/> (<see cref="EmailDestination"/>); a push delivery a device id (<see cref="PushDestination"/>).
-    /// Email and in-app have at most one delivery each; push has one per device.
+    /// <paramref name="destination"/> (<see cref="EmailDestination"/>); a push delivery a device id (<see cref="PushDestination"/>); an SMS
+    /// delivery a number in E.164 (<see cref="SmsDestination"/>). Email, in-app and SMS have at most one delivery each; push has one per
+    /// device.
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// An email delivery without a single valid address, or a push delivery without a device id; the message does not quote it.
+    /// An email delivery without a single valid address, a push delivery without a device id, or an SMS delivery without a number in
+    /// E.164; the message does not quote it.
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// The notification already has a delivery for the channel (for push: for the same device).
@@ -106,6 +108,11 @@ internal sealed class Notification : AggregateRoot<Guid>
         if (channel == NotificationChannel.Push && !PushDestination.IsValid(destination))
         {
             throw new ArgumentException("A push delivery needs a device id.", nameof(destination));
+        }
+
+        if (channel == NotificationChannel.Sms && !SmsDestination.IsValid(destination))
+        {
+            throw new ArgumentException("An SMS delivery needs one phone number in E.164.", nameof(destination));
         }
 
         if (_deliveries.Exists(delivery => delivery.Channel == channel

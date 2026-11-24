@@ -8,6 +8,7 @@ using TemplateName.Modules.Auth.Contracts.Users;
 using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
 using TemplateName.Modules.Notifications.Application.Devices;
+using TemplateName.Modules.Notifications.Application.Sms;
 using TemplateName.Modules.Notifications.Domain.Deliveries;
 using TemplateName.Modules.Notifications.Domain.Notifications;
 using TemplateName.Modules.Notifications.Domain.PushDevices;
@@ -64,6 +65,7 @@ internal sealed partial class NotificationScheduler(
     IPushDeviceRepository pushDevices,
     IUserSessionDirectory sessions,
     IOptions<PushOptions> pushOptions,
+    IOptions<SmsOptions> smsOptions,
     IUnitOfWork unitOfWork,
     ISecretProtector secretProtector,
     INotificationsMetrics metrics,
@@ -265,6 +267,27 @@ internal sealed partial class NotificationScheduler(
                 continue;
             }
 
+            if (channel == NotificationChannel.Sms)
+            {
+                // Off: dropped, as push is; a type whose only channel is SMS then has nothing to deliver and is recorded once.
+                if (!smsOptions.Value.Enabled)
+                {
+                    continue;
+                }
+
+                var number = request.SmsOverride ?? contact.PhoneNumber;
+                if (SmsDestination.IsValid(number))
+                {
+                    deliveries.Add((channel, number));
+                }
+                else
+                {
+                    LogNoPhoneNumber(logger, request.RecipientUserId);
+                }
+
+                continue;
+            }
+
             if (channel != NotificationChannel.Email)
             {
                 deliveries.Add((channel, null));
@@ -319,7 +342,8 @@ internal sealed partial class NotificationScheduler(
     }
 
     // Email and push respect quiet hours; in-app never waits (D11).
-    private static bool IsDeferrable(NotificationChannel channel) => channel is NotificationChannel.Email or NotificationChannel.Push;
+    private static bool IsDeferrable(NotificationChannel channel)
+        => channel is NotificationChannel.Email or NotificationChannel.Push or NotificationChannel.Sms;
 
     private async Task<DateTimeOffset> DeferrableDueAtAsync(
         NotificationTypeDefinition type,
@@ -345,6 +369,9 @@ internal sealed partial class NotificationScheduler(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Refused integration event {MessageId} for notification type {TypeCode} ({Reason}): a protected value is unreadable or not what its type declares (a safe absolute http or https link, or a code of 4 to 10 digits)")]
     private static partial void LogRefusedSecret(ILogger logger, Guid messageId, string typeCode, string reason);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Skipped the SMS delivery for user {UserId}: there is no valid phone number to text")]
+    private static partial void LogNoPhoneNumber(ILogger logger, Guid userId);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Created no notification for user {UserId}: the user does not exist")]
     private static partial void LogRecipientNotFound(ILogger logger, Guid userId);
