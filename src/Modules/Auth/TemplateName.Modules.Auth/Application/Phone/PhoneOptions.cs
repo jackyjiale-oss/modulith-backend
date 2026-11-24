@@ -5,7 +5,7 @@ namespace TemplateName.Modules.Auth.Application.Phone;
 
 /// <summary>
 /// The phone number routes (section <c>Auth:Phone</c>), validated when the host starts. Off by default: while <see cref="Enabled"/> is
-/// false the routes answer 404. Turn it on together with <c>Notifications:Sms:Enabled</c>, which sends the codes.
+/// false the routes answer 404. Turn it on only where the module that consumes the requested event texts the codes.
 /// </summary>
 internal sealed class PhoneOptions : IValidatableObject
 {

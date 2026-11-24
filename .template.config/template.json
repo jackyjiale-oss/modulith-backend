@@ -143,6 +143,7 @@
             "tests/TemplateName.IntegrationTests/Notifications/**",
             "tests/TemplateName.IntegrationTests/Infrastructure/RecordingEmailSender.cs",
             "tests/TemplateName.IntegrationTests/Infrastructure/RecordingPushTransport.cs",
+            "tests/TemplateName.IntegrationTests/Infrastructure/RecordingSmsTransport.cs",
             "tests/TemplateName.IntegrationTests/Infrastructure/RecordingInAppNotificationPusher.cs",
             "tests/TemplateName.IntegrationTests/Infrastructure/NotificationHubClient.cs",
             "tests/TemplateName.IntegrationTests/Auth/AuthFlowTests.cs",
@@ -151,7 +152,8 @@
             "docs/modules/notifications.md",
             "docs/adr/0019-embedded-scriban-notification-templates.md",
             "docs/adr/0021-signalr-hub-tickets.md",
-            "docs/adr/0039-session-bound-push-devices.md"
+            "docs/adr/0039-session-bound-push-devices.md",
+            "docs/adr/0040-phone-verification-codes-and-sms.md"
           ]
         },
         {

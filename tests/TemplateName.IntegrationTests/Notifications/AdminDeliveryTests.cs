@@ -125,7 +125,7 @@ public sealed class AdminDeliveryTests(IntegrationTestWebAppFactory factory) : A
         first.EnumerateObject().Select(property => property.Name).ShouldBe(
             [
                 "id", "notificationId", "typeCode", "recipientUserId", "channel", "destination", "status", "attemptCount", "nextAttemptAt",
-                "lastError", "createdAt", "sentAt", "deadLetteredAt",
+                "lastError", "createdAt", "sentAt", "deadLetteredAt", "providerMessageId",
             ],
             ignoreOrder: true);
         first.GetProperty("typeCode").GetString().ShouldBe(DeliveryTestTypeSource.Email);

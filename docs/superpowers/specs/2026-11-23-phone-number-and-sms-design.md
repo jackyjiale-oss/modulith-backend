@@ -1,6 +1,6 @@
 # Phone number and SMS channel — design
 
-- Status: approved by the user (2026-11-23); amended after the security review (2026-11-24: decisions 7 to 10, Section 8).
+- Status: approved by the user (2026-11-23); amended after the security review (2026-11-24: decisions 7 to 10, Section 8); implemented on `feat/sms-channel` (PR #65).
 - Date: 2026-11-23
 - Roadmap row: "Phone number and SMS channel" in `docs/blueprint-review.md` (split from push on 2026-11-23). Spec 2 of the push and SMS 1.0 gate; phone-number OTP login is spec 3 and builds on it. All three gate 1.0.0 (decided 2026-11-20).
 - Builds on: the Auth module (users, the `/me` routes, step-up, ADR 0023; verification links, ADR 0017; the outbox), the Notifications module and its push channel (ADR 0039: per-channel registration while enabled, secret variables, the delivery worker), the external HTTP clients and resilience pipelines (`AddExternalHttpClient`), ADR 0035 (switch markers).

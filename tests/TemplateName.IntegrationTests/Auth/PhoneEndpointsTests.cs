@@ -16,7 +16,7 @@ namespace TemplateName.IntegrationTests.Auth;
 
 /// <summary>
 /// The phone number routes through the running host: off by default (404), and with <c>Auth:Phone:Enabled</c> the request, the code
-/// read from the outbox as Notifications would receive it, the confirmation, the cooldown and a number another account holds.
+/// read from the outbox as a consuming module would receive it, the confirmation, the cooldown and a number another account holds.
 /// </summary>
 public sealed class PhoneEndpointsTests(IntegrationTestWebAppFactory factory) : IntegrationTestBase(factory)
 {
