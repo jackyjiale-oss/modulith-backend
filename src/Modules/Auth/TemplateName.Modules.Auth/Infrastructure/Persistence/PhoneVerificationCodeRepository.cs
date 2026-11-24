@@ -26,11 +26,24 @@ internal sealed class PhoneVerificationCodeRepository(AuthDbContext context) : I
     public Task<PhoneVerificationCode?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
         => context.Set<PhoneVerificationCode>().SingleOrDefaultAsync(code => code.Id == id, cancellationToken);
 
-    public Task<PhoneVerificationCode?> GetPendingAsync(Guid userId, DateTimeOffset now, CancellationToken cancellationToken)
-        => Pending(userId, now).OrderByDescending(code => code.CreatedAt).FirstOrDefaultAsync(cancellationToken);
+    public Task<PhoneVerificationCode?> GetPendingAsync(
+        Guid userId,
+        PhoneCodePurpose purpose,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+        => Pending(userId, now)
+            .Where(code => code.Purpose == purpose)
+            .OrderByDescending(code => code.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
 
-    public async Task<IReadOnlyList<PhoneVerificationCode>> ListPendingAsync(Guid userId, DateTimeOffset now, CancellationToken cancellationToken)
-        => await Pending(userId, now).ToListAsync(cancellationToken);
+    public async Task<IReadOnlyList<PhoneVerificationCode>> ListPendingAsync(
+        Guid userId,
+        PhoneCodePurpose? purpose,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+        => await Pending(userId, now)
+            .Where(code => purpose == null || code.Purpose == purpose)
+            .ToListAsync(cancellationToken);
 
     public Task<DateTimeOffset?> GetLastIssuedAtAsync(Guid userId, CancellationToken cancellationToken)
         => context.Set<PhoneVerificationCode>()

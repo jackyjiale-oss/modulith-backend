@@ -30,7 +30,7 @@ public sealed class PhoneVerificationCodePersistenceTests(IntegrationTestWebAppF
         var code = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, Number, "042137", "protected", Lifetime, Now);
         await SaveAsync(user, code);
 
-        var saved = (await Codes().GetPendingAsync(user.Id, Now, Ct)).ShouldNotBeNull();
+        var saved = (await Codes().GetPendingAsync(user.Id, PhoneCodePurpose.Verify, Now, Ct)).ShouldNotBeNull();
 
         saved.Id.ShouldBe(code.Id);
         saved.UserId.ShouldBe(user.Id);
@@ -55,8 +55,8 @@ public sealed class PhoneVerificationCodePersistenceTests(IntegrationTestWebAppF
         await SaveAsync(user, older, newer, expired);
         var codes = Codes();
 
-        (await codes.GetPendingAsync(user.Id, Now, Ct)).ShouldNotBeNull().Id.ShouldBe(newer.Id);
-        (await codes.ListPendingAsync(user.Id, Now, Ct)).Select(code => code.Id).ShouldBe([older.Id, newer.Id], ignoreOrder: true);
+        (await codes.GetPendingAsync(user.Id, PhoneCodePurpose.Verify, Now, Ct)).ShouldNotBeNull().Id.ShouldBe(newer.Id);
+        (await codes.ListPendingAsync(user.Id, PhoneCodePurpose.Verify, Now, Ct)).Select(code => code.Id).ShouldBe([older.Id, newer.Id], ignoreOrder: true);
         (await codes.GetLastIssuedAtAsync(user.Id, Ct)).ShouldBe(Now.AddMinutes(-1));
         (await codes.ListIssuedSinceAsync(user.Id, Now.AddHours(-1), Ct)).ShouldBe([Now.AddMinutes(-3), Now.AddMinutes(-1)]);
         (await codes.ListIssuedSinceAsync(user.Id, Now.AddDays(-1), Ct)).ShouldBe([Now.AddHours(-2), Now.AddMinutes(-3), Now.AddMinutes(-1)]);
@@ -116,7 +116,7 @@ public sealed class PhoneVerificationCodePersistenceTests(IntegrationTestWebAppF
         var stored = await QueryAsync(context => context.Set<PhoneVerificationCode>().SingleAsync(row => row.Id == code.Id, Ct));
         stored.AttemptCount.ShouldBe(5);
         stored.InvalidatedAt.ShouldBe(Now);
-        (await Codes().GetPendingAsync(user.Id, Now, Ct)).ShouldBeNull();
+        (await Codes().GetPendingAsync(user.Id, PhoneCodePurpose.Verify, Now, Ct)).ShouldBeNull();
     }
 
     [Fact]
@@ -128,7 +128,7 @@ public sealed class PhoneVerificationCodePersistenceTests(IntegrationTestWebAppF
 
         (await Codes().TryCountWrongAttemptAsync(code.Id, maxAttempts: 5, Now, Ct)).ShouldBeTrue();
 
-        var pending = (await Codes().GetPendingAsync(user.Id, Now, Ct)).ShouldNotBeNull();
+        var pending = (await Codes().GetPendingAsync(user.Id, PhoneCodePurpose.Verify, Now, Ct)).ShouldNotBeNull();
         pending.AttemptCount.ShouldBe(1);
         pending.InvalidatedAt.ShouldBeNull();
     }
@@ -190,4 +190,96 @@ public sealed class PhoneVerificationCodePersistenceTests(IntegrationTestWebAppF
     }
 
     private Task<T> QueryAsync<T>(Func<AuthDbContext, Task<T>> query) => query(NewScope().GetRequiredService<AuthDbContext>());
+
+    [Fact]
+    public async Task Purpose_round_trips()
+    {
+        var user = NewUser("alice@example.com");
+        var code = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.SignIn, Number, "042137", "protected", Lifetime, Now);
+        await SaveAsync(user, code);
+
+        (await Codes().GetPendingAsync(user.Id, PhoneCodePurpose.SignIn, Now, Ct)).ShouldNotBeNull().Purpose.ShouldBe(PhoneCodePurpose.SignIn);
+    }
+
+    [Fact]
+    public async Task Rows_written_before_the_column_read_as_verify()
+    {
+        var user = NewUser("alice@example.com");
+        await SaveAsync(user);
+        var id = Guid.CreateVersion7();
+        await QueryAsync(context => context.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO auth.PhoneVerificationCodes (Id, UserId, PhoneNumber, CodeHash, Salt, CreatedAt, ExpiresAt, AttemptCount)
+            VALUES (@Id, @UserId, @PhoneNumber, @CodeHash, @Salt, @CreatedAt, @ExpiresAt, 0)
+            """,
+            [
+                new SqlParameter("@Id", id),
+                new SqlParameter("@UserId", user.Id),
+                new SqlParameter("@PhoneNumber", Number),
+                new SqlParameter("@CodeHash", new byte[32]),
+                new SqlParameter("@Salt", new byte[16]),
+                new SqlParameter("@CreatedAt", Now.UtcDateTime),
+                new SqlParameter("@ExpiresAt", (Now + Lifetime).UtcDateTime),
+            ],
+            Ct));
+
+        var saved = (await Codes().GetPendingAsync(user.Id, PhoneCodePurpose.Verify, Now, Ct)).ShouldNotBeNull();
+
+        saved.Id.ShouldBe(id);
+        saved.Purpose.ShouldBe(PhoneCodePurpose.Verify);
+    }
+
+    [Fact]
+    public async Task Pending_lookup_is_per_purpose()
+    {
+        var user = NewUser("alice@example.com");
+        var verify = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, Number, "111111", "protected", Lifetime, Now.AddSeconds(-2));
+        var signIn = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.SignIn, Number, "222222", "protected", Lifetime, Now.AddSeconds(-1));
+        await SaveAsync(user, verify, signIn);
+
+        (await Codes().GetPendingAsync(user.Id, PhoneCodePurpose.Verify, Now, Ct)).ShouldNotBeNull().Id.ShouldBe(verify.Id);
+        (await Codes().GetPendingAsync(user.Id, PhoneCodePurpose.SignIn, Now, Ct)).ShouldNotBeNull().Id.ShouldBe(signIn.Id);
+        (await Codes().ListPendingAsync(user.Id, PhoneCodePurpose.SignIn, Now, Ct)).Select(code => code.Id).ShouldBe([signIn.Id]);
+    }
+
+    [Fact]
+    public async Task Listing_with_no_purpose_returns_both()
+    {
+        var user = NewUser("alice@example.com");
+        var verify = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, Number, "111111", "protected", Lifetime, Now);
+        var signIn = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.SignIn, Number, "222222", "protected", Lifetime, Now);
+        await SaveAsync(user, verify, signIn);
+
+        (await Codes().ListPendingAsync(user.Id, null, Now, Ct)).Select(code => code.Id).ShouldBe([verify.Id, signIn.Id], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task The_budget_counts_both_purposes()
+    {
+        var user = NewUser("alice@example.com");
+        var verify = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, Number, "111111", "protected", Lifetime, Now.AddMinutes(-5));
+        var signIn = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.SignIn, Number, "222222", "protected", Lifetime, Now.AddMinutes(-1));
+        await SaveAsync(user, verify, signIn);
+
+        (await Codes().GetLastIssuedAtAsync(user.Id, Ct)).ShouldBe(Now.AddMinutes(-1));
+        (await Codes().ListIssuedSinceAsync(user.Id, Now.AddDays(-1), Ct)).Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task GetByPhoneNumber_finds_the_verified_number_only()
+    {
+        var alice = NewUser("alice@example.com");
+        alice.VerifyPhoneNumber(Number, Now);
+        var bob = NewUser("bob@example.com");
+        bob.VerifyPhoneNumber("+60198765432", Now);
+        await SaveAsync(alice, bob);
+        await QueryAsync(context => context.Set<User>().IgnoreQueryFilters().Where(user => user.Id == bob.Id)
+            .ExecuteUpdateAsync(set => set.SetProperty(user => user.IsDeleted, true), Ct));
+
+        (await Users().GetByPhoneNumberAsync(Number, Ct)).ShouldNotBeNull().Id.ShouldBe(alice.Id);
+        (await Users().GetByPhoneNumberAsync("+60198765432", Ct)).ShouldBeNull();
+        (await Users().GetByPhoneNumberAsync("+60111111111", Ct)).ShouldBeNull();
+    }
+
+    private IUserRepository Users() => NewScope().GetRequiredService<IUserRepository>();
 }

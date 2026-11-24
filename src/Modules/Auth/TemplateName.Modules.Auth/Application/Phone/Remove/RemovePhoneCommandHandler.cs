@@ -52,7 +52,7 @@ internal sealed class RemovePhoneCommandHandler(
                 sessionId: session.Id));
         }
 
-        foreach (var pending in await codes.ListPendingAsync(user.Id, now, cancellationToken))
+        foreach (var pending in await codes.ListPendingAsync(user.Id, null, now, cancellationToken))
         {
             pending.Invalidate(now);
         }

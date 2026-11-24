@@ -834,6 +834,9 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
 
+                    b.Property<byte>("Purpose")
+                        .HasColumnType("tinyint");
+
                     b.Property<byte[]>("Salt")
                         .IsRequired()
                         .HasMaxLength(16)

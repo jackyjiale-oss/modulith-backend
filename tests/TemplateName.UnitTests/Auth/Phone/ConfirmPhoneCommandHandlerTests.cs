@@ -39,7 +39,7 @@ public sealed class ConfirmPhoneCommandHandlerTests
         _sessions.GetByIdAsync(session.Id, Arg.Any<CancellationToken>()).Returns(session);
         _currentUser.UserId.Returns(_user.Id);
         _currentUser.SessionId.Returns(session.Id);
-        _codes.GetPendingAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns(_pending);
+        _codes.GetPendingAsync(_user.Id, PhoneCodePurpose.Verify, Now, Arg.Any<CancellationToken>()).Returns(_pending);
         _codes.TryConsumeAsync(_pending.Id, Now, Arg.Any<CancellationToken>()).Returns(true);
         _codes.TryCountWrongAttemptAsync(_pending.Id, 5, Now, Arg.Any<CancellationToken>()).Returns(true);
         _unitOfWork.SaveChangesUnlessDuplicateAsync(UniqueIndexNames.UserPhoneNumber, Arg.Any<CancellationToken>()).Returns(true);
@@ -96,7 +96,7 @@ public sealed class ConfirmPhoneCommandHandlerTests
             (await _sut.HandleAsync(new ConfirmPhoneCommand("999999"), Ct)).Error.ShouldBe(PhoneErrors.InvalidCode);
         }
 
-        _codes.GetPendingAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns((PhoneVerificationCode?)null);
+        _codes.GetPendingAsync(_user.Id, PhoneCodePurpose.Verify, Now, Arg.Any<CancellationToken>()).Returns((PhoneVerificationCode?)null);
         (await _sut.HandleAsync(new ConfirmPhoneCommand(Code), Ct)).Error.ShouldBe(PhoneErrors.InvalidCode);
         _user.PhoneNumber.ShouldBeNull();
     }
@@ -104,7 +104,7 @@ public sealed class ConfirmPhoneCommandHandlerTests
     [Fact]
     public async Task No_pending_code_is_invalid_code()
     {
-        _codes.GetPendingAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns((PhoneVerificationCode?)null);
+        _codes.GetPendingAsync(_user.Id, PhoneCodePurpose.Verify, Now, Arg.Any<CancellationToken>()).Returns((PhoneVerificationCode?)null);
 
         (await _sut.HandleAsync(new ConfirmPhoneCommand(Code), Ct)).Error.ShouldBe(PhoneErrors.InvalidCode);
     }

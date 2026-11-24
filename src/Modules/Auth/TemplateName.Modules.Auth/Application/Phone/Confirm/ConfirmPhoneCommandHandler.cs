@@ -43,7 +43,7 @@ internal sealed class ConfirmPhoneCommandHandler(
         }
 
         var (user, session) = caller.Value;
-        var code = await codes.GetPendingAsync(user.Id, now, cancellationToken);
+        var code = await codes.GetPendingAsync(user.Id, PhoneCodePurpose.Verify, now, cancellationToken);
         if (code is null)
         {
             return Result.Failure(PhoneErrors.InvalidCode);

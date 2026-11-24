@@ -42,7 +42,7 @@ public sealed class RequestPhoneCodeCommandHandlerTests
         _currentUser.SessionId.Returns(session.Id);
         _currentUser.AuthTime.Returns(Now.AddHours(-1));
         _currentUser.AuthMethods.Returns(["pwd"]);
-        _codes.ListPendingAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([]);
+        _codes.ListPendingAsync(_user.Id, PhoneCodePurpose.Verify, Now, Arg.Any<CancellationToken>()).Returns([]);
         _codes.ListIssuedSinceAsync(_user.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns([]);
         _codes.Add(Arg.Do<PhoneVerificationCode>(_issued.Add));
         _secretProtector.Protect(Arg.Any<string>()).Returns(call => "protected:" + call.Arg<string>());
@@ -109,7 +109,7 @@ public sealed class RequestPhoneCodeCommandHandlerTests
     {
         var previous = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.Verify, Number, "111111", "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-5));
         _codes.GetLastIssuedAtAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(Now.AddMinutes(-5));
-        _codes.ListPendingAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([previous]);
+        _codes.ListPendingAsync(_user.Id, PhoneCodePurpose.Verify, Now, Arg.Any<CancellationToken>()).Returns([previous]);
 
         var result = await _sut.HandleAsync(new RequestPhoneCodeCommand(Number), Ct);
 

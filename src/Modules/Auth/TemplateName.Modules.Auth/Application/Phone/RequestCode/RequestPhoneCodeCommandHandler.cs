@@ -70,7 +70,7 @@ internal sealed class RequestPhoneCodeCommandHandler(
             return Result.Failure<PhoneCodeResponse>(new TooManyCodesError(retryAfter));
         }
 
-        foreach (var pending in await codes.ListPendingAsync(user.Id, now, cancellationToken))
+        foreach (var pending in await codes.ListPendingAsync(user.Id, PhoneCodePurpose.Verify, now, cancellationToken))
         {
             pending.Invalidate(now);
         }

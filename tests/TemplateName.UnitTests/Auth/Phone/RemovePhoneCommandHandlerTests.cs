@@ -39,7 +39,7 @@ public sealed class RemovePhoneCommandHandlerTests
         _currentUser.SessionId.Returns(session.Id);
         _currentUser.AuthTime.Returns(Now.AddMinutes(-1));
         _currentUser.AuthMethods.Returns(["pwd"]);
-        _codes.ListPendingAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([]);
+        _codes.ListPendingAsync(_user.Id, null, Now, Arg.Any<CancellationToken>()).Returns([]);
         _auditWriter.Record(Arg.Do<AuthAuditLog>(_auditEntries.Add));
         var time = new FakeTimeProvider(Now);
         _sut = new RemovePhoneCommandHandler(
@@ -61,7 +61,7 @@ public sealed class RemovePhoneCommandHandlerTests
     {
         _user.VerifyPhoneNumber(Number, Now.AddDays(-1));
         var pending = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.Verify, "+60198765432", "111111", "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-1));
-        _codes.ListPendingAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([pending]);
+        _codes.ListPendingAsync(_user.Id, null, Now, Arg.Any<CancellationToken>()).Returns([pending]);
 
         var result = await _sut.HandleAsync(new RemovePhoneCommand(), Ct);
 
@@ -100,7 +100,7 @@ public sealed class RemovePhoneCommandHandlerTests
     {
         _currentUser.AuthTime.Returns((DateTimeOffset?)null);
         var pending = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.Verify, Number, "111111", "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-1));
-        _codes.ListPendingAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([pending]);
+        _codes.ListPendingAsync(_user.Id, null, Now, Arg.Any<CancellationToken>()).Returns([pending]);
 
         var result = await _sut.HandleAsync(new RemovePhoneCommand(), Ct);
 

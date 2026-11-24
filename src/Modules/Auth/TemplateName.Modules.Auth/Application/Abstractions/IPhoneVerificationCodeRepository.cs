@@ -14,11 +14,18 @@ internal interface IPhoneVerificationCodeRepository
     /// <summary>Finds a code by its id, whatever its state.</summary>
     Task<PhoneVerificationCode?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
 
-    /// <summary>The user's newest pending code, or null.</summary>
-    Task<PhoneVerificationCode?> GetPendingAsync(Guid userId, DateTimeOffset now, CancellationToken cancellationToken);
+    /// <summary>The user's newest pending code of <paramref name="purpose"/>, or null.</summary>
+    Task<PhoneVerificationCode?> GetPendingAsync(Guid userId, PhoneCodePurpose purpose, DateTimeOffset now, CancellationToken cancellationToken);
 
-    /// <summary>Every pending code of the user, tracked, so a handler can invalidate them.</summary>
-    Task<IReadOnlyList<PhoneVerificationCode>> ListPendingAsync(Guid userId, DateTimeOffset now, CancellationToken cancellationToken);
+    /// <summary>
+    /// Every pending code of the user of <paramref name="purpose"/>, or of both purposes when it is null, tracked, so a handler can
+    /// invalidate them.
+    /// </summary>
+    Task<IReadOnlyList<PhoneVerificationCode>> ListPendingAsync(
+        Guid userId,
+        PhoneCodePurpose? purpose,
+        DateTimeOffset now,
+        CancellationToken cancellationToken);
 
     /// <summary>When the user's newest code was issued, whatever its state, or null when there is none (the resend cooldown).</summary>
     Task<DateTimeOffset?> GetLastIssuedAtAsync(Guid userId, CancellationToken cancellationToken);
