@@ -15,8 +15,26 @@ internal sealed partial record ChannelSendResult(ChannelSendOutcome Outcome, str
     /// <summary>The longest reason code.</summary>
     public const int MaxReasonLength = 50;
 
+    /// <summary>The longest provider message id, the column limit of <c>Delivery.ProviderMessageId</c>.</summary>
+    public const int MaxProviderMessageIdLength = 64;
+
     /// <summary>The channel accepted the message.</summary>
     public static ChannelSendResult Sent { get; } = new(ChannelSendOutcome.Sent, null);
+
+    /// <summary>The provider's id for an accepted message (Twilio's message SID), kept on the delivery; null when there is none.</summary>
+    public string? ProviderMessageId { get; private init; }
+
+    /// <summary>The channel accepted the message and the provider named it <paramref name="providerMessageId"/>.</summary>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="providerMessageId"/> is not 1 to <see cref="MaxProviderMessageIdLength"/> ASCII letters, digits, underscores or
+    /// dashes, so it can carry no text into the column or a log.
+    /// </exception>
+    public static ChannelSendResult SentAs(string providerMessageId) =>
+        IsProviderMessageId(providerMessageId)
+            ? Sent with { ProviderMessageId = providerMessageId }
+            : throw new ArgumentException(
+                $"A provider message id is 1 to {MaxProviderMessageIdLength} ASCII letters, digits, underscores or dashes.",
+                nameof(providerMessageId));
 
     /// <summary>A failure worth retrying, with its reason code.</summary>
     /// <exception cref="ArgumentException"><paramref name="reason"/> is not a reason code.</exception>
@@ -25,6 +43,10 @@ internal sealed partial record ChannelSendResult(ChannelSendOutcome Outcome, str
     /// <summary>A failure that dead-letters the delivery at once, with its reason code.</summary>
     /// <exception cref="ArgumentException"><paramref name="reason"/> is not a reason code.</exception>
     public static ChannelSendResult Permanent(string reason) => new(ChannelSendOutcome.PermanentFailure, EnsureReasonCode(reason));
+
+    /// <summary>Whether <paramref name="providerMessageId"/> is one <see cref="SentAs"/> accepts.</summary>
+    public static bool IsProviderMessageId([NotNullWhen(true)] string? providerMessageId)
+        => providerMessageId is not null && ProviderMessageIdPattern().IsMatch(providerMessageId);
 
     /// <summary>
     /// Whether <paramref name="reason"/> is a reason code: lowercase letters, digits and underscores, starting with a letter, at most
@@ -44,4 +66,7 @@ internal sealed partial record ChannelSendResult(ChannelSendOutcome Outcome, str
     // \z, not $: $ also matches before a final line break, which would let "smtp_550\n" through.
     [GeneratedRegex(@"^[a-z][a-z0-9_]*\z", RegexOptions.CultureInvariant)]
     private static partial Regex ReasonCodePattern();
+
+    [GeneratedRegex(@"^[A-Za-z0-9_-]{1,64}\z", RegexOptions.CultureInvariant)]
+    private static partial Regex ProviderMessageIdPattern();
 }

@@ -88,6 +88,10 @@ namespace TemplateName.Modules.Notifications.Infrastructure.Persistence.Migratio
                     b.Property<Guid>("NotificationId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ProviderMessageId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("RenderedSubject")
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");

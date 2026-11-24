@@ -325,7 +325,7 @@ internal sealed partial class DeliveryDispatcher(
         switch (sendResult.Outcome)
         {
             case ChannelSendOutcome.Sent:
-                delivery.MarkSent(subject, now);
+                delivery.MarkSent(subject, now, sendResult.ProviderMessageId);
                 return DeliveryResult.Sent;
 
             case ChannelSendOutcome.TransientFailure

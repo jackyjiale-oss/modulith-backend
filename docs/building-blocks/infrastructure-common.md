@@ -247,6 +247,18 @@ The Notifications module's push channel is one such provider: the FCM transport 
   }
 }
 ```
+
+The SMS channel is another: the Twilio transport sends through the client `sms-provider` on the pipeline of the same name, registered only while `Notifications:Sms:Enabled` is true ([notifications](../modules/notifications.md#sms-channel)). The same rule holds, more strongly: Twilio's Messages API has no idempotency key, so a retried `POST` can text the code twice. Leave `RetryUnsafeMethods` off and let the delivery worker retry; even then a send that timed out after Twilio accepted it is retried by the worker and can arrive twice (with the same code).
+
+```json
+{
+  "Resilience": {
+    "Pipelines": {
+      "sms-provider": { "AttemptTimeout": "00:00:10", "TotalTimeout": "00:00:30" }
+    }
+  }
+}
+```
 <!--#endif-->
 
 The Auth module's social login does exactly this with two custom names, `AddExternalHttpClient("oidc-discovery", "oidc-discovery")` (a provider's discovery document and signing keys) and `AddExternalHttpClient("facebook-graph", "facebook-graph")` (Facebook's Graph API); both use the `external-default` values until `Resilience:Pipelines:oidc-discovery` or `Resilience:Pipelines:facebook-graph` says otherwise.

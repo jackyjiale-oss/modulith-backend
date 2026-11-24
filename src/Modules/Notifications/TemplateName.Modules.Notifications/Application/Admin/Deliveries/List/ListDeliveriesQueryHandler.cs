@@ -86,7 +86,7 @@ internal sealed class ListDeliveriesQueryHandler(IDbConnectionFactory connection
         // The columns follow the DeliveryResponse constructor, which Dapper binds by position.
         var pageSql = $"""
             SELECT TOP (@Take) d.Id, d.NotificationId, n.TypeCode, n.RecipientUserId, d.Channel, d.Destination, d.Status, d.AttemptCount,
-                d.NextAttemptAt, d.LastError, d.CreatedAt, d.SentAt, d.DeadLetteredAt
+                d.NextAttemptAt, d.LastError, d.CreatedAt, d.SentAt, d.DeadLetteredAt, d.ProviderMessageId
             FROM {FromClause}
             WHERE {filter} AND {keyset.WhereClause}
             ORDER BY {keyset.OrderByClause}

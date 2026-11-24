@@ -20,6 +20,10 @@ namespace TemplateName.Modules.Notifications.Application.Admin.Deliveries.List;
 /// <param name="CreatedAt">When the delivery was created (UTC).</param>
 /// <param name="SentAt">When it was sent (UTC); null until then.</param>
 /// <param name="DeadLetteredAt">When it was given up (UTC); null unless <see cref="DeliveryStatus.DeadLettered"/>.</param>
+/// <param name="ProviderMessageId">
+/// The provider's id for the sent message (Twilio's message SID for SMS), to find it in the provider's logs; null for other channels and
+/// before the delivery is sent. Sent means the provider accepted the message, not that the phone received it.
+/// </param>
 internal sealed record DeliveryResponse(
     Guid Id,
     Guid NotificationId,
@@ -33,4 +37,5 @@ internal sealed record DeliveryResponse(
     string? LastError,
     DateTime CreatedAt,
     DateTime? SentAt,
-    DateTime? DeadLetteredAt);
+    DateTime? DeadLetteredAt,
+    string? ProviderMessageId);

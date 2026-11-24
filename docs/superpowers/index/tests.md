@@ -2,7 +2,7 @@
 
 # Tests
 
-Rows: 234
+Rows: 237
 
 ## Folders
 
@@ -232,6 +232,9 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Push/FcmOptions.cs | tests/TemplateName.UnitTests/Notifications/Push/FcmOptionsTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Push/FcmPushTransport.cs | tests/TemplateName.UnitTests/Notifications/Push/FcmPushTransportTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Push/PushChannel.cs | tests/TemplateName.UnitTests/Notifications/Push/PushChannelTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Sms/SmsChannel.cs | tests/TemplateName.UnitTests/Notifications/Sms/SmsChannelTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Sms/TwilioOptions.cs | tests/TemplateName.UnitTests/Notifications/Sms/TwilioOptionsTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Sms/TwilioSmsTransport.cs | tests/TemplateName.UnitTests/Notifications/Sms/TwilioSmsTransportTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Deliveries/DeliveryDispatcher.cs | tests/TemplateName.IntegrationTests/Notifications/DeliveryDispatcherTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Deliveries/DeliveryOptions.cs | tests/TemplateName.UnitTests/Notifications/DeliveryOptionsTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Hubs/HubTicketAuthenticationHandler.cs | tests/TemplateName.UnitTests/Notifications/HubTicketAuthenticationHandlerTests.cs |

@@ -18,6 +18,7 @@ internal sealed class DeliveryConfiguration : IEntityTypeConfiguration<Delivery>
         builder.Property(delivery => delivery.Destination).HasMaxLength(Delivery.MaxDestinationLength);
         builder.Property(delivery => delivery.LastError).HasMaxLength(Delivery.MaxLastErrorLength);
         builder.Property(delivery => delivery.RenderedSubject).HasMaxLength(Delivery.MaxRenderedSubjectLength);
+        builder.Property(delivery => delivery.ProviderMessageId).HasMaxLength(Delivery.MaxProviderMessageIdLength);
 
         // The lease is the concurrency token: an update saves only while LockedUntil still holds the value that was read, so a worker
         // whose lease ran out (and was re-claimed by another) cannot overwrite the new owner's outcome. The schema does not change.
