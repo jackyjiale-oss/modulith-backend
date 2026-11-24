@@ -1,6 +1,6 @@
 # Phone number and SMS channel — design
 
-- Status: draft, waiting for the user's review (2026-11-23).
+- Status: approved by the user (2026-11-23); amended after the security review (2026-11-24: decisions 7 to 10, Section 8).
 - Date: 2026-11-23
 - Roadmap row: "Phone number and SMS channel" in `docs/blueprint-review.md` (split from push on 2026-11-23). Spec 2 of the push and SMS 1.0 gate; phone-number OTP login is spec 3 and builds on it. All three gate 1.0.0 (decided 2026-11-20).
 - Builds on: the Auth module (users, the `/me` routes, step-up, ADR 0023; verification links, ADR 0017; the outbox), the Notifications module and its push channel (ADR 0039: per-channel registration while enabled, secret variables, the delivery worker), the external HTTP clients and resilience pipelines (`AddExternalHttpClient`), ADR 0035 (switch markers).
@@ -20,8 +20,9 @@
 
 - Phone-number OTP login (spec 3) and an SMS second factor for MFA.
 - SMS for any other notification type (the catalog supports adding it per type later).
-- Vonage, a local or in-country gateway, Twilio Verify; delivery receipts, status callbacks, inbound STOP handling beyond the `twilio_21610` reason code.
-- A global daily SMS cap (the per-user limits and the region allowlist are the cost guards).
+- Vonage, a local or in-country gateway, Twilio Verify; inbound STOP handling beyond the `twilio_21610` reason code.
+- Twilio delivery receipts and status callbacks: a follow-up spec. This one stores the message SID they will key on (5.4), and `Sent` means Twilio accepted the message, not that the phone received it.
+- An app-wide daily SMS cap: an attacker could use it up and block every real user's codes. Pumping across accounts is stopped at Twilio (SMS Pumping Protection, geo permissions, a spend limit, alerts), which the production checklist requires (8).
 - A template switch: both halves are configuration-switched; `--notifications false` removes the SMS channel with the module.
 
 ## 3. Decisions (the user, 2026-11-23)
@@ -32,6 +33,13 @@
 4. **Only the verification code goes by SMS.**
 5. **Abuse limits and a region allowlist**: signed-in users only, the `auth-strict` per-address limit, a 60 s resend cooldown, at most 5 codes per user per day, 5 wrong tries end a code, and `Auth:Phone:AllowedRegions`.
 6. **A new `PhoneVerificationCode` aggregate**, not an extension of the link-based `VerificationCode`.
+
+After the security review (the user, 2026-11-24):
+
+7. **Accept** the offline brute-force risk of a code hash (ADR 0040), only while the controls in 8 stay enforced.
+8. **Store the SID, receipts later**: each SMS delivery keeps Twilio's message SID; delivery receipts are a follow-up spec.
+9. **Pumping across accounts is stopped at Twilio**, as required production steps, not by an app-wide cap.
+10. **SMS is never treated as guaranteed** (5.4, "Delivery guarantees").
 
 ## 4. Surface
 
@@ -80,6 +88,7 @@ A new resilience pipeline `sms-provider` (suggested attempt timeout 10 s, total 
 - `auth.Users` gains `PhoneNumber nvarchar(32) NULL` and `PhoneNumberVerifiedAt datetime2(3) NULL`, with a filtered unique index `IX_Users_PhoneNumber` (`WHERE [PhoneNumber] IS NOT NULL`). `User.PhoneNumber` carries `[AuditMask]`.
 - New `auth.PhoneVerificationCodes` (`PhoneVerificationCode`): `Id`, `UserId`, `PhoneNumber nvarchar(32)` (the pending number), `CodeHash varbinary(32)`, `Salt varbinary(16)`, `CreatedAt`, `ExpiresAt`, `AttemptCount int`, `ConsumedAt`, `InvalidatedAt`. Indexes: `IX_PhoneVerificationCodes_UserId_CreatedAt` (the pending code, the cooldown and the daily count), `IX_PhoneVerificationCodes_ExpiresAt` (the cleanup).
 - Migration: Auth `AddPhoneNumbers`.
+- `notifications.Deliveries` gains `ProviderMessageId nvarchar(64) NULL` (the provider's id for the sent message; only SMS sets it today). Migration: Notifications `AddDeliveryProviderMessageId`.
 
 ### 5.2 Requesting a code
 
@@ -120,6 +129,12 @@ Removing (`DELETE`) clears both columns, writes `auth.phone_number_removed`, and
 
 The response body is never logged or attached (it can quote the number); logs name the delivery id and type code only.
 
+- **Message SID.** On a 2xx, the transport returns the `sid` from Twilio's JSON when it matches `^(SM|MM)[0-9a-f]{32}\z`; otherwise none (Warning naming the delivery id). `SmsChannel` returns it with the `Sent` result, `Delivery.MarkSent` stores it in `ProviderMessageId`, and the admin delivery list shows it so support can find the message in Twilio's logs.
+- **Delivery guarantees.** SMS is at least once and best effort, never guaranteed:
+  - `Sent` means Twilio accepted the message. Delivery to the phone is not tracked yet (receipts are a follow-up).
+  - A transient failure is retried by the delivery worker's existing retry policy, never past the delivery's `ExpiresAt` (the code's life); a permanent one dead-letters with its reason, and an administrator can retry it.
+  - Idempotency: the integration event is consumed once (the inbox) and creates one notification (the unique source index). Twilio's Messages API has no idempotency key, and a `POST` that timed out may have reached Twilio, so a retry can text the same code twice; the `sms-provider` pipeline itself never retries the `POST`.
+  - A user who receives nothing requests a new code after the cooldown.
 - **Privacy.** The number, the body and the code are never logged or put in a metric tag; the admin delivery list masks an SMS destination to its last 3 digits (`********789`).
 
 ### 5.5 Switches
@@ -136,29 +151,44 @@ Everything in Notifications goes with `--notifications false`. Auth's phone code
 | `Auth/Infrastructure/` | Persistence (configuration, repository with the two conditional updates), migration `AddPhoneNumbers`, cleanup job `AuthPhoneVerificationCodesCleanup`, the integration event publisher, `UserContactDirectory` reads `PhoneNumber`. |
 | `Auth/Endpoints/` | The three routes (`auth-strict` on `POST /me/phone`), the `GET /me` fields. |
 | `Auth.Contracts/` | `UserContact.PhoneNumber`, `PhoneVerificationRequestedIntegrationEvent`. |
-| `Notifications/Domain` | `NotificationChannel.Sms = 4`, `SmsDestination`, the `AddDelivery` rule for SMS (one per notification). |
-| `Notifications/Application` | Secret variable kinds; the scheduler's SMS branch and `SmsOverride`; the `PhoneVerificationRequested` consumer; the catalog type; `ISmsTransport`, `SmsMessage`, `SmsSendException`; `DestinationMask` for numbers. |
-| `Notifications/Infrastructure/Channels/Sms/` | `SmsChannel`, `TwilioSmsTransport`, `SmsOptions` and validation; the `AddSms` registration. |
+| `Notifications/Domain` | `NotificationChannel.Sms = 4`, `SmsDestination`, the `AddDelivery` rule for SMS (one per notification), `Delivery.ProviderMessageId` (set by `MarkSent`). |
+| `Notifications/Application` | Secret variable kinds; the scheduler's SMS branch and `SmsOverride`; the `PhoneVerificationRequested` consumer; the catalog type; `ISmsTransport`, `SmsMessage`, `SmsSendException`; `ChannelSendResult` carrying a provider message id; `DestinationMask` for numbers; `providerMessageId` in the admin delivery list. |
+| `Notifications/Infrastructure/Channels/Sms/` | `SmsChannel`, `TwilioSmsTransport`, `SmsOptions` and validation; the `AddSms` registration; the `ProviderMessageId` column and migration `AddDeliveryProviderMessageId`. |
 | `Notifications/Templates/Sms/` | 3 files. |
 | `Directory.Packages.props` | `libphonenumber-csharp` (Apache-2.0; licence file and terms checked). |
-| Docs | `auth.md`, `notifications.md`, `infrastructure-common.md` (the `sms-provider` example), production checklist (Twilio credentials, `From`, allowed regions, Twilio spend alerts and geo permissions), `blueprint-review.md`, ADR 0040, `docs/README.md` and the overview ADR rows. |
+| Docs | `auth.md`, `notifications.md` (including the delivery guarantees and what to monitor), `infrastructure-common.md` (the `sms-provider` example), production checklist (Twilio credentials, `From`, allowed regions, and the four required Twilio steps in 8), `blueprint-review.md` (receipts as a new row), ADR 0040, `docs/README.md` and the overview ADR rows. |
 | Index | `bash build/scripts/project-index.sh`. |
 
 ## 7. Tests, first
 
-Unit: `PhoneNumberRules` (E.164, mobile vs landline, a region outside the allowlist, a number without `+`, an over-long input); `PhoneVerificationCode` (issue, a code of 6 digits, the expiry boundary, consume once, invalidation, the try limit); the request handler (the cooldown and daily cap with `Retry-After`, step-up only when replacing a verified number, older codes invalidated, the event carries only the encrypted code); the confirm handler (a wrong code, the fifth wrong try ends it, the right code verifies, the taken number); the remove handler; the secret-kind checks (a `Code` refused when not digits, a `Link` refused when not a URL, a secret on an in-app-only type refused by the catalog); the scheduler's SMS branch (override, contact number, none); `SmsChannel`; `TwilioSmsTransport` against a fake handler (every row of the table, a non-JSON body, the number and body never in logs or exceptions); the option checks for both modules; `DestinationMask` for numbers.
+Unit: `PhoneNumberRules` (E.164, mobile vs landline, a region outside the allowlist, a number without `+`, an over-long input); `PhoneVerificationCode` (issue, a code of 6 digits, the expiry boundary, consume once, invalidation, the try limit); the request handler (the cooldown and daily cap with `Retry-After`, step-up only when replacing a verified number, older codes invalidated, the event carries only the encrypted code); the confirm handler (a wrong code, the fifth wrong try ends it, the right code verifies, the taken number); the remove handler; the secret-kind checks (a `Code` refused when not digits, a `Link` refused when not a URL, a secret on an in-app-only type refused by the catalog); the scheduler's SMS branch (override, contact number, none); `SmsChannel`; `TwilioSmsTransport` against a fake handler (every row of the table, a non-JSON body, the number and body never in logs or exceptions, the SID returned and a malformed one dropped); `Delivery.MarkSent` keeping the provider message id; the option checks for both modules; `DestinationMask` for numbers.
 
-Integration: the three routes and `GET /me`; parallel wrong guesses never exceed `MaxAttempts`; two users confirming the same number get one 204 and one 409; the full flow (request, the SMS recorded by a recording `ISmsTransport` on a host with SMS enabled, confirm with the recorded code); persistence, the unique filtered index, the cleanup job; the OpenAPI snapshot.
+Integration: the three routes and `GET /me`; parallel wrong guesses never exceed `MaxAttempts`; two users confirming the same number get one 204 and one 409; the full flow (request, the SMS recorded by a recording `ISmsTransport` on a host with SMS enabled, confirm with the recorded code); a transient failure retried with the same code; the SID in the admin delivery list; persistence, the unique filtered index, the cleanup job; the OpenAPI snapshot.
 
 Smoke: all on, then `--notifications false`, `--includeSample false`, `--caching memory`.
 
 ## 8. Risks
 
-- **SMS pumping.** The limits bound one account; many accounts can still pump. The region allowlist and Twilio's own geo permissions and spend alerts are the remaining guards (production checklist).
-- **A stolen database brute-forces a code hash.** A 6-digit code hashed with a salt can be recovered offline, but it lives 10 minutes and allows 5 tries; accepted in ADR 0040.
-- **Latency.** A code reaches the phone about two polling intervals after the request (Auth's outbox, then the delivery worker); lower `Outbox:PollingInterval` and `Notifications:Delivery:PollingInterval` if that is too slow.
-- **libphonenumber metadata ages.** Number ranges change; the package is updated by Dependabot like the others.
-- **Unicode text costs more.** A `zh-Hans` text is one segment only up to 70 characters; the template stays under it.
+The security review (2026-11-24) sorts them in three groups.
+
+**Accepted.**
+
+- **A stolen database brute-forces a code hash.** A 6-digit code hashed with a salt can be recovered offline. It is accepted in ADR 0040 only while these controls hold: a 16-byte random salt per code, a lifetime of at most 30 minutes (10 by default), at most 10 wrong tries (5 by default) counted atomically, a new code ending the previous one, the code encrypted in the outbox and never logged, and the daily cleanup deleting codes a day after they expire. Loosening any of them reopens the ADR.
+- **A duplicate text.** A timed-out send that reached Twilio can be retried, and the user receives the same code twice (5.4).
+
+**Monitored** (`notifications.md` names the signals).
+
+- **Latency.** A code reaches the phone about two polling intervals after the request (Auth's outbox, then the delivery worker). Watch `notifications.delivery.duration` and `notifications.deliveries` for `channel=sms`, and lower `Outbox:PollingInterval` and `Notifications:Delivery:PollingInterval` if codes arrive too slowly.
+- **libphonenumber metadata ages.** Number ranges change. Dependabot updates the package like the others; a rise in `auth.invalid_phone_number` answers for one region is the sign of stale metadata.
+- **Unicode text costs more.** A `zh-Hans` text is one segment only up to 70 characters, a GSM-7 text up to 160. A unit test holds each template to one segment, so a translation that grows past it fails the build.
+
+**Required before production** (the production checklist, under the notifications marker).
+
+- **Pumping across accounts.** The per-user limits bound one account, and many accounts can still pump. Before SMS goes live, set up the following at Twilio:
+  - turn on Twilio's SMS Pumping Protection for Programmable Messaging;
+  - limit geo permissions to the regions in `Auth:Phone:AllowedRegions`;
+  - set a spend limit (a usage trigger on SMS spend, and auto-recharge off or capped);
+  - send alerts to the operators: Twilio's usage triggers, plus the app's own signals (SMS dead letters, a `twilio_20003` or `twilio_21606` configuration fault, a jump in `auth.phone_verification` notifications created).
 
 ## 9. Open questions
 
@@ -170,3 +200,4 @@ None blocking. The native review of the `ms` and `zh-Hans` drafts stays open, as
 - Step-up only when replacing or removing a verified number, not when adding the first.
 - The secret-variable kinds (a change to the catalog that email links also go through).
 - The Twilio failure table, in particular which codes count as configuration faults.
+- Retrying a timed-out send (a possible duplicate text) rather than dead-lettering it (a possibly lost code).
