@@ -52,6 +52,8 @@ internal static class AuthAuditEvents
     public const string ExternalLinked = "auth.external_linked";
     public const string ExternalUnlinked = "auth.external_unlinked";
     public const string ExternalRegistered = "auth.external_registered";
+    public const string PhoneNumberVerified = "auth.phone_number_verified";
+    public const string PhoneNumberRemoved = "auth.phone_number_removed";
 
     /// <summary>Every event type above, for the audit log's <c>eventType</c> filter.</summary>
     public static IReadOnlyCollection<string> All { get; } =

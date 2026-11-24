@@ -23,6 +23,9 @@ internal sealed class PhoneVerificationCodeRepository(AuthDbContext context) : I
 
     public void Add(PhoneVerificationCode code) => context.Set<PhoneVerificationCode>().Add(code);
 
+    public Task<PhoneVerificationCode?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+        => context.Set<PhoneVerificationCode>().SingleOrDefaultAsync(code => code.Id == id, cancellationToken);
+
     public Task<PhoneVerificationCode?> GetPendingAsync(Guid userId, DateTimeOffset now, CancellationToken cancellationToken)
         => Pending(userId, now).OrderByDescending(code => code.CreatedAt).FirstOrDefaultAsync(cancellationToken);
 
@@ -36,8 +39,12 @@ internal sealed class PhoneVerificationCodeRepository(AuthDbContext context) : I
             .Select(code => (DateTimeOffset?)code.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
 
-    public Task<int> CountIssuedSinceAsync(Guid userId, DateTimeOffset since, CancellationToken cancellationToken)
-        => context.Set<PhoneVerificationCode>().CountAsync(code => code.UserId == userId && code.CreatedAt >= since, cancellationToken);
+    public async Task<IReadOnlyList<DateTimeOffset>> ListIssuedSinceAsync(Guid userId, DateTimeOffset since, CancellationToken cancellationToken)
+        => await context.Set<PhoneVerificationCode>()
+            .Where(code => code.UserId == userId && code.CreatedAt >= since)
+            .OrderBy(code => code.CreatedAt)
+            .Select(code => code.CreatedAt)
+            .ToListAsync(cancellationToken);
 
     public async Task<bool> TryCountWrongAttemptAsync(Guid id, int maxAttempts, DateTimeOffset now, CancellationToken cancellationToken)
     {

@@ -23,6 +23,7 @@ using TemplateName.Modules.Auth.Application.Admin.Roles;
 using TemplateName.Modules.Auth.Application.Admin.Users;
 using TemplateName.Modules.Auth.Application.Authentication;
 using TemplateName.Modules.Auth.Application.Mfa;
+using TemplateName.Modules.Auth.Application.Phone;
 using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Application.StepUp;
 using TemplateName.Modules.Auth.Application.Verification;
@@ -74,7 +75,6 @@ public static class AuthModule
         services.AddScoped<IPermissionRepository, PermissionRepository>();
         services.AddScoped<ISessionRepository, SessionRepository>();
         services.AddScoped<IVerificationCodeRepository, VerificationCodeRepository>();
-        services.AddScoped<IPhoneVerificationCodeRepository, PhoneVerificationCodeRepository>();
         services.AddScoped<IAuthAuditWriter, AuthAuditWriter>();
         services.AddScoped<IUnitOfWork>(serviceProvider => serviceProvider.GetRequiredService<AuthDbContext>());
         services.AddScoped<SuperAdminRules>();
@@ -122,6 +122,7 @@ public static class AuthModule
         AddPermissions(services, configuration);
         AddMfa(services, configuration);
         AddExternalLogin(services, configuration);
+        AddPhone(services, configuration);
         AddRetention(services, configuration);
 
         // One key ring for every instance, so an outbox event protected by one instance can be read by another (ADR 0017).
@@ -265,6 +266,19 @@ public static class AuthModule
         services.AddSingleton(serviceProvider => new ExternalNonceGate(serviceProvider.GetRequiredService<TimeProvider>()));
         services.AddSingleton<IExternalProofReplayGuard, HybridCacheExternalProofReplayGuard>();
         services.AddSingleton<IExternalIdentityVerifier, ExternalIdentityVerifier>();
+    }
+
+    /// <summary>
+    /// Registers the phone number routes' settings, <c>Auth:Phone</c> (validated on start: the limits' ranges and every allowed region
+    /// must be one the number metadata knows), and the repository of the phone verification codes.
+    /// </summary>
+    internal static void AddPhone(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<PhoneOptions>()
+            .Bind(configuration.GetSection(PhoneOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddScoped<IPhoneVerificationCodeRepository, PhoneVerificationCodeRepository>();
     }
 
     /// <summary>

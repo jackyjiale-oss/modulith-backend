@@ -25,6 +25,29 @@ public sealed class UserContactDirectoryTests(IntegrationTestWebAppFactory facto
     }
 
     [Fact]
+    public async Task The_verified_phone_number_is_returned()
+    {
+        var user = await CreateUserAsync("phone@example.com");
+        await using (var scope = Factory.Services.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            var stored = await context.Set<User>().SingleAsync(candidate => candidate.Id == user.Id, Ct);
+            stored.VerifyPhoneNumber("+60123456789", Factory.Time.GetUtcNow());
+            await context.SaveChangesAsync(Ct);
+        }
+
+        (await FindAsync(user.Id)).ShouldNotBeNull().PhoneNumber.ShouldBe("+60123456789");
+    }
+
+    [Fact]
+    public async Task A_user_without_a_verified_number_has_none()
+    {
+        var user = await CreateUserAsync("nophone@example.com");
+
+        (await FindAsync(user.Id)).ShouldNotBeNull().PhoneNumber.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task Soft_deleted_user_is_not_found()
     {
         var user = await CreateUserAsync("gone@example.com");

@@ -21,7 +21,7 @@ internal sealed class GetMeQueryHandler(
     // Dapper bypasses the EF Core soft-delete filters, so the queries repeat them for users and roles (ADR 0006). Assignments have no
     // flag of their own: they are hidden through their role.
     private const string Sql = """
-        SELECT Id, Email, EmailConfirmed, DisplayName, Locale, TimeZone
+        SELECT Id, Email, EmailConfirmed, DisplayName, Locale, TimeZone, PhoneNumber, PhoneNumberVerifiedAt
         FROM auth.Users
         WHERE Id = @UserId AND IsDeleted = 0 AND Status = @ActiveStatus;
 
@@ -67,9 +67,19 @@ internal sealed class GetMeQueryHandler(
             user.Locale,
             user.TimeZone,
             roles.AsReadOnly(),
-            permissions);
+            permissions,
+            user.PhoneNumber,
+            user.PhoneNumberVerifiedAt is { } verifiedAt ? new DateTimeOffset(DateTime.SpecifyKind(verifiedAt, DateTimeKind.Utc)) : null);
     }
 
     /// <summary>The user columns, bound by Dapper through the constructor in column order.</summary>
-    private sealed record UserRow(Guid Id, string Email, bool EmailConfirmed, string DisplayName, string Locale, string TimeZone);
+    private sealed record UserRow(
+        Guid Id,
+        string Email,
+        bool EmailConfirmed,
+        string DisplayName,
+        string Locale,
+        string TimeZone,
+        string? PhoneNumber,
+        DateTime? PhoneNumberVerifiedAt);
 }

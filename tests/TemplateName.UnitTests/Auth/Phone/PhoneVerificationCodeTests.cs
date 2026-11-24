@@ -19,7 +19,7 @@ public sealed class PhoneVerificationCodeTests
     [Fact]
     public void Matches_only_the_issued_code()
     {
-        var code = PhoneVerificationCode.Issue(UserId, "+60123456789", "042137", TimeSpan.FromMinutes(10), Now);
+        var code = PhoneVerificationCode.Issue(UserId, "+60123456789", "042137", "protected", TimeSpan.FromMinutes(10), Now);
 
         code.Matches("042137").ShouldBeTrue();
         code.Matches("042138").ShouldBeFalse();
@@ -32,8 +32,8 @@ public sealed class PhoneVerificationCodeTests
     [Fact]
     public void The_same_code_issued_twice_has_different_hashes()
     {
-        var first = PhoneVerificationCode.Issue(UserId, "+60123456789", "042137", TimeSpan.FromMinutes(10), Now);
-        var second = PhoneVerificationCode.Issue(UserId, "+60123456789", "042137", TimeSpan.FromMinutes(10), Now);
+        var first = PhoneVerificationCode.Issue(UserId, "+60123456789", "042137", "protected", TimeSpan.FromMinutes(10), Now);
+        var second = PhoneVerificationCode.Issue(UserId, "+60123456789", "042137", "protected", TimeSpan.FromMinutes(10), Now);
 
         first.CodeHash.ShouldNotBe(second.CodeHash);
     }
@@ -41,7 +41,7 @@ public sealed class PhoneVerificationCodeTests
     [Fact]
     public void ToString_never_contains_the_code_or_number()
     {
-        var code = PhoneVerificationCode.Issue(UserId, "+60123456789", "042137", TimeSpan.FromMinutes(10), Now);
+        var code = PhoneVerificationCode.Issue(UserId, "+60123456789", "042137", "protected", TimeSpan.FromMinutes(10), Now);
 
         var text = code.ToString();
 
@@ -54,7 +54,7 @@ public sealed class PhoneVerificationCodeTests
     [Fact]
     public void IsPending_until_expiry_exclusive()
     {
-        var code = PhoneVerificationCode.Issue(UserId, "+60123456789", "042137", TimeSpan.FromMinutes(10), Now);
+        var code = PhoneVerificationCode.Issue(UserId, "+60123456789", "042137", "protected", TimeSpan.FromMinutes(10), Now);
 
         code.ExpiresAt.ShouldBe(Now.AddMinutes(10));
         code.IsPending(Now.AddMinutes(10).AddTicks(-1)).ShouldBeTrue();
@@ -64,7 +64,7 @@ public sealed class PhoneVerificationCodeTests
     [Fact]
     public void Invalidate_keeps_the_first_time()
     {
-        var code = PhoneVerificationCode.Issue(UserId, "+60123456789", "042137", TimeSpan.FromMinutes(10), Now);
+        var code = PhoneVerificationCode.Issue(UserId, "+60123456789", "042137", "protected", TimeSpan.FromMinutes(10), Now);
 
         code.Invalidate(Now.AddMinutes(1));
         code.Invalidate(Now.AddMinutes(2));
@@ -76,7 +76,7 @@ public sealed class PhoneVerificationCodeTests
     [Fact]
     public void Consume_ends_it()
     {
-        var code = PhoneVerificationCode.Issue(UserId, "+60123456789", "042137", TimeSpan.FromMinutes(10), Now);
+        var code = PhoneVerificationCode.Issue(UserId, "+60123456789", "042137", "protected", TimeSpan.FromMinutes(10), Now);
 
         code.Consume(Now.AddMinutes(1));
 
@@ -89,7 +89,7 @@ public sealed class PhoneVerificationCodeTests
     [Fact]
     public void Issue_keeps_the_number_and_owner()
     {
-        var code = PhoneVerificationCode.Issue(UserId, "+60123456789", "042137", TimeSpan.FromMinutes(10), Now);
+        var code = PhoneVerificationCode.Issue(UserId, "+60123456789", "042137", "protected", TimeSpan.FromMinutes(10), Now);
 
         code.UserId.ShouldBe(UserId);
         code.PhoneNumber.ShouldBe("+60123456789");

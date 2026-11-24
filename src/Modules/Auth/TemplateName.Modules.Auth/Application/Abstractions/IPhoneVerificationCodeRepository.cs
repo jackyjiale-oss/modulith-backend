@@ -11,6 +11,9 @@ internal interface IPhoneVerificationCodeRepository
 {
     void Add(PhoneVerificationCode code);
 
+    /// <summary>Finds a code by its id, whatever its state.</summary>
+    Task<PhoneVerificationCode?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
+
     /// <summary>The user's newest pending code, or null.</summary>
     Task<PhoneVerificationCode?> GetPendingAsync(Guid userId, DateTimeOffset now, CancellationToken cancellationToken);
 
@@ -20,8 +23,11 @@ internal interface IPhoneVerificationCodeRepository
     /// <summary>When the user's newest code was issued, whatever its state, or null when there is none (the resend cooldown).</summary>
     Task<DateTimeOffset?> GetLastIssuedAtAsync(Guid userId, CancellationToken cancellationToken);
 
-    /// <summary>How many codes the user was issued at or after <paramref name="since"/> (the daily cap).</summary>
-    Task<int> CountIssuedSinceAsync(Guid userId, DateTimeOffset since, CancellationToken cancellationToken);
+    /// <summary>
+    /// When each code the user was issued at or after <paramref name="since"/> was issued, oldest first (the daily cap, and when the
+    /// oldest of them leaves the window).
+    /// </summary>
+    Task<IReadOnlyList<DateTimeOffset>> ListIssuedSinceAsync(Guid userId, DateTimeOffset since, CancellationToken cancellationToken);
 
     /// <summary>
     /// Counts one wrong try on a pending code that has fewer than <paramref name="maxAttempts"/>; the try that reaches the limit also

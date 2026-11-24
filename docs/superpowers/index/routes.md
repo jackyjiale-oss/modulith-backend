@@ -2,13 +2,14 @@
 
 # Routes
 
-Rows: 65
+Rows: 68
 
 | module | method | route | handler | permission | file |
 | --- | --- | --- | --- | --- | --- |
 | Audit | GET | /api/v1/admin/audit/trails | ListAuditTrailsQuery | AuditPermissions.TrailsView | src/Modules/Audit/TemplateName.Modules.Audit/Endpoints/AdminAuditTrailEndpoints.cs |
 | Auth | DELETE | /api/v1/admin/auth/roles/{id:guid} | DeleteRoleCommand | AuthPermissions.RoleManage | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/AdminRoleEndpoints.cs |
 | Auth | DELETE | /api/v1/auth/external/logins/{id:guid} | UnlinkExternalLoginCommand | authenticated | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/ExternalLoginEndpoints.cs |
+| Auth | DELETE | /api/v1/auth/me/phone | RemovePhoneCommand | authenticated | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/PhoneEndpoints.cs |
 | Auth | DELETE | /api/v1/auth/mfa/methods/{id:guid} | RemoveMfaMethodCommand | authenticated | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/MfaEndpoints.cs |
 | Auth | DELETE | /api/v1/auth/sessions/{id:guid} | RevokeSessionCommand | authenticated | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/AuthEndpoints.cs |
 | Auth | DELETE | /api/v1/auth/trusted-devices/{id:guid} | RevokeTrustedDeviceCommand | authenticated | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/TrustedDeviceEndpoints.cs |
@@ -39,6 +40,8 @@ Rows: 65
 | Auth | POST | /api/v1/auth/login | LoginCommand | anonymous | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/AuthEndpoints.cs |
 | Auth | POST | /api/v1/auth/logout | LogoutCommand | authenticated | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/AuthEndpoints.cs |
 | Auth | POST | /api/v1/auth/logout-all | LogoutAllCommand | authenticated | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/AuthEndpoints.cs |
+| Auth | POST | /api/v1/auth/me/phone | RequestPhoneCodeCommand | authenticated | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/PhoneEndpoints.cs |
+| Auth | POST | /api/v1/auth/me/phone/confirm | ConfirmPhoneCommand | authenticated | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/PhoneEndpoints.cs |
 | Auth | POST | /api/v1/auth/mfa/recovery-codes/regenerate | RegenerateRecoveryCodesCommand | authenticated | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/MfaEndpoints.cs |
 | Auth | POST | /api/v1/auth/mfa/totp/confirm | ConfirmTotpCommand | authenticated | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/MfaEndpoints.cs |
 | Auth | POST | /api/v1/auth/mfa/totp/setup | SetUpTotpCommand | authenticated | src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/MfaEndpoints.cs |

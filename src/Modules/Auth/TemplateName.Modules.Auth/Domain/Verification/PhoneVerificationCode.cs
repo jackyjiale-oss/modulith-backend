@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using TemplateName.Modules.Auth.Domain.Verification.Events;
 using TemplateName.SharedKernel;
 
 namespace TemplateName.Modules.Auth.Domain.Verification;
@@ -48,16 +49,27 @@ internal sealed class PhoneVerificationCode : AggregateRoot<Guid>
     public static string NewCode() =>
         RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
 
-    /// <summary>Issues a code for <paramref name="phoneNumber"/> (E.164), keeping only a hash of <paramref name="code"/> with a new salt.</summary>
-    public static PhoneVerificationCode Issue(Guid userId, string phoneNumber, string code, TimeSpan lifetime, DateTimeOffset now)
+    /// <summary>
+    /// Issues a code for <paramref name="phoneNumber"/> (E.164), keeping only a hash of <paramref name="code"/> with a new salt, and raises
+    /// <see cref="PhoneVerificationRequestedDomainEvent"/> carrying <paramref name="protectedCode"/> (the code encrypted by the
+    /// application), which only the event keeps.
+    /// </summary>
+    public static PhoneVerificationCode Issue(
+        Guid userId,
+        string phoneNumber,
+        string code,
+        string protectedCode,
+        TimeSpan lifetime,
+        DateTimeOffset now)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(phoneNumber);
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
+        ArgumentException.ThrowIfNullOrWhiteSpace(protectedCode);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(lifetime, TimeSpan.Zero);
 
         var salt = RandomNumberGenerator.GetBytes(SaltLength);
 
-        return new PhoneVerificationCode
+        var issued = new PhoneVerificationCode
         {
             Id = SequentialGuid.Create(now),
             UserId = userId,
@@ -67,6 +79,10 @@ internal sealed class PhoneVerificationCode : AggregateRoot<Guid>
             CreatedAt = now,
             ExpiresAt = now + lifetime,
         };
+
+        issued.Raise(new PhoneVerificationRequestedDomainEvent(issued.Id, userId, phoneNumber, protectedCode, issued.ExpiresAt));
+
+        return issued;
     }
 
     /// <summary>Whether <paramref name="code"/> is the issued code, compared in constant time.</summary>

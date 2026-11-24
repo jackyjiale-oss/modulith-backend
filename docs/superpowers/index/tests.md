@@ -2,7 +2,7 @@
 
 # Tests
 
-Rows: 229
+Rows: 234
 
 ## Folders
 
@@ -145,6 +145,10 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Passwords/Change/ChangePasswordCommandHandler.cs | tests/TemplateName.UnitTests/Auth/ChangePasswordCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Passwords/Forgot/ForgotPasswordCommandHandler.cs | tests/TemplateName.UnitTests/Auth/ForgotPasswordCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Passwords/Reset/ResetPasswordCommandHandler.cs | tests/TemplateName.UnitTests/Auth/ResetPasswordCommandHandlerTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/Phone/Confirm/ConfirmPhoneCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Phone/ConfirmPhoneCommandHandlerTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/Phone/PhoneOptions.cs | tests/TemplateName.UnitTests/Auth/Phone/PhoneOptionsTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/Phone/Remove/RemovePhoneCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Phone/RemovePhoneCommandHandlerTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/Phone/RequestCode/RequestPhoneCodeCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Phone/RequestPhoneCodeCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Registration/ConfirmEmail/ConfirmEmailCommandHandler.cs | tests/TemplateName.UnitTests/Auth/ConfirmEmailCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Registration/ConfirmEmail/ConfirmEmailCommandValidator.cs | tests/TemplateName.UnitTests/Auth/ConfirmEmailCommandValidatorTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Registration/Register/RegisterCommandHandler.cs | tests/TemplateName.UnitTests/Auth/RegisterCommandHandlerTests.cs |
@@ -173,6 +177,7 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Verification/PhoneNumberRules.cs | tests/TemplateName.UnitTests/Auth/Phone/PhoneNumberRulesTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Verification/PhoneVerificationCode.cs | tests/TemplateName.UnitTests/Auth/Phone/PhoneVerificationCodeTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Verification/VerificationCode.cs | tests/TemplateName.UnitTests/Auth/VerificationCodeTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/PhoneEndpoints.cs | tests/TemplateName.IntegrationTests/Auth/PhoneEndpointsTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Authorization/AuthSeeder.cs | tests/TemplateName.IntegrationTests/Auth/AuthSeederTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Authorization/PermissionChecker.cs | tests/TemplateName.IntegrationTests/Auth/PermissionCheckerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Authorization/PermissionSynchronizer.cs | tests/TemplateName.UnitTests/Auth/PermissionSynchronizerTests.cs |

@@ -9,6 +9,8 @@ namespace TemplateName.Modules.Auth.Application.Me.GetMe;
 /// <param name="TimeZone">The saved time zone (IANA id), <c>UTC</c> until the user changes it.</param>
 /// <param name="Roles">The names of the user's roles that are not deleted, sorted ordinally.</param>
 /// <param name="Permissions">The permission codes those roles grant, sorted ordinally: the set every permission check uses.</param>
+/// <param name="PhoneNumber">The verified mobile number in E.164, or null; a number waiting for its code is not shown.</param>
+/// <param name="PhoneNumberVerifiedAt">When <paramref name="PhoneNumber"/> was verified (UTC), or null.</param>
 internal sealed record MeResponse(
     Guid Id,
     string Email,
@@ -17,4 +19,6 @@ internal sealed record MeResponse(
     string Locale,
     string TimeZone,
     IReadOnlyCollection<string> Roles,
-    IReadOnlyCollection<string> Permissions);
+    IReadOnlyCollection<string> Permissions,
+    string? PhoneNumber = null,
+    DateTimeOffset? PhoneNumberVerifiedAt = null);

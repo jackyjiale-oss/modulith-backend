@@ -178,6 +178,9 @@ internal static class AuthEndpoints
         // Social login: auth/external/..., in the same group and tag.
         group.MapExternalLoginEndpoints();
 
+        // The verified phone number: auth/me/phone/..., 404 while Auth:Phone:Enabled is off.
+        group.MapPhoneEndpoints();
+
         return app;
     }
 
