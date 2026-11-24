@@ -3,6 +3,7 @@ using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Modules.Auth.Application.Abstractions;
+using TemplateName.Modules.Auth.Application.Phone;
 using TemplateName.Modules.Auth.Application.Phone.Remove;
 using TemplateName.Modules.Auth.Application.StepUp;
 using TemplateName.Modules.Auth.Domain.Audit;
@@ -28,11 +29,12 @@ public sealed class RemovePhoneCommandHandlerTests
     private readonly IUnitOfWork _unitOfWork = Substitute.For<IUnitOfWork>();
     private readonly List<AuthAuditLog> _auditEntries = [];
     private readonly User _user = User.Register("alice@example.com", "Alice", "en", "hash", Now.AddDays(-1)).Value;
+    private readonly UserSession _session;
     private readonly RemovePhoneCommandHandler _sut;
 
     public RemovePhoneCommandHandlerTests()
     {
-        var session = StartSession(_user);
+        var session = _session = StartSession(_user);
         _users.GetByIdAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_user);
         _sessions.GetByIdAsync(session.Id, Arg.Any<CancellationToken>()).Returns(session);
         _currentUser.UserId.Returns(_user.Id);
@@ -45,7 +47,7 @@ public sealed class RemovePhoneCommandHandlerTests
         _sut = new RemovePhoneCommandHandler(
             _users,
             _sessions,
-            _codes,
+            new PhoneChangeEffects(_sessions, _codes),
             _mfaMethods,
             new StepUpPolicy(_currentUser, Options.Create(new StepUpOptions()), time),
             _currentUser,
@@ -107,6 +109,35 @@ public sealed class RemovePhoneCommandHandlerTests
         result.IsSuccess.ShouldBeTrue();
         pending.InvalidatedAt.ShouldBe(Now);
         _auditEntries.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Removal_ends_the_other_sessions_and_pending_codes()
+    {
+        _user.VerifyPhoneNumber(Number, Now.AddDays(-1));
+        var other = StartSession(_user);
+        _sessions.GetActiveByUserAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([_session, other]);
+        var signIn = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.SignIn, Number, "222222", "protected", TimeSpan.FromMinutes(5), Now.AddMinutes(-1));
+        _codes.ListPendingAsync(_user.Id, null, Now, Arg.Any<CancellationToken>()).Returns([signIn]);
+
+        (await _sut.HandleAsync(new RemovePhoneCommand(), Ct)).IsSuccess.ShouldBeTrue();
+
+        other.RevokedReason.ShouldBe(SessionRevokedReason.PhoneNumberChanged);
+        _session.RevokedAt.ShouldBeNull();
+        _session.SecurityStamp.ShouldBe(_user.SecurityStamp);
+        signIn.InvalidatedAt.ShouldBe(Now);
+        _auditEntries.ShouldHaveSingleItem().Details.ShouldBe("""{"revokedSessionCount":1}""");
+    }
+
+    [Fact]
+    public async Task Removal_without_a_number_ends_no_session()
+    {
+        var other = StartSession(_user);
+        _sessions.GetActiveByUserAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([_session, other]);
+
+        (await _sut.HandleAsync(new RemovePhoneCommand(), Ct)).IsSuccess.ShouldBeTrue();
+
+        other.RevokedAt.ShouldBeNull();
     }
 
     private static UserSession StartSession(User user)

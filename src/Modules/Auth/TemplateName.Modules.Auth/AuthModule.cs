@@ -231,6 +231,7 @@ public static class AuthModule
         services.AddScoped<MfaFactorVerifier>();
         services.AddScoped<RecoveryCodeIssuer>();
         services.AddScoped<MfaChangeEffects>();
+        services.AddScoped<PhoneChangeEffects>();
 
         services.AddOptions<StepUpOptions>()
             .Bind(configuration.GetSection(StepUpOptions.SectionName))

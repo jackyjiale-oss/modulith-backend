@@ -56,13 +56,12 @@ internal sealed class RequestPhoneCodeCommandHandler(
             return Result.Failure<PhoneCodeResponse>(PhoneErrors.InvalidPhoneNumber);
         }
 
-        if (user.PhoneNumber is not null)
+        // A verified number signs the account in, so adding one needs the same fresh proof as replacing it: a stolen access token alone
+        // must not bind an attacker's number.
+        var stepUp = stepUpPolicy.Check(await mfaMethods.HasConfirmedAsync(user.Id, cancellationToken));
+        if (stepUp.IsFailure)
         {
-            var stepUp = stepUpPolicy.Check(await mfaMethods.HasConfirmedAsync(user.Id, cancellationToken));
-            if (stepUp.IsFailure)
-            {
-                return Result.Failure<PhoneCodeResponse>(stepUp.Error);
-            }
+            return Result.Failure<PhoneCodeResponse>(stepUp.Error);
         }
 
         if (await RetryAfterAsync(user.Id, settings, now, cancellationToken) is { } retryAfter)

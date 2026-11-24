@@ -40,7 +40,8 @@ public sealed class RequestPhoneCodeCommandHandlerTests
         _sessions.GetByIdAsync(session.Id, Arg.Any<CancellationToken>()).Returns(session);
         _currentUser.UserId.Returns(_user.Id);
         _currentUser.SessionId.Returns(session.Id);
-        _currentUser.AuthTime.Returns(Now.AddHours(-1));
+        // A fresh sign-in: every number change needs a step-up, a first number included.
+        _currentUser.AuthTime.Returns(Now.AddMinutes(-1));
         _currentUser.AuthMethods.Returns(["pwd"]);
         _codes.ListPendingAsync(_user.Id, PhoneCodePurpose.Verify, Now, Arg.Any<CancellationToken>()).Returns([]);
         _codes.ListIssuedSinceAsync(_user.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns([]);
@@ -177,11 +178,36 @@ public sealed class RequestPhoneCodeCommandHandlerTests
     }
 
     [Fact]
-    public async Task Adding_the_first_number_needs_no_step_up()
+    public async Task Adding_the_first_number_needs_step_up()
     {
-        _currentUser.AuthTime.Returns((DateTimeOffset?)null);
+        _currentUser.AuthTime.Returns(Now.AddHours(-1));
+
+        var result = await _sut.HandleAsync(new RequestPhoneCodeCommand(Number), Ct);
+
+        result.Error.ShouldBe(MfaErrors.StepUpRequired);
+        _issued.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Adding_the_first_number_after_an_sms_sign_in_needs_step_up()
+    {
+        _currentUser.AuthMethods.Returns(["sms"]);
+
+        (await _sut.HandleAsync(new RequestPhoneCodeCommand(Number), Ct)).Error.ShouldBe(MfaErrors.StepUpRequired);
+    }
+
+    [Fact]
+    public async Task A_new_verification_code_ends_only_pending_verification_codes()
+    {
+        var verify = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.Verify, Number, "111111", "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-5));
+        var signIn = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.SignIn, Number, "222222", "protected", TimeSpan.FromMinutes(5), Now.AddMinutes(-2));
+        _codes.ListPendingAsync(_user.Id, PhoneCodePurpose.Verify, Now, Arg.Any<CancellationToken>()).Returns([verify]);
+        _codes.ListPendingAsync(_user.Id, null, Now, Arg.Any<CancellationToken>()).Returns([verify, signIn]);
 
         (await _sut.HandleAsync(new RequestPhoneCodeCommand(Number), Ct)).IsSuccess.ShouldBeTrue();
+
+        verify.InvalidatedAt.ShouldBe(Now);
+        signIn.InvalidatedAt.ShouldBeNull();
     }
 
     [Theory]

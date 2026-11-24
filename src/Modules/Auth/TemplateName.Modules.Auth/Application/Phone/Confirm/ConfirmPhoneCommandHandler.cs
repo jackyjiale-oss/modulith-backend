@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Messaging;
@@ -27,6 +28,7 @@ internal sealed class ConfirmPhoneCommandHandler(
     IUserRepository users,
     ISessionRepository sessions,
     IPhoneVerificationCodeRepository codes,
+    PhoneChangeEffects changeEffects,
     ICurrentUser currentUser,
     IAuthAuditWriter auditWriter,
     IUnitOfWork unitOfWork,
@@ -68,15 +70,18 @@ internal sealed class ConfirmPhoneCommandHandler(
             return Result.Failure(PhoneErrors.PhoneNumberTaken);
         }
 
-        user.VerifyPhoneNumber(code.PhoneNumber, now);
+        var change = user.VerifyPhoneNumber(code.PhoneNumber, now);
+        var revokedSessionCount = await changeEffects.ApplyAsync(user, change, session.Id, now, cancellationToken);
         auditWriter.Record(AuthAuditLog.Create(
             AuthAuditEvents.PhoneNumberVerified,
             succeeded: true,
             now,
             userId: user.Id,
-            sessionId: session.Id));
+            sessionId: session.Id,
+            details: JsonSerializer.Serialize(new { revokedSessionCount })));
 
-        // One save: the number, the code's state and the audit row; the unique index decides a number another account verified first.
+        // One save: the number, the stamp, the sessions, the codes, the audit row and the outbox row of the change event; the unique
+        // index decides a number another account verified first.
         return await unitOfWork.SaveChangesUnlessDuplicateAsync(UniqueIndexNames.UserPhoneNumber, cancellationToken)
             ? Result.Success()
             : Result.Failure(PhoneErrors.PhoneNumberTaken);
