@@ -31,6 +31,8 @@
     <PackageVersion Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="10.0.15" />
     <!--#endif-->
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.11.0" />
+    <!-- Auth's phone numbers: parsing, mobile and region checks, E.164 formatting; Apache-2.0, no usage fees. -->
+    <PackageVersion Include="libphonenumber-csharp" Version="9.0.43" />
   </ItemGroup>
 
   <!--#if (notifications)-->

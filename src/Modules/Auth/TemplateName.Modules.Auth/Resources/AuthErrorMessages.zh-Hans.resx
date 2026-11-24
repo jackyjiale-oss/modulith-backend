@@ -90,6 +90,15 @@
   <data name="auth.invalid_token" xml:space="preserve">
     <value>链接无效或已过期。</value>
   </data>
+  <data name="auth.invalid_phone_number" xml:space="preserve">
+    <value>该电话号码不是受支持地区的有效手机号码。</value>
+  </data>
+  <data name="auth.invalid_code" xml:space="preserve">
+    <value>验证码无效或已过期。请重新获取。</value>
+  </data>
+  <data name="auth.phone_number_taken" xml:space="preserve">
+    <value>此电话号码已被其他账户使用。</value>
+  </data>
   <data name="auth.email_taken" xml:space="preserve">
     <value>使用此电子邮件地址的账户已存在。</value>
   </data>

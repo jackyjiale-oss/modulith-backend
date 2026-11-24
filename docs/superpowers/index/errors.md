@@ -2,7 +2,7 @@
 
 # Error codes
 
-Rows: 73
+Rows: 76
 
 ## Declared codes
 
@@ -23,10 +23,12 @@ Rows: 73
 | auth.external_provider_not_found | Auth | 404 | auth.external_provider_not_found | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Users/ExternalLoginErrors.cs |
 | auth.external_provider_unavailable | Auth | 503 | auth.external_provider_unavailable | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Users/ExternalLoginErrors.cs |
 | auth.external_sign_up_disabled | Auth | 403 | auth.external_sign_up_disabled | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Users/ExternalLoginErrors.cs |
+| auth.invalid_code | Auth | 400 | auth.invalid_code | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Verification/PhoneErrors.cs |
 | auth.invalid_credentials | Auth | 401 | auth.invalid_credentials | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Users/UserErrors.cs |
 | auth.invalid_external_token | Auth | 401 | auth.invalid_external_token | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Users/ExternalLoginErrors.cs |
 | auth.invalid_mfa_challenge | Auth | 400 | auth.invalid_mfa_challenge | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Mfa/MfaErrors.cs |
 | auth.invalid_mfa_code | Auth | 400 | auth.invalid_mfa_code | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Mfa/MfaErrors.cs |
+| auth.invalid_phone_number | Auth | 400 | auth.invalid_phone_number | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Verification/PhoneErrors.cs |
 | auth.invalid_refresh_token | Auth | 401 | auth.invalid_refresh_token | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Sessions/SessionErrors.cs |
 | auth.invalid_token | Auth | 400 | auth.invalid_token | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Verification/VerificationErrors.cs |
 | auth.last_login_method | Auth | 409 | auth.last_login_method | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Users/ExternalLoginErrors.cs |
@@ -39,6 +41,7 @@ Rows: 73
 | auth.password_reused | Auth | 400 | auth.password_reused | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Users/UserErrors.cs |
 | auth.permission_grant_not_allowed | Auth | 403 | auth.permission_grant_not_allowed | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Roles/RoleErrors.cs |
 | auth.permission_not_found | Auth | 400 | auth.permission_not_found | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Roles/RoleErrors.cs |
+| auth.phone_number_taken | Auth | 409 | auth.phone_number_taken | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Verification/PhoneErrors.cs |
 | auth.refresh_token_expired | Auth | 401 | auth.refresh_token_expired | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Sessions/SessionErrors.cs |
 | auth.refresh_token_reused | Auth | 401 | auth.refresh_token_reused | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Sessions/SessionErrors.cs |
 | auth.role_assignment_not_allowed | Auth | 403 | auth.role_assignment_not_allowed | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Users/UserErrors.cs |

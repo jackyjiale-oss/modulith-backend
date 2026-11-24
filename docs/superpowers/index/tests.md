@@ -2,7 +2,7 @@
 
 # Tests
 
-Rows: 227
+Rows: 229
 
 ## Folders
 
@@ -170,6 +170,8 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Users/ExternalLoginErrors.cs | tests/TemplateName.UnitTests/Auth/ExternalLoginErrorsTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Users/User.cs | tests/TemplateName.UnitTests/Auth/UserTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Users/UserExternalLogin.cs | tests/TemplateName.UnitTests/Auth/UserExternalLoginTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Domain/Verification/PhoneNumberRules.cs | tests/TemplateName.UnitTests/Auth/Phone/PhoneNumberRulesTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Domain/Verification/PhoneVerificationCode.cs | tests/TemplateName.UnitTests/Auth/Phone/PhoneVerificationCodeTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Verification/VerificationCode.cs | tests/TemplateName.UnitTests/Auth/VerificationCodeTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Authorization/AuthSeeder.cs | tests/TemplateName.IntegrationTests/Auth/AuthSeederTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Authorization/PermissionChecker.cs | tests/TemplateName.IntegrationTests/Auth/PermissionCheckerTests.cs |

@@ -282,7 +282,7 @@ Five entities carry `[Audited]`, so every save that changes one writes its field
 | `UserRole` | `UserId`, `RoleId`, `AssignedBy`, `AssignedAt` (composite key; created and hard-deleted) | none |
 | `UserExternalLogin` | `UserId`, `Provider`, `Subject`, `Email`, `LinkedAt` (a linked sign-in identity; created and hard-deleted when it is unlinked) | `LastUsedAt` (high frequency: it changes at every sign-in with the login, which the security log records). Nothing is secret: the subject is the provider's public identifier of the person, never a proof or a token (those are not stored at all) |
 
-`RowVersion` and the audit and soft-delete stamps are skipped by rule, not by attribute. `PasswordChangedAt` is audited: a password change shows as a change of that field without recording what it changed to, and an administrator's suspension as `{ "Status": { "old": "Active", "new": "Suspended" } }`. Nothing in Auth needs `[AuditMask]` today.
+`RowVersion` and the audit and soft-delete stamps are skipped by rule, not by attribute. `PasswordChangedAt` is audited: a password change shows as a change of that field without recording what it changed to, and an administrator's suspension as `{ "Status": { "old": "Active", "new": "Suspended" } }`. `PhoneNumber` carries `[AuditMask]`: adding, replacing or removing the verified number shows as a change of that field with `"****"` in place of the numbers.
 
 - **The seeder writes trails with no user.** The first run of the seeder saves with no signed-in user, so the seeded roles (`Role` `Created`), their grants (`RolePermission` `Created`) and, when the first administrator is created, that `User` and its `UserRole` are trail rows whose `UserId` and `SessionId` are null. That is correct: the seeder is not a person. A later run that changes nothing audited writes nothing.
 - **A sign-in writes no trail.** It only changes `LastLoginAt` (and, with an external login, that login's `LastUsedAt`), which are ignored, and a save that changes only ignored properties writes no change set.
@@ -313,6 +313,9 @@ Five entities carry `[Audited]`, so every save that changes one writes its field
 | `auth.session_not_found` | 404 | `id` | Session '{id}' was not found. |
 | `auth.invalid_token` | 400 | — | The link is invalid or has expired. |
 | `auth.email_taken` | 409 | — | An account with this email address already exists. |
+| `auth.invalid_phone_number` | 400 | — | The phone number is not a valid mobile number in a supported region. |
+| `auth.invalid_code` | 400 | — | The code is invalid or has expired. Request a new one. |
+| `auth.phone_number_taken` | 409 | — | This phone number is already used by another account. |
 | `auth.cannot_lock_self` | 400 | — | You cannot lock your own account. |
 | `auth.last_super_admin` | 409 | — | The last active SuperAdmin cannot be locked or lose the SuperAdmin role. |
 | `auth.cannot_manage_super_admin` | 403 | — | Only a SuperAdmin can manage a SuperAdmin account or grant the SuperAdmin role. |
