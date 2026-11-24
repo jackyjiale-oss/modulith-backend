@@ -27,6 +27,9 @@ internal sealed class Delivery : Entity<Guid>
     /// <summary>The column limit of <see cref="RenderedSubject"/>.</summary>
     public const int MaxRenderedSubjectLength = 300;
 
+    /// <summary>The column limit of <see cref="ProviderMessageId"/>.</summary>
+    public const int MaxProviderMessageIdLength = 64;
+
     // EF Core materializes the entity through this constructor; callers use Notification.AddDelivery.
     private Delivery()
     {
@@ -55,6 +58,9 @@ internal sealed class Delivery : Entity<Guid>
 
     /// <summary>The subject the recipient got, kept for the administrator's view; <see langword="null"/> until sent.</summary>
     public string? RenderedSubject { get; private set; }
+
+    /// <summary>The provider's id for the sent message (Twilio's message SID for SMS), for looking it up in the provider's logs; null otherwise.</summary>
+    public string? ProviderMessageId { get; private set; }
 
     public DateTime CreatedAt { get; private set; }
 
@@ -110,11 +116,22 @@ internal sealed class Delivery : Entity<Guid>
         return Result.Success();
     }
 
-    /// <summary>Settles a pending delivery as sent. <paramref name="renderedSubject"/> is cut to <see cref="MaxRenderedSubjectLength"/>.</summary>
+    /// <summary>
+    /// Settles a pending delivery as sent. <paramref name="renderedSubject"/> is cut to <see cref="MaxRenderedSubjectLength"/>;
+    /// <paramref name="providerMessageId"/> is the provider's id for the message, when it gave one.
+    /// </summary>
     /// <exception cref="InvalidOperationException">The delivery is not pending.</exception>
-    public void MarkSent(string? renderedSubject, DateTimeOffset now)
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="providerMessageId"/> is longer than <see cref="MaxProviderMessageIdLength"/>.</exception>
+    public void MarkSent(string? renderedSubject, DateTimeOffset now, string? providerMessageId = null)
     {
+        if (providerMessageId is not null)
+        {
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(providerMessageId.Length, MaxProviderMessageIdLength, nameof(providerMessageId));
+        }
+
         EnsurePending();
+
+        ProviderMessageId = providerMessageId;
 
         Status = DeliveryStatus.Sent;
         SentAt = now.UtcDateTime;

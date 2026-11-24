@@ -5,8 +5,9 @@ namespace TemplateName.Modules.Notifications.Application.Catalog;
 /// <summary>
 /// One kind of notification, declared in code by an <see cref="INotificationTypeSource"/>. <see cref="Code"/> is <c>{area}.{name}</c>
 /// (for example <c>auth.password_changed</c>). <see cref="Variables"/> are the placeholders its templates may use and
-/// <see cref="SecretVariables"/> the ones that carry a secret (a single-use link): they are never shown in a subject or an in-app text, and
-/// the scheduler refuses an event whose secret value does not decrypt to an absolute <c>http</c> or <c>https</c> URL.
+/// <see cref="SecretVariables"/> the ones that carry a secret, each with its <see cref="SecretKind"/> (a single-use link or a one-time
+/// code): they are never shown in a subject or an in-app text, only email and SMS receive them, and the scheduler refuses an event whose
+/// secret value does not decrypt to what its kind declares.
 /// </summary>
 internal sealed record NotificationTypeDefinition(
     string Code,
@@ -15,7 +16,7 @@ internal sealed record NotificationTypeDefinition(
     IReadOnlyList<NotificationChannel> DefaultChannels,
     IReadOnlyList<NotificationChannel> MandatoryChannels,
     IReadOnlySet<string> Variables,
-    IReadOnlySet<string> SecretVariables)
+    IReadOnlyDictionary<string, SecretKind> SecretVariables)
 {
     /// <summary>True when the recipient cannot switch <paramref name="channel"/> off for this type.</summary>
     public bool IsMandatory(NotificationChannel channel) => MandatoryChannels.Contains(channel);

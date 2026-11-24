@@ -1,4 +1,5 @@
 using System.Globalization;
+using TemplateName.Modules.Notifications.Domain.Deliveries;
 
 namespace TemplateName.Modules.Notifications.Application.Admin;
 
@@ -10,14 +11,21 @@ namespace TemplateName.Modules.Notifications.Application.Admin;
 /// The local part is replaced by its first character and four asterisks (<c>alice@example.com</c> becomes <c>a****@example.com</c>);
 /// the number of asterisks never depends on the real length, so the length is not leaked. The first character is shown only when the
 /// local part has at least <see cref="MinLocalPartForHint"/> characters, because for a shorter one it would be half of the secret or all
-/// of it. The domain is not secret and stays whole. Anything that does not look like an address is masked entirely.
+/// of it. The domain is not secret and stays whole. A phone number in E.164 keeps its last <see cref="NumberDigitsShown"/> digits behind a
+/// fixed run of asterisks (<c>+60123456789</c> becomes <c>********789</c>), so its length is not leaked either. Anything else is masked
+/// entirely.
 /// </remarks>
 internal static class DestinationMask
 {
     /// <summary>The shortest local part (in text elements, so a letter with its accents or an emoji counts once) that shows its first one.</summary>
     internal const int MinLocalPartForHint = 3;
 
+    /// <summary>The trailing digits a masked phone number shows.</summary>
+    internal const int NumberDigitsShown = 3;
+
     private const string Hidden = "****";
+
+    private const string HiddenNumber = "********";
 
     /// <summary>
     /// The masked form of <paramref name="destination"/>: <see langword="null"/> for none (in-app deliveries have no destination, and a
@@ -30,6 +38,11 @@ internal static class DestinationMask
         if (string.IsNullOrWhiteSpace(destination))
         {
             return null;
+        }
+
+        if (SmsDestination.IsValid(destination))
+        {
+            return string.Concat(HiddenNumber, destination.AsSpan(destination.Length - NumberDigitsShown));
         }
 
         var at = destination.LastIndexOf('@');

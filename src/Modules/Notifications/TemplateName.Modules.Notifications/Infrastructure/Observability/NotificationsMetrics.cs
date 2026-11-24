@@ -41,6 +41,7 @@ internal sealed class NotificationsMetrics : INotificationsMetrics
     {
         NotificationChannel.Email => "email",
         NotificationChannel.InApp => "in_app",
+        NotificationChannel.Sms => "sms",
         _ => "unknown",
     };
 

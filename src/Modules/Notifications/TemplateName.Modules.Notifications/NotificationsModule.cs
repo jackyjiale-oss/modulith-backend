@@ -21,11 +21,13 @@ using TemplateName.Modules.Notifications.Application;
 using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
 using TemplateName.Modules.Notifications.Application.Devices;
+using TemplateName.Modules.Notifications.Application.Sms;
 using TemplateName.Modules.Notifications.Application.Scheduling;
 using TemplateName.Modules.Notifications.Infrastructure.Catalog;
 using TemplateName.Modules.Notifications.Infrastructure.Channels.Email;
 using TemplateName.Modules.Notifications.Infrastructure.Channels.InApp;
 using TemplateName.Modules.Notifications.Infrastructure.Channels.Push;
+using TemplateName.Modules.Notifications.Infrastructure.Channels.Sms;
 using TemplateName.Modules.Notifications.Infrastructure.Deliveries;
 using TemplateName.Modules.Notifications.Infrastructure.Hubs;
 using TemplateName.Modules.Notifications.Infrastructure.Observability;
@@ -104,6 +106,7 @@ public static class NotificationsModule
         AddEmailChannel(services, configuration);
         AddHub(services, configuration);
         AddPush(services, configuration);
+        AddSms(services, configuration);
         AddRetention(services, configuration);
 
         return services;
@@ -141,6 +144,35 @@ public static class NotificationsModule
         services.AddSingleton<IPushTransport, FcmPushTransport>();
         services.AddSingleton<IFcmAccessTokenSource, GoogleFcmAccessTokenSource>();
         services.AddExternalHttpClient(FcmPushTransport.ClientName, FcmPushTransport.ClientName);
+    }
+
+    /// <summary>
+    /// Registers the SMS channel: <see cref="SmsOptions"/> (<c>Notifications:Sms</c>) and <see cref="TwilioOptions"/>
+    /// (<c>Notifications:Sms:Twilio</c>, whose credentials and sender are checked while SMS is enabled), both validated on start; and, only
+    /// while <c>Notifications:Sms:Enabled</c> is true, the <see cref="SmsChannel"/> and the <see cref="TwilioSmsTransport"/> on the named
+    /// client and resilience pipeline <c>sms-provider</c>. With SMS off no SMS delivery is created, so a type whose only channel is SMS is
+    /// recorded with nothing to deliver, and an SMS delivery left pending is dead-lettered with <c>channel_unavailable</c>.
+    /// </summary>
+    internal static void AddSms(IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<SmsOptions>()
+            .Bind(configuration.GetSection(SmsOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        var enabled = configuration.GetValue<bool>($"{SmsOptions.SectionName}:{nameof(SmsOptions.Enabled)}");
+        services.AddOptions<TwilioOptions>()
+            .Bind(configuration.GetSection(TwilioOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<TwilioOptions>>(new TwilioOptionsValidation(enabled));
+
+        if (!enabled)
+        {
+            return;
+        }
+
+        services.AddScoped<INotificationChannel, SmsChannel>();
+        services.AddSingleton<ISmsTransport, TwilioSmsTransport>();
+        services.AddExternalHttpClient(TwilioSmsTransport.ClientName, TwilioSmsTransport.ClientName);
     }
 
     /// <summary>

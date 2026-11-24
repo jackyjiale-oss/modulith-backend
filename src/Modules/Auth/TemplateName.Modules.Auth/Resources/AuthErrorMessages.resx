@@ -90,6 +90,15 @@
   <data name="auth.invalid_token" xml:space="preserve">
     <value>The link is invalid or has expired.</value>
   </data>
+  <data name="auth.invalid_phone_number" xml:space="preserve">
+    <value>The phone number is not a valid mobile number in a supported region.</value>
+  </data>
+  <data name="auth.invalid_code" xml:space="preserve">
+    <value>The code is invalid or has expired. Request a new one.</value>
+  </data>
+  <data name="auth.phone_number_taken" xml:space="preserve">
+    <value>This phone number is already used by another account.</value>
+  </data>
   <data name="auth.email_taken" xml:space="preserve">
     <value>An account with this email address already exists.</value>
   </data>

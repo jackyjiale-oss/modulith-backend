@@ -325,7 +325,7 @@ internal sealed partial class DeliveryDispatcher(
         switch (sendResult.Outcome)
         {
             case ChannelSendOutcome.Sent:
-                delivery.MarkSent(subject, now);
+                delivery.MarkSent(subject, now, sendResult.ProviderMessageId);
                 return DeliveryResult.Sent;
 
             case ChannelSendOutcome.TransientFailure
@@ -395,13 +395,13 @@ internal sealed partial class DeliveryDispatcher(
             ? delivery
             : null;
 
-    // The non-secret variables, plus an email's secret ones decrypted (in memory only). In-app templates never use a secret.
+    // The non-secret variables, plus the secret ones decrypted (in memory only) for email and SMS. In-app and push texts never use one.
     private static Dictionary<string, string> Variables(Notification notification, NotificationChannel channel, ISecretProtector secretProtector)
     {
         var variables = JsonSerializer.Deserialize<Dictionary<string, string>>(notification.Data)
             ?? new Dictionary<string, string>(StringComparer.Ordinal);
 
-        if (channel == NotificationChannel.Email && notification.ProtectedData is { } protectedData)
+        if (channel is NotificationChannel.Email or NotificationChannel.Sms && notification.ProtectedData is { } protectedData)
         {
             foreach (var (name, protectedValue) in JsonSerializer.Deserialize<Dictionary<string, string>>(protectedData) ?? [])
             {

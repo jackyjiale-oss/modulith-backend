@@ -90,6 +90,15 @@
   <data name="auth.invalid_token" xml:space="preserve">
     <value>Pautan tidak sah atau telah tamat tempoh.</value>
   </data>
+  <data name="auth.invalid_phone_number" xml:space="preserve">
+    <value>Nombor telefon bukan nombor mudah alih yang sah di rantau yang disokong.</value>
+  </data>
+  <data name="auth.invalid_code" xml:space="preserve">
+    <value>Kod tidak sah atau telah tamat tempoh. Minta kod baharu.</value>
+  </data>
+  <data name="auth.phone_number_taken" xml:space="preserve">
+    <value>Nombor telefon ini sudah digunakan oleh akaun lain.</value>
+  </data>
   <data name="auth.email_taken" xml:space="preserve">
     <value>Akaun dengan alamat e-mel ini sudah wujud.</value>
   </data>

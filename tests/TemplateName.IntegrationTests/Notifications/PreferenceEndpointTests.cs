@@ -41,9 +41,13 @@ public sealed class PreferenceEndpointTests(IntegrationTestWebAppFactory factory
         body.EnumerateObject().Select(property => property.Name).ShouldBe(["types"]);
         var types = body.GetProperty("types").EnumerateArray().ToList();
 
-        // Every catalog type, once, in the ordinal order of its code (the host also registers the delivery tests' types).
+        // Every catalog type with a channel to offer, once, in the ordinal order of its code (the host also registers the delivery
+        // tests' types). Push and SMS are off in the factory, so a type whose only channels are those (the phone code) is not listed.
         var catalog = Factory.Services.GetRequiredService<NotificationCatalog>();
-        types.Select(type => type.GetProperty("typeCode").GetString()).ShouldBe([.. catalog.All.Select(type => type.Code).Order(StringComparer.Ordinal)]);
+        types.Select(type => type.GetProperty("typeCode").GetString()).ShouldBe([.. catalog.All
+            .Where(type => type.DefaultChannels.Any(channel => channel is not (NotificationChannel.Push or NotificationChannel.Sms)))
+            .Select(type => type.Code)
+            .Order(StringComparer.Ordinal)]);
         types.Count.ShouldBeGreaterThanOrEqualTo(8 + 3);
 
         foreach (var type in types)
@@ -328,7 +332,7 @@ public sealed class PreferenceEndpointTests(IntegrationTestWebAppFactory factory
     }
 
     [Theory]
-    [InlineData("""{"items":[{"typeCode":"auth.password_changed","channel":"Sms","enabled":false}]}""")]
+    [InlineData("""{"items":[{"typeCode":"auth.password_changed","channel":"Fax","enabled":false}]}""")]
     [InlineData("""{"items":[{"typeCode":"auth.password_changed","channel":"InApp","enabled":"maybe"}]}""")]
     [InlineData("""{"items":"all"}""")]
     [InlineData("""{"items":[""")]

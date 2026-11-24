@@ -69,11 +69,11 @@ public sealed class AuditingTests
     }
 
     [Fact]
-    public void Audited_entities_ignore_exactly_the_derived_high_frequency_and_secret_properties_and_mask_nothing()
+    public void Audited_entities_ignore_exactly_the_derived_high_frequency_and_secret_properties_and_mask_only_the_phone_number()
     {
         var ignored = AuditedTypes().ToDictionary(type => type.Name, type => MarkedPropertyNames(type, typeof(AuditIgnoreAttribute)));
 
-        ignored["User"].ShouldBe(["NormalizedEmail", "LastLoginAt", "AccessFailedCount", "PasswordHash", "SecurityStamp"], ignoreOrder: true);
+        ignored["User"].ShouldBe(["NormalizedEmail", "LastLoginAt", "AccessFailedCount", "PasswordHash", "SecurityStamp", "PhoneCodeRequestedAt"], ignoreOrder: true);
         ignored["Role"].ShouldBe(["NormalizedName"]);
         //#if (includeSample)
         ignored["LeaveRequest"].ShouldBeEmpty();
@@ -81,7 +81,9 @@ public sealed class AuditingTests
         ignored["RolePermission"].ShouldBeEmpty();
         ignored["UserRole"].ShouldBeEmpty();
         ignored["UserExternalLogin"].ShouldBe(["LastUsedAt"]);
-        AuditedTypes().SelectMany(type => MarkedPropertyNames(type, typeof(AuditMaskAttribute))).ShouldBeEmpty();
+        AuditedTypes()
+            .SelectMany(type => MarkedPropertyNames(type, typeof(AuditMaskAttribute)).Select(name => $"{type.Name}.{name}"))
+            .ShouldBe(["User.PhoneNumber"]);
     }
 
     [Fact]

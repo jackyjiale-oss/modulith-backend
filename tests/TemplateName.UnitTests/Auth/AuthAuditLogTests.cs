@@ -134,7 +134,9 @@ public sealed class AuthAuditLogTests
             .Select(f => (string)f.GetRawConstantValue()!)
             .ToList();
 
-        values.Count.ShouldBe(47);
+        values.Count.ShouldBe(49);
+        values.ShouldContain("auth.phone_number_verified");
+        values.ShouldContain("auth.phone_number_removed");
         values.ShouldContain("auth.external_login_succeeded");
         values.ShouldContain("auth.external_login_failed");
         values.ShouldContain("auth.external_linked");

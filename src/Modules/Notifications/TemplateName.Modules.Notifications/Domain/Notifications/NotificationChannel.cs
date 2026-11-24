@@ -8,4 +8,7 @@ internal enum NotificationChannel : byte
 
     /// <summary>A push to one of the recipient's devices (FCM); one delivery per device.</summary>
     Push = 3,
+
+    /// <summary>A text message to one phone number (Twilio); at most one delivery per notification.</summary>
+    Sms = 4,
 }

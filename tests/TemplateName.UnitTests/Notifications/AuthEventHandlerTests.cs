@@ -226,6 +226,29 @@ public sealed class AuthEventHandlerTests
 
     private static Dictionary<string, string> Variables(string json) => JsonSerializer.Deserialize<Dictionary<string, string>>(json)!;
 
+    [Fact]
+    public async Task The_consumer_passes_the_number_code_and_expiry()
+    {
+        _harness.Sms.Enabled = true;
+        _harness.Decrypts("CfDJ8-protected-code", "042137");
+        var expiresAt = Now.AddMinutes(9).AddSeconds(30);
+        var handler = new PhoneVerificationRequestedIntegrationEventHandler(_harness.CreateScheduler(), _harness.Time);
+
+        await handler.HandleAsync(
+            new PhoneVerificationRequestedIntegrationEvent(_eventId, OccurredAt, _userId, "+60123456789", "CfDJ8-protected-code", expiresAt),
+            Ct);
+
+        var notification = _harness.Added.ShouldHaveSingleItem();
+        notification.TypeCode.ShouldBe(AuthNotificationTypes.PhoneVerification);
+        notification.ExpiresAt.ShouldBe(expiresAt.UtcDateTime);
+        Variables(notification.Data).ShouldBe(new Dictionary<string, string> { ["expires_in_minutes"] = "10" });
+        Variables(notification.ProtectedData!).ShouldBe(new Dictionary<string, string> { ["code"] = "CfDJ8-protected-code" });
+        var delivery = notification.Deliveries.ShouldHaveSingleItem();
+        delivery.Channel.ShouldBe(NotificationChannel.Sms);
+        delivery.Destination.ShouldBe("+60123456789");
+        _harness.Inbox.Received(1).Record(_eventId, handler.GetType().FullName!);
+    }
+
     private void AssertLink(string typeCode, DateTimeOffset expiresAt, string expectedMinutes, Type handlerType)
     {
         var notification = _harness.Added.ShouldHaveSingleItem();

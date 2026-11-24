@@ -26,7 +26,7 @@ public sealed class TemplateCompletenessTests
 
     // The types whose email carries a single-use link (a secret variable).
     public static TheoryData<string> LinkTypeCodes => new(ProductionCatalog.All
-        .Where(type => type.SecretVariables.Count > 0)
+        .Where(type => type.SecretVariables.Values.Contains(SecretKind.Link))
         .Select(type => type.Code)
         .Order(StringComparer.Ordinal));
 
@@ -103,7 +103,7 @@ public sealed class TemplateCompletenessTests
         type.Variables.ShouldContain(ExpiresInMinutes);
         foreach (var culture in RecipientCulture.Supported)
         {
-            foreach (var secret in type.SecretVariables)
+            foreach (var secret in type.SecretVariables.Keys)
             {
                 Part(typeCode, culture, "html").ShouldContain($"<a href=\"{{{{ {secret} }}}}\"", customMessage: $"{typeCode} {culture} html");
                 Part(typeCode, culture, "text").Split('\n').Select(line => line.Trim()).ShouldContain($"{{{{ {secret} }}}}", $"{typeCode} {culture} text");
@@ -197,7 +197,8 @@ public sealed class TemplateCompletenessTests
     {
         var prefix = $"{typeof(TestNotificationTypeSource).Assembly.GetName().Name}.Templates.InApp.test.broken";
 
-        TestSource.MissingParts(TestNotificationTypeSource.Broken).ShouldBe([$"{prefix}.zh-Hans.body.scriban is missing"]);
+        // Broken also has an email channel (a secret variable needs one) and no email templates; its planted problems are in-app.
+        TestSource.MissingParts(TestNotificationTypeSource.Broken).Where(problem => problem.Contains(".InApp.", StringComparison.Ordinal)).ShouldBe([$"{prefix}.zh-Hans.body.scriban is missing"]);
         TestSource.MissingParts(TestNotificationTypeSource.EnglishOnly).Count.ShouldBe(4);
         TestSource.MissingParts(TestNotificationTypeSource.ParseError).ShouldContain(problem => problem.Contains("en.title.scriban does not parse", StringComparison.Ordinal));
         TestSource.PlaceholderMismatches(TestNotificationTypeSource.Broken).ShouldBe(

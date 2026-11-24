@@ -23,6 +23,9 @@ namespace TemplateName.Modules.Notifications.Application.Scheduling;
 /// <param name="ExcludedSessionId">
 /// A sign-in session whose push devices get no push of this notification: the new device a new-sign-in notice is about.
 /// </param>
+/// <param name="SmsOverride">
+/// The number in E.164 to text instead of the recipient's verified one (the pending number a phone code was issued for).
+/// </param>
 internal sealed record NotificationRequest(
     string TypeCode,
     Guid RecipientUserId,
@@ -32,7 +35,8 @@ internal sealed record NotificationRequest(
     IReadOnlyDictionary<string, string> ProtectedVariables,
     string? EmailOverride,
     DateTimeOffset? ExpiresAt,
-    Guid? ExcludedSessionId = null)
+    Guid? ExcludedSessionId = null,
+    string? SmsOverride = null)
 {
     private bool PrintMembers(StringBuilder builder)
     {
@@ -44,7 +48,8 @@ internal sealed record NotificationRequest(
             .Append("], ProtectedVariables = [").AppendJoin(", ", ProtectedVariables.Keys.Order(StringComparer.Ordinal))
             .Append("], HasEmailOverride = ").Append(EmailOverride is not null)
             .Append(", ExpiresAt = ").Append(ExpiresAt?.ToString("O", System.Globalization.CultureInfo.InvariantCulture))
-            .Append(", ExcludedSessionId = ").Append(ExcludedSessionId);
+            .Append(", ExcludedSessionId = ").Append(ExcludedSessionId)
+            .Append(", HasSmsOverride = ").Append(SmsOverride is not null);
         return true;
     }
 }

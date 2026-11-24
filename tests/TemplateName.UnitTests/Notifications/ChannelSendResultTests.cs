@@ -5,6 +5,25 @@ namespace TemplateName.UnitTests.Notifications;
 public sealed class ChannelSendResultTests
 {
     [Fact]
+    public void SentAs_carries_the_provider_message_id()
+    {
+        var result = ChannelSendResult.SentAs("SM0123456789abcdef0123456789abcdef");
+
+        result.Outcome.ShouldBe(ChannelSendOutcome.Sent);
+        result.Reason.ShouldBeNull();
+        result.ProviderMessageId.ShouldBe("SM0123456789abcdef0123456789abcdef");
+        ChannelSendResult.Sent.ProviderMessageId.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("SM 1")]
+    [InlineData("SM\n1")]
+    [InlineData("<script>")]
+    public void SentAs_refuses_an_id_that_could_carry_text(string id) =>
+        Should.Throw<ArgumentException>(() => ChannelSendResult.SentAs(id));
+
+    [Fact]
     public void Results_carry_the_outcome_and_the_reason_code()
     {
         ChannelSendResult.Sent.ShouldBe(new ChannelSendResult(ChannelSendOutcome.Sent, null));

@@ -10,8 +10,9 @@ namespace TemplateName.Modules.Notifications.Application.Catalog;
 /// in-app channel, which the user can switch off. <see cref="AuthNotificationTypes.NewDeviceLogin"/>,
 /// <see cref="AuthNotificationTypes.TokenReuseDetected"/> and <see cref="AuthNotificationTypes.AccountLocked"/> also have a push channel,
 /// optional too (a password change ends every other session, so its push would reach no other device). The four types that
-/// carry a single-use link declare <c>action_url</c> as a secret variable, which only their email text and HTML may show. The templates
-/// are in <c>Templates/</c> of this project.
+/// carry a single-use link declare <c>action_url</c> as a secret variable, which only their email text and HTML may show.
+/// <see cref="AuthNotificationTypes.PhoneVerification"/> is the exception to the email rule: a mandatory SMS only, whose secret
+/// <c>code</c> (<see cref="SecretKind.Code"/>) its text shows. The templates are in <c>Templates/</c> of this project.
 /// </summary>
 internal sealed class AuthNotificationTypeSource : INotificationTypeSource
 {
@@ -24,11 +25,13 @@ internal sealed class AuthNotificationTypeSource : INotificationTypeSource
     private const string Change = "change";
     private const string IpAddress = "ip_address";
     private const string Provider = "provider";
+    private const string Code = "code";
 
     private static readonly NotificationChannel[] EmailOnly = [NotificationChannel.Email];
     private static readonly NotificationChannel[] EmailAndInApp = [NotificationChannel.Email, NotificationChannel.InApp];
     private static readonly NotificationChannel[] EmailAndPush = [NotificationChannel.Email, NotificationChannel.Push];
     private static readonly NotificationChannel[] EmailInAppAndPush = [NotificationChannel.Email, NotificationChannel.InApp, NotificationChannel.Push];
+    private static readonly NotificationChannel[] SmsOnly = [NotificationChannel.Sms];
 
     public IReadOnlyCollection<NotificationTypeDefinition> Types { get; } =
     [
@@ -44,6 +47,14 @@ internal sealed class AuthNotificationTypeSource : INotificationTypeSource
         Notice(AuthNotificationTypes.NewDeviceLogin, EmailAndPush, DisplayName, OccurredAt, TimeZone, IpAddress),
         Notice(AuthNotificationTypes.ExternalLoginLinked, EmailAndInApp, DisplayName, Provider, OccurredAt, TimeZone),
         Notice(AuthNotificationTypes.ExternalLoginUnlinked, EmailAndInApp, DisplayName, Provider, OccurredAt, TimeZone),
+        new(
+            AuthNotificationTypes.PhoneVerification,
+            NotificationCategory.Security,
+            NotificationPriority.Critical,
+            SmsOnly,
+            SmsOnly,
+            new HashSet<string>([ExpiresInMinutes], StringComparer.Ordinal),
+            new Dictionary<string, SecretKind>(StringComparer.Ordinal) { [Code] = SecretKind.Code }),
     ];
 
     private static NotificationTypeDefinition Link(string code) =>
@@ -60,5 +71,5 @@ internal sealed class AuthNotificationTypeSource : INotificationTypeSource
             channels,
             EmailOnly,
             new HashSet<string>(variables, StringComparer.Ordinal),
-            new HashSet<string>(secretVariables, StringComparer.Ordinal));
+            secretVariables.ToDictionary(name => name, _ => SecretKind.Link, StringComparer.Ordinal));
 }

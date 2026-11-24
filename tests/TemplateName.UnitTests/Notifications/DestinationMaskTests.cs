@@ -12,6 +12,16 @@ public sealed class DestinationMaskTests
     }
 
     [Theory]
+    [InlineData("+60123456789", "********789")]
+    [InlineData("+6581234567", "********567")]
+    [InlineData("+861381234567890", "********890")]
+    public void A_number_is_masked_to_its_last_three_digits(string number, string expected)
+    {
+        // A fixed run of asterisks, so the mask does not tell the number's length.
+        DestinationMask.Mask(number).ShouldBe(expected);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]

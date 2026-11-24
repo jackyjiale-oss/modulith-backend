@@ -23,6 +23,11 @@ public sealed class AuthNotificationRenderTests
     private const string IpAddress = "203.0.113.7";
     private const string Provider = "Google";
     private const string ExpiresInMinutes = "60";
+    private const string Code = "042137";
+
+    // GSM 03.38's basic character set: a text of these alone is one segment up to 160 characters; anything else makes it UCS-2 (70).
+    private const string Gsm7Basic =
+        "@\u00a3$\u00a5\u00e8\u00e9\u00f9\u00ec\u00f2\u00c7\n\u00d8\u00f8\r\u00c5\u00e5\u0394_\u03a6\u0393\u039b\u03a9\u03a0\u03a8\u03a3\u0398\u039e\u00c6\u00e6\u00df\u00c9 !\"#\u00a4%&'()*+,-./0123456789:;<=>?\u00a1ABCDEFGHIJKLMNOPQRSTUVWXYZ\u00c4\u00d6\u00d1\u00dc\u00a7\u00bfabcdefghijklmnopqrstuvwxyz\u00e4\u00f6\u00f1\u00fc\u00e0";
 
     private static readonly NotificationCatalog Catalog = BuildCatalog();
     private static readonly ScribanNotificationRenderer Renderer = new(
@@ -47,9 +52,35 @@ public sealed class AuthNotificationRenderTests
     }
 
     [Fact]
-    public void Catalog_holds_all_twelve_auth_types()
+    public void Catalog_holds_all_thirteen_auth_types()
     {
-        Catalog.All.Count.ShouldBe(12);
+        Catalog.All.Count.ShouldBe(13);
+    }
+
+    [Theory]
+    [InlineData("en")]
+    [InlineData("ms")]
+    [InlineData("zh-Hans")]
+    public void The_sms_template_fits_one_segment(string culture)
+    {
+        var type = Catalog.Find(AuthNotificationTypes.PhoneVerification).ShouldNotBeNull();
+        var variables = VariablesOf(type, "Aisha");
+        variables["expires_in_minutes"] = "10";
+
+        var message = Renderer.Render(AuthNotificationTypes.PhoneVerification, NotificationChannel.Sms, culture, variables);
+
+        message.TextBody.ShouldContain(Code);
+        message.TextBody.ShouldContain("10");
+        message.TextBody.ShouldContain(ProductName);
+        if (culture == "zh-Hans")
+        {
+            message.TextBody.Length.ShouldBeLessThanOrEqualTo(70, message.TextBody);
+        }
+        else
+        {
+            message.TextBody.All(Gsm7Basic.Contains).ShouldBeTrue(message.TextBody);
+            message.TextBody.Length.ShouldBeLessThanOrEqualTo(160, message.TextBody);
+        }
     }
 
     [Theory]
@@ -62,6 +93,18 @@ public sealed class AuthNotificationRenderTests
         foreach (var channel in type.DefaultChannels)
         {
             var message = Should.NotThrow(() => Renderer.Render(typeCode, channel, culture, variables), $"{typeCode} {channel} {culture}");
+
+            if (channel == NotificationChannel.Sms)
+            {
+                // One line of text, no subject and no HTML; the code is the only secret it may show.
+                message.Subject.ShouldBeEmpty();
+                message.HtmlBody.ShouldBeNull();
+                message.TextBody.ShouldNotBeNullOrWhiteSpace();
+                message.TextBody.ShouldNotContain('\n');
+                message.TextBody.ShouldNotContain("{{");
+                message.TextBody.ShouldNotContain("http", Case.Insensitive);
+                continue;
+            }
 
             message.Subject.ShouldNotBeNullOrWhiteSpace();
             message.Subject.ShouldNotContain('\n');
@@ -94,7 +137,7 @@ public sealed class AuthNotificationRenderTests
                 message.HtmlBody.ShouldContain(variables[name], customMessage: $"{typeCode} {culture} html shows {name}");
             }
 
-            if (type.SecretVariables.Contains("action_url"))
+            if (type.SecretVariables.ContainsKey("action_url"))
             {
                 message.HtmlBody.ShouldContain($"<a href=\"{EncodedActionUrl}\"");
                 message.HtmlBody.ShouldNotContain("&amp;amp;");
@@ -116,6 +159,10 @@ public sealed class AuthNotificationRenderTests
     {
         const string DisplayName = "<b>x</b>";
         var type = Catalog.Find(typeCode).ShouldNotBeNull();
+        if (!type.DefaultChannels.Contains(NotificationChannel.Email))
+        {
+            return;
+        }
 
         var message = Renderer.Render(typeCode, NotificationChannel.Email, culture, VariablesOf(type, DisplayName));
 
@@ -181,9 +228,10 @@ public sealed class AuthNotificationRenderTests
             ["change"] = "enabled",
             ["ip_address"] = IpAddress,
             ["provider"] = Provider,
+            ["code"] = Code,
         };
 
-        return type.Variables.Concat(type.SecretVariables).ToDictionary(name => name, name => values[name], StringComparer.Ordinal);
+        return type.Variables.Concat(type.SecretVariables.Keys).ToDictionary(name => name, name => values[name], StringComparer.Ordinal);
     }
 
     private static NotificationCatalog BuildCatalog()

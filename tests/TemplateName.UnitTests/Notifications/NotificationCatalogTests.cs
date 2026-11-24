@@ -137,6 +137,55 @@ public sealed class NotificationCatalogTests
         Should.Throw<InvalidOperationException>(() => catalog.All).Message.ShouldContain("system.welcome");
     }
 
+    [Theory]
+    [InlineData(nameof(NotificationChannel.InApp))]
+    [InlineData(nameof(NotificationChannel.Push))]
+    public void A_secret_on_an_in_app_only_type_is_refused_by_the_catalog(string only)
+    {
+        var channel = Enum.Parse<NotificationChannel>(only);
+        var catalog = new NotificationCatalog([new FirstSource(Define("system.welcome", defaults: [channel], mandatory: [], secretVariables: ["action_url"]))]);
+
+        var exception = Should.Throw<InvalidOperationException>(() => catalog.All);
+
+        exception.Message.ShouldContain("system.welcome");
+        exception.Message.ShouldContain("secret");
+    }
+
+    [Fact]
+    public void A_secret_on_an_in_app_and_push_type_is_refused_by_the_catalog()
+    {
+        var catalog = new NotificationCatalog([new FirstSource(Define(
+            "system.welcome",
+            defaults: [NotificationChannel.InApp, NotificationChannel.Push],
+            mandatory: [],
+            secretVariables: ["action_url"]))]);
+
+        Should.Throw<InvalidOperationException>(() => catalog.All).Message.ShouldContain("system.welcome");
+    }
+
+    [Fact]
+    public void A_secret_of_an_undefined_kind_is_refused_by_the_catalog()
+    {
+        var catalog = new NotificationCatalog([new FirstSource(Define(
+            "system.welcome",
+            secretKinds: new Dictionary<string, SecretKind>(StringComparer.Ordinal) { ["code"] = (SecretKind)0 }))]);
+
+        var exception = Should.Throw<InvalidOperationException>(() => catalog.All);
+
+        exception.Message.ShouldContain("system.welcome");
+        exception.Message.ShouldContain("code");
+    }
+
+    [Fact]
+    public void A_code_secret_on_an_email_type_is_accepted()
+    {
+        var catalog = new NotificationCatalog([new FirstSource(Define(
+            "system.welcome",
+            secretKinds: new Dictionary<string, SecretKind>(StringComparer.Ordinal) { ["code"] = SecretKind.Code }))]);
+
+        catalog.Find("system.welcome").ShouldNotBeNull().SecretVariables["code"].ShouldBe(SecretKind.Code);
+    }
+
     [Fact]
     public async Task Startup_check_touches_the_catalog_and_fails_the_start()
     {
@@ -159,7 +208,8 @@ public sealed class NotificationCatalogTests
         IReadOnlyList<NotificationChannel>? defaults = null,
         IReadOnlyList<NotificationChannel>? mandatory = null,
         string[]? variables = null,
-        string[]? secretVariables = null) =>
+        string[]? secretVariables = null,
+        IReadOnlyDictionary<string, SecretKind>? secretKinds = null) =>
         new(
             code,
             NotificationCategory.Security,
@@ -167,7 +217,7 @@ public sealed class NotificationCatalogTests
             defaults ?? EmailAndInApp,
             mandatory ?? [NotificationChannel.Email],
             new HashSet<string>(variables ?? []),
-            new HashSet<string>(secretVariables ?? []));
+            secretKinds ?? (secretVariables ?? []).ToDictionary(name => name, _ => SecretKind.Link, StringComparer.Ordinal));
 
     private sealed class FirstSource(params NotificationTypeDefinition[] types) : INotificationTypeSource
     {

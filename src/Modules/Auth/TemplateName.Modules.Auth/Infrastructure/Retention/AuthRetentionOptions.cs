@@ -26,6 +26,9 @@ internal sealed class AuthRetentionOptions : IValidatableObject
     /// <summary>How long a two-step sign-in challenge is kept after <c>ExpiresAt</c>.</summary>
     public TimeSpan? MfaChallenges { get; set; } = TimeSpan.FromDays(1);
 
+    /// <summary>How long a phone verification code is kept after <c>ExpiresAt</c>.</summary>
+    public TimeSpan? PhoneVerificationCodes { get; set; } = TimeSpan.FromDays(1);
+
     /// <summary>How long a trusted device is kept after <c>ExpiresAt</c> or <c>RevokedAt</c>, whichever is first.</summary>
     public TimeSpan? TrustedDevices { get; set; } = TimeSpan.FromDays(30);
 
@@ -45,6 +48,7 @@ internal sealed class AuthRetentionOptions : IValidatableObject
             (nameof(MfaChallenges), MfaChallenges),
             (nameof(TrustedDevices), TrustedDevices),
             (nameof(AuditLogs), AuditLogs),
+            (nameof(PhoneVerificationCodes), PhoneVerificationCodes),
         })
         {
             if (value < TimeSpan.Zero)

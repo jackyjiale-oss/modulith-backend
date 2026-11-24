@@ -22,6 +22,9 @@ internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
     /// <summary>The column limit of <see cref="Locale"/>.</summary>
     public const int MaxLocaleLength = 16;
 
+    /// <summary>The column limit of <see cref="PhoneNumber"/>; the request validator refuses longer input.</summary>
+    public const int MaxPhoneNumberLength = 32;
+
     private const string DefaultTimeZone = "UTC";
 
     private readonly List<PasswordHistoryEntry> _passwordHistory = [];
@@ -54,6 +57,19 @@ internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
     public string Locale { get; private set; } = string.Empty;
 
     public string TimeZone { get; private set; } = DefaultTimeZone;
+
+    /// <summary>The verified mobile number in E.164, or null; unique among users. A number waiting for its code is not stored here.</summary>
+    [AuditMask]
+    public string? PhoneNumber { get; private set; }
+
+    public DateTimeOffset? PhoneNumberVerifiedAt { get; private set; }
+
+    /// <summary>
+    /// When the user last requested a phone code. Writing it makes each request a write of this row, so the row's version lets only one of
+    /// two simultaneous requests through and the cooldown and the daily cap cannot be raced.
+    /// </summary>
+    [AuditIgnore]
+    public DateTimeOffset? PhoneCodeRequestedAt { get; private set; }
 
     public DateTimeOffset? PasswordChangedAt { get; private set; }
 
@@ -403,6 +419,29 @@ internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
     /// security stamp stays, because the code is already single-use and a rotation would end the session that was just created.
     /// </summary>
     public void NoteRecoveryCodeUsed() => Raise(new MfaChangedDomainEvent(Id, MfaChange.RecoveryCodeUsed));
+
+    /// <summary>
+    /// Makes <paramref name="e164"/> the account's verified number, replacing any previous one. The caller has checked the code; the
+    /// database's unique index refuses a number another account verified first.
+    /// </summary>
+    public void VerifyPhoneNumber(string e164, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(e164);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(e164.Length, MaxPhoneNumberLength, nameof(e164));
+
+        PhoneNumber = e164;
+        PhoneNumberVerifiedAt = now;
+    }
+
+    /// <summary>Records a phone code request (see <see cref="PhoneCodeRequestedAt"/>).</summary>
+    public void NotePhoneCodeRequested(DateTimeOffset now) => PhoneCodeRequestedAt = now;
+
+    /// <summary>Removes the verified number; nothing changes when there is none.</summary>
+    public void RemovePhoneNumber()
+    {
+        PhoneNumber = null;
+        PhoneNumberVerifiedAt = null;
+    }
 
     /// <summary>
     /// Records that someone tried to register this address again. Nothing changes; the event lets a handler tell the owner, so the

@@ -2,7 +2,7 @@
 
 # Integration events
 
-Rows: 11
+Rows: 12
 
 | event | publisher | handlers |
 | --- | --- | --- |
@@ -14,6 +14,7 @@ Rows: 11
 | NewDeviceSignedInIntegrationEvent | Auth (src/Modules/Auth/TemplateName.Modules.Auth/Application/IntegrationEvents/PublishNewDeviceSignedInDomainEventHandler.cs) | Notifications (src/Modules/Notifications/TemplateName.Modules.Notifications/Application/AuthEvents/NewDeviceSignedInIntegrationEventHandler.cs) |
 | PasswordChangedIntegrationEvent | Auth (src/Modules/Auth/TemplateName.Modules.Auth/Application/IntegrationEvents/PublishPasswordChangedDomainEventHandler.cs) | Notifications (src/Modules/Notifications/TemplateName.Modules.Notifications/Application/AuthEvents/PasswordChangedIntegrationEventHandler.cs) |
 | PasswordResetRequestedIntegrationEvent | Auth (src/Modules/Auth/TemplateName.Modules.Auth/Application/IntegrationEvents/PublishVerificationCodeIssuedDomainEventHandler.cs) | Notifications (src/Modules/Notifications/TemplateName.Modules.Notifications/Application/AuthEvents/PasswordResetRequestedIntegrationEventHandler.cs) |
+| PhoneVerificationRequestedIntegrationEvent | Auth (src/Modules/Auth/TemplateName.Modules.Auth/Application/IntegrationEvents/PublishPhoneVerificationRequestedDomainEventHandler.cs) | Notifications (src/Modules/Notifications/TemplateName.Modules.Notifications/Application/AuthEvents/PhoneVerificationRequestedIntegrationEventHandler.cs) |
 | RefreshTokenReuseDetectedIntegrationEvent | Auth (src/Modules/Auth/TemplateName.Modules.Auth/Application/IntegrationEvents/PublishRefreshTokenReuseDetectedDomainEventHandler.cs) | Notifications (src/Modules/Notifications/TemplateName.Modules.Notifications/Application/AuthEvents/RefreshTokenReuseDetectedIntegrationEventHandler.cs) |
 | RegistrationAttemptedIntegrationEvent | Auth (src/Modules/Auth/TemplateName.Modules.Auth/Application/IntegrationEvents/PublishRegistrationAttemptedDomainEventHandler.cs) | Notifications (src/Modules/Notifications/TemplateName.Modules.Notifications/Application/AuthEvents/RegistrationAttemptedIntegrationEventHandler.cs) |
 | UserLockedOutIntegrationEvent | Auth (src/Modules/Auth/TemplateName.Modules.Auth/Application/IntegrationEvents/PublishUserLockedOutDomainEventHandler.cs) | Notifications (src/Modules/Notifications/TemplateName.Modules.Notifications/Application/AuthEvents/UserLockedOutIntegrationEventHandler.cs) |

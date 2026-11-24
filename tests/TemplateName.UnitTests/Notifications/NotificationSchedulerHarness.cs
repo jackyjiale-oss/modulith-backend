@@ -7,6 +7,7 @@ using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
 using TemplateName.Modules.Notifications.Application.Devices;
 using TemplateName.Modules.Notifications.Application.Scheduling;
+using TemplateName.Modules.Notifications.Application.Sms;
 using TemplateName.Modules.Notifications.Domain.Notifications;
 using TemplateName.Modules.Notifications.Domain.Preferences;
 using TemplateName.Modules.Notifications.Domain.PushDevices;
@@ -50,6 +51,8 @@ internal sealed class NotificationSchedulerHarness
 
     public PushOptions Push { get; } = new();
 
+    public SmsOptions Sms { get; } = new();
+
     /// <summary>The recipient's active devices, as <see cref="IPushDeviceRepository.ListActiveAsync"/> returns them.</summary>
     public List<PushDevice> Devices { get; } = [];
 
@@ -67,7 +70,7 @@ internal sealed class NotificationSchedulerHarness
     public RecordingLogger<NotificationScheduler> Logger { get; } = new();
 
     public NotificationCatalog Catalog { get; } =
-        new([new AuthNotificationTypeSource(), new TestNotificationTypeSource(), new PushTestTypeSource()]);
+        new([new AuthNotificationTypeSource(), new TestNotificationTypeSource(), new PushTestTypeSource(), new CodeTestTypeSource()]);
 
     public List<Notification> Added { get; } = [];
 
@@ -81,6 +84,7 @@ internal sealed class NotificationSchedulerHarness
             PushDevices,
             Sessions,
             Options.Create(Push),
+            Options.Create(Sms),
             UnitOfWork,
             SecretProtector,
             Metrics,
@@ -93,9 +97,10 @@ internal sealed class NotificationSchedulerHarness
         string email = "alice@example.com",
         string displayName = "Alice",
         string locale = "ms",
-        string timeZone = "UTC")
+        string timeZone = "UTC",
+        string? phoneNumber = null)
     {
-        var contact = new UserContact(userId, email, displayName, locale, timeZone);
+        var contact = new UserContact(userId, email, displayName, locale, timeZone, phoneNumber);
         Contacts.FindAsync(userId, Arg.Any<CancellationToken>()).Returns(contact);
         return contact;
     }
@@ -141,6 +146,24 @@ internal sealed class PushTestTypeSource : INotificationTypeSource
             [NotificationChannel.Email, NotificationChannel.Push],
             [NotificationChannel.Email],
             new HashSet<string>(["display_name"], StringComparer.Ordinal),
-            new HashSet<string>(StringComparer.Ordinal)),
+            new Dictionary<string, SecretKind>(StringComparer.Ordinal)),
+    ];
+}
+
+/// <summary>A <c>Critical</c> email-only type whose secret <c>code</c> is a <see cref="SecretKind.Code"/>, for the scheduler's code rule.</summary>
+internal sealed class CodeTestTypeSource : INotificationTypeSource
+{
+    public const string CodeNotice = "test.code_notice";
+
+    public IReadOnlyCollection<NotificationTypeDefinition> Types { get; } =
+    [
+        new(
+            CodeNotice,
+            NotificationCategory.Security,
+            NotificationPriority.Critical,
+            [NotificationChannel.Email],
+            [NotificationChannel.Email],
+            new HashSet<string>(StringComparer.Ordinal),
+            new Dictionary<string, SecretKind>(StringComparer.Ordinal) { ["code"] = SecretKind.Code }),
     ];
 }

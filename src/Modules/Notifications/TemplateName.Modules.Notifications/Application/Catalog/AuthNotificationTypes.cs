@@ -36,6 +36,9 @@ internal static class AuthNotificationTypes
     /// <summary>The account was signed in to from a device none of its earlier sessions used (<c>NewDeviceSignedIn</c>); email only, no client-supplied text.</summary>
     public const string NewDeviceLogin = "auth.new_device_login";
 
+    /// <summary>The code that verifies a phone number (<c>PhoneVerificationRequested</c>); a mandatory text to the number being verified.</summary>
+    public const string PhoneVerification = "auth.phone_verification";
+
     /// <summary>A social-login provider was linked to the account (<c>ExternalLoginLinked</c>); email and an optional in-app message.</summary>
     public const string ExternalLoginLinked = "auth.external_login_linked";
 

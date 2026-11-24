@@ -162,7 +162,7 @@ One SQL Server database, one schema per owner, each with its own `__EFMigrations
 | Schema | Owner | Context | Tables | Migrations |
 |---|---|---|---|---|
 | `platform` | Infrastructure.Common (building block) | `PlatformDbContext` | `IdempotencyKeys`, `JobStates` | `src/BuildingBlocks/TemplateName.Infrastructure.Common/Idempotency/Migrations/` |
-| `auth` | Auth module | `AuthDbContext` | `Users`, `PasswordHistory`, `UserRoles`, `Roles`, `Permissions`, `RolePermissions`, `UserExternalLogins`, `UserSessions`, `RefreshTokens`, `VerificationCodes`, `UserMfaMethods`, `RecoveryCodes`, `MfaChallenges`, `TrustedDevices`, `AuthAuditLogs`, `DataProtectionKeys`, `OutboxMessages`, `OutboxMessageConsumers` | `src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Persistence/Migrations/` |
+| `auth` | Auth module | `AuthDbContext` | `Users`, `PasswordHistory`, `UserRoles`, `Roles`, `Permissions`, `RolePermissions`, `UserExternalLogins`, `UserSessions`, `RefreshTokens`, `VerificationCodes`, `PhoneVerificationCodes`, `UserMfaMethods`, `RecoveryCodes`, `MfaChallenges`, `TrustedDevices`, `AuthAuditLogs`, `DataProtectionKeys`, `OutboxMessages`, `OutboxMessageConsumers` | `src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Persistence/Migrations/` |
 <!--#if (notifications)-->
 | `notify` | Notifications module | `NotificationsDbContext` | `Notifications`, `Deliveries`, `InAppNotifications`, `UserPreferences`, `UserSettings`, `HubTickets`, `InboxMessages` (no outbox) | `src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Persistence/Migrations/` |
 <!--#endif-->
@@ -257,4 +257,5 @@ The rules for when a boundary is crossed:
 | [0038](../adr/0038-etag-over-editable-state.md) | ETag and If-Match on the update endpoints: a hash of the editable state, optional `If-Match`, 412 `concurrency.precondition_failed` |
 <!--#if (notifications)-->
 | [0039](../adr/0039-session-bound-push-devices.md) | Push notifications: FCM only, devices bound to their sign-in session, one delivery per device |
+| [0040](../adr/0040-phone-verification-codes-and-sms.md) | Phone numbers verified by our own SMS code (a salted hash, five tries, a region allowlist), sent through Twilio as a Notifications channel; the code-hash risk accepted with its controls; SMS at least once, the message SID kept; pumping across accounts stopped at Twilio |
 <!--#endif-->

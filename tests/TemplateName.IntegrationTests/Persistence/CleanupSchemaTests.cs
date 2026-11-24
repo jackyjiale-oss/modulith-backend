@@ -33,6 +33,7 @@ public sealed class CleanupSchemaTests(IntegrationTestWebAppFactory factory)
         { "auth.TrustedDevices", "ExpiresAt", false },
         { "auth.TrustedDevices", "RevokedAt", true },
         { "auth.AuthAuditLogs", "OccurredAt", false },
+        { "auth.PhoneVerificationCodes", "ExpiresAt", false },
         //#if (notifications)
         { "notify.HubTickets", "ExpiresAt", false },
         { "notify.Notifications", "CreatedAt", false },

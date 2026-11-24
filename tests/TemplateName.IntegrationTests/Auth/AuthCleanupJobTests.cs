@@ -38,13 +38,14 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
     private static readonly TimeSpan OneYear = TimeSpan.FromDays(365);
     private static readonly TimeSpan OneSecond = TimeSpan.FromSeconds(1);
 
-    // One age between each two of the retentions the key theory uses (12 h, 1 d, 3 d, 7 d, 10 d, 30 d, 60 d, 90 d, 120 d, 365 d), below the
-    // first and above the last.
+    // One age between each two of the retentions the key theory uses (12 h, 1 d, 2 d, 3 d, 7 d, 10 d, 30 d, 60 d, 90 d, 120 d, 365 d),
+    // below the first and above the last.
     private static readonly TimeSpan[] RetentionAgeGrid =
     [
         TimeSpan.FromHours(6),
         TimeSpan.FromHours(18),
-        TimeSpan.FromDays(2),
+        TimeSpan.FromHours(36),
+        TimeSpan.FromHours(60),
         TimeSpan.FromDays(5),
         TimeSpan.FromDays(8),
         TimeSpan.FromDays(20),
@@ -63,6 +64,7 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
         MfaChallengesCleanupJob.JobName,
         TrustedDevicesCleanupJob.JobName,
         AuditLogsCleanupJob.JobName,
+        PhoneVerificationCodesCleanupJob.JobName,
     ];
 
     private Guid? _userId;
@@ -87,7 +89,7 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
     private DateTimeOffset Now => Factory.Time.GetUtcNow();
 
     [Fact]
-    public async Task The_six_auth_cleanup_jobs_are_registered_with_their_intervals()
+    public async Task The_auth_cleanup_jobs_are_registered_with_their_intervals()
     {
         await using var scope = Factory.Services.CreateAsyncScope();
         var jobs = scope.ServiceProvider.GetServices<RecurringJobRegistration>()
@@ -105,6 +107,7 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
                 ["AuthMfaChallengesCleanup"] = TimeSpan.FromHours(1),
                 ["AuthTrustedDevicesCleanup"] = OneDay,
                 ["AuthAuditLogsCleanup"] = OneDay,
+                ["AuthPhoneVerificationCodesCleanup"] = OneDay,
             },
             ignoreOrder: true);
         jobs.Keys.ShouldBe(JobNames, ignoreOrder: true);
@@ -261,6 +264,21 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
     }
 
     [Fact]
+    public async Task Phone_codes_expired_more_than_one_day_ago_go_and_a_code_expired_exactly_one_day_ago_stays()
+    {
+        var exactly = await SeedPhoneCodeAsync(Now - OneDay);
+        var justOver = await SeedPhoneCodeAsync(Now - OneDay - OneSecond);
+        var pending = await SeedPhoneCodeAsync(Now + TimeSpan.FromMinutes(10));
+
+        var result = await RunAsync(PhoneVerificationCodesCleanupJob.JobName);
+
+        result.Processed.ShouldBe(1);
+        var remaining = await PhoneCodeIdsAsync();
+        remaining.ShouldBe([exactly, pending], ignoreOrder: true);
+        remaining.ShouldNotContain(justOver);
+    }
+
+    [Fact]
     public async Task Trusted_devices_expired_more_than_thirty_days_ago_go_and_a_device_expired_exactly_thirty_days_ago_stays()
     {
         var exactly = await SeedTrustedDeviceAsync(Now - ThirtyDays);
@@ -331,6 +349,7 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
         await SeedMfaChallengeAsync(longAgo);
         await SeedTrustedDeviceAsync(longAgo, revokedAt: longAgo);
         await SeedAuditLogAsync(longAgo);
+        await SeedPhoneCodeAsync(longAgo);
         TimeSpan? off = zero ? TimeSpan.Zero : null;
         var retention = new AuthRetentionOptions
         {
@@ -340,6 +359,7 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
             MfaChallenges = off,
             TrustedDevices = off,
             AuditLogs = off,
+            PhoneVerificationCodes = off,
         };
 
         var result = await RunAsync(jobName, retention);
@@ -351,6 +371,7 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
         (await MfaChallengeIdsAsync()).Count.ShouldBe(1);
         (await TrustedDeviceIdsAsync()).Count.ShouldBe(1);
         (await AuditLogIdsAsync()).Count.ShouldBe(1);
+        (await PhoneCodeIdsAsync()).Count.ShouldBe(1);
     }
 
     [Theory]
@@ -436,13 +457,14 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
     public async Task Each_auth_job_reads_its_own_retention_key(string jobName)
     {
         // Every table holds one row at each age of a grid whose steps lie between any two retentions used below, so a job that read the wrong
-        // key leaves a different set of rows than the one its own key leaves. Defaults are 7 d / 30 d / 90 d / 1 d / 30 d / off.
+        // key leaves a different set of rows than the one its own key leaves. Defaults are 7 d / 30 d / 90 d / 1 d / 30 d / off / 1 d.
         var codes = new Dictionary<TimeSpan, Guid>();
         var tokens = new Dictionary<TimeSpan, Guid>();
         var sessions = new Dictionary<TimeSpan, Guid>();
         var challenges = new Dictionary<TimeSpan, Guid>();
         var devices = new Dictionary<TimeSpan, Guid>();
         var auditLogs = new Dictionary<TimeSpan, long>();
+        var phoneCodes = new Dictionary<TimeSpan, Guid>();
 
         // The tokens hang off one live session, so only the token job can delete them.
         var tokenSession = await SeedSessionAsync(Now + NinetyDays + OneYear, tokenExpiries: [.. RetentionAgeGrid.Select(age => Now - age)]);
@@ -458,6 +480,7 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
             challenges[age] = await SeedMfaChallengeAsync(Now - age);
             devices[age] = await SeedTrustedDeviceAsync(Now - age);
             auditLogs[age] = await SeedAuditLogAsync(Now - age);
+            phoneCodes[age] = await SeedPhoneCodeAsync(Now - age);
         }
 
         var retention = new AuthRetentionOptions();
@@ -478,6 +501,9 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
             case TrustedDevicesCleanupJob.JobName:
                 retention.TrustedDevices = TimeSpan.FromDays(60);
                 break;
+            case PhoneVerificationCodesCleanupJob.JobName:
+                retention.PhoneVerificationCodes = TimeSpan.FromDays(2);
+                break;
             default:
                 retention.AuditLogs = OneYear;
                 break;
@@ -494,6 +520,7 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
         (await MfaChallengeIdsAsync()).ShouldBe(Survivors(challenges, retention.MfaChallenges), ignoreOrder: true);
         (await TrustedDeviceIdsAsync()).ShouldBe(Survivors(devices, retention.TrustedDevices), ignoreOrder: true);
         (await AuditLogIdsAsync()).ShouldBe(Survivors(auditLogs, retention.AuditLogs), ignoreOrder: true);
+        (await PhoneCodeIdsAsync()).ShouldBe(Survivors(phoneCodes, retention.PhoneVerificationCodes), ignoreOrder: true);
     }
 
     [Fact]
@@ -569,6 +596,7 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
             MfaChallengesCleanupJob.JobName => new MfaChallengesCleanupJob(context, Factory.Time, jobs, batching, auth),
             TrustedDevicesCleanupJob.JobName => new TrustedDevicesCleanupJob(context, Factory.Time, jobs, batching, auth),
             AuditLogsCleanupJob.JobName => new AuditLogsCleanupJob(context, Factory.Time, jobs, batching, auth),
+            PhoneVerificationCodesCleanupJob.JobName => new PhoneVerificationCodesCleanupJob(context, Factory.Time, jobs, batching, auth),
             _ => throw new ArgumentOutOfRangeException(nameof(name), name, "Not an Auth cleanup job."),
         };
     }
@@ -583,7 +611,7 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
         return await CreateJob(jobName, scope, retention, batchSize, maxBatchesPerRun).RunAsync(Ct);
     }
 
-    /// <summary>Runs the six Auth cleanup jobs as the scheduler does, with the host's own configuration.</summary>
+    /// <summary>Runs the Auth cleanup jobs as the scheduler does, with the host's own configuration.</summary>
     private async Task RunAllAsync()
     {
         var runner = Factory.Services.GetRequiredService<RecurringJobRunner>();
@@ -625,6 +653,20 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
         await context.SaveChangesAsync(Ct);
 
         await context.Set<VerificationCode>().Where(candidate => candidate.Id == code.Id)
+            .ExecuteUpdateAsync(set => set.SetProperty(candidate => candidate.ExpiresAt, expiresAt), Ct);
+        return code.Id;
+    }
+
+    private async Task<Guid> SeedPhoneCodeAsync(DateTimeOffset expiresAt)
+    {
+        var userId = await UserIdAsync();
+        await using var scope = Factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        var code = PhoneVerificationCode.Issue(userId, "+60123456789", "042137", "protected", TimeSpan.FromMinutes(10), Now);
+        context.Add(code);
+        await context.SaveChangesAsync(Ct);
+
+        await context.Set<PhoneVerificationCode>().Where(candidate => candidate.Id == code.Id)
             .ExecuteUpdateAsync(set => set.SetProperty(candidate => candidate.ExpiresAt, expiresAt), Ct);
         return code.Id;
     }
@@ -718,6 +760,8 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
 
     private Task<List<Guid>> UsedTokenIdsAsync()
         => QueryAsync(context => context.Set<RefreshToken>().Where(row => row.UsedAt != null).Select(row => row.Id).ToListAsync(Ct));
+
+    private Task<List<Guid>> PhoneCodeIdsAsync() => QueryAsync(context => context.Set<PhoneVerificationCode>().Select(row => row.Id).ToListAsync(Ct));
 
     private Task<List<Guid>> MfaChallengeIdsAsync() => QueryAsync(context => context.Set<MfaChallenge>().Select(row => row.Id).ToListAsync(Ct));
 

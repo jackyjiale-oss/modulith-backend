@@ -173,6 +173,33 @@ public sealed class NotificationTests
             typeCode, NotificationPriority.Normal, Guid.NewGuid(), "en", "{}", null, Guid.NewGuid(), null, null, Now));
 
     [Fact]
+    public void An_sms_delivery_needs_a_number_in_e164_and_is_one_per_notification()
+    {
+        var notification = Create();
+
+        notification.AddDelivery(NotificationChannel.Sms, "+60123456789", Now, Now).Destination.ShouldBe("+60123456789");
+        Should.Throw<InvalidOperationException>(() => notification.AddDelivery(NotificationChannel.Sms, "+60198765432", Now, Now));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("60123456789")]
+    [InlineData("+0123456789")]
+    [InlineData("+60123")]
+    [InlineData("+6012345678901234")]
+    [InlineData("+60-123-456-789")]
+    public void An_sms_delivery_without_a_valid_number_is_refused_without_quoting_it(string? destination)
+    {
+        var exception = Should.Throw<ArgumentException>(() => Create().AddDelivery(NotificationChannel.Sms, destination, Now, Now));
+
+        if (!string.IsNullOrEmpty(destination))
+        {
+            exception.Message.ShouldNotContain(destination);
+        }
+    }
+
+    [Fact]
     public void Two_push_deliveries_for_different_devices_are_allowed()
     {
         var notification = Create();

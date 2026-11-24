@@ -110,6 +110,25 @@ public sealed class DeliveryTests
     }
 
     [Fact]
+    public void MarkSent_keeps_the_provider_message_id()
+    {
+        var delivery = Delivery.Create(Guid.NewGuid(), NotificationChannel.Sms, "+60123456789", Now, null, Now);
+
+        delivery.MarkSent(null, Now, "SM0123456789abcdef0123456789abcdef");
+
+        delivery.ProviderMessageId.ShouldBe("SM0123456789abcdef0123456789abcdef");
+        Delivery.Create(Guid.NewGuid(), NotificationChannel.Email, "a@example.com", Now, null, Now).ProviderMessageId.ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_provider_message_id_longer_than_the_column_is_refused()
+    {
+        var delivery = Delivery.Create(Guid.NewGuid(), NotificationChannel.Sms, "+60123456789", Now, null, Now);
+
+        Should.Throw<ArgumentOutOfRangeException>(() => delivery.MarkSent(null, Now, new string('a', Delivery.MaxProviderMessageIdLength + 1)));
+    }
+
+    [Fact]
     public void MarkSent_stores_the_subject_cut_to_its_column_and_clears_the_schedule()
     {
         var delivery = NewDelivery();

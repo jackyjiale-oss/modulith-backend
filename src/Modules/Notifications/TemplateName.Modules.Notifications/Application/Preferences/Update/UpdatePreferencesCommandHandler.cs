@@ -5,6 +5,7 @@ using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Notifications.Application.Abstractions;
 using TemplateName.Modules.Notifications.Application.Catalog;
 using TemplateName.Modules.Notifications.Application.Devices;
+using TemplateName.Modules.Notifications.Application.Sms;
 using TemplateName.Modules.Notifications.Application.Preferences.Get;
 using TemplateName.Modules.Notifications.Domain.Notifications;
 using TemplateName.Modules.Notifications.Domain.Preferences;
@@ -32,7 +33,8 @@ internal sealed class UpdatePreferencesCommandHandler(
     IUnitOfWork unitOfWork,
     IQueryHandler<GetPreferencesQuery, PreferencesResponse> getPreferences,
     TimeProvider timeProvider,
-    IOptions<PushOptions> pushOptions) : ICommandHandler<UpdatePreferencesCommand, PreferencesResponse>
+    IOptions<PushOptions> pushOptions,
+    IOptions<SmsOptions> smsOptions) : ICommandHandler<UpdatePreferencesCommand, PreferencesResponse>
 {
     public async Task<Result<PreferencesResponse>> HandleAsync(UpdatePreferencesCommand command, CancellationToken cancellationToken)
     {
@@ -60,7 +62,7 @@ internal sealed class UpdatePreferencesCommandHandler(
             async token =>
             {
                 var rows = await preferences.ListAsync(userId, token);
-                if (!command.IfMatch.IsSatisfiedBy(PreferencesVersion.Of(PreferencesView.Build(catalog, rows, pushOptions.Value.Enabled))))
+                if (!command.IfMatch.IsSatisfiedBy(PreferencesVersion.Of(PreferencesView.Build(catalog, rows, pushOptions.Value.Enabled, smsOptions.Value.Enabled))))
                 {
                     return Result.Failure(ConcurrencyErrors.PreconditionFailed);
                 }
@@ -86,7 +88,7 @@ internal sealed class UpdatePreferencesCommandHandler(
         }
 
         // Push while it is disabled is not offered, so it is refused like a channel the type does not have.
-        if (!PreferencesView.Offers(type, item.Channel, pushOptions.Value.Enabled))
+        if (!PreferencesView.Offers(type, item.Channel, pushOptions.Value.Enabled, smsOptions.Value.Enabled))
         {
             return PreferenceErrors.ChannelNotSupported(type.Code, item.Channel.ToString());
         }

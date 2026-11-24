@@ -43,6 +43,9 @@ internal interface IUserRepository
     /// </summary>
     Task<bool> IsActiveInRoleAsync(Guid userId, Guid roleId, CancellationToken cancellationToken);
 
+    /// <summary>Whether a user other than <paramref name="exceptUserId"/>, not deleted, holds <paramref name="e164"/> as the verified number.</summary>
+    Task<bool> IsPhoneNumberTakenAsync(string e164, Guid exceptUserId, CancellationToken cancellationToken);
+
     /// <summary>Whether a user other than <paramref name="exceptUserId"/> that is active and not soft-deleted holds the role.</summary>
     Task<bool> AnyOtherActiveInRoleAsync(Guid roleId, Guid exceptUserId, CancellationToken cancellationToken);
 

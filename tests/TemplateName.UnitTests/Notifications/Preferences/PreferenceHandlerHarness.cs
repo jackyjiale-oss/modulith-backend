@@ -7,6 +7,7 @@ using TemplateName.Modules.Notifications.Application.Catalog;
 using TemplateName.Modules.Notifications.Application.Devices;
 using TemplateName.Modules.Notifications.Application.Preferences.Get;
 using TemplateName.Modules.Notifications.Application.Preferences.Update;
+using TemplateName.Modules.Notifications.Application.Sms;
 using TemplateName.Modules.Notifications.Domain.Notifications;
 using TemplateName.Modules.Notifications.Domain.Preferences;
 
@@ -47,10 +48,12 @@ internal sealed class PreferenceHandlerHarness
     /// <summary>The push settings the handlers read; push is off unless a test turns it on.</summary>
     public PushOptions Push { get; } = new();
 
-    public GetPreferencesQueryHandler CreateGetHandler() => new(Catalog, Preferences, CurrentUser, Options.Create(Push));
+    public SmsOptions Sms { get; } = new();
+
+    public GetPreferencesQueryHandler CreateGetHandler() => new(Catalog, Preferences, CurrentUser, Options.Create(Push), Options.Create(Sms));
 
     public UpdatePreferencesCommandHandler CreateUpdateHandler()
-        => new(Catalog, Preferences, CurrentUser, UnitOfWork, CreateGetHandler(), new FakeTimeProvider(Now), Options.Create(Push));
+        => new(Catalog, Preferences, CurrentUser, UnitOfWork, CreateGetHandler(), new FakeTimeProvider(Now), Options.Create(Push), Options.Create(Sms));
 
     public UserPreference Disabled(string typeCode, NotificationChannel channel)
         => UserPreference.Create(UserId, typeCode, channel, isEnabled: false, Now);

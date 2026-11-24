@@ -14,4 +14,8 @@ namespace TemplateName.Modules.Auth.Contracts.Users;
 /// <param name="TimeZone">
 /// The user's saved IANA time zone id as stored (<c>UTC</c> by default); never null. The caller treats an unknown or empty id as <c>UTC</c>.
 /// </param>
-public sealed record UserContact(Guid UserId, string Email, string DisplayName, string Locale, string TimeZone);
+/// <param name="PhoneNumber">
+/// The user's verified mobile number in E.164 (<c>+60123456789</c>), or null when none is verified: where an SMS for the user goes. A
+/// number waiting for its code is never here.
+/// </param>
+public sealed record UserContact(Guid UserId, string Email, string DisplayName, string Locale, string TimeZone, string? PhoneNumber = null);

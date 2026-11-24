@@ -2,7 +2,7 @@
 
 # Tests
 
-Rows: 227
+Rows: 237
 
 ## Folders
 
@@ -145,6 +145,10 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Passwords/Change/ChangePasswordCommandHandler.cs | tests/TemplateName.UnitTests/Auth/ChangePasswordCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Passwords/Forgot/ForgotPasswordCommandHandler.cs | tests/TemplateName.UnitTests/Auth/ForgotPasswordCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Passwords/Reset/ResetPasswordCommandHandler.cs | tests/TemplateName.UnitTests/Auth/ResetPasswordCommandHandlerTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/Phone/Confirm/ConfirmPhoneCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Phone/ConfirmPhoneCommandHandlerTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/Phone/PhoneOptions.cs | tests/TemplateName.UnitTests/Auth/Phone/PhoneOptionsTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/Phone/Remove/RemovePhoneCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Phone/RemovePhoneCommandHandlerTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/Phone/RequestCode/RequestPhoneCodeCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Phone/RequestPhoneCodeCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Registration/ConfirmEmail/ConfirmEmailCommandHandler.cs | tests/TemplateName.UnitTests/Auth/ConfirmEmailCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Registration/ConfirmEmail/ConfirmEmailCommandValidator.cs | tests/TemplateName.UnitTests/Auth/ConfirmEmailCommandValidatorTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Registration/Register/RegisterCommandHandler.cs | tests/TemplateName.UnitTests/Auth/RegisterCommandHandlerTests.cs |
@@ -170,7 +174,10 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Users/ExternalLoginErrors.cs | tests/TemplateName.UnitTests/Auth/ExternalLoginErrorsTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Users/User.cs | tests/TemplateName.UnitTests/Auth/UserTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Users/UserExternalLogin.cs | tests/TemplateName.UnitTests/Auth/UserExternalLoginTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Domain/Verification/PhoneNumberRules.cs | tests/TemplateName.UnitTests/Auth/Phone/PhoneNumberRulesTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Domain/Verification/PhoneVerificationCode.cs | tests/TemplateName.UnitTests/Auth/Phone/PhoneVerificationCodeTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Domain/Verification/VerificationCode.cs | tests/TemplateName.UnitTests/Auth/VerificationCodeTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Endpoints/PhoneEndpoints.cs | tests/TemplateName.IntegrationTests/Auth/PhoneEndpointsTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Authorization/AuthSeeder.cs | tests/TemplateName.IntegrationTests/Auth/AuthSeederTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Authorization/PermissionChecker.cs | tests/TemplateName.IntegrationTests/Auth/PermissionCheckerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Authorization/PermissionSynchronizer.cs | tests/TemplateName.UnitTests/Auth/PermissionSynchronizerTests.cs |
@@ -225,6 +232,9 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Push/FcmOptions.cs | tests/TemplateName.UnitTests/Notifications/Push/FcmOptionsTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Push/FcmPushTransport.cs | tests/TemplateName.UnitTests/Notifications/Push/FcmPushTransportTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Push/PushChannel.cs | tests/TemplateName.UnitTests/Notifications/Push/PushChannelTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Sms/SmsChannel.cs | tests/TemplateName.UnitTests/Notifications/Sms/SmsChannelTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Sms/TwilioOptions.cs | tests/TemplateName.UnitTests/Notifications/Sms/TwilioOptionsTests.cs |
+| src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Channels/Sms/TwilioSmsTransport.cs | tests/TemplateName.UnitTests/Notifications/Sms/TwilioSmsTransportTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Deliveries/DeliveryDispatcher.cs | tests/TemplateName.IntegrationTests/Notifications/DeliveryDispatcherTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Deliveries/DeliveryOptions.cs | tests/TemplateName.UnitTests/Notifications/DeliveryOptionsTests.cs |
 | src/Modules/Notifications/TemplateName.Modules.Notifications/Infrastructure/Hubs/HubTicketAuthenticationHandler.cs | tests/TemplateName.UnitTests/Notifications/HubTicketAuthenticationHandlerTests.cs |

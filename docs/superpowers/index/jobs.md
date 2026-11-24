@@ -2,7 +2,7 @@
 
 # Recurring jobs
 
-Rows: 16
+Rows: 17
 
 | job | module | config keys | file |
 | --- | --- | --- | --- |
@@ -11,6 +11,7 @@ Rows: 16
 | AuthAuditLogsCleanup | Auth | Jobs:AuthAuditLogsCleanup:Enabled, Jobs:AuthAuditLogsCleanup:Interval | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Retention/AuditLogsCleanupJob.cs |
 | AuthMfaChallengesCleanup | Auth | Jobs:AuthMfaChallengesCleanup:Enabled, Jobs:AuthMfaChallengesCleanup:Interval | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Retention/MfaChallengesCleanupJob.cs |
 | AuthOutboxCleanup | Auth | Jobs:AuthOutboxCleanup:Enabled, Jobs:AuthOutboxCleanup:Interval | src/BuildingBlocks/TemplateName.Infrastructure.Common/Outbox/OutboxCleanupJob.cs |
+| AuthPhoneVerificationCodesCleanup | Auth | Jobs:AuthPhoneVerificationCodesCleanup:Enabled, Jobs:AuthPhoneVerificationCodesCleanup:Interval | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Retention/PhoneVerificationCodesCleanupJob.cs |
 | AuthRefreshTokensCleanup | Auth | Jobs:AuthRefreshTokensCleanup:Enabled, Jobs:AuthRefreshTokensCleanup:Interval | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Retention/RefreshTokensCleanupJob.cs |
 | AuthSessionsCleanup | Auth | Jobs:AuthSessionsCleanup:Enabled, Jobs:AuthSessionsCleanup:Interval | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Retention/UserSessionsCleanupJob.cs |
 | AuthTrustedDevicesCleanup | Auth | Jobs:AuthTrustedDevicesCleanup:Enabled, Jobs:AuthTrustedDevicesCleanup:Interval | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Retention/TrustedDevicesCleanupJob.cs |

@@ -67,7 +67,7 @@ internal sealed class TemplateCompletenessChecker(NotificationCatalog catalog)
     public IReadOnlyList<string> UndeclaredVariables(string typeCode)
     {
         var type = Type(typeCode);
-        var declared = type.Variables.Concat(type.SecretVariables).Append(TemplateVariables.ProductName).ToHashSet(StringComparer.Ordinal);
+        var declared = type.Variables.Concat(type.SecretVariables.Keys).Append(TemplateVariables.ProductName).ToHashSet(StringComparer.Ordinal);
         declared.Remove(TemplateVariables.This);
 
         return Parts(typeCode)
@@ -98,7 +98,7 @@ internal sealed class TemplateCompletenessChecker(NotificationCatalog catalog)
                 var variables = Variables(assembly, resourceName) ?? [];
 
                 // 'this' reads the whole model, so it uses every secret variable without naming one.
-                var secrets = (variables.Contains(TemplateVariables.This) ? type.SecretVariables : variables.Where(type.SecretVariables.Contains))
+                var secrets = (variables.Contains(TemplateVariables.This) ? type.SecretVariables.Keys : variables.Where(type.SecretVariables.ContainsKey))
                     .Order(StringComparer.Ordinal)
                     .ToList();
                 if (secrets.Count > 0)

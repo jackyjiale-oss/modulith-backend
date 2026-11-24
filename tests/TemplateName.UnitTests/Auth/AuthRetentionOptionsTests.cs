@@ -21,6 +21,7 @@ public sealed class AuthRetentionOptionsTests
         options.Sessions.ShouldBe(TimeSpan.FromDays(90));
         options.MfaChallenges.ShouldBe(TimeSpan.FromDays(1));
         options.TrustedDevices.ShouldBe(TimeSpan.FromDays(30));
+        options.PhoneVerificationCodes.ShouldBe(TimeSpan.FromDays(1));
     }
 
     [Fact]
@@ -38,6 +39,7 @@ public sealed class AuthRetentionOptionsTests
     [InlineData("MfaChallenges")]
     [InlineData("TrustedDevices")]
     [InlineData("AuditLogs")]
+    [InlineData("PhoneVerificationCodes")]
     public void Negative_retention_is_rejected(string key)
     {
         using var services = BuildServices(new Dictionary<string, string?> { [$"Auth:Retention:{key}"] = "-1.00:00:00" });
@@ -55,6 +57,7 @@ public sealed class AuthRetentionOptionsTests
     [InlineData("MfaChallenges")]
     [InlineData("TrustedDevices")]
     [InlineData("AuditLogs")]
+    [InlineData("PhoneVerificationCodes")]
     public void Zero_and_null_turn_a_cleanup_off_and_are_accepted(string key)
     {
         using var zero = BuildServices(new Dictionary<string, string?> { [$"Auth:Retention:{key}"] = "00:00:00" });
