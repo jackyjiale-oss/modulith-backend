@@ -1,9 +1,11 @@
+using System.Text.Json;
 using TemplateName.Application.Common.Identity;
 using TemplateName.Application.Common.Messaging;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Application.Mfa;
 using TemplateName.Modules.Auth.Application.StepUp;
 using TemplateName.Modules.Auth.Domain.Audit;
+using TemplateName.Modules.Auth.Domain.Users;
 using TemplateName.SharedKernel;
 
 namespace TemplateName.Modules.Auth.Application.Phone.Remove;
@@ -17,7 +19,7 @@ namespace TemplateName.Modules.Auth.Application.Phone.Remove;
 internal sealed class RemovePhoneCommandHandler(
     IUserRepository users,
     ISessionRepository sessions,
-    IPhoneVerificationCodeRepository codes,
+    PhoneChangeEffects changeEffects,
     IMfaMethodRepository mfaMethods,
     StepUpPolicy stepUpPolicy,
     ICurrentUser currentUser,
@@ -43,19 +45,27 @@ internal sealed class RemovePhoneCommandHandler(
                 return stepUp;
             }
 
-            user.RemovePhoneNumber();
+        }
+
+        // The pending codes end whether or not there was a number; the sessions only when a number was removed.
+        var removed = user.RemovePhoneNumber(now);
+        var revokedSessionCount = await changeEffects.ApplyAsync(
+            user,
+            removed ? PhoneNumberChange.Removed : null,
+            session.Id,
+            now,
+            cancellationToken);
+        if (removed)
+        {
             auditWriter.Record(AuthAuditLog.Create(
                 AuthAuditEvents.PhoneNumberRemoved,
                 succeeded: true,
                 now,
                 userId: user.Id,
-                sessionId: session.Id));
+                sessionId: session.Id,
+                details: JsonSerializer.Serialize(new { revokedSessionCount })));
         }
 
-        foreach (var pending in await codes.ListPendingAsync(user.Id, now, cancellationToken))
-        {
-            pending.Invalidate(now);
-        }
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
 

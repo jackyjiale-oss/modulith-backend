@@ -52,11 +52,12 @@ The environment of a .NET host that is not told otherwise is `Production`, and t
 
 - SMS and phone numbers are off by default (`Notifications:Sms:Enabled`, `Auth:Phone:Enabled`); a project turns them on together and sets `Notifications:Sms:Twilio:AccountSid`, `Notifications:Sms:Twilio:AuthToken` (from the environment or the vault, never a file) and exactly one of `Notifications:Sms:Twilio:From` (a number in E.164) or `Notifications:Sms:Twilio:MessagingServiceSid`. The host does not start with SMS on and any of these missing ([notifications](../modules/notifications.md#sms-channel)).
 - Set `Auth:Phone:AllowedRegions` to the countries you serve; empty accepts every region.
+- Phone sign-in (`Auth:Phone:SignInEnabled`, off by default) turns a verified number into a way to sign in: turn it on only after the four Twilio steps below, decide whether `Auth:Phone:SignInDeniedRoles` (`SuperAdmin`, `Admin` by default) fits your roles, and encourage TOTP for accounts a SIM swap must not open ([ADR 0041](../adr/0041-phone-number-sign-in.md)).
 - **Required before SMS goes live**, at Twilio, because the per-user limits bound one account and many accounts can still pump premium-rate numbers:
   - turn on **SMS Pumping Protection** for Programmable Messaging;
   - limit **geo permissions** to the regions in `Auth:Phone:AllowedRegions`;
   - set a **spend limit**: a usage trigger on SMS spend, and auto-recharge off or capped;
-  - send **alerts** to the operators: Twilio's usage triggers, plus the app's signals (SMS dead letters, a `twilio_20003` or `twilio_21606` configuration fault, a jump in `auth.phone_verification` notifications created).
+  - send **alerts** to the operators: Twilio's usage triggers, plus the app's signals (SMS dead letters, a `twilio_20003` or `twilio_21606` configuration fault, a jump in `auth.phone_verification` or `auth.phone_sign_in` notifications created).
 - SMS is at least once and never guaranteed: `Sent` means Twilio accepted the text, and a timed-out send can arrive twice with the same code ([delivery guarantees](../modules/notifications.md#sms-channel)).
 
 **Yours:** create the Twilio account and sender (a number or a Messaging Service, registered for the countries you text, which some require), keep the auth token in your vault, rotate it as you rotate other keys, and do the four steps above.

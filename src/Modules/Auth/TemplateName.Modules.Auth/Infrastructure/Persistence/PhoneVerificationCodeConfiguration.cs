@@ -14,6 +14,10 @@ internal sealed class PhoneVerificationCodeConfiguration : IEntityTypeConfigurat
         builder.Property(code => code.Id).ValueGeneratedNever();
 
         builder.Property(code => code.PhoneNumber).HasMaxLength(User.MaxPhoneNumberLength);
+
+        // tinyint, always written by the application. The migration that added it gave the rows already there the value 1 (Verify); the
+        // model has no database default, so a purpose is never left to the database.
+        builder.Property(code => code.Purpose);
         builder.Property(code => code.CodeHash).HasMaxLength(32);
         builder.Property(code => code.Salt).HasMaxLength(PhoneVerificationCode.SaltLength);
 

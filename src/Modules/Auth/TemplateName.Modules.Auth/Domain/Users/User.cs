@@ -421,27 +421,56 @@ internal sealed class User : AggregateRoot<Guid>, IAuditable, ISoftDeletable
     public void NoteRecoveryCodeUsed() => Raise(new MfaChangedDomainEvent(Id, MfaChange.RecoveryCodeUsed));
 
     /// <summary>
-    /// Makes <paramref name="e164"/> the account's verified number, replacing any previous one. The caller has checked the code; the
-    /// database's unique index refuses a number another account verified first.
+    /// Makes <paramref name="e164"/> the account's verified number, replacing any previous one, and says how it changed: added,
+    /// replaced (the security stamp rotates) or null when it already was the number (nothing changes). The caller has checked the code;
+    /// the database's unique index refuses a number another account verified first.
     /// </summary>
-    public void VerifyPhoneNumber(string e164, DateTimeOffset now)
+    public PhoneNumberChange? VerifyPhoneNumber(string e164, DateTimeOffset now)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(e164);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(e164.Length, MaxPhoneNumberLength, nameof(e164));
 
+        if (string.Equals(PhoneNumber, e164, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var change = PhoneNumber is null ? PhoneNumberChange.Added : PhoneNumberChange.Replaced;
         PhoneNumber = e164;
         PhoneNumberVerifiedAt = now;
+
+        // A verified number signs the account in, so replacing it ends whatever the old number opened; adding one only tells the owner.
+        if (change == PhoneNumberChange.Replaced)
+        {
+            SecurityStamp = NewSecurityStamp();
+        }
+
+        Raise(new PhoneNumberChangedDomainEvent(Id, change, LastDigitsOf(e164), now));
+        return change;
     }
 
     /// <summary>Records a phone code request (see <see cref="PhoneCodeRequestedAt"/>).</summary>
     public void NotePhoneCodeRequested(DateTimeOffset now) => PhoneCodeRequestedAt = now;
 
-    /// <summary>Removes the verified number; nothing changes when there is none.</summary>
-    public void RemovePhoneNumber()
+    /// <summary>
+    /// Removes the verified number, rotates the security stamp (the number was a way in) and raises
+    /// <see cref="PhoneNumberChangedDomainEvent"/>. Nothing changes, and false is returned, when there is none.
+    /// </summary>
+    public bool RemovePhoneNumber(DateTimeOffset now)
     {
+        if (PhoneNumber is not { } removed)
+        {
+            return false;
+        }
+
         PhoneNumber = null;
         PhoneNumberVerifiedAt = null;
+        SecurityStamp = NewSecurityStamp();
+        Raise(new PhoneNumberChangedDomainEvent(Id, PhoneNumberChange.Removed, LastDigitsOf(removed), now));
+        return true;
     }
+
+    private static string LastDigitsOf(string e164) => e164[^Math.Min(3, e164.Length)..];
 
     /// <summary>
     /// Records that someone tried to register this address again. Nothing changes; the event lets a handler tell the owner, so the

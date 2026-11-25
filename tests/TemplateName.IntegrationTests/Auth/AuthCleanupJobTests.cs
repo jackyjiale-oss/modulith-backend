@@ -662,7 +662,7 @@ public sealed class AuthCleanupJobTests(IntegrationTestWebAppFactory factory) : 
         var userId = await UserIdAsync();
         await using var scope = Factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-        var code = PhoneVerificationCode.Issue(userId, "+60123456789", "042137", "protected", TimeSpan.FromMinutes(10), Now);
+        var code = PhoneVerificationCode.Issue(userId, PhoneCodePurpose.Verify, "+60123456789", "042137", "protected", TimeSpan.FromMinutes(10), Now);
         context.Add(code);
         await context.SaveChangesAsync(Ct);
 

@@ -120,4 +120,18 @@ public sealed class MfaChallengeTests
         Should.Throw<ArgumentException>(() => MfaChallenge.Issue(Guid.NewGuid(), Hash(1), Stamp, "Pixel 9", firstFactor, Lifetime, Now));
         Should.Throw<ArgumentException>(() => MfaChallenge.Issue(Guid.NewGuid(), Hash(1), Stamp, "Pixel 9", null!, Lifetime, Now));
     }
+
+    [Fact]
+    public void Sms_is_an_accepted_first_factor()
+    {
+        var challenge = MfaChallenge.Issue(Guid.NewGuid(), Hash(1), Stamp, "Pixel 9", AuthenticationMethods.Sms, Lifetime, Now);
+
+        challenge.FirstFactor.ShouldBe(AuthenticationMethods.Sms);
+    }
+
+    [Fact]
+    public void Another_value_is_still_refused()
+    {
+        Should.Throw<ArgumentException>(() => MfaChallenge.Issue(Guid.NewGuid(), Hash(1), Stamp, "Pixel 9", AuthenticationMethods.OneTimePassword, Lifetime, Now));
+    }
 }

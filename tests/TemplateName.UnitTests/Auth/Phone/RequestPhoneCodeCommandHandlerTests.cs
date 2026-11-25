@@ -40,9 +40,10 @@ public sealed class RequestPhoneCodeCommandHandlerTests
         _sessions.GetByIdAsync(session.Id, Arg.Any<CancellationToken>()).Returns(session);
         _currentUser.UserId.Returns(_user.Id);
         _currentUser.SessionId.Returns(session.Id);
-        _currentUser.AuthTime.Returns(Now.AddHours(-1));
+        // A fresh sign-in: every number change needs a step-up, a first number included.
+        _currentUser.AuthTime.Returns(Now.AddMinutes(-1));
         _currentUser.AuthMethods.Returns(["pwd"]);
-        _codes.ListPendingAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([]);
+        _codes.ListPendingAsync(_user.Id, PhoneCodePurpose.Verify, Now, Arg.Any<CancellationToken>()).Returns([]);
         _codes.ListIssuedSinceAsync(_user.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns([]);
         _codes.Add(Arg.Do<PhoneVerificationCode>(_issued.Add));
         _secretProtector.Protect(Arg.Any<string>()).Returns(call => "protected:" + call.Arg<string>());
@@ -51,6 +52,7 @@ public sealed class RequestPhoneCodeCommandHandlerTests
             _users,
             _sessions,
             _codes,
+            new PhoneCodeBudget(_codes),
             _mfaMethods,
             new StepUpPolicy(_currentUser, Options.Create(new StepUpOptions()), time),
             _currentUser,
@@ -107,9 +109,9 @@ public sealed class RequestPhoneCodeCommandHandlerTests
     [Fact]
     public async Task A_new_code_ends_the_previous_one()
     {
-        var previous = PhoneVerificationCode.Issue(_user.Id, Number, "111111", "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-5));
+        var previous = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.Verify, Number, "111111", "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-5));
         _codes.GetLastIssuedAtAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(Now.AddMinutes(-5));
-        _codes.ListPendingAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([previous]);
+        _codes.ListPendingAsync(_user.Id, PhoneCodePurpose.Verify, Now, Arg.Any<CancellationToken>()).Returns([previous]);
 
         var result = await _sut.HandleAsync(new RequestPhoneCodeCommand(Number), Ct);
 
@@ -177,11 +179,36 @@ public sealed class RequestPhoneCodeCommandHandlerTests
     }
 
     [Fact]
-    public async Task Adding_the_first_number_needs_no_step_up()
+    public async Task Adding_the_first_number_needs_step_up()
     {
-        _currentUser.AuthTime.Returns((DateTimeOffset?)null);
+        _currentUser.AuthTime.Returns(Now.AddHours(-1));
+
+        var result = await _sut.HandleAsync(new RequestPhoneCodeCommand(Number), Ct);
+
+        result.Error.ShouldBe(MfaErrors.StepUpRequired);
+        _issued.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Adding_the_first_number_after_an_sms_sign_in_needs_step_up()
+    {
+        _currentUser.AuthMethods.Returns(["sms"]);
+
+        (await _sut.HandleAsync(new RequestPhoneCodeCommand(Number), Ct)).Error.ShouldBe(MfaErrors.StepUpRequired);
+    }
+
+    [Fact]
+    public async Task A_new_verification_code_ends_only_pending_verification_codes()
+    {
+        var verify = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.Verify, Number, "111111", "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-5));
+        var signIn = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.SignIn, Number, "222222", "protected", TimeSpan.FromMinutes(5), Now.AddMinutes(-2));
+        _codes.ListPendingAsync(_user.Id, PhoneCodePurpose.Verify, Now, Arg.Any<CancellationToken>()).Returns([verify]);
+        _codes.ListPendingAsync(_user.Id, null, Now, Arg.Any<CancellationToken>()).Returns([verify, signIn]);
 
         (await _sut.HandleAsync(new RequestPhoneCodeCommand(Number), Ct)).IsSuccess.ShouldBeTrue();
+
+        verify.InvalidatedAt.ShouldBe(Now);
+        signIn.InvalidatedAt.ShouldBeNull();
     }
 
     [Theory]

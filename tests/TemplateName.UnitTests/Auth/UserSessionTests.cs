@@ -431,7 +431,7 @@ public sealed class UserSessionTests
     {
         ((int)SessionRevokedReason.Expired).ShouldBe(5);
         ((int)SessionRevokedReason.MfaChanged).ShouldBe(6);
-        Enum.GetValues<SessionRevokedReason>().Length.ShouldBe(8);
+        Enum.GetValues<SessionRevokedReason>().Length.ShouldBe(9);
 
         var (session, _) = StartSession();
         session.Revoke(SessionRevokedReason.MfaChanged, Now);

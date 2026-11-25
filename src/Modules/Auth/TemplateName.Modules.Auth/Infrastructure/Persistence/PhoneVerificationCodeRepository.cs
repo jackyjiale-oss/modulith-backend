@@ -26,11 +26,24 @@ internal sealed class PhoneVerificationCodeRepository(AuthDbContext context) : I
     public Task<PhoneVerificationCode?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
         => context.Set<PhoneVerificationCode>().SingleOrDefaultAsync(code => code.Id == id, cancellationToken);
 
-    public Task<PhoneVerificationCode?> GetPendingAsync(Guid userId, DateTimeOffset now, CancellationToken cancellationToken)
-        => Pending(userId, now).OrderByDescending(code => code.CreatedAt).FirstOrDefaultAsync(cancellationToken);
+    public Task<PhoneVerificationCode?> GetPendingAsync(
+        Guid userId,
+        PhoneCodePurpose purpose,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+        => Pending(userId, now)
+            .Where(code => code.Purpose == purpose)
+            .OrderByDescending(code => code.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
 
-    public async Task<IReadOnlyList<PhoneVerificationCode>> ListPendingAsync(Guid userId, DateTimeOffset now, CancellationToken cancellationToken)
-        => await Pending(userId, now).ToListAsync(cancellationToken);
+    public async Task<IReadOnlyList<PhoneVerificationCode>> ListPendingAsync(
+        Guid userId,
+        PhoneCodePurpose? purpose,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+        => await Pending(userId, now)
+            .Where(code => purpose == null || code.Purpose == purpose)
+            .ToListAsync(cancellationToken);
 
     public Task<DateTimeOffset?> GetLastIssuedAtAsync(Guid userId, CancellationToken cancellationToken)
         => context.Set<PhoneVerificationCode>()
@@ -59,6 +72,20 @@ internal sealed class PhoneVerificationCodeRepository(AuthDbContext context) : I
             cancellationToken);
 
         return counted == 1;
+    }
+
+    // One UPDATE ... WHERE: a try is claimed only while fewer than maxAttempts were, so concurrent guesses queue on the row lock and at
+    // most maxAttempts of them ever compare a code.
+    public async Task<bool> TryClaimAttemptAsync(Guid id, int maxAttempts, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var claimed = await context.Set<PhoneVerificationCode>()
+            .Where(code => code.Id == id
+                && code.AttemptCount < maxAttempts
+                && code.ConsumedAt == null
+                && code.InvalidatedAt == null
+                && code.ExpiresAt > now)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(code => code.AttemptCount, code => code.AttemptCount + 1), cancellationToken);
+        return claimed == 1;
     }
 
     // The rule of PhoneVerificationCode.IsPending in one UPDATE ... WHERE: the database decides which concurrent caller wins.

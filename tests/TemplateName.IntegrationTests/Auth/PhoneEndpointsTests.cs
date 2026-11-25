@@ -8,7 +8,9 @@ using Microsoft.Extensions.DependencyInjection;
 using TemplateName.Application.Common.Security;
 using TemplateName.Infrastructure.Common.Outbox;
 using TemplateName.IntegrationTests.Infrastructure;
+using TemplateName.Modules.Auth.Domain.Sessions;
 using TemplateName.Modules.Auth.Domain.Users;
+using TemplateName.Modules.Auth.Domain.Users.Events;
 using TemplateName.Modules.Auth.Domain.Verification;
 using TemplateName.Modules.Auth.Domain.Verification.Events;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
@@ -184,6 +186,110 @@ public sealed class PhoneEndpointsTests(IntegrationTestWebAppFactory factory) : 
 
         removed.StatusCode.ShouldBe(HttpStatusCode.NoContent);
         (await GetMeAsync(client)).GetProperty("phoneNumber").ValueKind.ShouldBe(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task First_number_needs_a_step_up()
+    {
+        await using var host = EnabledHost();
+        var caller = await SignInAsync();
+        Factory.Time.Advance(TimeSpan.FromMinutes(11));
+        using var client = await CreateClientAsync(host);
+
+        using var requested = await client.PostAsJsonAsync(PhoneRoute, new { phoneNumber = Number }, Ct);
+
+        await AssertProblemAsync(requested, HttpStatusCode.Forbidden, "auth.step_up_required");
+        (await CodeCountAsync(caller.UserId)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Replacing_the_number_signs_out_the_other_sessions()
+    {
+        await using var host = EnabledHost();
+        var caller = await SignInAsync();
+        await SetPhoneNumberAsync(caller.UserId, "+60198765432");
+        var otherSessionId = await StartOtherSessionAsync(caller.UserId);
+        using var client = await CreateClientAsync(host);
+
+        (await client.PostAsJsonAsync(PhoneRoute, new { phoneNumber = Number }, Ct)).StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        using var confirmed = await client.PostAsJsonAsync(ConfirmRoute, new { code = await LatestCodeAsync(host) }, Ct);
+
+        confirmed.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        var sessions = await SessionsAsync(caller.UserId);
+        sessions.Single(session => session.Id == otherSessionId).RevokedReason.ShouldBe(SessionRevokedReason.PhoneNumberChanged);
+        sessions.Single(session => session.Id == caller.SessionId).RevokedAt.ShouldBeNull();
+        (await GetMeAsync(client)).GetProperty("phoneNumber").GetString().ShouldBe(Number);
+    }
+
+    [Fact]
+    public async Task Each_change_publishes_one_event()
+    {
+        await using var host = EnabledHost();
+        var caller = await SignInAsync();
+        using var client = await CreateClientAsync(host);
+
+        (await client.PostAsJsonAsync(PhoneRoute, new { phoneNumber = "+60198765432" }, Ct)).StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        (await client.PostAsJsonAsync(ConfirmRoute, new { code = await LatestCodeAsync(host) }, Ct)).StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        Factory.Time.Advance(TimeSpan.FromMinutes(2));
+        (await client.PostAsJsonAsync(PhoneRoute, new { phoneNumber = Number }, Ct)).StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        (await client.PostAsJsonAsync(ConfirmRoute, new { code = await LatestCodeAsync(host) }, Ct)).StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        Factory.Time.Advance(TimeSpan.FromMinutes(1));
+        (await client.DeleteAsync(PhoneRoute, Ct)).StatusCode.ShouldBe(HttpStatusCode.NoContent);
+
+        var changes = await PhoneNumberChangesAsync(caller.UserId);
+        changes.ShouldBe([(1, "432"), (2, "789"), (3, "789")]);
+    }
+
+    private async Task<Guid> StartOtherSessionAsync(Guid userId)
+    {
+        await using var scope = Factory.Services.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        var user = await context.Set<User>().AsNoTracking().SingleAsync(candidate => candidate.Id == userId, Ct);
+        var (session, _) = UserSession.Start(
+            userId,
+            AuthenticationMethods.Password,
+            "Laptop",
+            userAgent: null,
+            ipAddress: null,
+            user.SecurityStamp,
+            System.Security.Cryptography.RandomNumberGenerator.GetBytes(32),
+            TimeSpan.FromDays(14),
+            TimeSpan.FromDays(90),
+            Factory.Time.GetUtcNow());
+        context.Add(session);
+        await context.SaveChangesAsync(Ct);
+        return session.Id;
+    }
+
+    private async Task<List<UserSession>> SessionsAsync(Guid userId)
+    {
+        await using var scope = Factory.Services.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Set<UserSession>().AsNoTracking()
+            .Where(session => session.UserId == userId)
+            .ToListAsync(Ct);
+    }
+
+    /// <summary>The kind and last digits of every number change of <paramref name="userId"/>, oldest first, from the outbox.</summary>
+    private async Task<List<(int Change, string LastDigits)>> PhoneNumberChangesAsync(Guid userId)
+    {
+        await using var scope = Factory.Services.CreateAsyncScope();
+        var messages = await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Set<OutboxMessage>().AsNoTracking()
+            .Where(row => row.Type == typeof(PhoneNumberChangedDomainEvent).FullName)
+            .OrderBy(row => row.OccurredAt)
+            .ToListAsync(Ct);
+        var changes = new List<(int Change, string LastDigits)>();
+        foreach (var message in messages)
+        {
+            using var content = JsonDocument.Parse(message.Content);
+            var properties = content.RootElement.EnumerateObject()
+                .ToDictionary(property => property.Name, property => property.Value.Clone(), StringComparer.OrdinalIgnoreCase);
+            if (properties["UserId"].GetGuid() == userId)
+            {
+                changes.Add((properties["Change"].GetInt32(), properties["LastDigits"].GetString()!));
+            }
+        }
+
+        return changes;
     }
 
     private WebApplicationFactory<Program> EnabledHost()

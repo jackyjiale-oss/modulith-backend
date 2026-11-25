@@ -11,8 +11,9 @@ namespace TemplateName.Modules.Notifications.Application.Catalog;
 /// <see cref="AuthNotificationTypes.TokenReuseDetected"/> and <see cref="AuthNotificationTypes.AccountLocked"/> also have a push channel,
 /// optional too (a password change ends every other session, so its push would reach no other device). The four types that
 /// carry a single-use link declare <c>action_url</c> as a secret variable, which only their email text and HTML may show.
-/// <see cref="AuthNotificationTypes.PhoneVerification"/> is the exception to the email rule: a mandatory SMS only, whose secret
-/// <c>code</c> (<see cref="SecretKind.Code"/>) its text shows. The templates are in <c>Templates/</c> of this project.
+/// <see cref="AuthNotificationTypes.PhoneVerification"/> and <see cref="AuthNotificationTypes.PhoneSignIn"/> are the exceptions to the
+/// email rule: a mandatory SMS only, whose secret <c>code</c> (<see cref="SecretKind.Code"/>) its text shows. The templates are in
+/// <c>Templates/</c> of this project.
 /// </summary>
 internal sealed class AuthNotificationTypeSource : INotificationTypeSource
 {
@@ -26,6 +27,8 @@ internal sealed class AuthNotificationTypeSource : INotificationTypeSource
     private const string IpAddress = "ip_address";
     private const string Provider = "provider";
     private const string Code = "code";
+    private const string Kind = "kind";
+    private const string LastDigits = "last_digits";
 
     private static readonly NotificationChannel[] EmailOnly = [NotificationChannel.Email];
     private static readonly NotificationChannel[] EmailAndInApp = [NotificationChannel.Email, NotificationChannel.InApp];
@@ -47,15 +50,21 @@ internal sealed class AuthNotificationTypeSource : INotificationTypeSource
         Notice(AuthNotificationTypes.NewDeviceLogin, EmailAndPush, DisplayName, OccurredAt, TimeZone, IpAddress),
         Notice(AuthNotificationTypes.ExternalLoginLinked, EmailAndInApp, DisplayName, Provider, OccurredAt, TimeZone),
         Notice(AuthNotificationTypes.ExternalLoginUnlinked, EmailAndInApp, DisplayName, Provider, OccurredAt, TimeZone),
+        Notice(AuthNotificationTypes.PhoneNumberChanged, EmailOnly, DisplayName, Kind, LastDigits, OccurredAt, TimeZone),
+        PhoneCode(AuthNotificationTypes.PhoneVerification),
+        PhoneCode(AuthNotificationTypes.PhoneSignIn),
+    ];
+
+    // A code texted to a number: a mandatory SMS whose secret is the code, carried encrypted like a link.
+    private static NotificationTypeDefinition PhoneCode(string code) =>
         new(
-            AuthNotificationTypes.PhoneVerification,
+            code,
             NotificationCategory.Security,
             NotificationPriority.Critical,
             SmsOnly,
             SmsOnly,
             new HashSet<string>([ExpiresInMinutes], StringComparer.Ordinal),
-            new Dictionary<string, SecretKind>(StringComparer.Ordinal) { [Code] = SecretKind.Code }),
-    ];
+            new Dictionary<string, SecretKind>(StringComparer.Ordinal) { [Code] = SecretKind.Code });
 
     private static NotificationTypeDefinition Link(string code) =>
         Define(code, EmailOnly, [DisplayName, ExpiresInMinutes], [ActionUrl]);

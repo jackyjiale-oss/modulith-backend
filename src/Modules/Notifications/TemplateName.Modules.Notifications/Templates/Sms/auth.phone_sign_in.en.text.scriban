@@ -1,0 +1,1 @@
+{{ product_name }}: your sign-in code is {{ code }}. It expires in {{ expires_in_minutes }} minutes. Never share it.

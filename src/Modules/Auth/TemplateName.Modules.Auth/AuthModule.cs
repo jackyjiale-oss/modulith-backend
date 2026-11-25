@@ -24,6 +24,7 @@ using TemplateName.Modules.Auth.Application.Admin.Users;
 using TemplateName.Modules.Auth.Application.Authentication;
 using TemplateName.Modules.Auth.Application.Mfa;
 using TemplateName.Modules.Auth.Application.Phone;
+using TemplateName.Modules.Auth.Application.PhoneSignIn;
 using TemplateName.Modules.Auth.Application.Passwords;
 using TemplateName.Modules.Auth.Application.StepUp;
 using TemplateName.Modules.Auth.Application.Verification;
@@ -231,6 +232,9 @@ public static class AuthModule
         services.AddScoped<MfaFactorVerifier>();
         services.AddScoped<RecoveryCodeIssuer>();
         services.AddScoped<MfaChangeEffects>();
+        services.AddScoped<PhoneChangeEffects>();
+        services.AddScoped<PhoneCodeBudget>();
+        services.AddScoped<PhoneSignInGate>();
 
         services.AddOptions<StepUpOptions>()
             .Bind(configuration.GetSection(StepUpOptions.SectionName))

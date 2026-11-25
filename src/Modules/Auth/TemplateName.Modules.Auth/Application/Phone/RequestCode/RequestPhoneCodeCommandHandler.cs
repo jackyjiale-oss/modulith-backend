@@ -30,6 +30,7 @@ internal sealed class RequestPhoneCodeCommandHandler(
     IUserRepository users,
     ISessionRepository sessions,
     IPhoneVerificationCodeRepository codes,
+    PhoneCodeBudget budget,
     IMfaMethodRepository mfaMethods,
     StepUpPolicy stepUpPolicy,
     ICurrentUser currentUser,
@@ -38,8 +39,6 @@ internal sealed class RequestPhoneCodeCommandHandler(
     IOptions<PhoneOptions> options,
     TimeProvider timeProvider) : ICommandHandler<RequestPhoneCodeCommand, PhoneCodeResponse>
 {
-    private static readonly TimeSpan DailyWindow = TimeSpan.FromDays(1);
-
     public async Task<Result<PhoneCodeResponse>> HandleAsync(RequestPhoneCodeCommand command, CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
@@ -56,27 +55,26 @@ internal sealed class RequestPhoneCodeCommandHandler(
             return Result.Failure<PhoneCodeResponse>(PhoneErrors.InvalidPhoneNumber);
         }
 
-        if (user.PhoneNumber is not null)
+        // A verified number signs the account in, so adding one needs the same fresh proof as replacing it: a stolen access token alone
+        // must not bind an attacker's number.
+        var stepUp = stepUpPolicy.Check(await mfaMethods.HasConfirmedAsync(user.Id, cancellationToken));
+        if (stepUp.IsFailure)
         {
-            var stepUp = stepUpPolicy.Check(await mfaMethods.HasConfirmedAsync(user.Id, cancellationToken));
-            if (stepUp.IsFailure)
-            {
-                return Result.Failure<PhoneCodeResponse>(stepUp.Error);
-            }
+            return Result.Failure<PhoneCodeResponse>(stepUp.Error);
         }
 
-        if (await RetryAfterAsync(user.Id, settings, now, cancellationToken) is { } retryAfter)
+        if (await budget.CheckAsync(user.Id, settings, now, cancellationToken) is { } refusal)
         {
-            return Result.Failure<PhoneCodeResponse>(new TooManyCodesError(retryAfter));
+            return Result.Failure<PhoneCodeResponse>(new TooManyCodesError(refusal.RetryAfter));
         }
 
-        foreach (var pending in await codes.ListPendingAsync(user.Id, now, cancellationToken))
+        foreach (var pending in await codes.ListPendingAsync(user.Id, PhoneCodePurpose.Verify, now, cancellationToken))
         {
             pending.Invalidate(now);
         }
 
         var plainCode = PhoneVerificationCode.NewCode();
-        var code = PhoneVerificationCode.Issue(user.Id, number, plainCode, secretProtector.Protect(plainCode), settings.CodeLifetime, now);
+        var code = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, number, plainCode, secretProtector.Protect(plainCode), settings.CodeLifetime, now);
         codes.Add(code);
         user.NotePhoneCodeRequested(now);
 
@@ -85,23 +83,5 @@ internal sealed class RequestPhoneCodeCommandHandler(
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return new PhoneCodeResponse(code.ExpiresAt);
-    }
-
-    /// <summary>How long until the cooldown or the daily cap allows another code, or null when one is allowed now.</summary>
-    private async Task<TimeSpan?> RetryAfterAsync(Guid userId, PhoneOptions settings, DateTimeOffset now, CancellationToken cancellationToken)
-    {
-        if (await codes.GetLastIssuedAtAsync(userId, cancellationToken) is { } lastIssuedAt && now - lastIssuedAt < settings.ResendCooldown)
-        {
-            return lastIssuedAt + settings.ResendCooldown - now;
-        }
-
-        var issuedToday = await codes.ListIssuedSinceAsync(userId, now - DailyWindow, cancellationToken);
-        if (issuedToday.Count >= settings.MaxCodesPerDay)
-        {
-            // The next code is allowed when enough of the oldest ones have left the window to bring the count below the cap.
-            return issuedToday[issuedToday.Count - settings.MaxCodesPerDay] + DailyWindow - now;
-        }
-
-        return null;
     }
 }

@@ -29,17 +29,18 @@ public sealed class ConfirmPhoneCommandHandlerTests
     private readonly List<AuthAuditLog> _auditEntries = [];
     private readonly User _user = User.Register("alice@example.com", "Alice", "en", "hash", Now.AddDays(-1)).Value;
     private readonly PhoneVerificationCode _pending;
+    private readonly UserSession _session;
     private readonly ConfirmPhoneCommandHandler _sut;
 
     public ConfirmPhoneCommandHandlerTests()
     {
-        var session = StartSession(_user);
-        _pending = PhoneVerificationCode.Issue(_user.Id, Number, Code, "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-1));
+        var session = _session = StartSession(_user);
+        _pending = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.Verify, Number, Code, "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-1));
         _users.GetByIdAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_user);
         _sessions.GetByIdAsync(session.Id, Arg.Any<CancellationToken>()).Returns(session);
         _currentUser.UserId.Returns(_user.Id);
         _currentUser.SessionId.Returns(session.Id);
-        _codes.GetPendingAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns(_pending);
+        _codes.GetPendingAsync(_user.Id, PhoneCodePurpose.Verify, Now, Arg.Any<CancellationToken>()).Returns(_pending);
         _codes.TryConsumeAsync(_pending.Id, Now, Arg.Any<CancellationToken>()).Returns(true);
         _codes.TryCountWrongAttemptAsync(_pending.Id, 5, Now, Arg.Any<CancellationToken>()).Returns(true);
         _unitOfWork.SaveChangesUnlessDuplicateAsync(UniqueIndexNames.UserPhoneNumber, Arg.Any<CancellationToken>()).Returns(true);
@@ -48,6 +49,7 @@ public sealed class ConfirmPhoneCommandHandlerTests
             _users,
             _sessions,
             _codes,
+            new PhoneChangeEffects(_sessions, _codes),
             _currentUser,
             _auditWriter,
             _unitOfWork,
@@ -96,7 +98,7 @@ public sealed class ConfirmPhoneCommandHandlerTests
             (await _sut.HandleAsync(new ConfirmPhoneCommand("999999"), Ct)).Error.ShouldBe(PhoneErrors.InvalidCode);
         }
 
-        _codes.GetPendingAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns((PhoneVerificationCode?)null);
+        _codes.GetPendingAsync(_user.Id, PhoneCodePurpose.Verify, Now, Arg.Any<CancellationToken>()).Returns((PhoneVerificationCode?)null);
         (await _sut.HandleAsync(new ConfirmPhoneCommand(Code), Ct)).Error.ShouldBe(PhoneErrors.InvalidCode);
         _user.PhoneNumber.ShouldBeNull();
     }
@@ -104,7 +106,7 @@ public sealed class ConfirmPhoneCommandHandlerTests
     [Fact]
     public async Task No_pending_code_is_invalid_code()
     {
-        _codes.GetPendingAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns((PhoneVerificationCode?)null);
+        _codes.GetPendingAsync(_user.Id, PhoneCodePurpose.Verify, Now, Arg.Any<CancellationToken>()).Returns((PhoneVerificationCode?)null);
 
         (await _sut.HandleAsync(new ConfirmPhoneCommand(Code), Ct)).Error.ShouldBe(PhoneErrors.InvalidCode);
     }
@@ -141,6 +143,60 @@ public sealed class ConfirmPhoneCommandHandlerTests
         var result = await _sut.HandleAsync(new ConfirmPhoneCommand(Code), Ct);
 
         result.Error.ShouldBe(PhoneErrors.PhoneNumberTaken);
+    }
+
+    [Fact]
+    public async Task A_first_number_ends_no_session()
+    {
+        var other = StartSession(_user);
+        _sessions.GetActiveByUserAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([_session, other]);
+        var stamp = _user.SecurityStamp;
+
+        (await _sut.HandleAsync(new ConfirmPhoneCommand(Code), Ct)).IsSuccess.ShouldBeTrue();
+
+        other.RevokedAt.ShouldBeNull();
+        _user.SecurityStamp.ShouldBe(stamp);
+        _auditEntries.ShouldHaveSingleItem().Details.ShouldBe("""{"revokedSessionCount":0}""");
+    }
+
+    [Fact]
+    public async Task A_replacement_ends_the_other_sessions_and_keeps_this_one()
+    {
+        _user.VerifyPhoneNumber("+60198765432", Now.AddDays(-1));
+        var other = StartSession(_user);
+        _sessions.GetActiveByUserAsync(_user.Id, Now, Arg.Any<CancellationToken>()).Returns([_session, other]);
+
+        (await _sut.HandleAsync(new ConfirmPhoneCommand(Code), Ct)).IsSuccess.ShouldBeTrue();
+
+        _user.PhoneNumber.ShouldBe(Number);
+        other.RevokedAt.ShouldBe(Now);
+        other.RevokedReason.ShouldBe(SessionRevokedReason.PhoneNumberChanged);
+        _session.RevokedAt.ShouldBeNull();
+        _session.SecurityStamp.ShouldBe(_user.SecurityStamp);
+        _auditEntries.ShouldHaveSingleItem().Details.ShouldBe("""{"revokedSessionCount":1}""");
+    }
+
+    [Fact]
+    public async Task A_replacement_ends_pending_sign_in_codes()
+    {
+        _user.VerifyPhoneNumber("+60198765432", Now.AddDays(-1));
+        var signIn = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.SignIn, "+60198765432", "222222", "protected", TimeSpan.FromMinutes(5), Now.AddMinutes(-1));
+        _codes.ListPendingAsync(_user.Id, null, Now, Arg.Any<CancellationToken>()).Returns([signIn]);
+
+        (await _sut.HandleAsync(new ConfirmPhoneCommand(Code), Ct)).IsSuccess.ShouldBeTrue();
+
+        signIn.InvalidatedAt.ShouldBe(Now);
+    }
+
+    [Fact]
+    public async Task A_sign_in_code_does_not_confirm()
+    {
+        var signIn = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.SignIn, Number, Code, "protected", TimeSpan.FromMinutes(5), Now.AddMinutes(-1));
+        _codes.GetPendingAsync(_user.Id, PhoneCodePurpose.Verify, Now, Arg.Any<CancellationToken>()).Returns((PhoneVerificationCode?)null);
+        _codes.GetPendingAsync(_user.Id, PhoneCodePurpose.SignIn, Now, Arg.Any<CancellationToken>()).Returns(signIn);
+
+        (await _sut.HandleAsync(new ConfirmPhoneCommand(Code), Ct)).Error.ShouldBe(PhoneErrors.InvalidCode);
+        _user.PhoneNumber.ShouldBeNull();
     }
 
     [Fact]

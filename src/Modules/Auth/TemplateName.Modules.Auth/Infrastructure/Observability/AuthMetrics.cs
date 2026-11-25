@@ -1,6 +1,7 @@
 using System.Diagnostics.Metrics;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Application.Mfa;
+using TemplateName.Modules.Auth.Application.PhoneSignIn;
 
 namespace TemplateName.Modules.Auth.Infrastructure.Observability;
 
@@ -23,6 +24,8 @@ internal sealed class AuthMetrics : IAuthMetrics
     private readonly Counter<long> _stepUps;
     private readonly Counter<long> _mfaVerifications;
     private readonly Counter<long> _externalLogins;
+    private readonly Counter<long> _phoneSignIns;
+
 
     public AuthMetrics(IMeterFactory meterFactory)
     {
@@ -39,7 +42,22 @@ internal sealed class AuthMetrics : IAuthMetrics
             "auth.external_logins",
             unit: "{attempt}",
             description: "External sign-in attempts that reached the handler, by configured provider and outcome.");
+        _phoneSignIns = meter.CreateCounter<long>(
+            "auth.phone_sign_ins",
+            unit: "{request}",
+            description: "Phone sign-in sends and verifies that reached the handler, by outcome.");
     }
+
+    public void RecordPhoneSignIn(PhoneSignInOutcome outcome)
+        => _phoneSignIns.Add(1, new KeyValuePair<string, object?>(OutcomeTag, outcome switch
+        {
+            PhoneSignInOutcome.Sent => "sent",
+            PhoneSignInOutcome.Suppressed => "suppressed",
+            PhoneSignInOutcome.SignedIn => "signed_in",
+            PhoneSignInOutcome.Challenged => "challenged",
+            PhoneSignInOutcome.Refused => "refused",
+            _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, "Unknown phone sign-in outcome."),
+        }));
 
     public void RecordLogin(LoginOutcome outcome) => _logins.Add(1, new KeyValuePair<string, object?>(ResultTag, ResultOf(outcome)));
 

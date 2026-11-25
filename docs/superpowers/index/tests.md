@@ -2,7 +2,7 @@
 
 # Tests
 
-Rows: 237
+Rows: 240
 
 ## Folders
 
@@ -149,6 +149,9 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Phone/PhoneOptions.cs | tests/TemplateName.UnitTests/Auth/Phone/PhoneOptionsTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Phone/Remove/RemovePhoneCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Phone/RemovePhoneCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Phone/RequestCode/RequestPhoneCodeCommandHandler.cs | tests/TemplateName.UnitTests/Auth/Phone/RequestPhoneCodeCommandHandlerTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/PhoneSignIn/PhoneSignInGate.cs | tests/TemplateName.UnitTests/Auth/PhoneSignIn/PhoneSignInGateTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/PhoneSignIn/Send/SendPhoneSignInCodeCommandHandler.cs | tests/TemplateName.UnitTests/Auth/PhoneSignIn/SendPhoneSignInCodeCommandHandlerTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Application/PhoneSignIn/Verify/VerifyPhoneSignInCommandHandler.cs | tests/TemplateName.UnitTests/Auth/PhoneSignIn/VerifyPhoneSignInCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Registration/ConfirmEmail/ConfirmEmailCommandHandler.cs | tests/TemplateName.UnitTests/Auth/ConfirmEmailCommandHandlerTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Registration/ConfirmEmail/ConfirmEmailCommandValidator.cs | tests/TemplateName.UnitTests/Auth/ConfirmEmailCommandValidatorTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Application/Registration/Register/RegisterCommandHandler.cs | tests/TemplateName.UnitTests/Auth/RegisterCommandHandlerTests.cs |

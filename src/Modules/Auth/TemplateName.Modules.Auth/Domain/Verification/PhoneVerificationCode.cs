@@ -26,6 +26,9 @@ internal sealed class PhoneVerificationCode : AggregateRoot<Guid>
 
     public Guid UserId { get; private set; }
 
+    public PhoneCodePurpose Purpose { get; private set; }
+
+
     /// <summary>The pending number in E.164 that the code was sent to; it becomes the user's number when the code is confirmed.</summary>
     public string PhoneNumber { get; private set; } = string.Empty;
 
@@ -50,12 +53,14 @@ internal sealed class PhoneVerificationCode : AggregateRoot<Guid>
         RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
 
     /// <summary>
-    /// Issues a code for <paramref name="phoneNumber"/> (E.164), keeping only a hash of <paramref name="code"/> with a new salt, and raises
-    /// <see cref="PhoneVerificationRequestedDomainEvent"/> carrying <paramref name="protectedCode"/> (the code encrypted by the
+    /// Issues a code of <paramref name="purpose"/> for <paramref name="phoneNumber"/> (E.164), keeping only a hash of
+    /// <paramref name="code"/> with a new salt, and raises <see cref="PhoneVerificationRequestedDomainEvent"/> (to verify a number) or
+    /// <see cref="PhoneSignInCodeIssuedDomainEvent"/> (to sign in) carrying <paramref name="protectedCode"/> (the code encrypted by the
     /// application), which only the event keeps.
     /// </summary>
     public static PhoneVerificationCode Issue(
         Guid userId,
+        PhoneCodePurpose purpose,
         string phoneNumber,
         string code,
         string protectedCode,
@@ -73,6 +78,7 @@ internal sealed class PhoneVerificationCode : AggregateRoot<Guid>
         {
             Id = SequentialGuid.Create(now),
             UserId = userId,
+            Purpose = purpose,
             PhoneNumber = phoneNumber,
             Salt = salt,
             CodeHash = Hash(salt, code),
@@ -80,12 +86,24 @@ internal sealed class PhoneVerificationCode : AggregateRoot<Guid>
             ExpiresAt = now + lifetime,
         };
 
-        issued.Raise(new PhoneVerificationRequestedDomainEvent(issued.Id, userId, phoneNumber, protectedCode, issued.ExpiresAt));
+        issued.Raise(purpose switch
+        {
+            PhoneCodePurpose.Verify => new PhoneVerificationRequestedDomainEvent(issued.Id, userId, phoneNumber, protectedCode, issued.ExpiresAt),
+            PhoneCodePurpose.SignIn => new PhoneSignInCodeIssuedDomainEvent(issued.Id, userId, phoneNumber, protectedCode, issued.ExpiresAt),
+            _ => throw new ArgumentOutOfRangeException(nameof(purpose), purpose, "Unknown phone code purpose."),
+        });
 
         return issued;
     }
 
     /// <summary>Whether <paramref name="code"/> is the issued code, compared in constant time.</summary>
+    /// <summary>
+    /// Spends what <see cref="Matches"/> costs, with a fresh salt, when there is no code to compare with, so a request for an unknown
+    /// number or one with no pending code takes as long as one with a wrong code.
+    /// </summary>
+    public static void SpendMatchCost(string code) =>
+        _ = CryptographicOperations.FixedTimeEquals(Hash(RandomNumberGenerator.GetBytes(SaltLength), code ?? string.Empty), new byte[32]);
+
     public bool Matches(string code) =>
         code is not null && CryptographicOperations.FixedTimeEquals(Hash(Salt, code), CodeHash);
 

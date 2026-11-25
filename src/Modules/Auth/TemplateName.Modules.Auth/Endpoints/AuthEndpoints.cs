@@ -180,6 +180,7 @@ internal static class AuthEndpoints
 
         // The verified phone number: auth/me/phone/..., 404 while Auth:Phone:Enabled is off.
         group.MapPhoneEndpoints();
+        group.MapPhoneSignInEndpoints();
 
         return app;
     }

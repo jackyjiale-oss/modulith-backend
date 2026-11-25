@@ -1,0 +1,1 @@
+{{ product_name }}: kod log masuk anda ialah {{ code }}. Kod ini tamat tempoh dalam {{ expires_in_minutes }} minit. Jangan kongsikan.

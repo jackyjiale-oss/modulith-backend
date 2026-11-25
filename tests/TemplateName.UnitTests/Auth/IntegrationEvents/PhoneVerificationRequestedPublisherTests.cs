@@ -30,7 +30,7 @@ public sealed class PhoneVerificationRequestedPublisherTests
 
     public PhoneVerificationRequestedPublisherTests()
     {
-        _code = PhoneVerificationCode.Issue(_user.Id, Number, "042137", "ciphertext-of-the-code", TimeSpan.FromMinutes(10), Now.AddSeconds(-5));
+        _code = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.Verify, Number, "042137", "ciphertext-of-the-code", TimeSpan.FromMinutes(10), Now.AddSeconds(-5));
         _requested = _code.DomainEvents.OfType<PhoneVerificationRequestedDomainEvent>().Single();
         _codes.GetByIdAsync(_code.Id, Arg.Any<CancellationToken>()).Returns(_code);
         _users.GetByIdAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_user);

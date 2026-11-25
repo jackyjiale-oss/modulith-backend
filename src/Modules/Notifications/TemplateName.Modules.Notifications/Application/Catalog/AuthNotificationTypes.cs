@@ -39,6 +39,12 @@ internal static class AuthNotificationTypes
     /// <summary>The code that verifies a phone number (<c>PhoneVerificationRequested</c>); a mandatory text to the number being verified.</summary>
     public const string PhoneVerification = "auth.phone_verification";
 
+    /// <summary>The code that signs in with the account's verified number (<c>PhoneSignInCodeRequested</c>); a mandatory text to that number.</summary>
+    public const string PhoneSignIn = "auth.phone_sign_in";
+
+    /// <summary>The verified phone number was added, replaced or removed (<c>PhoneNumberChanged</c>); a mandatory email naming its last three digits.</summary>
+    public const string PhoneNumberChanged = "auth.phone_number_changed";
+
     /// <summary>A social-login provider was linked to the account (<c>ExternalLoginLinked</c>); email and an optional in-app message.</summary>
     public const string ExternalLoginLinked = "auth.external_login_linked";
 
