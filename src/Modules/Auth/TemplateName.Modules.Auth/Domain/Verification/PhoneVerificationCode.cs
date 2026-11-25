@@ -9,7 +9,8 @@ namespace TemplateName.Modules.Auth.Domain.Verification;
 /// <summary>
 /// A 6-digit code texted to a phone number the user wants to verify. Only a salted SHA-256 hash of the code is stored; the code travels
 /// only encrypted, inside the requested event. A code ends when it is consumed, when a newer code replaces it, when it reaches the
-/// wrong-try limit (counted in the database, <c>IPhoneVerificationCodeRepository.TryCountWrongAttemptAsync</c>) or when it expires.
+/// try limit (every try is claimed in the database before the code is compared,
+/// <c>IPhoneVerificationCodeRepository.TryClaimAttemptAsync</c>, and a code whose tries are used up compares nothing) or when it expires.
 /// </summary>
 internal sealed class PhoneVerificationCode : AggregateRoot<Guid>
 {
@@ -40,12 +41,12 @@ internal sealed class PhoneVerificationCode : AggregateRoot<Guid>
 
     public DateTimeOffset ExpiresAt { get; private set; }
 
-    /// <summary>The wrong tries so far; the repository counts them in one conditional statement, so this instance may lag behind.</summary>
+    /// <summary>The tries claimed so far (the right code's too); the repository claims them in one conditional statement, so this instance may lag behind.</summary>
     public int AttemptCount { get; private set; }
 
     public DateTimeOffset? ConsumedAt { get; private set; }
 
-    /// <summary>Set when a newer code replaced this one, the wrong-try limit was reached, or the number was removed.</summary>
+    /// <summary>Set when a newer code replaced this one or the number was removed or changed. A code whose tries are used up is not marked: it is refused by its claim.</summary>
     public DateTimeOffset? InvalidatedAt { get; private set; }
 
     /// <summary>A uniformly random code of <see cref="CodeLength"/> digits, leading zeros kept.</summary>

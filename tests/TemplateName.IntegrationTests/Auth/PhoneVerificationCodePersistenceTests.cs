@@ -102,28 +102,13 @@ public sealed class PhoneVerificationCodePersistenceTests(IntegrationTestWebAppF
         await SaveAsync(bob);
     }
 
-    [Fact]
-    public async Task Parallel_wrong_attempts_never_exceed_the_maximum()
+    [Theory]
+    [InlineData((int)PhoneCodePurpose.Verify)]
+    [InlineData((int)PhoneCodePurpose.SignIn)]
+    public async Task Parallel_claims_never_exceed_the_maximum(int purpose)
     {
         var user = NewUser("alice@example.com");
-        var code = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, Number, "042137", "protected", Lifetime, Now);
-        await SaveAsync(user, code);
-
-        var counted = await Task.WhenAll(Enumerable.Range(0, 10)
-            .Select(_ => Codes().TryCountWrongAttemptAsync(code.Id, maxAttempts: 5, Now, Ct)));
-
-        counted.Count(wasCounted => wasCounted).ShouldBe(5);
-        var stored = await QueryAsync(context => context.Set<PhoneVerificationCode>().SingleAsync(row => row.Id == code.Id, Ct));
-        stored.AttemptCount.ShouldBe(5);
-        stored.InvalidatedAt.ShouldBe(Now);
-        (await Codes().GetPendingAsync(user.Id, PhoneCodePurpose.Verify, Now, Ct)).ShouldBeNull();
-    }
-
-    [Fact]
-    public async Task Parallel_claims_never_exceed_the_maximum()
-    {
-        var user = NewUser("alice@example.com");
-        var code = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.SignIn, Number, "042137", "protected", Lifetime, Now);
+        var code = PhoneVerificationCode.Issue(user.Id, (PhoneCodePurpose)purpose, Number, "042137", "protected", Lifetime, Now);
         await SaveAsync(user, code);
 
         var claimed = await Task.WhenAll(Enumerable.Range(0, 10)
@@ -135,13 +120,13 @@ public sealed class PhoneVerificationCodePersistenceTests(IntegrationTestWebAppF
     }
 
     [Fact]
-    public async Task A_wrong_attempt_below_the_maximum_keeps_the_code_pending()
+    public async Task A_claim_below_the_maximum_keeps_the_code_pending()
     {
         var user = NewUser("alice@example.com");
         var code = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.Verify, Number, "042137", "protected", Lifetime, Now);
         await SaveAsync(user, code);
 
-        (await Codes().TryCountWrongAttemptAsync(code.Id, maxAttempts: 5, Now, Ct)).ShouldBeTrue();
+        (await Codes().TryClaimAttemptAsync(code.Id, maxAttempts: 5, Now, Ct)).ShouldBeTrue();
 
         var pending = (await Codes().GetPendingAsync(user.Id, PhoneCodePurpose.Verify, Now, Ct)).ShouldNotBeNull();
         pending.AttemptCount.ShouldBe(1);
@@ -160,7 +145,7 @@ public sealed class PhoneVerificationCodePersistenceTests(IntegrationTestWebAppF
             Codes().TryConsumeAsync(code.Id, Now, Ct));
 
         claims.Count(claimed => claimed).ShouldBe(1);
-        (await Codes().TryCountWrongAttemptAsync(code.Id, maxAttempts: 5, Now, Ct)).ShouldBeFalse();
+        (await Codes().TryClaimAttemptAsync(code.Id, maxAttempts: 5, Now, Ct)).ShouldBeFalse();
     }
 
     [Fact]

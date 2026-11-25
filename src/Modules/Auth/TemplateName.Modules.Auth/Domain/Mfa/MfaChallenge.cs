@@ -6,7 +6,7 @@ namespace TemplateName.Modules.Auth.Domain.Mfa;
 /// <summary>
 /// The state between a correct password and a correct second factor: an opaque token whose SHA-256 hash is stored, valid for a few
 /// minutes, single use and bound to the security stamp of the user at the time of the password step (so a password change, an MFA
-/// change or a suspension in between ends it). Only the verify route looks it up. The wrong-code counter and the consumption change
+/// change or a suspension in between ends it). Only the verify route looks it up. The try counter and the consumption change
 /// through conditional updates (<c>IMfaChallengeRepository</c>), so the aggregate only answers <see cref="CanUse"/> for what it has loaded.
 /// </summary>
 internal sealed class MfaChallenge : AggregateRoot<Guid>
@@ -42,7 +42,10 @@ internal sealed class MfaChallenge : AggregateRoot<Guid>
 
     public DateTimeOffset? ConsumedAt { get; private set; }
 
-    /// <summary>The number of wrong codes presented for this challenge.</summary>
+    /// <summary>
+    /// The tries claimed for this challenge. A try is claimed (<c>IMfaChallengeRepository.TryClaimAttemptAsync</c>) before its code is
+    /// checked, so the right code's try is counted too; the name is kept from when only wrong codes counted.
+    /// </summary>
     public int FailedAttempts { get; private set; }
 
     /// <summary>Issues a challenge that expires <paramref name="lifetime"/> after <paramref name="now"/>. A device name longer than its column is cut to it.</summary>
@@ -88,7 +91,7 @@ internal sealed class MfaChallenge : AggregateRoot<Guid>
 
     /// <summary>
     /// Whether a code may still be tried: not consumed, <paramref name="now"/> before <see cref="ExpiresAt"/> (exclusive), fewer than
-    /// <paramref name="maxAttempts"/> wrong codes, and the <paramref name="currentSecurityStamp"/> of the user equal to the snapshot
+    /// <paramref name="maxAttempts"/> tries claimed, and the <paramref name="currentSecurityStamp"/> of the user equal to the snapshot
     /// (ordinal comparison). Changes nothing; the caller consumes the challenge with one conditional update of the same rule.
     /// </summary>
     public bool CanUse(string currentSecurityStamp, DateTimeOffset now, int maxAttempts) =>
