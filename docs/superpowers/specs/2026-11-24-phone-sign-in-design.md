@@ -120,7 +120,7 @@ Every 400 of this route has the same body except `traceId` (`ProblemResponseComp
 
 ### 5.4 Step-up
 
-`StepUpPolicy.Check` gains one rule before the age check: when the caller's `amr` contains `sms` and neither `otp` nor `rcvr`, it answers 403 `auth.step_up_required`. The rest is unchanged. So a TOTP account's `sms otp mfa` session satisfies it within `MaxAge`, and a password, social-only or other account steps up with its usual factor (`POST /step-up` with a password, or a provider's proof); a step-up replaces `amr`, so `sms` is gone afterwards. An account with neither a password, a social login nor TOTP (an administrator-created account that verified a number) has no step-up factor and answers `auth.step_up_method_not_allowed` until it sets a password through forgot-password.
+`StepUpPolicy.Check` gains one rule before the age check: when the caller's `amr` contains `sms` and neither `otp` nor `rcvr`, it answers 403 `auth.step_up_required`. The rest is unchanged. So a TOTP account's `sms otp mfa` session satisfies it within `MaxAge`, and a password, social-only or other account steps up with its usual factor (`POST /step-up` with a password, or a provider's proof); a step-up replaces `amr`, so `sms` is gone afterwards. An account with neither a password, a social login nor TOTP (an administrator-created account that verified a number) has no step-up factor: a code sent to `POST /step-up` is `auth.step_up_method_not_allowed`, and a password sent there is a counted wrong password, `auth.current_password_incorrect` (the handler spends the cost of a verification, as for an unknown account), until it sets a password through forgot-password. The route's class documentation holds this order.
 
 ### 5.5 Changing the number
 

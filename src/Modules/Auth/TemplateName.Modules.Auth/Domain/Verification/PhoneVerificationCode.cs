@@ -29,7 +29,6 @@ internal sealed class PhoneVerificationCode : AggregateRoot<Guid>
 
     public PhoneCodePurpose Purpose { get; private set; }
 
-
     /// <summary>The pending number in E.164 that the code was sent to; it becomes the user's number when the code is confirmed.</summary>
     public string PhoneNumber { get; private set; } = string.Empty;
 
@@ -97,7 +96,6 @@ internal sealed class PhoneVerificationCode : AggregateRoot<Guid>
         return issued;
     }
 
-    /// <summary>Whether <paramref name="code"/> is the issued code, compared in constant time.</summary>
     /// <summary>
     /// Spends what <see cref="Matches"/> costs, with a fresh salt, when there is no code to compare with, so a request for an unknown
     /// number or one with no pending code takes as long as one with a wrong code.
@@ -105,6 +103,7 @@ internal sealed class PhoneVerificationCode : AggregateRoot<Guid>
     public static void SpendMatchCost(string code) =>
         _ = CryptographicOperations.FixedTimeEquals(Hash(RandomNumberGenerator.GetBytes(SaltLength), code ?? string.Empty), new byte[32]);
 
+    /// <summary>Whether <paramref name="code"/> is the issued code, compared in constant time.</summary>
     public bool Matches(string code) =>
         code is not null && CryptographicOperations.FixedTimeEquals(Hash(Salt, code), CodeHash);
 

@@ -232,6 +232,41 @@ public sealed class VerifyMfaCommandHandlerTests
     }
 
     [Fact]
+    public async Task An_sms_challenge_of_an_unconfirmed_email_account_is_answered()
+    {
+        // The texted code proved the holder (the number was verified), as at the phone sign-in route that issued this challenge: an
+        // unconfirmed email is no reason to turn a challenge away after the right code.
+        GivenSmsChallenge();
+        Set(_user, nameof(User.EmailConfirmed), false);
+
+        var result = await _sut.HandleAsync(Command(code: CurrentCode), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        _addedSessions.ShouldHaveSingleItem().AuthMethods.ShouldBe("sms otp mfa");
+    }
+
+    [Fact]
+    public async Task An_sms_challenge_of_a_suspended_account_is_a_dead_challenge()
+    {
+        GivenSmsChallenge();
+        _user.Suspend(IssuedAt);
+
+        var result = await _sut.HandleAsync(Command(code: CurrentCode), Ct);
+
+        await AssertInvalidChallengeAndNothingCountedAsync(result.Error, expectedUserId: _user.Id);
+    }
+
+    [Fact]
+    public async Task A_password_challenge_of_an_unconfirmed_email_account_is_a_dead_challenge()
+    {
+        Set(_user, nameof(User.EmailConfirmed), false);
+
+        var result = await _sut.HandleAsync(Command(code: CurrentCode), Ct);
+
+        await AssertInvalidChallengeAndNothingCountedAsync(result.Error, expectedUserId: _user.Id);
+    }
+
+    [Fact]
     public async Task Remember_device_is_ignored_for_an_sms_challenge()
     {
         GivenSmsChallenge();

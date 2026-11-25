@@ -13,13 +13,15 @@ namespace TemplateName.Modules.Auth.Application.Phone.Remove;
 /// <summary>
 /// Removes the caller's verified number. The caller's user and live session first (<see cref="CallerSession"/>); a verified number
 /// needs a fresh step-up (<see cref="StepUpPolicy"/>, proved with a code when the account has two-step verification), and its removal
-/// is audited as <c>auth.phone_number_removed</c>. Every pending code ends either way, and the answer is a success also when there was
-/// no number. One save.
+/// is audited as <c>auth.phone_number_removed</c>. Every pending code ends with it, and so does a pending code when there is no number
+/// (that also needs the step-up, as starting the verification did); with neither a number nor a pending code nothing changes, nothing is
+/// asked and the answer is a success. One save.
 /// </summary>
 internal sealed class RemovePhoneCommandHandler(
     IUserRepository users,
     ISessionRepository sessions,
     PhoneChangeEffects changeEffects,
+    IPhoneVerificationCodeRepository codes,
     IMfaMethodRepository mfaMethods,
     StepUpPolicy stepUpPolicy,
     ICurrentUser currentUser,
@@ -37,14 +39,16 @@ internal sealed class RemovePhoneCommandHandler(
         }
 
         var (user, session) = caller.Value;
-        if (user.PhoneNumber is not null)
+
+        // Ending a pending verification changes the account as starting one did (adding a number always needs a step-up), so a step-up
+        // is also needed when only pending codes are there. Neither a number nor a code: nothing changes and nothing is asked.
+        if (user.PhoneNumber is not null || (await codes.ListPendingAsync(user.Id, purpose: null, now, cancellationToken)).Count > 0)
         {
             var stepUp = stepUpPolicy.Check(await mfaMethods.HasConfirmedAsync(user.Id, cancellationToken));
             if (stepUp.IsFailure)
             {
                 return stepUp;
             }
-
         }
 
         // The pending codes end whether or not there was a number; the sessions only when a number was removed.
@@ -65,7 +69,6 @@ internal sealed class RemovePhoneCommandHandler(
                 sessionId: session.Id,
                 details: JsonSerializer.Serialize(new { revokedSessionCount })));
         }
-
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
 

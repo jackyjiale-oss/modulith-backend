@@ -48,6 +48,7 @@ public sealed class RemovePhoneCommandHandlerTests
             _users,
             _sessions,
             new PhoneChangeEffects(_sessions, _codes),
+            _codes,
             _mfaMethods,
             new StepUpPolicy(_currentUser, Options.Create(new StepUpOptions()), time),
             _currentUser,
@@ -98,9 +99,34 @@ public sealed class RemovePhoneCommandHandlerTests
     }
 
     [Fact]
-    public async Task Without_a_number_succeeds_without_step_up_and_ends_pending_codes()
+    public async Task Without_a_number_or_a_pending_code_succeeds_without_step_up_and_changes_nothing()
     {
         _currentUser.AuthTime.Returns((DateTimeOffset?)null);
+
+        var result = await _sut.HandleAsync(new RemovePhoneCommand(), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        _auditEntries.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Pending_codes_without_a_number_need_a_step_up_and_stay_pending_without_one()
+    {
+        // Ending a pending verification is a change of the account like starting one (adding a number always needs a step-up).
+        _currentUser.AuthTime.Returns(Now.AddHours(-1));
+        var pending = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.Verify, Number, "111111", "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-1));
+        _codes.ListPendingAsync(_user.Id, null, Now, Arg.Any<CancellationToken>()).Returns([pending]);
+
+        var result = await _sut.HandleAsync(new RemovePhoneCommand(), Ct);
+
+        result.Error.ShouldBe(MfaErrors.StepUpRequired);
+        pending.InvalidatedAt.ShouldBeNull();
+        await _unitOfWork.DidNotReceiveWithAnyArgs().SaveChangesAsync(Ct);
+    }
+
+    [Fact]
+    public async Task Pending_codes_without_a_number_end_after_a_step_up()
+    {
         var pending = PhoneVerificationCode.Issue(_user.Id, PhoneCodePurpose.Verify, Number, "111111", "protected", TimeSpan.FromMinutes(10), Now.AddMinutes(-1));
         _codes.ListPendingAsync(_user.Id, null, Now, Arg.Any<CancellationToken>()).Returns([pending]);
 
