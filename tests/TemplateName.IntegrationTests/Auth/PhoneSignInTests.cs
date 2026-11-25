@@ -198,6 +198,29 @@ public sealed class PhoneSignInTests(IntegrationTestWebAppFactory factory) : Int
     }
 
     [Fact]
+    public async Task Parallel_guesses_compare_one_code_at_most_five_times()
+    {
+        // A high lockout threshold, so only the per-code limit is at work: ten wrong guesses at once, then the right code.
+        await using var host = SignInHost(builder => builder.UseSetting("Auth:Lockout:MaxFailedAttempts", "50"));
+        using var client = host.CreateClient();
+        var user = await CreateUserWithNumberAsync("alice@example.com", Number);
+        (await PostAsync(client, SendRoute, new { phoneNumber = Number })).StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        var code = await LatestCodeAsync(host, user.Id);
+        var wrong = code == "000000" ? "000001" : "000000";
+
+        var guesses = await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => PostAsync(client, VerifyRoute, new { phoneNumber = Number, code = wrong })));
+        using var right = await PostAsync(client, VerifyRoute, new { phoneNumber = Number, code });
+
+        guesses.ShouldAllBe(response => response.StatusCode == HttpStatusCode.BadRequest);
+        await AssertProblemAsync(right, HttpStatusCode.BadRequest, "auth.invalid_code");
+        (await UserAsync(user.Id)).AccessFailedCount.ShouldBe(5);
+        foreach (var response in guesses)
+        {
+            response.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task Two_sends_at_once_issue_one_code()
     {
         await using var host = SignInHost();

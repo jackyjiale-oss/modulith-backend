@@ -42,6 +42,14 @@ internal interface IPhoneVerificationCodeRepository
     /// </summary>
     Task<bool> TryCountWrongAttemptAsync(Guid id, int maxAttempts, DateTimeOffset now, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Claims one try of a pending code before the presented code is compared with it: one conditional <c>UPDATE</c> that raises
+    /// <c>AttemptCount</c> only while it is below <paramref name="maxAttempts"/>. False when the tries are used up (also by requests
+    /// running at the same moment) or the code is no longer pending, so parallel guesses never get more than
+    /// <paramref name="maxAttempts"/> comparisons of one code.
+    /// </summary>
+    Task<bool> TryClaimAttemptAsync(Guid id, int maxAttempts, DateTimeOffset now, CancellationToken cancellationToken);
+
     /// <summary>Consumes a pending code; of concurrent callers exactly one gets true.</summary>
     Task<bool> TryConsumeAsync(Guid id, DateTimeOffset now, CancellationToken cancellationToken);
 }

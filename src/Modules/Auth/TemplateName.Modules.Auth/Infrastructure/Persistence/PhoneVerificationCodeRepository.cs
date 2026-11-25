@@ -74,6 +74,20 @@ internal sealed class PhoneVerificationCodeRepository(AuthDbContext context) : I
         return counted == 1;
     }
 
+    // One UPDATE ... WHERE: a try is claimed only while fewer than maxAttempts were, so concurrent guesses queue on the row lock and at
+    // most maxAttempts of them ever compare a code.
+    public async Task<bool> TryClaimAttemptAsync(Guid id, int maxAttempts, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var claimed = await context.Set<PhoneVerificationCode>()
+            .Where(code => code.Id == id
+                && code.AttemptCount < maxAttempts
+                && code.ConsumedAt == null
+                && code.InvalidatedAt == null
+                && code.ExpiresAt > now)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(code => code.AttemptCount, code => code.AttemptCount + 1), cancellationToken);
+        return claimed == 1;
+    }
+
     // The rule of PhoneVerificationCode.IsPending in one UPDATE ... WHERE: the database decides which concurrent caller wins.
     public async Task<bool> TryConsumeAsync(Guid id, DateTimeOffset now, CancellationToken cancellationToken)
     {

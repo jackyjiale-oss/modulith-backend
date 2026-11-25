@@ -120,6 +120,21 @@ public sealed class PhoneVerificationCodePersistenceTests(IntegrationTestWebAppF
     }
 
     [Fact]
+    public async Task Parallel_claims_never_exceed_the_maximum()
+    {
+        var user = NewUser("alice@example.com");
+        var code = PhoneVerificationCode.Issue(user.Id, PhoneCodePurpose.SignIn, Number, "042137", "protected", Lifetime, Now);
+        await SaveAsync(user, code);
+
+        var claimed = await Task.WhenAll(Enumerable.Range(0, 10)
+            .Select(_ => Codes().TryClaimAttemptAsync(code.Id, maxAttempts: 5, Now, Ct)));
+
+        claimed.Count(wasClaimed => wasClaimed).ShouldBe(5);
+        (await QueryAsync(context => context.Set<PhoneVerificationCode>().SingleAsync(row => row.Id == code.Id, Ct))).AttemptCount.ShouldBe(5);
+        (await Codes().TryConsumeAsync(code.Id, Now, Ct)).ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task A_wrong_attempt_below_the_maximum_keeps_the_code_pending()
     {
         var user = NewUser("alice@example.com");

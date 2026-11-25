@@ -64,9 +64,17 @@ internal sealed class VerifyPhoneSignInCommandHandler(
             return await RefuseAsync(user, "locked", now);
         }
 
+        // The try is claimed before the code is compared, so guesses arriving together get at most MaxAttempts comparisons of this code
+        // between them; a code whose tries are used up is no code at all.
+        if (!await codes.TryClaimAttemptAsync(code.Id, settings.MaxAttempts, now, CancellationToken.None))
+        {
+            PhoneVerificationCode.SpendMatchCost(command.Code);
+            return await RefuseAsync(user, "no_code", now);
+        }
+
         if (!code.Matches(command.Code))
         {
-            await CountWrongCodeAsync(user, code, now);
+            await CountWrongCodeAsync(user, now);
             return await RefuseAsync(user, "wrong_code", now);
         }
 
@@ -146,11 +154,10 @@ internal sealed class VerifyPhoneSignInCommandHandler(
         return LoginResult.Signed(started.Tokens);
     }
 
-    // A wrong code is a guess: one try on the code (which ends it at MaxAttempts) and one failure on the account, each one atomic
-    // statement that ignores the request's cancellation, so a guesser who disconnects is still counted.
-    private async Task CountWrongCodeAsync(User user, PhoneVerificationCode code, DateTimeOffset now)
+    // A wrong code is a guess: its try on the code was claimed before the comparison, and it also counts as one failure on the account,
+    // in one atomic statement that ignores the request's cancellation, so a guesser who disconnects is still counted.
+    private async Task CountWrongCodeAsync(User user, DateTimeOffset now)
     {
-        await codes.TryCountWrongAttemptAsync(code.Id, phoneOptions.Value.MaxAttempts, now, CancellationToken.None);
         var lockout = lockoutOptions.Value;
         var counted = await users.RecordFailedSignInAsync(user.Id, now, lockout.MaxFailedAttempts, lockout.Duration, CancellationToken.None);
         if (counted is { LockoutEnd: { } lockoutEnd })

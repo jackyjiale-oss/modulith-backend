@@ -56,7 +56,7 @@ public sealed class VerifyPhoneSignInCommandHandlerTests
         _users.GetByPhoneNumberAsync(Number, Arg.Any<CancellationToken>()).Returns(_user);
         _codes.GetPendingAsync(_user.Id, PhoneCodePurpose.SignIn, Now, Arg.Any<CancellationToken>()).Returns(_code);
         _codes.TryConsumeAsync(_code.Id, Now, Arg.Any<CancellationToken>()).Returns(true);
-        _codes.TryCountWrongAttemptAsync(_code.Id, 5, Now, Arg.Any<CancellationToken>()).Returns(true);
+        _codes.TryClaimAttemptAsync(_code.Id, 5, Now, Arg.Any<CancellationToken>()).Returns(true);
         // The database counts atomically; User.RecordFailedSignIn is the specification of that count (as in LoginCommandHandlerTests).
         _users.RecordFailedSignInAsync(_user.Id, Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
             .Returns(call =>
@@ -143,12 +143,27 @@ public sealed class VerifyPhoneSignInCommandHandlerTests
         var result = await _sut.HandleAsync(Command(code: WrongCode), Ct);
 
         result.Error.ShouldBe(PhoneErrors.InvalidCode);
-        await _codes.Received(1).TryCountWrongAttemptAsync(_code.Id, 5, Now, CancellationToken.None);
+        await _codes.Received(1).TryClaimAttemptAsync(_code.Id, 5, Now, CancellationToken.None);
         await _users.Received(1).RecordFailedSignInAsync(_user.Id, Now, 5, TimeSpan.FromMinutes(15), CancellationToken.None);
         _user.AccessFailedCount.ShouldBe(1);
         _code.ConsumedAt.ShouldBeNull();
         AssertFailedAudit("wrong_code", _user.Id);
         _addedSessions.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_guess_is_claimed_before_the_code_is_compared()
+    {
+        // The claim is the per-code limit: when the code's tries are used up (also by requests running at the same moment), even the
+        // right code is not compared, so parallel guesses never get more than MaxAttempts comparisons.
+        _codes.TryClaimAttemptAsync(_code.Id, 5, Now, Arg.Any<CancellationToken>()).Returns(false);
+
+        (await _sut.HandleAsync(Command(), Ct)).Error.ShouldBe(PhoneErrors.InvalidCode);
+
+        await _codes.DidNotReceiveWithAnyArgs().TryConsumeAsync(default, default, Ct);
+        await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
+        _addedSessions.ShouldBeEmpty();
+        AssertFailedAudit("no_code", _user.Id);
     }
 
     [Fact]
@@ -206,7 +221,7 @@ public sealed class VerifyPhoneSignInCommandHandlerTests
         (await _sut.HandleAsync(Command(), Ct)).Error.ShouldBe(PhoneErrors.InvalidCode);
 
         await _codes.DidNotReceiveWithAnyArgs().TryConsumeAsync(default, default, Ct);
-        await _codes.DidNotReceiveWithAnyArgs().TryCountWrongAttemptAsync(default, default, default, Ct);
+        await _codes.DidNotReceiveWithAnyArgs().TryClaimAttemptAsync(default, default, default, Ct);
         await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
         AssertFailedAudit("locked", _user.Id);
     }
@@ -305,6 +320,7 @@ public sealed class VerifyPhoneSignInCommandHandlerTests
         var code = PhoneVerificationCode.Issue(unconfirmed.Id, PhoneCodePurpose.SignIn, Number, Code, "protected", TimeSpan.FromMinutes(5), Now.AddMinutes(-1));
         _users.GetByPhoneNumberAsync(Number, Arg.Any<CancellationToken>()).Returns(unconfirmed);
         _codes.GetPendingAsync(unconfirmed.Id, PhoneCodePurpose.SignIn, Now, Arg.Any<CancellationToken>()).Returns(code);
+        _codes.TryClaimAttemptAsync(code.Id, 5, Now, Arg.Any<CancellationToken>()).Returns(true);
         _codes.TryConsumeAsync(code.Id, Now, Arg.Any<CancellationToken>()).Returns(true);
 
         (await _sut.HandleAsync(Command(), Ct)).IsSuccess.ShouldBeTrue();
