@@ -30,7 +30,7 @@ internal sealed class PhoneOptions : IValidatableObject
     [Range(1, 50)]
     public int MaxCodesPerDay { get; set; } = 5;
 
-    /// <summary>The wrong tries that end a code.</summary>
+    /// <summary>The tries a code accepts, each claimed before the code is compared; at this count the code is spent.</summary>
     [Range(1, 10)]
     public int MaxAttempts { get; set; } = 5;
 
@@ -77,12 +77,12 @@ internal sealed class PhoneOptions : IValidatableObject
         }
     }
 
-    /// <summary><see cref="AllowedRegions"/> as a set, for <see cref="PhoneNumberRules.TryNormalize"/>.</summary>
     /// <summary>The normalized names of <see cref="SignInDeniedRoles"/>, or of the defaults when it is not configured.</summary>
     internal IReadOnlySet<string> DeniedRoleSet() =>
         new HashSet<string>(
             (SignInDeniedRoles ?? DefaultDeniedRoles).Where(role => !string.IsNullOrWhiteSpace(role)).Select(Role.NormalizeName),
             StringComparer.Ordinal);
 
+    /// <summary><see cref="AllowedRegions"/> as a set, for <see cref="PhoneNumberRules.TryNormalize"/>.</summary>
     internal IReadOnlySet<string> AllowedRegionSet() => new HashSet<string>(AllowedRegions ?? [], StringComparer.Ordinal);
 }

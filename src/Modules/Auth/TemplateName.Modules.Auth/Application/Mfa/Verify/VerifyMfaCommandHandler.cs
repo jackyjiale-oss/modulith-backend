@@ -197,8 +197,13 @@ internal sealed class VerifyMfaCommandHandler(
     /// <summary>The user still holds the stamp the challenge was issued under, may sign in and is not locked.</summary>
     private static bool CanSignIn(User user, MfaChallenge challenge, DateTimeOffset now) =>
         string.Equals(user.SecurityStamp, challenge.SecurityStamp, StringComparison.Ordinal)
-        && user.EnsureCanSignIn().IsSuccess
+        && MayStartSession(user, challenge)
         && !user.IsLockedOut(now);
+
+    // A texted code proved the holder through the verified number, so the unconfirmed-email refusal of a password login does not apply
+    // after one (as at the phone sign-in route that issued the challenge); a suspended account is refused after any first factor.
+    private static bool MayStartSession(User user, MfaChallenge challenge) =>
+        challenge.FirstFactor == AuthenticationMethods.Sms ? user.Status != UserStatus.Suspended : user.EnsureCanSignIn().IsSuccess;
 
     private static string FactorDetails(MfaFactor factor) =>
         JsonSerializer.Serialize(new { factor = factor == MfaFactor.Totp ? "totp" : "recovery_code" });

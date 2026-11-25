@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
@@ -284,6 +285,99 @@ public sealed class VerifyPhoneSignInCommandHandlerTests
     }
 
     [Fact]
+    public async Task A_lost_session_save_is_retried_once_with_the_user_read_again()
+    {
+        // A simultaneous wrong guess changes the user row between the read and the save; the right code must not pay for it.
+        var reread = ConflictedUserRead();
+        _unitOfWork.TrySaveChangesAsync(Arg.Any<CancellationToken>()).Returns(false, true);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        result.Value.AccessToken.ShouldBe(AccessTokenValue);
+        await _users.Received(1).GetByIdAsync(_user.Id, CancellationToken.None);
+        await _unitOfWork.Received(2).TrySaveChangesAsync(CancellationToken.None);
+        _addedSessions.Count.ShouldBe(2);
+        reread.LastLoginAt.ShouldBe(Now);
+        _metrics.Received(1).RecordPhoneSignIn(PhoneSignInOutcome.SignedIn);
+        _metrics.DidNotReceive().RecordPhoneSignIn(PhoneSignInOutcome.Refused);
+    }
+
+    [Fact]
+    public async Task A_lost_challenge_save_is_retried_once_with_the_user_read_again()
+    {
+        _mfaMethods.HasConfirmedAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(true);
+        ConflictedUserRead();
+        _unitOfWork.TrySaveChangesAsync(Arg.Any<CancellationToken>()).Returns(false, true);
+
+        var result = await _sut.HandleAsync(Command(), Ct);
+
+        result.IsSuccess.ShouldBeTrue();
+        result.Value.MfaRequired.ShouldBeTrue();
+        _addedChallenges.Count.ShouldBe(2);
+        _metrics.Received(1).RecordPhoneSignIn(PhoneSignInOutcome.Challenged);
+    }
+
+    [Fact]
+    public async Task A_second_lost_save_is_invalid_code_with_its_audit_row()
+    {
+        ConflictedUserRead();
+        _unitOfWork.TrySaveChangesAsync(Arg.Any<CancellationToken>()).Returns(false);
+
+        (await _sut.HandleAsync(Command(), Ct)).Error.ShouldBe(PhoneErrors.InvalidCode);
+
+        await _unitOfWork.Received(2).TrySaveChangesAsync(CancellationToken.None);
+        _addedSessions.Count.ShouldBe(2);
+        AssertFailedAudit("lost_race", _user.Id);
+        _metrics.Received(1).RecordPhoneSignIn(PhoneSignInOutcome.Refused);
+    }
+
+    [Theory]
+    [InlineData("locked")]
+    [InlineData("number changed")]
+    [InlineData("user gone")]
+    public async Task A_lost_save_is_not_retried_when_the_user_can_no_longer_sign_in(string change)
+    {
+        var reread = ConflictedUserRead();
+        switch (change)
+        {
+            case "locked":
+                for (var i = 0; i < 5; i++)
+                {
+                    reread.RecordFailedSignIn(Now.AddSeconds(-10), maxFailedAttempts: 5, TimeSpan.FromMinutes(15));
+                }
+
+                break;
+            case "number changed":
+                reread.VerifyPhoneNumber("+60198765432", Now.AddSeconds(-1));
+                break;
+            default:
+                _users.GetByIdAsync(_user.Id, Arg.Any<CancellationToken>()).Returns((User?)null);
+                break;
+        }
+
+        _unitOfWork.TrySaveChangesAsync(Arg.Any<CancellationToken>()).Returns(false, true);
+
+        (await _sut.HandleAsync(Command(), Ct)).Error.ShouldBe(PhoneErrors.InvalidCode);
+
+        await _unitOfWork.Received(1).TrySaveChangesAsync(CancellationToken.None);
+        _addedSessions.Count.ShouldBe(1);
+        _metrics.DidNotReceive().RecordPhoneSignIn(PhoneSignInOutcome.SignedIn);
+    }
+
+    [Fact]
+    public async Task A_lost_save_for_a_user_suspended_meanwhile_is_told_so()
+    {
+        var reread = ConflictedUserRead();
+        reread.Suspend(Now.AddSeconds(-1));
+        _unitOfWork.TrySaveChangesAsync(Arg.Any<CancellationToken>()).Returns(false, true);
+
+        (await _sut.HandleAsync(Command(), Ct)).Error.ShouldBe(UserErrors.AccountInactive);
+
+        _addedSessions.Count.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task A_lost_session_save_is_invalid_code()
     {
         _unitOfWork.TrySaveChangesAsync(Arg.Any<CancellationToken>()).Returns(false);
@@ -336,6 +430,21 @@ public sealed class VerifyPhoneSignInCommandHandlerTests
     }
 
     private static VerifyPhoneSignInCommand Command(string number = Number, string code = Code) => new(number, code, "Pixel 9");
+
+    // What the handler reads again after a lost save: the same account (same id and stamp, the number still verified), as a fresh instance.
+    private User ConflictedUserRead()
+    {
+        var reread = User.Register("alice@example.com", "Alice", "en", "hash", Now.AddDays(-30)).Value;
+        const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        var id = typeof(User).GetProperty(nameof(User.Id), Flags)!;
+        id.DeclaringType!.GetProperty(nameof(User.Id), Flags)!.SetValue(reread, _user.Id);
+        var stamp = typeof(User).GetProperty(nameof(User.SecurityStamp), Flags)!;
+        stamp.DeclaringType!.GetProperty(nameof(User.SecurityStamp), Flags)!.SetValue(reread, _user.SecurityStamp);
+        reread.VerifyPhoneNumber(Number, Now.AddDays(-2));
+        reread.ClearDomainEvents();
+        _users.GetByIdAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(reread);
+        return reread;
+    }
 
     private void AssertFailedAudit(string reason, Guid? userId)
     {

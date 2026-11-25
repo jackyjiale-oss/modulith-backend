@@ -31,6 +31,7 @@ internal sealed class StepUpPolicy(ICurrentUser currentUser, IOptions<StepUpOpti
         {
             return Result.Failure(MfaErrors.StepUpRequired);
         }
+
         if (currentUser.AuthTime is not { } authTime || timeProvider.GetUtcNow() - authTime >= options.Value.MaxAge)
         {
             return Result.Failure(MfaErrors.StepUpRequired);

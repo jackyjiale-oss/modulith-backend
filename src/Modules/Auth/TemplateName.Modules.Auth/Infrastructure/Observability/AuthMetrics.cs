@@ -26,7 +26,6 @@ internal sealed class AuthMetrics : IAuthMetrics
     private readonly Counter<long> _externalLogins;
     private readonly Counter<long> _phoneSignIns;
 
-
     public AuthMetrics(IMeterFactory meterFactory)
     {
         var meter = meterFactory.Create(MeterName);
