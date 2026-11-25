@@ -18,13 +18,16 @@ namespace TemplateName.Modules.Auth.Application.Mfa.Verify;
 /// of a new session. The order is fixed:
 /// <list type="number">
 /// <item>The challenge, by the SHA-256 of its token, and its user. A challenge that is unknown, expired, used, exhausted
-/// (<c>Auth:Mfa:MaxChallengeAttempts</c> wrong codes) or bound to an older security stamp, and a user who is gone, cannot sign in, is
+/// (<c>Auth:Mfa:MaxChallengeAttempts</c> tries) or bound to an older security stamp, and a user who is gone, cannot sign in, is
 /// locked or has no confirmed method any more, are one answer, <see cref="MfaErrors.InvalidChallenge"/>; nothing is verified or counted.</item>
-/// <item>The factor, through <see cref="MfaFactorVerifier"/>, which spends a right code. A wrong one counts on the challenge
-/// <b>and</b> in the user's lockout counter (D7), each by one atomic statement; the failure that locks raises the lockout event.
+/// <item>The try is claimed on the challenge by one conditional update <b>before</b> the code is checked, the right code's too, so
+/// guesses arriving together get at most <c>MaxChallengeAttempts</c> checks between them; a request that loses the claim is the same
+/// <see cref="MfaErrors.InvalidChallenge"/>, with nothing checked or counted against the account.</item>
+/// <item>The factor, through <see cref="MfaFactorVerifier"/>, which spends a right code. A wrong one counts in the user's lockout
+/// counter (D7) by one atomic statement (the challenge's try is already counted); the failure that locks raises the lockout event.
 /// The answer is <see cref="MfaErrors.InvalidCode"/>.</item>
-/// <item>The challenge is consumed by one conditional update; losing it (a simultaneous verify, or the cap or the expiry reached
-/// meanwhile) is <see cref="MfaErrors.InvalidChallenge"/>, and the code stays spent: the user signs in again with the next code.</item>
+/// <item>The challenge is consumed by one conditional update; losing it (a simultaneous verify, or the expiry reached meanwhile) is
+/// <see cref="MfaErrors.InvalidChallenge"/>, and the code stays spent: the user signs in again with the next code.</item>
 /// <item>The session, through <see cref="SessionStarter"/>: <c>amr</c> is the challenge's <see cref="MfaChallenge.FirstFactor"/> (<c>pwd</c>,
 /// <c>fed</c> after a federated sign-in or <c>sms</c> after a texted code), then <c>otp</c> or <c>rcvr</c>, then <c>mfa</c> (<c>pwd otp mfa</c>, <c>fed rcvr mfa</c>);
 /// <c>auth_time</c> now, the failure count reset; a recovery code also raises <see cref="MfaChange.RecoveryCodeUsed"/>.</item>
@@ -80,13 +83,21 @@ internal sealed class VerifyMfaCommandHandler(
             return await RejectChallengeAsync(challenge?.UserId, tried, now, cancellationToken);
         }
 
+        // The try is claimed before the code is checked, so guesses arriving together get at most MaxChallengeAttempts checks between
+        // them (the reading above is only the cheap first look). Losing the claim is a dead challenge: nothing is checked or counted
+        // against the account. Honouring the cancellation here is safe: a request that stops before the claim checks no code.
+        if (!await challenges.TryClaimAttemptAsync(challenge.Id, now, maxAttempts, cancellationToken))
+        {
+            return await RejectChallengeAsync(user.Id, tried, now, cancellationToken);
+        }
+
         if (await factorVerifier.VerifyAsync(user.Id, proof, now, cancellationToken) is not { } factor)
         {
-            return await RejectWrongCodeAsync(user, challenge, tried, now);
+            return await RejectWrongCodeAsync(user, tried, now);
         }
 
         // From here on the code is spent in the database, so nothing below honours the request's cancellation.
-        if (!await challenges.TryConsumeAsync(challenge.Id, now, maxAttempts, CancellationToken.None))
+        if (!await challenges.TryConsumeAsync(challenge.Id, now, CancellationToken.None))
         {
             return await RejectChallengeAsync(user.Id, tried, now, CancellationToken.None);
         }
@@ -192,12 +203,12 @@ internal sealed class VerifyMfaCommandHandler(
     private static string FactorDetails(MfaFactor factor) =>
         JsonSerializer.Serialize(new { factor = factor == MfaFactor.Totp ? "totp" : "recovery_code" });
 
-    private async Task<Result<MfaVerifyResponse>> RejectWrongCodeAsync(User user, MfaChallenge challenge, MfaFactor tried, DateTimeOffset now)
+    private async Task<Result<MfaVerifyResponse>> RejectWrongCodeAsync(User user, MfaFactor tried, DateTimeOffset now)
     {
-        // Two atomic statements, so simultaneous wrong codes are each counted: one on the challenge (its cap) and one in the user's
-        // lockout counter (D7), which a new challenge does not reset. The tracked user is left unchanged, so the save below only inserts.
-        // Neither the counts nor the save honour the request's cancellation: a guesser who disconnects is still counted.
-        await challenges.RecordFailedAttemptAsync(challenge.Id, CancellationToken.None);
+        // The challenge's try was claimed before the code was checked, so simultaneous wrong codes are each counted there already; one
+        // atomic statement counts it in the user's lockout counter (D7), which a new challenge does not reset. The tracked user is left
+        // unchanged, so the save below only inserts. Neither the count nor the save honours the request's cancellation: a guesser who
+        // disconnects is still counted.
         var lockout = lockoutOptions.Value;
         var counted = await users.RecordFailedSignInAsync(user.Id, now, lockout.MaxFailedAttempts, lockout.Duration, CancellationToken.None);
         if (counted is { LockoutEnd: { } lockoutEnd })

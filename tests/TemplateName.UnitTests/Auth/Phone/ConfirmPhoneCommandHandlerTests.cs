@@ -42,7 +42,7 @@ public sealed class ConfirmPhoneCommandHandlerTests
         _currentUser.SessionId.Returns(session.Id);
         _codes.GetPendingAsync(_user.Id, PhoneCodePurpose.Verify, Now, Arg.Any<CancellationToken>()).Returns(_pending);
         _codes.TryConsumeAsync(_pending.Id, Now, Arg.Any<CancellationToken>()).Returns(true);
-        _codes.TryCountWrongAttemptAsync(_pending.Id, 5, Now, Arg.Any<CancellationToken>()).Returns(true);
+        _codes.TryClaimAttemptAsync(_pending.Id, 5, Now, Arg.Any<CancellationToken>()).Returns(true);
         _unitOfWork.SaveChangesUnlessDuplicateAsync(UniqueIndexNames.UserPhoneNumber, Arg.Any<CancellationToken>()).Returns(true);
         _auditWriter.Record(Arg.Do<AuthAuditLog>(_auditEntries.Add));
         _sut = new ConfirmPhoneCommandHandler(
@@ -68,6 +68,7 @@ public sealed class ConfirmPhoneCommandHandlerTests
         _user.PhoneNumber.ShouldBe(Number);
         _user.PhoneNumberVerifiedAt.ShouldBe(Now);
         _pending.ConsumedAt.ShouldBe(Now);
+        await _codes.Received(1).TryClaimAttemptAsync(_pending.Id, 5, Now, Ct);
         var audit = _auditEntries.ShouldHaveSingleItem();
         audit.EventType.ShouldBe(AuthAuditEvents.PhoneNumberVerified);
         audit.Succeeded.ShouldBeTrue();
@@ -76,31 +77,45 @@ public sealed class ConfirmPhoneCommandHandlerTests
     }
 
     [Fact]
-    public async Task A_wrong_code_counts_one_attempt()
+    public async Task A_wrong_code_spends_the_try_claimed_for_it()
     {
         var result = await _sut.HandleAsync(new ConfirmPhoneCommand("999999"), Ct);
 
         result.Error.ShouldBe(PhoneErrors.InvalidCode);
-        await _codes.Received(1).TryCountWrongAttemptAsync(_pending.Id, 5, Now, Ct);
+        await _codes.Received(1).TryClaimAttemptAsync(_pending.Id, 5, Now, Ct);
         await _codes.DidNotReceiveWithAnyArgs().TryConsumeAsync(default, default, Ct);
         _user.PhoneNumber.ShouldBeNull();
         await _unitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(string.Empty, Ct);
     }
 
     [Fact]
-    public async Task The_fifth_wrong_attempt_ends_the_code()
+    public async Task A_code_with_no_tries_left_is_refused_even_with_the_right_code()
     {
-        // The repository's conditional update ends the code on the fifth try; the next lookup finds no pending code.
-        _codes.TryCountWrongAttemptAsync(_pending.Id, 5, Now, Arg.Any<CancellationToken>()).Returns(true, true, true, true, true, false);
+        // The try is claimed before the code is compared: guesses arriving together get at most five comparisons between them, so a
+        // right code that finds the tries used up is never compared at all.
+        _codes.TryClaimAttemptAsync(_pending.Id, 5, Now, Arg.Any<CancellationToken>()).Returns(false);
+
+        (await _sut.HandleAsync(new ConfirmPhoneCommand(Code), Ct)).Error.ShouldBe(PhoneErrors.InvalidCode);
+
+        _pending.ConsumedAt.ShouldBeNull();
+        _user.PhoneNumber.ShouldBeNull();
+        await _codes.DidNotReceiveWithAnyArgs().TryConsumeAsync(default, default, Ct);
+        await _unitOfWork.DidNotReceiveWithAnyArgs().SaveChangesUnlessDuplicateAsync(string.Empty, Ct);
+    }
+
+    [Fact]
+    public async Task The_fifth_try_is_the_last()
+    {
+        _codes.TryClaimAttemptAsync(_pending.Id, 5, Now, Arg.Any<CancellationToken>()).Returns(true, true, true, true, true, false);
 
         for (var attempt = 0; attempt < 5; attempt++)
         {
             (await _sut.HandleAsync(new ConfirmPhoneCommand("999999"), Ct)).Error.ShouldBe(PhoneErrors.InvalidCode);
         }
 
-        _codes.GetPendingAsync(_user.Id, PhoneCodePurpose.Verify, Now, Arg.Any<CancellationToken>()).Returns((PhoneVerificationCode?)null);
         (await _sut.HandleAsync(new ConfirmPhoneCommand(Code), Ct)).Error.ShouldBe(PhoneErrors.InvalidCode);
         _user.PhoneNumber.ShouldBeNull();
+        await _codes.DidNotReceiveWithAnyArgs().TryConsumeAsync(default, default, Ct);
     }
 
     [Fact]

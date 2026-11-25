@@ -1,5 +1,3 @@
-using System.Data;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using TemplateName.Modules.Auth.Application.Abstractions;
 using TemplateName.Modules.Auth.Domain.Verification;
@@ -8,19 +6,6 @@ namespace TemplateName.Modules.Auth.Infrastructure.Persistence;
 
 internal sealed class PhoneVerificationCodeRepository(AuthDbContext context) : IPhoneVerificationCodeRepository
 {
-    // One statement: the try that reaches the limit also ends the code, and a code that is no longer pending counts nothing, so parallel
-    // guesses can never exceed the limit.
-    private const string CountWrongAttemptSql = """
-        UPDATE auth.PhoneVerificationCodes
-        SET AttemptCount = AttemptCount + 1,
-            InvalidatedAt = CASE WHEN AttemptCount + 1 >= @MaxAttempts THEN @InvalidatedAt ELSE InvalidatedAt END
-        WHERE Id = @Id
-          AND AttemptCount < @MaxAttempts
-          AND ConsumedAt IS NULL
-          AND InvalidatedAt IS NULL
-          AND ExpiresAt > @Now
-        """;
-
     public void Add(PhoneVerificationCode code) => context.Set<PhoneVerificationCode>().Add(code);
 
     public Task<PhoneVerificationCode?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
@@ -58,21 +43,6 @@ internal sealed class PhoneVerificationCodeRepository(AuthDbContext context) : I
             .OrderBy(code => code.CreatedAt)
             .Select(code => code.CreatedAt)
             .ToListAsync(cancellationToken);
-
-    public async Task<bool> TryCountWrongAttemptAsync(Guid id, int maxAttempts, DateTimeOffset now, CancellationToken cancellationToken)
-    {
-        var counted = await context.Database.ExecuteSqlRawAsync(
-            CountWrongAttemptSql,
-            [
-                new SqlParameter("@Id", SqlDbType.UniqueIdentifier) { Value = id },
-                new SqlParameter("@MaxAttempts", SqlDbType.Int) { Value = maxAttempts },
-                new SqlParameter("@Now", SqlDbType.DateTime2) { Value = now.UtcDateTime, Scale = 7 },
-                new SqlParameter("@InvalidatedAt", SqlDbType.DateTime2) { Value = now.UtcDateTime, Scale = 3 },
-            ],
-            cancellationToken);
-
-        return counted == 1;
-    }
 
     // One UPDATE ... WHERE: a try is claimed only while fewer than maxAttempts were, so concurrent guesses queue on the row lock and at
     // most maxAttempts of them ever compare a code.

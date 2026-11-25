@@ -309,26 +309,42 @@ public sealed class MfaPersistenceTests(IntegrationTestWebAppFactory factory) : 
     }
 
     [Fact]
-    public async Task Failed_attempts_are_all_counted_when_concurrent()
+    public async Task Parallel_claims_never_exceed_the_maximum()
     {
         var user = NewUser("alice@example.com");
         var challenge = NewChallenge(user, Hash(1));
         var consumed = NewChallenge(user, Hash(2));
         await SaveAsync(user, challenge, consumed);
-        (await NewScope().GetRequiredService<IMfaChallengeRepository>().TryConsumeAsync(consumed.Id, Now, MaxAttempts, Ct)).ShouldBeTrue();
+        (await NewScope().GetRequiredService<IMfaChallengeRepository>().TryConsumeAsync(consumed.Id, Now, Ct)).ShouldBeTrue();
 
-        // Ten wrong codes at once queue on the row lock; each is counted once and each caller sees its own new count.
-        var counts = await Task.WhenAll(Enumerable.Range(0, 10).Select(
-            _ => NewScope().GetRequiredService<IMfaChallengeRepository>().RecordFailedAttemptAsync(challenge.Id, Ct)));
+        // Ten guesses at once queue on the row lock: only MaxAttempts of them are claimed, so only that many ever get their code checked.
+        var claimed = await Task.WhenAll(Enumerable.Range(0, 10).Select(
+            _ => NewScope().GetRequiredService<IMfaChallengeRepository>().TryClaimAttemptAsync(challenge.Id, Now, MaxAttempts, Ct)));
 
-        counts.ShouldBe([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], ignoreOrder: true);
-        (await NewScope().GetRequiredService<IMfaChallengeRepository>().GetByTokenHashAsync(Hash(1), Ct)).ShouldNotBeNull().FailedAttempts.ShouldBe(10);
+        claimed.Count(wasClaimed => wasClaimed).ShouldBe(MaxAttempts);
+        (await NewScope().GetRequiredService<IMfaChallengeRepository>().GetByTokenHashAsync(Hash(1), Ct)).ShouldNotBeNull().FailedAttempts.ShouldBe(MaxAttempts);
 
-        // A consumed challenge and an unknown one count nothing.
+        // A consumed challenge and an unknown one claim nothing.
         var challenges = NewScope().GetRequiredService<IMfaChallengeRepository>();
-        (await challenges.RecordFailedAttemptAsync(consumed.Id, Ct)).ShouldBeNull();
-        (await challenges.RecordFailedAttemptAsync(Guid.NewGuid(), Ct)).ShouldBeNull();
+        (await challenges.TryClaimAttemptAsync(consumed.Id, Now, MaxAttempts, Ct)).ShouldBeFalse();
+        (await challenges.TryClaimAttemptAsync(Guid.NewGuid(), Now, MaxAttempts, Ct)).ShouldBeFalse();
         (await NewScope().GetRequiredService<IMfaChallengeRepository>().GetByTokenHashAsync(Hash(2), Ct)).ShouldNotBeNull().FailedAttempts.ShouldBe(0);
+
+        // The cap is the claim's business: the caller holding the last claimed try still consumes the challenge.
+        (await NewScope().GetRequiredService<IMfaChallengeRepository>().TryConsumeAsync(challenge.Id, Now, Ct)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Parallel_consumes_have_one_winner()
+    {
+        var user = NewUser("alice@example.com");
+        var challenge = NewChallenge(user, Hash(1));
+        await SaveAsync(user, challenge);
+
+        var consumed = await Task.WhenAll(Enumerable.Range(0, 4).Select(
+            _ => NewScope().GetRequiredService<IMfaChallengeRepository>().TryConsumeAsync(challenge.Id, Now, Ct)));
+
+        consumed.Count(wasConsumed => wasConsumed).ShouldBe(1);
     }
 
     [Theory]
@@ -336,7 +352,7 @@ public sealed class MfaPersistenceTests(IntegrationTestWebAppFactory factory) : 
     [InlineData("consumed")]
     [InlineData("exhausted")]
     [InlineData("valid until one tick before expiry")]
-    public async Task Try_consume_challenge_follows_the_domain_rule(string state)
+    public async Task Try_claim_challenge_follows_the_domain_rule(string state)
     {
         var user = NewUser("alice@example.com");
         var challenge = NewChallenge(user, Hash(1));
@@ -350,23 +366,55 @@ public sealed class MfaPersistenceTests(IntegrationTestWebAppFactory factory) : 
         };
         if (state == "consumed")
         {
-            (await challenges.TryConsumeAsync(challenge.Id, Now, MaxAttempts, Ct)).ShouldBeTrue();
+            (await challenges.TryConsumeAsync(challenge.Id, Now, Ct)).ShouldBeTrue();
         }
 
         if (state == "exhausted")
         {
             for (var attempt = 0; attempt < MaxAttempts; attempt++)
             {
-                await challenges.RecordFailedAttemptAsync(challenge.Id, Ct);
+                (await challenges.TryClaimAttemptAsync(challenge.Id, Now, MaxAttempts, Ct)).ShouldBeTrue();
             }
         }
 
         var loaded = (await NewScope().GetRequiredService<IMfaChallengeRepository>().GetByTokenHashAsync(Hash(1), Ct)).ShouldNotBeNull();
 
-        var consumedNow = await NewScope().GetRequiredService<IMfaChallengeRepository>().TryConsumeAsync(challenge.Id, at, MaxAttempts, Ct);
+        var claimedNow = await NewScope().GetRequiredService<IMfaChallengeRepository>().TryClaimAttemptAsync(challenge.Id, at, MaxAttempts, Ct);
 
         // The statement repeats MfaChallenge.CanUse (the stamp is the handler's check), so both must answer alike.
-        consumedNow.ShouldBe(loaded.CanUse(user.SecurityStamp, at, MaxAttempts));
+        claimedNow.ShouldBe(loaded.CanUse(user.SecurityStamp, at, MaxAttempts));
+        claimedNow.ShouldBe(state == "valid until one tick before expiry");
+        var stored = (await NewScope().GetRequiredService<IMfaChallengeRepository>().GetByTokenHashAsync(Hash(1), Ct)).ShouldNotBeNull();
+        stored.FailedAttempts.ShouldBe(state switch
+        {
+            "exhausted" => MaxAttempts,
+            "valid until one tick before expiry" => 1,
+            _ => 0,
+        });
+    }
+
+    [Theory]
+    [InlineData("expired")]
+    [InlineData("consumed")]
+    [InlineData("valid until one tick before expiry")]
+    public async Task Try_consume_challenge_needs_it_unconsumed_and_unexpired(string state)
+    {
+        var user = NewUser("alice@example.com");
+        var challenge = NewChallenge(user, Hash(1));
+        await SaveAsync(user, challenge);
+        var at = state switch
+        {
+            "expired" => challenge.ExpiresAt,
+            "valid until one tick before expiry" => challenge.ExpiresAt.AddMilliseconds(-1),
+            _ => Now,
+        };
+        if (state == "consumed")
+        {
+            (await NewScope().GetRequiredService<IMfaChallengeRepository>().TryConsumeAsync(challenge.Id, Now, Ct)).ShouldBeTrue();
+        }
+
+        var consumedNow = await NewScope().GetRequiredService<IMfaChallengeRepository>().TryConsumeAsync(challenge.Id, at, Ct);
+
         consumedNow.ShouldBe(state == "valid until one tick before expiry");
         var stored = (await NewScope().GetRequiredService<IMfaChallengeRepository>().GetByTokenHashAsync(Hash(1), Ct)).ShouldNotBeNull();
         stored.ConsumedAt.ShouldBe(state switch

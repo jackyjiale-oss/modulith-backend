@@ -79,8 +79,8 @@ public sealed class VerifyMfaCommandHandlerTests
         _tokenService.Hash(ChallengeTokenValue).Returns(ChallengeHash);
         _tokenService.Generate().Returns(new GeneratedToken(RefreshTokenValue, RefreshTokenHash));
         _challenges.GetByTokenHashAsync(ChallengeHash, Arg.Any<CancellationToken>()).Returns(_challenge);
-        _challenges.TryConsumeAsync(_challenge.Id, Now, 5, Arg.Any<CancellationToken>()).Returns(true);
-        _challenges.RecordFailedAttemptAsync(_challenge.Id, Arg.Any<CancellationToken>()).Returns(1);
+        _challenges.TryConsumeAsync(_challenge.Id, Now, Arg.Any<CancellationToken>()).Returns(true);
+        _challenges.TryClaimAttemptAsync(_challenge.Id, Now, 5, Arg.Any<CancellationToken>()).Returns(true);
 
         _methods.HasConfirmedAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(true);
         var method = UserMfaMethod.StartTotp(_user.Id, "Phone", ProtectedSecret, IssuedAt.AddDays(-1));
@@ -127,8 +127,10 @@ public sealed class VerifyMfaCommandHandlerTests
         _user.AccessFailedCount.ShouldBe(0);
         _user.LastLoginAt.ShouldBe(Now);
         _user.DomainEvents.ShouldBeEmpty();
-        await _challenges.Received(1).TryConsumeAsync(_challenge.Id, Now, 5, CancellationToken.None);
-        await _challenges.DidNotReceiveWithAnyArgs().RecordFailedAttemptAsync(default, Ct);
+        await _challenges.Received(1).TryConsumeAsync(_challenge.Id, Now, CancellationToken.None);
+
+        // The try is claimed before the code is checked, the right code's too.
+        await _challenges.Received(1).TryClaimAttemptAsync(_challenge.Id, Now, 5, Ct);
         await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
         _auditEntries.Select(entry => entry.EventType).ShouldBe([AuthAuditEvents.MfaVerified, AuthAuditEvents.LoginSucceeded]);
         _auditEntries.ShouldAllBe(entry => entry.Succeeded && entry.UserId == _user.Id && entry.SessionId == session.Id);
@@ -180,7 +182,7 @@ public sealed class VerifyMfaCommandHandlerTests
         result.IsSuccess.ShouldBeTrue();
         _addedSessions.ShouldHaveSingleItem().AuthMethods.ShouldBe("fed otp mfa");
         _tokenRequests.ShouldHaveSingleItem().AuthMethods.ShouldBe("fed otp mfa");
-        await _challenges.Received(1).TryConsumeAsync(challenge.Id, Now, 5, CancellationToken.None);
+        await _challenges.Received(1).TryConsumeAsync(challenge.Id, Now, CancellationToken.None);
     }
 
     [Fact]
@@ -251,12 +253,12 @@ public sealed class VerifyMfaCommandHandlerTests
         var result = await _sut.HandleAsync(Command(code: wrongCode), Ct);
 
         result.Error.ShouldBe(MfaErrors.InvalidCode);
-        await _challenges.Received(1).RecordFailedAttemptAsync(_challenge.Id, CancellationToken.None);
+        await _challenges.Received(1).TryClaimAttemptAsync(_challenge.Id, Now, 5, Ct);
         await _users.Received(1).RecordFailedSignInAsync(_user.Id, Now, 5, LockoutDuration, CancellationToken.None);
         _user.AccessFailedCount.ShouldBe(1);
         _user.DomainEvents.ShouldBeEmpty();
         await _methods.DidNotReceiveWithAnyArgs().TryClaimTimeStepAsync(default, default, default, Ct);
-        await _challenges.DidNotReceiveWithAnyArgs().TryConsumeAsync(default, default, default, Ct);
+        await _challenges.DidNotReceiveWithAnyArgs().TryConsumeAsync(default, default, Ct);
         var audit = _auditEntries.ShouldHaveSingleItem();
         audit.EventType.ShouldBe(AuthAuditEvents.MfaFailed);
         audit.Succeeded.ShouldBeFalse();
@@ -267,6 +269,18 @@ public sealed class VerifyMfaCommandHandlerTests
         await _unitOfWork.DidNotReceiveWithAnyArgs().TrySaveChangesAsync(Ct);
         _addedSessions.ShouldBeEmpty();
         _metrics.Received(1).RecordMfaVerification(MfaVerificationOutcome.InvalidCode, MfaFactor.Totp);
+    }
+
+    [Fact]
+    public async Task Tries_used_up_by_simultaneous_guesses_refuse_even_the_right_code_unchecked()
+    {
+        // The try is claimed before the code is checked, so guesses arriving together get at most five checks between them: a request
+        // that finds the tries gone is refused without its code being looked at, spent or counted against the account.
+        _challenges.TryClaimAttemptAsync(_challenge.Id, Now, 5, Arg.Any<CancellationToken>()).Returns(false);
+
+        var result = await _sut.HandleAsync(Command(code: CurrentCode), Ct);
+
+        await AssertInvalidChallengeAndNothingCountedAsync(result.Error, expectedUserId: _user.Id, claimAttempted: true);
     }
 
     [Fact]
@@ -351,14 +365,14 @@ public sealed class VerifyMfaCommandHandlerTests
     [Fact]
     public async Task Lost_consume_is_invalid_challenge()
     {
-        _challenges.TryConsumeAsync(_challenge.Id, Now, 5, Arg.Any<CancellationToken>()).Returns(false);
+        _challenges.TryConsumeAsync(_challenge.Id, Now, Arg.Any<CancellationToken>()).Returns(false);
 
         var result = await _sut.HandleAsync(Command(code: CurrentCode), Ct);
 
         // The code is spent (its step is claimed) but the challenge was consumed, exhausted or expired meanwhile: the user signs in again.
         result.Error.ShouldBe(MfaErrors.InvalidChallenge);
         await _methods.Received(1).TryClaimTimeStepAsync(Arg.Any<Guid>(), Totp.TimeStepAt(Now), Now, CancellationToken.None);
-        await _challenges.Received(1).TryConsumeAsync(_challenge.Id, Now, 5, CancellationToken.None);
+        await _challenges.Received(1).TryConsumeAsync(_challenge.Id, Now, CancellationToken.None);
         await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
         _addedSessions.ShouldBeEmpty();
         _user.LastLoginAt.ShouldBeNull();
@@ -386,7 +400,7 @@ public sealed class VerifyMfaCommandHandlerTests
         _addedSessions[1].UserId.ShouldBe(_user.Id);
         reread.LastLoginAt.ShouldBe(Now);
         await _methods.Received(1).TryClaimTimeStepAsync(Arg.Any<Guid>(), Arg.Any<long>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
-        await _challenges.Received(1).TryConsumeAsync(_challenge.Id, Now, 5, CancellationToken.None);
+        await _challenges.Received(1).TryConsumeAsync(_challenge.Id, Now, CancellationToken.None);
         await _unitOfWork.Received(2).TrySaveChangesAsync(CancellationToken.None);
         _auditEntries.Select(entry => entry.EventType)
             .ShouldBe([AuthAuditEvents.MfaVerified, AuthAuditEvents.LoginSucceeded, AuthAuditEvents.MfaVerified, AuthAuditEvents.LoginSucceeded]);
@@ -535,7 +549,8 @@ public sealed class VerifyMfaCommandHandlerTests
         var challenge = MfaChallenge.Issue(
             _user.Id, ChallengeHash, _user.SecurityStamp, DeviceName, AuthenticationMethods.Federated, TimeSpan.FromMinutes(5), IssuedAt);
         _challenges.GetByTokenHashAsync(ChallengeHash, Arg.Any<CancellationToken>()).Returns(challenge);
-        _challenges.TryConsumeAsync(challenge.Id, Now, 5, Arg.Any<CancellationToken>()).Returns(true);
+        _challenges.TryClaimAttemptAsync(challenge.Id, Now, 5, Arg.Any<CancellationToken>()).Returns(true);
+        _challenges.TryConsumeAsync(challenge.Id, Now, Arg.Any<CancellationToken>()).Returns(true);
         return challenge;
     }
 
@@ -545,7 +560,8 @@ public sealed class VerifyMfaCommandHandlerTests
         var challenge = MfaChallenge.Issue(
             _user.Id, ChallengeHash, _user.SecurityStamp, DeviceName, AuthenticationMethods.Sms, TimeSpan.FromMinutes(5), IssuedAt);
         _challenges.GetByTokenHashAsync(ChallengeHash, Arg.Any<CancellationToken>()).Returns(challenge);
-        _challenges.TryConsumeAsync(challenge.Id, Now, 5, Arg.Any<CancellationToken>()).Returns(true);
+        _challenges.TryClaimAttemptAsync(challenge.Id, Now, 5, Arg.Any<CancellationToken>()).Returns(true);
+        _challenges.TryConsumeAsync(challenge.Id, Now, Arg.Any<CancellationToken>()).Returns(true);
         return challenge;
     }
 
@@ -611,16 +627,25 @@ public sealed class VerifyMfaCommandHandlerTests
         _user.ClearDomainEvents();
     }
 
-    private async Task AssertInvalidChallengeAndNothingCountedAsync(Error error, Guid? expectedUserId)
+    private async Task AssertInvalidChallengeAndNothingCountedAsync(Error error, Guid? expectedUserId, bool claimAttempted = false)
     {
         error.ShouldBe(MfaErrors.InvalidChallenge);
 
-        // Nothing is verified (no code is spent) and nothing is counted, on the challenge or the user.
+        // Nothing is verified (no code is spent) and nothing is counted, on the challenge or the user. A challenge that fails the first
+        // reading is not even claimed; one that loses the claim is (the claim is what was refused).
         await _methods.DidNotReceiveWithAnyArgs().GetTotpAsync(default, Ct);
         await _methods.DidNotReceiveWithAnyArgs().TryClaimTimeStepAsync(default, default, default, Ct);
         await _recoveryCodes.DidNotReceiveWithAnyArgs().FindUnusedAsync(default, default!, Ct);
-        await _challenges.DidNotReceiveWithAnyArgs().RecordFailedAttemptAsync(default, Ct);
-        await _challenges.DidNotReceiveWithAnyArgs().TryConsumeAsync(default, default, default, Ct);
+        if (claimAttempted)
+        {
+            await _challenges.Received(1).TryClaimAttemptAsync(_challenge.Id, Now, 5, Ct);
+        }
+        else
+        {
+            await _challenges.DidNotReceiveWithAnyArgs().TryClaimAttemptAsync(default, default, default, Ct);
+        }
+
+        await _challenges.DidNotReceiveWithAnyArgs().TryConsumeAsync(default, default, Ct);
         await _users.DidNotReceiveWithAnyArgs().RecordFailedSignInAsync(default, default, default, default, Ct);
         await _unitOfWork.Received(1).SaveChangesAsync(Ct);
         var audit = _auditEntries.ShouldHaveSingleItem();

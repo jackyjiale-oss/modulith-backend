@@ -15,8 +15,9 @@ namespace TemplateName.Modules.Auth.Application.Phone.Confirm;
 /// <list type="number">
 /// <item>The caller's user and live session (<see cref="CallerSession"/>); otherwise <c>UserErrors.NotFound</c>, answered as 401.</item>
 /// <item>The caller's newest pending code; none is <see cref="PhoneErrors.InvalidCode"/>.</item>
-/// <item>A wrong code counts one try in one conditional statement, which also ends the code at <c>Auth:Phone:MaxAttempts</c>, so
-/// parallel guesses never exceed it; the answer is the same <see cref="PhoneErrors.InvalidCode"/> whatever the cause.</item>
+/// <item>A try is claimed in one conditional statement before the code is compared (also the right code's), so parallel guesses never
+/// get more than <c>Auth:Phone:MaxAttempts</c> comparisons of one code; a code whose tries are used up is refused unseen. The answer is
+/// the same <see cref="PhoneErrors.InvalidCode"/> whatever the cause.</item>
 /// <item>The right code is consumed in one conditional statement (of two simultaneous confirmations exactly one goes on), the number
 /// becomes the user's, <c>auth.phone_number_verified</c> is audited, and one save commits it.</item>
 /// <item>When another account holds the number, <see cref="PhoneErrors.PhoneNumberTaken"/> without a save; when one verifies it between
@@ -51,9 +52,17 @@ internal sealed class ConfirmPhoneCommandHandler(
             return Result.Failure(PhoneErrors.InvalidCode);
         }
 
+        // The try is claimed before the code is compared, so guesses arriving together get at most MaxAttempts comparisons of this code
+        // between them; a code whose tries are used up is no code at all. Honouring the cancellation is safe: a request that stops
+        // before the claim compares nothing.
+        if (!await codes.TryClaimAttemptAsync(code.Id, options.Value.MaxAttempts, now, cancellationToken))
+        {
+            PhoneVerificationCode.SpendMatchCost(command.Code);
+            return Result.Failure(PhoneErrors.InvalidCode);
+        }
+
         if (!code.Matches(command.Code))
         {
-            await codes.TryCountWrongAttemptAsync(code.Id, options.Value.MaxAttempts, now, cancellationToken);
             return Result.Failure(PhoneErrors.InvalidCode);
         }
 

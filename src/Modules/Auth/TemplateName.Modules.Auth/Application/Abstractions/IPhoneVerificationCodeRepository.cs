@@ -5,7 +5,7 @@ namespace TemplateName.Modules.Auth.Application.Abstractions;
 /// <summary>
 /// Loads and adds <see cref="PhoneVerificationCode"/> aggregates. A code is pending while it is neither consumed nor invalidated and
 /// <c>now &lt; ExpiresAt</c>, the rule of <see cref="PhoneVerificationCode.IsPending"/>. The two <c>Try</c> methods are single conditional
-/// statements, so the database decides a race; they bypass the change tracker.
+/// statements, so the database decides a race; they bypass the change tracker. A code is never compared before its try is claimed.
 /// </summary>
 internal interface IPhoneVerificationCodeRepository
 {
@@ -35,12 +35,6 @@ internal interface IPhoneVerificationCodeRepository
     /// oldest of them leaves the window).
     /// </summary>
     Task<IReadOnlyList<DateTimeOffset>> ListIssuedSinceAsync(Guid userId, DateTimeOffset since, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Counts one wrong try on a pending code that has fewer than <paramref name="maxAttempts"/>; the try that reaches the limit also
-    /// invalidates it. False when nothing was counted (the code ended, or another caller took the last try).
-    /// </summary>
-    Task<bool> TryCountWrongAttemptAsync(Guid id, int maxAttempts, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>
     /// Claims one try of a pending code before the presented code is compared with it: one conditional <c>UPDATE</c> that raises
