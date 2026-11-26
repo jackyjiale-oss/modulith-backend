@@ -70,8 +70,10 @@ public static class AuthModule
 
         services.AddModuleDbContext<AuthDbContext>(AuthDbContext.Schema);
 
-        // Registered first among this module's services, so the host refuses an unusable key ring before the module's own background
-        // work starts (the migrate mode never starts the host, so it never runs).
+        // Hosted services start in registration order, so the host refuses an unusable key ring before this module's outbox dispatcher,
+        // the signing key provider and the later modules' background workers start. The recurring job scheduler is registered earlier, by
+        // AddInfrastructureCommon, and its first tick may run before the check throws; those jobs (the cleanups among them) do not use
+        // Data Protection. The migrate mode never starts the host, so it never runs the check.
         services.AddSingleton<IKeyRingReader, DbKeyRingReader>();
         services.AddHostedService<KeyRingStartupCheck>();
         services.AddOutbox<AuthDbContext>(assembly);

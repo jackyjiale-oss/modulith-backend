@@ -53,7 +53,8 @@
 #if (caching == "redis")
 #   - AddPlatformRedis registers nothing while Caching:Provider is memory (the default, below);
 #endif
-#   - the only environment-dependent checks in src/ are the signing key (above), HSTS plus HTTPS redirection outside Development
+#   - the only environment-dependent checks in src/ are the signing key and the key ring certificate (above: KeyRingStartupCheck, and
+#     the switch that turns Data Protection's automatic key generation off while no certificate is active), HSTS plus HTTPS redirection outside Development
 #     (with no https port configured, UseHttpsRedirection only logs a warning and passes the request on; /health/* is exempt from the
 #     redirect anyway; HSTS acts on https requests only), OpenAPI and Scalar (not mapped in Production) and the log format;
 #   - Auth:Links: the localhost defaults pass (absolute http(s) with {token}); a real deployment sets its front-end URLs;

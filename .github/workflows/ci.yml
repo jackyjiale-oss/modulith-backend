@@ -181,8 +181,8 @@ jobs:
           -err
 
   # The API image (build/docker/Dockerfile), checked by build/scripts/container-verify.sh: migrate twice against a throwaway SQL Server,
-  # start in Production, the image's HEALTHCHECK reports healthy, /health/ready answers 200, the user is not root. cd.yml runs the same
-  # script on the pushed digest. Runs in parallel with build-test.
+  # start in Production with a throwaway key ring certificate, the image's HEALTHCHECK reports healthy, /health/ready answers 200, the
+  # user is not root, and a Production start without the certificate is refused. cd.yml runs the same script on the pushed digest. Runs in parallel with build-test.
   container:
     name: container
     runs-on: ubuntu-latest
