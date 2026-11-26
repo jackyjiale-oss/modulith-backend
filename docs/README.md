@@ -55,6 +55,17 @@ On a pull request whose base branch has a committed OpenAPI snapshot, the breaki
 | [`deployment/migrations.md`](deployment/migrations.md) | The `migrate` mode, the two database logins, expand-then-contract and the maintenance mode of a contract release, running it by hand |
 | [`deployment/production-checklist.md`](deployment/production-checklist.md) | The production checklist, each line tied to the code or setting behind it |
 
+## Runbooks
+
+| Document | What it covers |
+|---|---|
+| [`runbooks/README.md`](runbooks/README.md) | The index of the operational procedures, each with when to use it, who may do it, the steps, how to verify and how to roll back |
+| [`runbooks/contract-phase.md`](runbooks/contract-phase.md) | Dropping or renaming a column or table: proving nothing reads it, the marked migration, its upgrade-ladder seed and the maintenance-mode release |
+| [`runbooks/user-locked-out.md`](runbooks/user-locked-out.md), [`runbooks/lost-mfa-device.md`](runbooks/lost-mfa-device.md) | Unlocking an account and resetting two-step verification, with the identity check before each |
+| [`runbooks/signing-key-rotation.md`](runbooks/signing-key-rotation.md) | Replacing the access-token signing key without signing anyone out |
+| [`runbooks/restore-backup.md`](runbooks/restore-backup.md) | Restoring the database with the key-ring certificates, starting a new protected ring and rotating the certificate |
+| [`runbooks/dead-letter-replay.md`](runbooks/dead-letter-replay.md) | Putting abandoned outbox messages back in the queue once the cause is fixed |
+
 ## Architecture decisions
 
 | ADR | Decision |
@@ -108,5 +119,6 @@ On a pull request whose base branch has a committed OpenAPI snapshot, the breaki
 | [0039](adr/0039-session-bound-push-devices.md) | Push notifications: FCM only, devices bound to their sign-in session, one delivery per device |
 | [0040](adr/0040-phone-verification-codes-and-sms.md) | Phone numbers verified by our own SMS code (a salted hash, five tries, a region allowlist), sent through Twilio as a Notifications channel; the code-hash risk accepted with its controls; SMS at least once, the message SID kept; pumping across accounts stopped at Twilio |
 <!--#endif-->
+| [0042](adr/0042-key-ring-protected-by-a-certificate.md) | The Data Protection key ring is wrapped with a certificate (`Auth:DataProtection:Certificate`, `PreviousCertificates`); outside Development and Testing the host refuses to start without a usable certificate or with a plaintext key in the ring, with no bypass flag; rotation keeps every certificate that wrapped a key |
 
 A new decision gets the next number: `adr/NNNN-kebab-title.md`, in the same format, listed here and in the architecture overview.

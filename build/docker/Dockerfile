@@ -45,9 +45,8 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra AS final
 WORKDIR /app
 COPY --from=build /app/publish .
 
-# HTTP on 8080 only. TLS ends at the proxy. Do NOT set HTTPS_PORT, ASPNETCORE_HTTPS_PORT(S) or an https URL here:
-# the host enables HTTPS redirection outside Development once an https port is configured, and the HEALTHCHECK
-# below (which does not follow redirects) would then get a 307 and report the container unhealthy (307).
+# HTTP on 8080 only. TLS ends at the proxy, which forwards the scheme; no https port is set here. (/health/* is exempt from HTTPS
+# redirection, so the HEALTHCHECK below gets its answer either way; every other path would be redirected once an https port is set.)
 # AllowedHosts must list 127.0.0.1 beside the public names: the HEALTHCHECK sends Host 127.0.0.1:<port>.
 ENV ASPNETCORE_HTTP_PORTS=8080
 EXPOSE 8080

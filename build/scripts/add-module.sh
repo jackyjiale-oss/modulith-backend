@@ -115,7 +115,8 @@ has_using() {
 
 # remove_generated NAME PREFIX: removes exactly what the engine wrote for the module: the directories
 # src/Modules/NAME/PREFIX.Modules.NAME and src/Modules/NAME/PREFIX.Modules.NAME.Contracts, src/Modules/NAME itself when that is empty
-# afterwards, docs/modules/NAME.md (never the kebab-case page: the engine does not write it) and the marker. It runs only while the
+# afterwards, the upgrade-path seed folder tests/PREFIX.IntegrationTests/UpgradePath/Seeds/NAME, docs/modules/NAME.md (never the
+# kebab-case page: the engine does not write it) and the marker. It runs only while the
 # marker exists, which is the proof that the engine has just written those files: a run with flags only (no marker) changes nothing,
 # so a mistyped prefix cannot reach the files of a module added by hand. It also refuses (changes nothing, prints why and returns 1)
 # for a module that any host's Program.cs already registers or already has a 'using ....Modules.NAME;' line for (a run that stopped
@@ -145,7 +146,8 @@ remove_generated() {
     rm -f -- "$marker"
     return 1
   fi
-  rm -rf -- "src/Modules/$name/$prefix.Modules.$name" "src/Modules/$name/$prefix.Modules.$name.Contracts"
+  rm -rf -- "src/Modules/$name/$prefix.Modules.$name" "src/Modules/$name/$prefix.Modules.$name.Contracts" \
+    "tests/$prefix.IntegrationTests/UpgradePath/Seeds/$name"
   rmdir -- "src/Modules/$name" 2> /dev/null || true
   rm -f -- "docs/modules/$name.md" "$marker"
 }
@@ -460,7 +462,7 @@ finish_module() {
     # restore of CI need them) are named one by one; a tracked one that changed is in the list above already.
     git -c core.quotepath=off ls-files --others --exclude-standard -- '*packages.lock.json'
   else
-    echo "add-module: this is not a git repository: commit the new module folders (src/Modules/$1, docs/modules/$(kebab_case "$1").md), the packages.lock.json files they gained, and the edited shared files."
+    echo "add-module: this is not a git repository: commit the new module folders (src/Modules/$1, docs/modules/$(kebab_case "$1").md, the upgrade-path seeds under tests/*/UpgradePath/Seeds/$1), the packages.lock.json files they gained, and the edited shared files."
   fi
   return 0
 }

@@ -29,13 +29,17 @@ Migrate first (the API does not migrate on start outside Development), then star
 docker run --rm -e ConnectionStrings__Database api:local migrate
 
 docker run -d --name api -p 8080:8080 \
+  -v /secure/keyring.pfx:/certs/keyring.pfx:ro \
+  -e Auth__DataProtection__Certificate__Source=File \
+  -e Auth__DataProtection__Certificate__Path=/certs/keyring.pfx \
+  -e Auth__DataProtection__Certificate__Password \
   -e ConnectionStrings__Database \
   -e Auth__Jwt__SigningKeys__0__KeyId \
   -e Auth__Jwt__SigningKeys__0__PrivateKeyPem \
   api:local
 ```
 
-`-e NAME` with no value takes the value from your shell, so the secret is on no command line and in no file. The settings above are the minimum for Production; the full list of keys and their defaults is [`services/api.md`](../services/api.md#configuration), and the front-end URLs in `Auth:Links`,
+`-e NAME` with no value takes the value from your shell, so the secret is on no command line and in no file. The settings above are the minimum for Production (the key ring certificate is [below](#the-key-ring-certificate); without it the container exits at start); the full list of keys and their defaults is [`services/api.md`](../services/api.md#configuration), and the front-end URLs in `Auth:Links`,
 <!--#if (notifications)-->
 the SMTP settings in `Notifications:Email`,
 <!--#endif-->
@@ -43,11 +47,30 @@ the SMTP settings in `Notifications:Email`,
 
 **Port.** The image listens on HTTP 8080 only: `ASPNETCORE_HTTP_PORTS=8080`, `EXPOSE 8080`. TLS ends at the proxy or load balancer. To change the port set **`ASPNETCORE_HTTP_PORTS`**, not `ASPNETCORE_URLS`: the health check reads only the first port number of `ASPNETCORE_HTTP_PORTS` (8080 when it is unset or holds no port number), so a port set only through `ASPNETCORE_URLS` leaves the container reported unhealthy.
 
-**Do not set `HTTPS_PORT`, `ASPNETCORE_HTTPS_PORT(S)` or an https URL in the container.** Outside Development the host enables HTTPS redirection, and once an https port is known it redirects plain-HTTP requests to it. The health check does not follow the redirect, so a healthy container would report `unhealthy (307)`. Let the proxy do TLS and forward the scheme (below); the application then sees `https` and sends HSTS.
+**The container still serves plain HTTP on 8080 and does not need an https port.** Outside Development the host enables HTTPS redirection, and once an https port is known (`HTTPS_PORT`, `ASPNETCORE_HTTPS_PORT(S)` or an https URL) it redirects plain-HTTP requests to it. `/health/*` is exempt and never redirects, so the image's health check (which does not follow redirects) keeps getting its answer; every other path would be redirected. Let the proxy do TLS and forward the scheme (below); the application then sees `https` and sends HSTS.
 
 **`AllowedHosts`.** Set it to the public host names **and `127.0.0.1`**, for example `AllowedHosts=api.example.com;127.0.0.1;localhost`. Host filtering answers 400 to any other `Host` header, and the image's health check sends `Host: 127.0.0.1:<port>`: with the public names alone a healthy container reports `unhealthy (400)` and an orchestrator restarts it. Add any host name your load balancer's probe sends as well. `container-verify.sh` starts the image with this shape (`api.example.test;127.0.0.1;localhost`), so CI proves the probes pass with it.
 
-**State.** Nothing is written to the container's file system that matters: the Data Protection key ring is in the database (`auth.DataProtectionKeys`, ADR 0017), logs go to the console as compact JSON, and the outbox, inbox and jobs are tables.
+**State.** Nothing is written to the container's file system that matters: the Data Protection key ring is in the database (`auth.DataProtectionKeys`, ADR 0017, wrapped with the certificate below), logs go to the console as compact JSON, and the outbox, inbox and jobs are tables.
+
+## The key ring certificate
+
+Outside Development and Testing the API does not start unless the Data Protection key ring is wrapped with an RSA certificate that is valid now ([ADR 0042](../adr/0042-key-ring-protected-by-a-certificate.md), [production checklist](production-checklist.md#data-protection-keys-persisted-and-protected)). In a container the certificate is a **PFX file mounted read-only** and its password is a **secret**; the image holds neither:
+
+```bash
+docker run -d --name api -p 8080:8080 \
+  -v /secure/keyring.pfx:/certs/keyring.pfx:ro \
+  -e Auth__DataProtection__Certificate__Source=File \
+  -e Auth__DataProtection__Certificate__Path=/certs/keyring.pfx \
+  -e Auth__DataProtection__Certificate__Password \
+  ... api:local
+```
+
+- **The file** is a PFX with the private key, RSA, valid now; the PFX holds both halves, so there is no separate key file. Mount it as a secret or a read-only volume (a Compose or Swarm `secrets:` entry appears under `/run/secrets/`, a Kubernetes `Secret` volume under the path you choose) and keep it out of the build context and out of the repository. The container runs as a non-root user that is not the file's owner, so the file must be readable by that user (`container-verify.sh` uses mode `0644` on a throwaway file).
+- **The password** reaches the process as `Auth__DataProtection__Certificate__Password`, taken from your secret store or the orchestrator's secret (`-e NAME` with no value, as above). It is never baked into the image, written in a Compose file in the repository or typed on a command line.
+- **Every certificate that ever wrapped a key** stays configured: add each previous one as `Auth__DataProtection__PreviousCertificates__0__Source`, `...__0__Path`, `...__0__Password`, then `__1__...`, each with its own mount. Rotation, the backup set and the recovery steps are in [`restore-backup.md`](../runbooks/restore-backup.md).
+- **`migrate` needs none of this.** It builds the host and never starts it, so the `migrate` command above, and the pipeline's migrate step, are given no certificate setting.
+- **A container that exits at start** with "The Data Protection key ring is not usable" has printed every problem it found (a missing file, a wrong password, a certificate that is not valid now, a plaintext key, a key wrapped under a certificate that is not listed); read the container log and the runbook.
 
 ## The health check
 
@@ -67,7 +90,7 @@ Point the proxy's health probe at `/health/ready`, and give it a path that does 
 bash build/scripts/container-verify.sh api:local      # or ghcr.io/<owner>/<repository>/api@sha256:...
 ```
 
-It needs `docker`, `openssl`, `curl` and `timeout` (GNU coreutils; on macOS Homebrew installs it as `gtimeout`, so put coreutils' `gnubin` on `PATH` or alias it), and takes a few minutes (`VERIFY_TIMEOUT`, default 120 seconds per wait). It generates an SA password and a signing key for the run and writes neither to a file. Seven checks: start a throwaway SQL Server on a private network; run `migrate` twice (the first retried while the server starts, each attempt stopped when it outlasts what is left of the wait); start the image in Production with the minimum configuration; wait for the image's own `HEALTHCHECK` to say `healthy`; call `/health/ready` and expect 200; assert the configured user is not root; remove every container and the network, printing the logs first on a failure. Everything it creates carries the label `container-verify=<pid>-<random>` (so two runs on one daemon do not remove each other's objects); `docker ps -a --filter label=container-verify` and `docker network ls --filter label=container-verify` should print nothing afterwards (a `SIGKILL` cannot be cleaned up by the script; remove what it leaves with those filters).
+It needs `docker`, `openssl`, `curl` and `timeout` (GNU coreutils; on macOS Homebrew installs it as `gtimeout`, so put coreutils' `gnubin` on `PATH` or alias it), and takes a few minutes (`VERIFY_TIMEOUT`, default 120 seconds per wait). It generates an SA password, a signing key and a throwaway key ring certificate (a self-signed PFX, mounted read-only, its password a secret) for the run and writes no secret to a file. Eight checks: start a throwaway SQL Server on a private network; run `migrate` twice (the first retried while the server starts, each attempt stopped when it outlasts what is left of the wait); start the image in Production with the minimum configuration; wait for the image's own `HEALTHCHECK` to say `healthy`; call `/health/ready` and expect 200; assert the configured user is not root; start the image in Production again without the certificate and expect it to exit non-zero naming `Auth:DataProtection:Certificate`; remove every container and the network, printing the logs first on a failure. Everything it creates carries the label `container-verify=<pid>-<random>` (so two runs on one daemon do not remove each other's objects); `docker ps -a --filter label=container-verify` and `docker network ls --filter label=container-verify` should print nothing afterwards (a `SIGKILL` cannot be cleaned up by the script; remove what it leaves with those filters).
 
 What the script cannot rule out: it starts the image against an empty database, so the outbox, the recurring jobs, the other background services and the seeding run but have nothing to do, and a problem that appears only with data is not seen. The integration tests that start Production switch those services off.
 

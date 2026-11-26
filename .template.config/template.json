@@ -130,6 +130,7 @@
             "src/Modules/Sample/**",
             "tests/TemplateName.UnitTests/Sample/**",
             "tests/TemplateName.IntegrationTests/Sample/**",
+            "tests/TemplateName.IntegrationTests/UpgradePath/Seeds/Sample/**",
             "tests/TemplateName.IntegrationTests/Idempotency/IdempotencyTests.cs",
             "tests/TemplateName.UnitTests/Localization/ErrorMessageLocalizerTests.cs",
             "docs/modules/sample.md"
@@ -141,6 +142,7 @@
             "src/Modules/Notifications/**",
             "tests/TemplateName.UnitTests/Notifications/**",
             "tests/TemplateName.IntegrationTests/Notifications/**",
+            "tests/TemplateName.IntegrationTests/UpgradePath/Seeds/Notifications/**",
             "tests/TemplateName.IntegrationTests/Infrastructure/RecordingEmailSender.cs",
             "tests/TemplateName.IntegrationTests/Infrastructure/RecordingPushTransport.cs",
             "tests/TemplateName.IntegrationTests/Infrastructure/RecordingSmsTransport.cs",

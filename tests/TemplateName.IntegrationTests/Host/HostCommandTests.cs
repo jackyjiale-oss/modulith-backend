@@ -92,8 +92,9 @@ public sealed class HostCommandTests
     [Fact]
     public async Task Healthcheck_does_not_follow_a_redirect_with_the_real_handler()
     {
-        // HTTPS redirection with an https port set answers /health/live with a 307; followed, it would reach a port nothing listens
-        // on (or, here, a 200 from another path) and hide the misconfiguration. A loopback server answers both paths.
+        // The host exempts /health/* from HTTPS redirection, but a redirect from anything in front of it (or a later change) would
+        // answer /health/live with a 307; followed, it would reach a port nothing listens on (or, here, a 200 from another path) and
+        // hide the misconfiguration. A loopback server answers both paths.
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
