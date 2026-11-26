@@ -82,7 +82,7 @@ ADR 0031 says a project is required to have this test and the template does not 
 
 A fixture in `tests/TemplateName.IntegrationTests/UpgradePath/`, using the integration test SQL Server container (Docker needed, as for every integration test):
 
-1. For each module that owns a `DbContext` (the same set the `migrate` mode applies), create a fresh database.
+1. Create one fresh database for every context that has migrations (the same set the `migrate` mode applies), as production has one database with a schema per module; seeds therefore keep their ids unique across modules.
 2. Migrate to each of the module's migrations in order. After a migration that has a seed, run `Seeds/{Module}/{MigrationName}.seed.sql`, where `{MigrationName}` is the migration class name without its timestamp (`InitialAuth`, not `20261008053947_InitialAuth`), and `{Module}` is the context's name without `DbContext` (`Auth`, `Audit`, `Notifications`, `Sample`, `Platform`). The files are embedded resources of the integration test project.
 3. Migrate to head.
 4. Run each seed's `{MigrationName}.verify.sql`. A verify script selects what is wrong and must return no rows: a seeded row that vanished, a value that did not survive a data-rewriting migration, an orphaned reference.
@@ -92,7 +92,7 @@ Modules migrate independently (no foreign keys cross schemas), so the order of m
 
 ### 4.2 Guard tests (no Docker)
 
-They sit in the integration test project beside the fixture, read the migrations by reflection and the seeds as embedded resources, and take no container, so they run in a plain `dotnet test`.
+They sit in the integration test project beside the fixture, read the migrations by reflection and the seeds as embedded resources, and use no container themselves. The project's assembly-wide fixture still starts the SQL Server container for every test in it, so they run wherever the integration tests run (Docker needed); a developer without Docker checks them by disabling the assembly fixture for a local run.
 
 - Every context that has migrations has at least one seed.
 - A seed file names an existing migration (a renamed migration cannot leave a stale seed), and each seed has its verify script and the other way round.
