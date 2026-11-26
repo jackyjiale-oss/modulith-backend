@@ -32,6 +32,7 @@ using TemplateName.Modules.Auth.Contracts.Users;
 using TemplateName.Modules.Auth.Endpoints;
 using TemplateName.Modules.Auth.Infrastructure.Authorization;
 using TemplateName.Modules.Auth.Infrastructure.Contracts;
+using TemplateName.Modules.Auth.Infrastructure.DataProtection;
 using TemplateName.Modules.Auth.Infrastructure.External;
 using TemplateName.Modules.Auth.Infrastructure.Observability;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
@@ -130,9 +131,12 @@ public static class AuthModule
         var applicationName = configuration["Auth:DataProtection:ApplicationName"] is { Length: > 0 } configuredName
             ? configuredName
             : DefaultDataProtectionApplicationName;
-        services.AddDataProtection()
+        var keyRingCertificates = KeyRingCertificates.Load(configuration);
+        services.AddSingleton(keyRingCertificates);
+        var dataProtection = services.AddDataProtection()
             .SetApplicationName(applicationName)
             .PersistKeysToDbContext<AuthDbContext>();
+        KeyRingCertificates.Protect(dataProtection, keyRingCertificates);
 
         return services;
     }
