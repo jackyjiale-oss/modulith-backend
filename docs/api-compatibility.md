@@ -98,7 +98,7 @@ Add the marker by hand to the migration's own file (the one that holds `Up`, not
 public partial class DropUsersFullName : Migration
 ```
 
-**The upgrade path.** A project tests that its migrations apply from the previous release to this one over data, and that a fresh database works. The template does not ship that test (the delivery pipeline added the `migrate` mode and the [migrations runbook](deployment/migrations.md), where the contract phase is run, but not the test); write it in your project.
+**The upgrade path.** The template ships the test: the upgrade-path ladder in `tests/TemplateName.IntegrationTests/UpgradePath/` migrates every module's context one migration at a time with seed data, migrates to the latest migration and fails when a migration throws or a verify script finds a lost or broken row; a migration that rewrites or deletes data adds a seed in the same change, and a `[ContractMigration]` needs a seed on the migration before it ([`deployment/migrations.md`](deployment/migrations.md#expand-then-contract), [`coding-conventions.md`](coding-conventions.md#migrations-that-touch-data-the-upgrade-path-ladder), the [contract-phase runbook](runbooks/contract-phase.md)). A project keeps it green and writes the seeds for its own migrations.
 
 ## When can a column or table go?
 
@@ -160,7 +160,7 @@ For mobile apps consider telemetry, a minimum supported app version (the templat
 - Keep API contract types apart from entities.
 - Keep business logic in the shared handlers where behaviour is the same across versions.
 - Test every supported version's contract. The gate and the snapshot, where the project has them, cover only the published document; a project adds behaviour tests per version.
-- Test fresh installs and upgrades of the database (the upgrade-path test above).
+- Test fresh installs and upgrades of the database (the upgrade-path ladder above).
 - Track API usage and app versions in the logs (`ApiVersion`, `ClientVersion`).
 - Document a column rename and the systems that depend on it, in the pull request and the module page.
 - Remove obsolete DTOs, mappings, endpoints and schema elements after retirement.

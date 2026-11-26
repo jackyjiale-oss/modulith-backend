@@ -9,7 +9,7 @@ The checklist of the blueprint (section 16.3), each line with the code or settin
 | [HTTPS and HSTS, valid certificate](#https-hsts-and-a-valid-certificate) | Code enforces redirection and HSTS; the certificate is yours |
 | [Migrations applied by a command, not on startup](#migrations-applied-by-a-command-not-on-startup) | Enforced by the defaults and the pipeline |
 | [Secrets from the environment, none in files](#secrets-from-the-environment-none-in-files) | Partly enforced |
-| [Data Protection keys persisted and protected](#data-protection-keys-persisted-and-protected) | Persisted; **not protected** |
+| [Data Protection keys persisted and protected](#data-protection-keys-persisted-and-protected) | Persisted; protected by a certificate you supply, which the host requires |
 | [Forwarded headers behind a proxy](#forwarded-headers-behind-a-proxy-or-load-balancer) | Yours, validated when set |
 | [Health checks wired](#health-checks-wired-to-the-load-balancer-or-monitor) | Endpoints and image check exist; the wiring is yours |
 | [Log level and masking](#log-level-information-and-masking) | Defaults set; masking is limited |
@@ -67,7 +67,22 @@ The environment of a .NET host that is not told otherwise is `Production`, and t
 
 **Persisted: yes.** The key ring is stored in `auth.DataProtectionKeys` (`PersistKeysToDbContext<AuthDbContext>`, ADR 0017), so every instance and every restart reads the same keys; keep `Auth:DataProtection:ApplicationName` the same on every instance and never truncate the table or restore the rest of the schema without it ([Auth module](../modules/auth.md#recovering-access)).
 
-**Protected: no.** The ring is not encrypted at rest. The code has no `ProtectKeysWith...` call, and this delivery plan did not add one. Anyone with a copy of the database can read the keys and so decrypt what they protect: the TOTP secrets of authenticator apps (ADR 0022) and the single-use links in pending outbox rows (ADR 0017, ADR 0020). Until your project adds a key protector (a certificate, Azure Key Vault, or on Windows a DPAPI protector), treat every database backup and every copy of the database as a secret. Adding a protector is a code change with its own ADR; do it before real users enrol an authenticator app. **This line is not satisfied by the template.**
+**Protected: yes, by a certificate you supply.** Each key in the ring is wrapped with an RSA certificate (ASP.NET Core's `ProtectKeysWithCertificate`, [ADR 0042](../adr/0042-key-ring-protected-by-a-certificate.md)), so a copy of the database no longer reads the TOTP secrets of authenticator apps (ADR 0022) or the single-use links in pending outbox rows (ADR 0017, ADR 0020) without the certificate. The template ships no certificate; the key ring needs one that is **RSA, has a private key and is valid now**, and a self-signed one is enough, because nothing but the template uses it.
+
+| Setting | Meaning |
+|---|---|
+| `Auth:DataProtection:Certificate:Source` | `Store` or `File` |
+| `Auth:DataProtection:Certificate:Thumbprint`, `StoreLocation` (default `LocalMachine`), `StoreName` (default `My`) | `Store`: a certificate in the certificate store; on IIS the app pool identity needs read access to its private key ([`iis.md`](iis.md#the-key-ring-certificate)) |
+| `Auth:DataProtection:Certificate:Path`, `Password` | `File`: a PFX; in Docker mounted read-only, the password a secret and never in the image or a committed file ([`docker.md`](docker.md#the-key-ring-certificate)) |
+| `Auth:DataProtection:PreviousCertificates` | A list of the same shape: every certificate that ever wrapped a key, used only to unwrap |
+
+**The host refuses to start** outside Development and Testing, with one message that names the setting and [`restore-backup.md`](../runbooks/restore-backup.md), when: no active certificate is configured or one cannot be loaded (not found, wrong password, no private key, not RSA); the active certificate is not valid now (the message gives its dates); the ring holds a **plaintext key** (one created before a certificate was configured); or a key in the ring is wrapped under a certificate that is not configured (the message gives its thumbprint). There is no flag to bypass it, and in Production with no certificate automatic key generation is off, so no plaintext key is ever saved. The `migrate` mode never starts the host, so it needs no certificate. Development and Testing keep an unwrapped ring unless a certificate is configured. **Upgrading a project that already ran in Production without a certificate** therefore stops at start: follow [procedure B of the restore runbook](../runbooks/restore-backup.md#b-start-a-new-protected-ring-a-plaintext-ring-or-a-certificate-that-is-lost) (a new ring, which ends enrolled authenticators and queued single-use links).
+
+**Yours:**
+
+- Make or buy the certificate, keep it **and every certificate that ever wrapped a key** with its password in a secret store and in the backup set next to the database backups: a restored ring cannot be read without them.
+- Rotate **before the expiry date**: an expired active certificate stops the next restart, not the running process. Rotation moves the old certificate to `PreviousCertificates`; it is never dropped while the ring exists ([`restore-backup.md`](../runbooks/restore-backup.md), procedure C).
+- Not built: re-wrapping old keys under a new certificate, and Key Vault or DPAPI protectors (a project swaps the protector in its `AuthModule`, ADR 0042).
 
 ## Forwarded headers behind a proxy or load balancer
 
@@ -86,13 +101,14 @@ With Redis down `/health/ready` answers 200 `Degraded`, by design ([`services/ap
 
 ## Backups and a tested restore
 
-Nothing in the template takes or tests a backup. **Yours:** schedule database backups and restore one into a scratch database. Back the database up and restore it **as a whole**: the schema holds `auth.DataProtectionKeys`, and a restore that loses it makes every stored TOTP secret unreadable ([Auth module](../modules/auth.md#recovering-access)). The backups contain the unencrypted key ring ([above](#data-protection-keys-persisted-and-protected)), so protect them like secrets. Retention of rows inside the database (outbox, inbox, audit trails) is a different matter and is configured per kind of data ([`services/api.md`](../services/api.md#retention)).
+Nothing in the template takes or tests a backup. **Yours:** schedule database backups and restore one into a scratch database. Back the database up and restore it **as a whole**: the schema holds `auth.DataProtectionKeys`, and a restore that loses it makes every stored TOTP secret unreadable ([Auth module](../modules/auth.md#recovering-access)). The backups contain the key ring wrapped with your certificate ([above](#data-protection-keys-persisted-and-protected)): keep the certificate with the backup set (but not its password beside the PFX), and protect both like secrets. Retention of rows inside the database (outbox, inbox, audit trails) is a different matter and is configured per kind of data ([`services/api.md`](../services/api.md#retention)).
 
 The procedures for restoring a backup, the key ring and its certificate, a contract-phase release and the other operations are the [runbooks](../runbooks/README.md); read them before you need them.
 
 ## Also before the first release
 
 - [ ] Every item above has an owner and a date.
+- [ ] The key ring certificate is configured on every instance, its password is a secret, and the certificate and every previous one are in the backup set; the expiry date of the active one is in a calendar ([above](#data-protection-keys-persisted-and-protected)).
 - [ ] `Auth:Links`,
   <!--#if (notifications)-->
   `Notifications:Email`,

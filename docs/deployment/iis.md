@@ -81,8 +81,33 @@ The runner's service account needs: write access to the site folder and to its p
 - **Hosting Bundle** for .NET 10, installed after IIS, so the ASP.NET Core Module is registered. The publish is framework-dependent, so the Bundle's runtime must match the major version of the application.
 - **App pool**: one per application, **No Managed Code**, the `ApplicationPoolIdentity` or another identity with least privilege (read on the site folder, write on `logs` if the application writes there).
 - **Runtime configuration** is not in the publish. Keep non-secret settings in `appsettings.Production.json` in the site folder (the swap leaves it alone). Secrets (the runtime connection string, the JWT signing key `Auth:Jwt:SigningKeys:0:PrivateKeyPem`, any other credential) do not belong in a file: set them as environment variables of the app pool (`ConnectionStrings__Database`, `Auth__Jwt__SigningKeys__0__PrivateKeyPem`, and so on; IIS Manager, Configuration Editor, `system.applicationHost/applicationPools`, the pool's `environmentVariables`), or at machine level. A `web.config` is overwritten by every publish, so settings there would be lost. The runtime login has no DDL rights ([`migrations.md`](migrations.md)).
-- **Data Protection keys** are in the database (`auth.DataProtectionKeys`, ADR 0017), not on the server's disk, so a web farm shares them with no shared folder: every instance uses the same database and the same `Auth:DataProtection:ApplicationName`. The ring is not encrypted at rest ([production checklist](production-checklist.md#data-protection-keys-persisted-and-protected)).
+- **Data Protection keys** are in the database (`auth.DataProtectionKeys`, ADR 0017), not on the server's disk, so a web farm shares them with no shared folder: every instance uses the same database and the same `Auth:DataProtection:ApplicationName`. The ring is wrapped with a certificate, and the host does not start without one ([the certificate](#the-key-ring-certificate); [production checklist](production-checklist.md#data-protection-keys-persisted-and-protected)).
 - **TLS** is the site's https binding (or a proxy in front). Set `ForwardedHeaders` if there is a proxy ([`docker.md`](docker.md#behind-a-proxy-or-load-balancer) applies as written), and `AllowedHosts` to the public host names, the host of `IIS_HEALTH_URL` among them (host filtering answers 400 to any other `Host`, the health check included), plus any host name a load balancer's probe sends.
+
+## The key ring certificate
+
+Outside Development and Testing the API does not start unless the Data Protection key ring is wrapped with an RSA certificate that is valid now ([ADR 0042](../adr/0042-key-ring-protected-by-a-certificate.md)). On IIS the natural home is the machine's certificate store; the application pool identity must be able to **read the certificate's private key**, which is the step that goes wrong. Nothing on this page was run against a real IIS server: the manual checklist below includes the drill.
+
+1. **Import the certificate** into the local machine store, from an elevated PowerShell. The password comes from your secret store, never a literal in the command:
+
+   ```powershell
+   $password = Read-Host -AsSecureString
+   Import-PfxCertificate -FilePath .\keyring.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $password
+   ```
+
+   The key ring needs RSA, a private key and a validity period that includes now. A self-signed certificate is enough; the way to make one is in [`restore-backup.md`](../runbooks/restore-backup.md) (procedure B, step 4). Note the **thumbprint** it prints.
+2. **Grant the app pool identity read access to the private key.** In `certlm.msc`: Personal, Certificates, the certificate, All Tasks, Manage Private Keys, Add, and enter `IIS AppPool\<pool name>` (set the location to the local computer, not the domain) with **Read** only. For a custom identity, grant that account instead. The grant is on the key, not on the certificate, so importing the PFX again (a rotation) needs it again.
+3. **Set the settings as environment variables of the app pool**, beside the other secrets ([Server settings](#server-settings)). The thumbprint is not a secret, but it is environment-specific, so it does not belong in a committed file either:
+
+   ```text
+   Auth__DataProtection__Certificate__Source=Store
+   Auth__DataProtection__Certificate__Thumbprint=<the thumbprint>
+   ```
+
+   `StoreLocation` defaults to `LocalMachine` and `StoreName` to `My`, which is where step 1 put it. A PFX file in the site's parent folder also works (`Source=File`, `Path`, and the password as the secret `Auth__DataProtection__Certificate__Password`), but the store keeps the password and the file out of the deployment; if you use a file, keep it outside the publish folder, which every release mirrors.
+4. **Every certificate that ever wrapped a key** is listed as `Auth__DataProtection__PreviousCertificates__0__Source`, `...__0__Thumbprint`, then `__1__...`, and stays in the store ([`restore-backup.md`](../runbooks/restore-backup.md), procedure C). On a web farm import the same certificate on every server and repeat the grant on each.
+
+If the pool identity cannot read the key, the application fails to start (the ASP.NET Core Module answers 500.30) and its log, or the Windows event log, says that the certificate is not an RSA certificate with an accessible private key, naming `Auth:DataProtection:Certificate` (or the `PreviousCertificates` entry); that is the message to read as "check the grant". A thumbprint that is not in the store says so, and so does one with a validity period that excludes now (with both dates). The deployment script's migration step is not affected: `migrate` never starts the host and needs no certificate.
 
 ## Manual checklist for a real server
 
@@ -93,6 +118,7 @@ Tick these on a staging or test server before the first production release, and 
 - [ ] The app pool exists with **No Managed Code** and a least-privilege identity; the preflight fails with a clear message when the pool is set to a CLR version (change it and run again).
 - [ ] The site's physical path is `IIS_SITE_PATH`, with the https binding for users; `IIS_HEALTH_URL` is `http://localhost/health/ready` (an http binding exists and `AllowedHosts` lists `localhost`) or `https://<public host>/health/ready`.
 - [ ] The runtime settings and secrets are set (app pool environment variables and `appsettings.Production.json`); the runtime login cannot change the schema.
+- [ ] **Key ring certificate.** The certificate is in `Cert:\LocalMachine\My` with its private key, `IIS AppPool\<pool name>` has **Read** on that key, and the pool's environment has `Auth__DataProtection__Certificate__Source=Store` and the thumbprint. The site starts; `GET /health/ready` answers 200. Then remove the grant and recycle the pool: the site must fail to start with the message naming `Auth:DataProtection:Certificate` (the drill that proves the grant is what matters); put the grant back. On a web farm repeat on every server.
 - [ ] The self-hosted runner is registered with the labels `self-hosted`, `windows`, `iis`, runs as an account with the rights listed above, and can reach the database.
 - [ ] **First deploy** by hand from an elevated Windows PowerShell 5.1 with a publish folder and `ConnectionStrings__Database` set: `migrate` runs, the site comes online, the health check passes, `{SitePath}.previous` exists. `appsettings.Production.json` and `logs` are unchanged and `app_offline.htm` is gone.
 - [ ] **Second deploy** of a changed build: `{SitePath}.previous` now holds the first build; a file removed from the new publish is gone from the site.

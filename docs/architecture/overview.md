@@ -260,3 +260,4 @@ The rules for when a boundary is crossed:
 | [0039](../adr/0039-session-bound-push-devices.md) | Push notifications: FCM only, devices bound to their sign-in session, one delivery per device |
 | [0040](../adr/0040-phone-verification-codes-and-sms.md) | Phone numbers verified by our own SMS code (a salted hash, five tries, a region allowlist), sent through Twilio as a Notifications channel; the code-hash risk accepted with its controls; SMS at least once, the message SID kept; pumping across accounts stopped at Twilio |
 <!--#endif-->
+| [0042](../adr/0042-key-ring-protected-by-a-certificate.md) | The Data Protection key ring is wrapped with a certificate; outside Development and Testing the host refuses to start without a usable one or with a plaintext key in the ring |
