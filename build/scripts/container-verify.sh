@@ -372,6 +372,8 @@ pass "the container runs as user '$user', not root"
 step "7/8 Starting '$image' in Production without the key ring certificate"
 # The same configuration as step 3 minus the three Auth__DataProtection__Certificate__* settings: the host must refuse to start, exit
 # non-zero and name the missing setting. Run in the foreground and bounded, so a host that wrongly starts is killed, not waited for.
+# That the refused start stores no plaintext key is proved by the integration test Production_does_not_start_without_a_certificate (the
+# table is empty afterwards); here the database already holds the wrapped keys step 3 made, so an assertion would need sqlcmd in the SQL image.
 nocert_status=0
 ConnectionStrings__Database="$connection_string" Auth__Jwt__SigningKeys__0__PrivateKeyPem="$signing_key_pem" \
   timeout --foreground --kill-after=5 "$wait_limit" \

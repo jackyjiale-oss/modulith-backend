@@ -1,7 +1,11 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using TemplateName.Modules.Auth.Infrastructure.Tokens;
 
 namespace TemplateName.Modules.Auth.Infrastructure.DataProtection;
 
@@ -84,6 +88,29 @@ internal static class KeyRingCertificates
 
         builder.ProtectKeysWithCertificate(set.Active);
         builder.UnprotectKeysWithAnyCertificate([set.Active, .. set.Previous]);
+    }
+
+    /// <summary>
+    /// Outside Development and Testing, switches automatic key generation off while no certificate is active, so the framework never
+    /// stores a key unwrapped. Its own start-up step (<c>DataProtectionHostedService</c>) makes a key when the ring has none, and it runs
+    /// before <c>KeyRingStartupCheck</c>; a plaintext key saved to the shared table then would be adopted by other instances and would
+    /// make every restart after the configuration is fixed refuse. Without a key the framework logs the failure and the check refuses
+    /// the host with its own message. The environment is read when the options are built, not at registration.
+    /// </summary>
+    public static void RequireCertificateToCreateKeys(IDataProtectionBuilder builder, KeyRingCertificateSet set)
+    {
+        if (set.Active is not null)
+        {
+            return;
+        }
+
+        builder.Services.AddOptions<KeyManagementOptions>().Configure<IHostEnvironment>((options, environment) =>
+        {
+            if (!SigningKeyProvider.AllowsEphemeralKey(environment))
+            {
+                options.AutoGenerateKeys = false;
+            }
+        });
     }
 
     private static X509Certificate2? LoadOne(CertificateReference settings, string setting, List<string> problems)

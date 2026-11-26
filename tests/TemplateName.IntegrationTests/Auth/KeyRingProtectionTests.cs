@@ -44,6 +44,10 @@ public sealed class KeyRingProtectionTests(IntegrationTestWebAppFactory factory)
 
         failure.Message.ShouldContain("Auth:DataProtection:Certificate");
         failure.Message.ShouldContain("docs/runbooks/restore-backup.md");
+
+        // The framework's own start-up step must not have made a key on the way: a plaintext key in the shared table would be adopted
+        // by other instances and would make every restart after the fix refuse.
+        (await ReadRingAsync(connectionString, Ct)).ShouldBeEmpty();
     }
 
     [Fact]

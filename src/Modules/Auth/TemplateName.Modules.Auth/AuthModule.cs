@@ -143,6 +143,7 @@ public static class AuthModule
             .SetApplicationName(applicationName)
             .PersistKeysToDbContext<AuthDbContext>();
         KeyRingCertificates.Protect(dataProtection, keyRingCertificates);
+        KeyRingCertificates.RequireCertificateToCreateKeys(dataProtection, keyRingCertificates);
 
         return services;
     }
