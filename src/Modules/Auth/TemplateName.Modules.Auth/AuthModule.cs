@@ -32,6 +32,7 @@ using TemplateName.Modules.Auth.Contracts.Users;
 using TemplateName.Modules.Auth.Endpoints;
 using TemplateName.Modules.Auth.Infrastructure.Authorization;
 using TemplateName.Modules.Auth.Infrastructure.Contracts;
+using TemplateName.Modules.Auth.Infrastructure.DataProtection;
 using TemplateName.Modules.Auth.Infrastructure.External;
 using TemplateName.Modules.Auth.Infrastructure.Observability;
 using TemplateName.Modules.Auth.Infrastructure.Persistence;
@@ -59,7 +60,8 @@ public static class AuthModule
     /// social login's configuration (<c>Auth:External</c>, the provider catalog and the <c>oidc-discovery</c> and <c>facebook-graph</c> HTTP clients)
     /// and proof verification (the ID token verifier, the nonce replay guard and <c>IExternalIdentityVerifier</c>),
     /// the retention of time-bound rows (<c>Auth:Retention</c>) with the six recurring cleanup jobs that enforce it, and the Data Protection
-    /// key ring stored in <c>auth.DataProtectionKeys</c>. Call it after
+    /// key ring stored in <c>auth.DataProtectionKeys</c>, wrapped with the certificate of <c>Auth:DataProtection</c>, which the host
+    /// refuses to start without outside Development and Testing (<c>KeyRingStartupCheck</c>). Call it after
     /// <c>AddInfrastructureCommon</c> and before <c>AddApplicationDecorators</c>.
     /// </summary>
     public static IServiceCollection AddAuthModule(this IServiceCollection services, IConfiguration configuration)
@@ -67,6 +69,13 @@ public static class AuthModule
         var assembly = typeof(AuthModule).Assembly;
 
         services.AddModuleDbContext<AuthDbContext>(AuthDbContext.Schema);
+
+        // Hosted services start in registration order, so the host refuses an unusable key ring before this module's outbox dispatcher,
+        // the signing key provider and the later modules' background workers start. The recurring job scheduler is registered earlier, by
+        // AddInfrastructureCommon, and its first tick may run before the check throws; those jobs (the cleanups among them) do not use
+        // Data Protection. The migrate mode never starts the host, so it never runs the check.
+        services.AddSingleton<IKeyRingReader, DbKeyRingReader>();
+        services.AddHostedService<KeyRingStartupCheck>();
         services.AddOutbox<AuthDbContext>(assembly);
         services.AddApplicationHandlers(assembly);
         services.AddErrorMessages<AuthErrorMessages>();
@@ -130,9 +139,13 @@ public static class AuthModule
         var applicationName = configuration["Auth:DataProtection:ApplicationName"] is { Length: > 0 } configuredName
             ? configuredName
             : DefaultDataProtectionApplicationName;
-        services.AddDataProtection()
+        var keyRingCertificates = KeyRingCertificates.Load(configuration);
+        services.AddSingleton(keyRingCertificates);
+        var dataProtection = services.AddDataProtection()
             .SetApplicationName(applicationName)
             .PersistKeysToDbContext<AuthDbContext>();
+        KeyRingCertificates.Protect(dataProtection, keyRingCertificates);
+        KeyRingCertificates.RequireCertificateToCreateKeys(dataProtection, keyRingCertificates);
 
         return services;
     }

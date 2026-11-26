@@ -119,11 +119,16 @@ app.UseStatusCodePages();
 app.UseTraceIdHeader();
 // 5. UseSecurityHeaders
 app.UseSecurityHeaders();
-// 6. HSTS + HTTPS redirection, non-Development
+// 6. HSTS + HTTPS redirection, non-Development. The health endpoints are exempt from the redirect, so a plain local probe (an IIS
+//    deploy check on http://localhost, the container's own check) gets its answer instead of a 307 once an https port is known.
+//    HSTS needs no exemption: it sends nothing over plain HTTP. The exposure is unchanged: those endpoints were anonymous already and
+//    return only a status.
 if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();
-    app.UseHttpsRedirection();
+    app.UseWhen(
+        context => !context.Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase),
+        branch => branch.UseHttpsRedirection());
 }
 // 7. UseRequestLogging
 app.UseRequestLogging();

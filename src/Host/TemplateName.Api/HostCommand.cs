@@ -50,7 +50,8 @@ internal static partial class HostCommand
     /// <summary>
     /// Makes one GET to the liveness endpoint and writes one line to <paramref name="output"/>: the status code, or the kind of failure.
     /// Returns 0 for a 2xx answer and 1 for anything else, a timeout or a refused connection included. A redirect is not followed, so
-    /// HTTPS redirection switched on by an https port reads <c>unhealthy (307)</c> instead of a failure somewhere else.
+    /// one (the host exempts <c>/health/*</c> from HTTPS redirection, so only something in front of it or a later change would send it)
+    /// reads <c>unhealthy (307)</c> instead of a failure somewhere else.
     /// </summary>
     /// <param name="httpPorts">The value of <c>ASPNETCORE_HTTP_PORTS</c>.</param>
     /// <param name="output">Where the line goes.</param>

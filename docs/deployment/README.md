@@ -10,6 +10,7 @@ What was and was not run: the workflows, the Dockerfile and the scripts were wri
 | [`iis.md`](iis.md) | The IIS script (normal and maintenance orders, recovery) and the checklist for a real server |
 | [`migrations.md`](migrations.md) | `migrate`, the two logins, expand then contract and the maintenance mode |
 | [`production-checklist.md`](production-checklist.md) | The production checklist, line by line |
+| [`../runbooks/README.md`](../runbooks/README.md) | The operational runbooks: the contract phase, a locked-out user, a lost authenticator, signing-key rotation, a restore and the key ring, dead-letter replay |
 
 ## The pipeline
 
@@ -97,7 +98,7 @@ The `maintenance` job runs `build/scripts/detect-contract-migration.sh` and `bui
 | `IIS_ENABLED` | `deploy-iis` | `true` turns the IIS job on. |
 | `IIS_SITE_PATH` | `deploy-iis` | The IIS site's physical path. |
 | `IIS_APP_POOL` | `deploy-iis` | The site's application pool. |
-| `IIS_HEALTH_URL` | `deploy-iis` | The readiness URL the script polls: the site's public https URL, `https://<public host>/health/ready`, with a certificate valid for that host. Not `http://localhost`: HTTPS redirection would send it to `https://localhost` ([`iis.md`](iis.md#health-url)). |
+| `IIS_HEALTH_URL` | `deploy-iis` | The readiness URL the script polls: `http://localhost/health/ready` (the health endpoints are exempt from HTTPS redirection; needs an http binding and `localhost` in `AllowedHosts`) or the site's public `https://<public host>/health/ready` with a certificate valid for that host ([`iis.md`](iis.md#health-url)). |
 | `CODEQL_ENABLED` | `codeql` | `false` skips the CodeQL job (see below). Anything else, or unset, runs it. |
 | `STAGING_URL` | `deploy-staging` | Base URL of staging (a trailing slash is dropped); the smoke test calls `<url>/health/ready`. A repository variable, or one on the `staging` environment. |
 | `PRODUCTION_URL` | `deploy-production` | The same for production. |

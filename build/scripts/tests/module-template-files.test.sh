@@ -53,7 +53,8 @@ assert_files() {
   fi
 }
 
-# module_files <module> <prefix>: the files under the first project of a module, then the marker and the document.
+# module_files <module> <prefix>: the files under the first project of a module, then the marker, the document and the upgrade-path
+# seed and verify scripts of its first migration.
 module_files() {
   local m="$1" p="$2" root="src/Modules/$1/$2.Modules.$1"
   cat <<EOF
@@ -70,6 +71,8 @@ $root/Resources/${m}ErrorMessages.resx
 $root/Resources/${m}ErrorMessages.ms.resx
 $root/Resources/${m}ErrorMessages.zh-Hans.resx
 $root/Domain/.gitkeep
+tests/$p.IntegrationTests/UpgradePath/Seeds/$m/Create${m}Schema.seed.sql
+tests/$p.IntegrationTests/UpgradePath/Seeds/$m/Create${m}Schema.verify.sql
 EOF
 }
 
