@@ -23,7 +23,7 @@ The operator who owns the database backups and the host's secrets (the certifica
 2. **Restore the database** as a whole with your backup tool. Never restore the rest of the schema without `auth.DataProtectionKeys`, and keep `Auth:DataProtection:ApplicationName` unchanged.
 3. **Put the certificates on the host.**
    - File: mount each PFX read-only (Docker: as a secret or a read-only volume) and give the password to the process as a secret or environment variable.
-   - Store (IIS, Windows): `Import-PfxCertificate -FilePath .\keyring.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $password`, then allow the app pool identity to read the private key ([`../deployment/iis.md`](../deployment/iis.md)).
+   - Store (IIS, Windows): `$password = Read-Host -AsSecureString` (or `ConvertTo-SecureString` of a value your secret store hands you, never a literal in the command), then `Import-PfxCertificate -FilePath .\keyring.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $password`, then allow the app pool identity to read the private key ([`../deployment/iis.md`](../deployment/iis.md)).
 4. **Configure the settings** (user secrets, environment variables or your secret store, never a file in the repository). `Source` is `Store` or `File`. The active certificate:
 
    ```text

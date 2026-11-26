@@ -68,7 +68,7 @@ The outbox delivers at least once, so every step of the chain is built to run tw
 - Inside the owning module, `OutboxMessageConsumers (OutboxMessageId, Name)` records each handler that succeeded, in the same save as its work. A replay skips those and runs only the handlers that failed. These rows are kept for an abandoned message (the cleanup deletes them only with a processed one).
 - A handler that publishes an integration event to another module uses the outbox message id as the event id. Each consuming module records `InboxMessages (MessageId, Consumer)` in **its own schema**, in the same save as its rows, and skips an event it already recorded (ADR 0018). So a consumer that already succeeded is not run a second time.
 
-One limit: an inbox row is deleted after `Retention:Inbox` (7 days by default) past its `ProcessedAt`. Replay within that window of the consumer's last success. Replaying a message older than that, one whose consumer had already done its work, can repeat the effect of that consumer: check the consumer's rows first.
+One limit: an inbox row is deleted after `Retention:Inbox` (7 days by default) past its `ProcessedAt`. Replay within that window of the consumer's last success. Replaying a message older than that, one whose consumer had already done its work, can repeat the effect of that consumer: check the consumer's rows first. With `Retention:Inbox` set to `0` the inbox cleanup is off and no inbox row is ever deleted, so replay is safe at any age.
 
 ## Verify
 

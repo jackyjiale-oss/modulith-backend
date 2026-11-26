@@ -21,7 +21,7 @@ A caller with the permission `auth.user.reset_mfa` (held by `SuperAdmin` and, by
    Authorization: Bearer <access token with auth.user.reset_mfa>
    ```
 
-   No body; 204 on success, also for a user without two-step verification (nothing changes). The method and every recovery code are deleted, the security stamp rotates (pending challenges and trusted devices die) and every session of the user ends. The audit row `auth.admin_mfa_reset` records you as the actor.
+   No body; 204 on success, also for a user without two-step verification (nothing changes). The method (a pending setup too) and every recovery code are deleted. When the method was confirmed, the security stamp also rotates (pending challenges and trusted devices die) and every session of the user ends; a setup that was only pending is just removed, with no stamp change and no session ended. The audit row `auth.admin_mfa_reset` records you as the actor.
 4. **Tell the user** to sign in with the password alone and to set up a new authenticator at once (`POST /api/v1/auth/mfa/totp/setup`, then `/confirm`), and to keep the new recovery codes somewhere other than the phone.
 
 ## Verify
