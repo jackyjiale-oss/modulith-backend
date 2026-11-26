@@ -16,6 +16,8 @@ ADR 0017 keeps the Data Protection key ring in `auth.DataProtectionKeys` so ever
 
 **When it is required.** (1) Never, a setting turns it on; (2) a start-up refusal outside Development and Testing; (3) the refusal, with a flag that bypasses it.
 
+Rejected: **Key Vault** and **DPAPI** as built-in options (a cloud account or a Windows-only dependency in a template that must run anywhere; a project swaps the protector, see the consequences), **no protector** (leaves the gap the checklist already names). In Auth, not a **new building-block package**: Auth is the only module with a ring, so a package would be a seam with one user. A **single thumbprint** in an environment variable is rejected because Docker has no certificate store and rotation needs a list of certificates. A **bypass flag** is rejected because a flag that is easy to set is the first thing a rushed release sets, and it would leave a plaintext ring in Production; Development and Testing already cover the cases where the ring may stay unwrapped.
+
 ## Decision
 We chose a certificate, in Auth, named by source, and a start-up refusal with no bypass.
 
@@ -28,7 +30,7 @@ We chose a certificate, in Auth, named by source, and a start-up refusal with no
 
 ## Consequences
 - **A new start-up refusal.** A project that upgrades without a certificate no longer starts in Production; the message names the setting and the runbook, and the release notes and the production checklist say so. Development and Testing are unaffected. `container-verify.sh` makes a throwaway PFX for its Production run and proves the refusal without one.
-- **The framework wraps with RSA PKCS#1 v1.5 key transport** (`ProtectKeysWithCertificate` offers no choice). The certificate's private key is used only to unwrap keys read from the database at start; no request carries input to it. Accepted, because the framework has no other certificate-based protector.
+- **The framework wraps with RSA PKCS#1 v1.5 key transport** (`ProtectKeysWithCertificate` offers no choice). The certificate's private key is used only to unwrap keys whenever they are read from the database (at start and whenever the framework refreshes its key cache); no request carries input to it. Accepted, because the framework has no other certificate-based protector.
 - **A certificate that ever wrapped a key stays needed** for as long as the ring exists, because data protected by that key (a TOTP secret) still needs it, so it stays in `PreviousCertificates` and in the backup set, with its password in a secret store. Re-wrapping old keys is not built. A lost certificate means a new ring and the consequences in the runbook.
 - **An expired active certificate stops the next restart**, not the running process; the runbook says to rotate before the expiry and the message gives the dates.
 - **Certificate access is deployment work.** On IIS the application pool identity must be able to read the certificate's private key; in Docker the PFX is mounted read-only and its password is a secret ([`docs/deployment/iis.md`](../deployment/iis.md#the-key-ring-certificate), [`docs/deployment/docker.md`](../deployment/docker.md#the-key-ring-certificate)).
