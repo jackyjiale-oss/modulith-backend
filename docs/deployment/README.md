@@ -10,6 +10,7 @@ What was and was not run: the workflows, the Dockerfile and the scripts were wri
 | [`iis.md`](iis.md) | The IIS script (normal and maintenance orders, recovery) and the checklist for a real server |
 | [`migrations.md`](migrations.md) | `migrate`, the two logins, expand then contract and the maintenance mode |
 | [`production-checklist.md`](production-checklist.md) | The production checklist, line by line |
+| [`../runbooks/README.md`](../runbooks/README.md) | The operational runbooks: the contract phase, a locked-out user, a lost authenticator, signing-key rotation, a restore and the key ring, dead-letter replay |
 
 ## The pipeline
 

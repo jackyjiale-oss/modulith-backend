@@ -2,7 +2,7 @@
 
 # Template switch markers
 
-Rows: 62
+Rows: 63
 
 | file | kinds | expressions |
 | --- | --- | --- |
@@ -35,6 +35,7 @@ Rows: 62
 | docs/modules/auth.md | <!--#if | caching == "redis"; includeSample; notifications |
 | docs/modules/notifications.md | <!--#if | caching == "redis" |
 | docs/modules/sample.md | <!--#if | notifications |
+| docs/runbooks/dead-letter-replay.md | <!--#if | notifications |
 | docs/services/api.md | <!--#if | caching == "redis"; includeSample; notifications; notifications && includeSample |
 | src/Host/TemplateName.Api/Program.cs | //#if | caching == "redis"; includeSample; notifications |
 | src/Host/TemplateName.Api/TemplateName.Api.csproj | <!--#if | caching == "redis"; includeSample; notifications |

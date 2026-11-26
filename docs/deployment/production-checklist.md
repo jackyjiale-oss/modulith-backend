@@ -88,6 +88,8 @@ With Redis down `/health/ready` answers 200 `Degraded`, by design ([`services/ap
 
 Nothing in the template takes or tests a backup. **Yours:** schedule database backups and restore one into a scratch database. Back the database up and restore it **as a whole**: the schema holds `auth.DataProtectionKeys`, and a restore that loses it makes every stored TOTP secret unreadable ([Auth module](../modules/auth.md#recovering-access)). The backups contain the unencrypted key ring ([above](#data-protection-keys-persisted-and-protected)), so protect them like secrets. Retention of rows inside the database (outbox, inbox, audit trails) is a different matter and is configured per kind of data ([`services/api.md`](../services/api.md#retention)).
 
+The procedures for restoring a backup, the key ring and its certificate, a contract-phase release and the other operations are the [runbooks](../runbooks/README.md); read them before you need them.
+
 ## Also before the first release
 
 - [ ] Every item above has an owner and a date.
