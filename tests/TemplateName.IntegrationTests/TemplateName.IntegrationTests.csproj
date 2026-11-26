@@ -44,6 +44,11 @@
   <!--#endif-->
 
   <ItemGroup>
+    <!-- The seed and verify scripts of the upgrade-path ladder (UpgradePath/UpgradeLadder.cs reads them by name). -->
+    <EmbeddedResource Include="UpgradePath\Seeds\**\*.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- One repository-root locator, one document-path derivation and one OpenAPI classifier (tested in the architecture tests) for both test projects. -->
     <Compile Include="..\TemplateName.ArchitectureTests\RepositoryPaths.cs" Link="Documentation\RepositoryPaths.cs" />
     <Compile Include="..\TemplateName.ArchitectureTests\DocumentPaths.cs" Link="Documentation\DocumentPaths.cs" />

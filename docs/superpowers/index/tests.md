@@ -2,7 +2,7 @@
 
 # Tests
 
-Rows: 240
+Rows: 241
 
 ## Folders
 
@@ -24,6 +24,7 @@ Rows: 240
 | TemplateName.IntegrationTests | Persistence | cross-cutting |
 | TemplateName.IntegrationTests | Redis | Platform.Redis |
 | TemplateName.IntegrationTests | Sample | Sample |
+| TemplateName.IntegrationTests | UpgradePath | cross-cutting |
 | TemplateName.UnitTests | Application | Application.Common |
 | TemplateName.UnitTests | Audit | Audit |
 | TemplateName.UnitTests | Auth | Auth |
