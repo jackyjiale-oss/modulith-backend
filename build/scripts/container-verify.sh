@@ -47,8 +47,8 @@
 #   - AddPlatformRedis registers nothing while Caching:Provider is memory (the default, below);
 #endif
 #   - the only environment-dependent checks in src/ are the signing key (above), HSTS plus HTTPS redirection outside Development
-#     (with no https port configured, UseHttpsRedirection only logs a warning and passes the request on; HSTS acts on https requests
-#     only; the Dockerfile says not to set an https port), OpenAPI and Scalar (not mapped in Production) and the log format;
+#     (with no https port configured, UseHttpsRedirection only logs a warning and passes the request on; /health/* is exempt from the
+#     redirect anyway; HSTS acts on https requests only), OpenAPI and Scalar (not mapped in Production) and the log format;
 #   - Auth:Links: the localhost defaults pass (absolute http(s) with {token}); a real deployment sets its front-end URLs;
 #if (notifications)
 #   - Notifications:Email: host localhost and no username pass; SMTP is reached only for a pending email delivery, none here;
