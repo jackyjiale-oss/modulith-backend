@@ -1,0 +1,2 @@
+-- ModuleName after CreateModuleNameSchema: the module has no table of its own yet, so nothing is seeded here. Rows for a table go in a seed named after
+-- the migration that creates it, Seeds/ModuleName/{MigrationName}.seed.sql, with its verify script (docs/coding-conventions.md). Keep this file: a module needs a seed.

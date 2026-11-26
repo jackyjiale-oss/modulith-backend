@@ -37,13 +37,29 @@ public sealed class UpgradeLadderGuardTests
     public void A_contract_migration_without_a_seed_before_it_is_reported()
     {
         var violations = UpgradeLadderRules.Violations(
-            [Ladder(Rung("20260101000000_AddNickname", typeof(AddsNickname)), Rung("20260102000000_DropNickname", typeof(DropsNickname)))],
-            Keys(),
-            Keys());
+            [Ladder(
+                Rung("20260101000000_AddAge", typeof(AddsAge)),
+                Rung("20260102000000_AddNickname", typeof(AddsNickname)),
+                Rung("20260103000000_DropNickname", typeof(DropsNickname)))],
+            Keys("Things/AddAge"),
+            Keys("Things/AddAge"));
 
         var violation = violations.ShouldHaveSingleItem();
         violation.ShouldContain("Things/DropNickname");
         violation.ShouldContain("Things/AddNickname");
+    }
+
+    [Fact]
+    public void A_context_without_any_seed_is_reported()
+    {
+        var violations = UpgradeLadderRules.Violations(
+            [Ladder(Rung("20260101000000_AddNickname", typeof(AddsNickname)), Rung("20260102000000_AddAge", typeof(AddsAge)))],
+            Keys(),
+            Keys());
+
+        var violation = violations.ShouldHaveSingleItem();
+        violation.ShouldContain("Things");
+        violation.ShouldContain("no seed");
     }
 
     [Fact]

@@ -36,7 +36,7 @@ public sealed class UpgradePathTests(IntegrationTestWebAppFactory factory)
             }
 
             var context = (DbContext)scope.ServiceProvider.GetRequiredService(ladder.ContextType);
-            var seeded = await MigrateRungByRungAsync(context, ladder, failures);
+            var seeded = await MigrateRungByRungAsync(context, connectionString, ladder, failures);
             foreach (var rung in ladder.Rungs.Where(rung => seeded.Contains(rung.Name)))
             {
                 await VerifyAsync(connectionString, ladder, rung, failures);
@@ -47,7 +47,7 @@ public sealed class UpgradePathTests(IntegrationTestWebAppFactory factory)
     }
 
     /// <summary>Migrates to each rung in turn and runs its seed; returns the names of the rungs whose seed ran without an error.</summary>
-    private static async Task<HashSet<string>> MigrateRungByRungAsync(DbContext context, ModuleLadder ladder, List<string> failures)
+    private static async Task<HashSet<string>> MigrateRungByRungAsync(DbContext context, string connectionString, ModuleLadder ladder, List<string> failures)
     {
         var migrator = context.GetService<IMigrator>();
         var seeded = new HashSet<string>(StringComparer.Ordinal);
@@ -73,7 +73,7 @@ public sealed class UpgradePathTests(IntegrationTestWebAppFactory factory)
 
             try
             {
-                await context.Database.ExecuteSqlRawAsync(seed, Ct);
+                await ExecuteSeedAsync(connectionString, seed);
                 seeded.Add(rung.Name);
             }
 #pragma warning disable CA1031
@@ -97,6 +97,19 @@ public sealed class UpgradePathTests(IntegrationTestWebAppFactory factory)
         }
 
         return seeded;
+    }
+
+    /// <summary>
+    /// Runs one seed as a single batch over a plain connection. <c>ExecuteSqlRawAsync</c> would read the braces of a JSON value in a seed as
+    /// format placeholders.
+    /// </summary>
+    private static async Task ExecuteSeedAsync(string connectionString, string seed)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = seed;
+        await command.ExecuteNonQueryAsync(Ct);
     }
 
     private static async Task VerifyAsync(string connectionString, ModuleLadder ladder, MigrationRung rung, List<string> failures)

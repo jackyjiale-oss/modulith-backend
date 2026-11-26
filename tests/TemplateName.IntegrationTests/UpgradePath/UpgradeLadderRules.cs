@@ -6,9 +6,9 @@ namespace TemplateName.IntegrationTests.UpgradePath;
 internal static class UpgradeLadderRules
 {
     /// <summary>
-    /// The rules, as one message each: a seed names a migration that exists (a renamed migration cannot leave a stale seed), a seed and
-    /// its verify script come as a pair, and a <see cref="ContractMigrationAttribute"/> migration has a seed on the migration before it,
-    /// so the contraction is proved over data.
+    /// The rules, as one message each: every context that has migrations has at least one seed, a seed names a migration that exists (a
+    /// renamed migration cannot leave a stale seed), a seed and its verify script come as a pair, and a
+    /// <see cref="ContractMigrationAttribute"/> migration has a seed on the migration before it, so the contraction is proved over data.
     /// </summary>
     /// <param name="ladders">The migrations of every context.</param>
     /// <param name="seedKeys">The keys (<c>{Module}/{Name}</c>) of the seed scripts.</param>
@@ -21,6 +21,13 @@ internal static class UpgradeLadderRules
 
         var violations = new List<string>();
         var migrationKeys = ladders.SelectMany(ladder => ladder.Rungs.Select(rung => KeyOf(ladder, rung))).ToHashSet(StringComparer.Ordinal);
+
+        foreach (var ladder in ladders.Where(ladder => !ladder.Rungs.Any(rung => seedKeys.Contains(KeyOf(ladder, rung)))))
+        {
+            violations.Add(
+                $"The context '{ladder.Module}' has migrations and no seed; add 'Seeds/{ladder.Module}/{{MigrationName}}.seed.sql' and its " +
+                "verify script for its first migration (docs/coding-conventions.md says what a seed holds).");
+        }
 
         foreach (var key in seedKeys.Order(StringComparer.Ordinal))
         {

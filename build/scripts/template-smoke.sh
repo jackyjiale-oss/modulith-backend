@@ -453,6 +453,7 @@ expect_part "$notifications" "notifications=$notifications" \
   src/Modules/Notifications \
   "tests/$project_name.UnitTests/Notifications" \
   "tests/$project_name.IntegrationTests/Notifications" \
+  "tests/$project_name.IntegrationTests/UpgradePath/Seeds/Notifications" \
   docs/modules/notifications.md \
   docs/adr/0019-embedded-scriban-notification-templates.md \
   docs/adr/0021-signalr-hub-tickets.md
@@ -460,6 +461,7 @@ expect_part "$include_sample" "includeSample=$include_sample" \
   src/Modules/Sample \
   "tests/$project_name.UnitTests/Sample" \
   "tests/$project_name.IntegrationTests/Sample" \
+  "tests/$project_name.IntegrationTests/UpgradePath/Seeds/Sample" \
   docs/modules/sample.md
 redis_kept=true
 if [[ "$caching" == "memory" ]]; then redis_kept=false; fi
