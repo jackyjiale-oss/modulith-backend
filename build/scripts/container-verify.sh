@@ -6,7 +6,8 @@
 #   4. wait until Docker reports the image's own HEALTHCHECK as `healthy`;
 #   5. GET /health/ready from this machine: 200;
 #   6. the container's configured user is not root;
-#   7. remove every container and the network, whatever the outcome; on failure print the container logs first.
+#   7. start `<image>` in Production without the key ring certificate: it must exit non-zero and name Auth:DataProtection:Certificate;
+#   8. remove every container and the network, whatever the outcome; on failure print the container logs first.
 #
 # Usage: bash build/scripts/container-verify.sh <image>      for example api:ci, or ghcr.io/owner/repo@sha256:...
 #
@@ -24,16 +25,22 @@
 #   docker network ls --filter label=container-verify -q
 # A SIGKILL cannot be trapped; remove what it leaves with the same label filters.
 #
-# Secrets: the SA password (`openssl rand -hex 12` plus `Aa1!`, for SQL Server's complexity rule) and the ES256 signing key are made
-# here for this run only and never written to a file. When GITHUB_ACTIONS is set both are masked before any use. They reach a
-# container by name (`-e NAME`, taken from the environment of that one docker command), never on a command line, so the runner's
-# process list does not show them.
+# Secrets: the SA password (`openssl rand -hex 12` plus `Aa1!`, for SQL Server's complexity rule), the ES256 signing key and the
+# password of the key ring certificate's PFX are made here for this run only. None of the three is written to a file (the PFX itself
+# is, in $work, which is removed on exit, but its password is not). When GITHUB_ACTIONS is set each is masked before any use. They
+# reach a container by name (`-e NAME`, taken from the environment of that one docker command), never on a command line, so the
+# runner's process list does not show them.
 #
 # The minimum Production configuration (docs/deployment/docker.md, "Running it"; ADR 0033). Production refuses to start without:
 #   ConnectionStrings__Database                    ConnectionStringsOptions.Database is [Required], validated on start; `migrate`
 #                                                  reads it too (ADR 0006), and is given nothing else.
 #   Auth__Jwt__SigningKeys__0__KeyId               JwtOptions: an empty Auth:Jwt:SigningKeys fails ValidateOnStart outside Development and
 #   Auth__Jwt__SigningKeys__0__PrivateKeyPem       Testing; the key must be EC P-256, PEM 'PRIVATE KEY' (PKCS#8) or 'EC PRIVATE KEY'.
+#   Auth__DataProtection__Certificate__Source      KeyRingStartupCheck: outside Development and Testing the host does not start unless the
+#   Auth__DataProtection__Certificate__Path        Data Protection key ring is wrapped with an RSA certificate that is valid now and holds
+#   Auth__DataProtection__Certificate__Password    no plaintext key. Here: a throwaway PFX made for this run (RSA, self-signed), mounted
+#                                                  read-only at /certs/dp.pfx, with Source File. `migrate` is given none of these: it
+#                                                  never starts the host, so it needs no certificate.
 # ASPNETCORE_ENVIRONMENT=Production is set explicitly (the image's default is Production too).
 # AllowedHosts is set the way the docs tell a deployment to set it, not left at `*`: a public host name plus 127.0.0.1 (the
 # image's HEALTHCHECK sends Host 127.0.0.1:<port>) and localhost. Host filtering answers 400 to any other Host, so steps 4 and 5
@@ -60,11 +67,13 @@
 #if (notifications)
 #   - Notifications:Templates/Delivery/Hub/Retention: valid defaults;
 #endif
-#   - Data Protection: the key ring is kept in auth.DataProtectionKeys (made by `migrate`), not on the container's file system;
+#   - Data Protection: the key ring is kept in auth.DataProtectionKeys (made by `migrate`), not on the container's file system, and
+#     wrapped with the certificate above (step 7 proves the host refuses to start without it);
 #   - Auth:Seed:RunOnStartup (on by default) seeds roles and permissions before the host starts, so the database must be migrated
 #     first (step 2); with Auth:Seed:AdminEmail/AdminPassword empty no administrator is created;
 #   - OTEL_EXPORTER_OTLP_ENDPOINT unset: no exporter.
-# The integration test HostTests.Scalar_is_not_mapped_in_production starts Production with the same files plus a signing key.
+# The integration test HostTests.Scalar_is_not_mapped_in_production starts Production with the same files plus a signing key and a
+# throwaway key ring certificate.
 # Not ruled out without running the image: that test switches the outbox dispatcher, the recurring jobs and the other background
 # services off and skips the seeding, while the container runs all of them; a background service that throws stops the host (and fails
 # step 4 here, with the logs printed).
@@ -192,8 +201,10 @@ work="$(mktemp -d)"
 # The secrets of this run, masked before any use.
 sa_password="$(openssl rand -hex 12)Aa1!"
 signing_key_pem="$(openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt)"
+dp_password="$(openssl rand -hex 16)"
 if [ -n "${GITHUB_ACTIONS:-}" ]; then
   echo "::add-mask::$sa_password"
+  echo "::add-mask::$dp_password"
   while IFS= read -r line; do
     case "$line" in
       "" | -----*) ;;
@@ -203,9 +214,15 @@ if [ -n "${GITHUB_ACTIONS:-}" ]; then
 fi
 connection_string="Server=$sql,1433;Database=Verify;User Id=sa;Password=$sa_password;Encrypt=True;TrustServerCertificate=True"
 
+# The key ring certificate: an RSA key and a self-signed certificate in a PFX, valid from now. The file is readable by any user (the
+# image runs as a non-root user that is not the owner of $work) and mounted read-only; the key never leaves $work.
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$work/dp.key" -out "$work/dp.crt" -days 3 -subj "/CN=container-verify" 2>/dev/null
+DP_PFX_PASSWORD="$dp_password" openssl pkcs12 -export -inkey "$work/dp.key" -in "$work/dp.crt" -out "$work/dp.pfx" -passout env:DP_PFX_PASSWORD
+chmod 644 "$work/dp.pfx"
+
 echo "Verifying $image (each wait up to ${wait_limit}s; label $label)"
 
-step "1/7 Starting SQL Server ($sql_image) on the private network $network"
+step "1/8 Starting SQL Server ($sql_image) on the private network $network"
 docker network create --label "$label" "$network" >/dev/null
 MSSQL_SA_PASSWORD="$sa_password" docker run -d --name "$sql" --label "$label" --network "$network" \
   -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD \
@@ -258,7 +275,7 @@ attempt_seconds() {
   echo "$left"
 }
 
-step "2/7 Running '$image migrate', twice"
+step "2/8 Running '$image migrate', twice"
 deadline=$((SECONDS + wait_limit))
 attempt=0
 while :; do
@@ -284,18 +301,23 @@ else
   fail "the second migrate exited $? instead of 0."
 fi
 
-step "3/7 Starting '$image' as the API in Production"
+step "3/8 Starting '$image' as the API in Production"
 ConnectionStrings__Database="$connection_string" Auth__Jwt__SigningKeys__0__PrivateKeyPem="$signing_key_pem" \
+  Auth__DataProtection__Certificate__Password="$dp_password" \
   docker run -d --name "$api" --label "$label" --network "$network" -p "127.0.0.1::$api_port" \
+  -v "$work/dp.pfx:/certs/dp.pfx:ro" \
   -e ASPNETCORE_ENVIRONMENT=Production \
   -e "AllowedHosts=api.example.test;127.0.0.1;localhost" \
   -e ConnectionStrings__Database \
   -e Auth__Jwt__SigningKeys__0__KeyId=verify \
   -e Auth__Jwt__SigningKeys__0__PrivateKeyPem \
+  -e Auth__DataProtection__Certificate__Source=File \
+  -e Auth__DataProtection__Certificate__Path=/certs/dp.pfx \
+  -e Auth__DataProtection__Certificate__Password \
   "$image" >/dev/null
 pass "the API container started"
 
-step "4/7 Waiting for the HEALTHCHECK to report healthy"
+step "4/8 Waiting for the HEALTHCHECK to report healthy"
 deadline=$((SECONDS + wait_limit))
 while :; do
   health="$(inspect "$api" '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}')"
@@ -315,7 +337,7 @@ while :; do
 done
 pass "the HEALTHCHECK reports healthy"
 
-step "5/7 GET /health/ready from this machine"
+step "5/8 GET /health/ready from this machine"
 published="$(docker port "$api" "$api_port/tcp")"
 published="${published%%$'\n'*}"
 host_port="${published##*:}"
@@ -340,14 +362,38 @@ while :; do
 done
 pass "$ready_url answered 200"
 
-step "6/7 Checking the container's user"
+step "6/8 Checking the container's user"
 user="$(inspect "$api" '{{.Config.User}}')"
 case "$user" in
   "" | root | 0 | root:* | 0:* | missing) fail "the container runs as root (configured user: '${user}')." ;;
 esac
 pass "the container runs as user '$user', not root"
 
-step "7/7 Removing the containers and the network"
+step "7/8 Starting '$image' in Production without the key ring certificate"
+# The same configuration as step 3 minus the three Auth__DataProtection__Certificate__* settings: the host must refuse to start, exit
+# non-zero and name the missing setting. Run in the foreground and bounded, so a host that wrongly starts is killed, not waited for.
+nocert_status=0
+ConnectionStrings__Database="$connection_string" Auth__Jwt__SigningKeys__0__PrivateKeyPem="$signing_key_pem" \
+  timeout --foreground --kill-after=5 "$wait_limit" \
+  docker run --rm --label "$label" --network "$network" \
+  -e ASPNETCORE_ENVIRONMENT=Production \
+  -e "AllowedHosts=api.example.test;127.0.0.1;localhost" \
+  -e ConnectionStrings__Database \
+  -e Auth__Jwt__SigningKeys__0__KeyId=verify \
+  -e Auth__Jwt__SigningKeys__0__PrivateKeyPem \
+  "$image" >"$work/nocert.log" 2>&1 || nocert_status=$?
+case "$nocert_status" in
+  0) fail "the API started in Production without a key ring certificate (exit 0); it must refuse." ;;
+  124 | 137) fail "the API did not stop within ${wait_limit}s in Production without a key ring certificate; it must refuse to start." ;;
+esac
+if ! grep -q "Auth:DataProtection:Certificate" "$work/nocert.log"; then
+  echo "--- output of the run without the certificate" >&2
+  cat "$work/nocert.log" >&2
+  fail "the API exited $nocert_status without a key ring certificate but its output does not name Auth:DataProtection:Certificate."
+fi
+pass "without the certificate the API exits $nocert_status and names Auth:DataProtection:Certificate"
+
+step "8/8 Removing the containers and the network"
 # The EXIT trap removes them too (a no-op by then); here a passing run also proves nothing is left behind.
 remove_created
 leftover_containers="$(docker ps -aq --filter "label=$label")"

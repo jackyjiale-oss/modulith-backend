@@ -2,7 +2,7 @@
 
 # Tests
 
-Rows: 242
+Rows: 244
 
 ## Folders
 
@@ -188,6 +188,8 @@ Pairs `Foo.cs` under `src/` (not under `Migrations`) with `FooTests.cs` under `t
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Contracts/UserContactDirectory.cs | tests/TemplateName.IntegrationTests/Auth/UserContactDirectoryTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/Contracts/UserSessionDirectory.cs | tests/TemplateName.IntegrationTests/Auth/UserSessionDirectoryTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/DataProtection/KeyRingCertificates.cs | tests/TemplateName.UnitTests/Auth/DataProtection/KeyRingCertificatesTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/DataProtection/KeyRingInspector.cs | tests/TemplateName.UnitTests/Auth/DataProtection/KeyRingInspectorTests.cs |
+| src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/DataProtection/KeyRingStartupCheck.cs | tests/TemplateName.UnitTests/Auth/DataProtection/KeyRingStartupCheckTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/External/ExternalLoginOptions.cs | tests/TemplateName.UnitTests/Auth/External/ExternalLoginOptionsTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/External/ExternalNonceGate.cs | tests/TemplateName.UnitTests/Auth/External/ExternalNonceGateTests.cs |
 | src/Modules/Auth/TemplateName.Modules.Auth/Infrastructure/External/ExternalProviderCatalog.cs | tests/TemplateName.UnitTests/Auth/External/ExternalProviderCatalogTests.cs |

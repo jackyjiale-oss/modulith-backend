@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -89,11 +88,7 @@ public sealed class HostTests(IntegrationTestWebAppFactory factory) : Integratio
     [Fact]
     public async Task Scalar_is_not_mapped_in_production()
     {
-        using var signingKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        await using var production = Factory.WithWebHostBuilder(builder => builder
-            .UseEnvironment("Production")
-            .UseSetting("Auth:Jwt:SigningKeys:0:KeyId", "production-test")
-            .UseSetting("Auth:Jwt:SigningKeys:0:PrivateKeyPem", signingKey.ExportPkcs8PrivateKeyPem()));
+        await using var production = await ProductionHosts.CreateAsync(Factory, "TemplateName_HostScalar", Ct);
         using var client = production.CreateClient();
 
         // Signed in: for an anonymous caller the fallback policy answers 401 before the missing route shows.

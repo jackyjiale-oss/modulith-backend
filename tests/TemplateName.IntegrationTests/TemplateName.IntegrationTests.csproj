@@ -60,4 +60,10 @@
     <Compile Include="..\TemplateName.UnitTests\Auth\External\FakeIdentityProvider.cs" Link="Auth\External\FakeIdentityProvider.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The throwaway certificates and the framework-made key ring documents of the key ring tests, shared with the unit tests. -->
+    <Compile Include="..\TemplateName.UnitTests\Auth\DataProtection\TestCertificates.cs" Link="Auth\DataProtection\TestCertificates.cs" />
+    <Compile Include="..\TemplateName.UnitTests\Auth\DataProtection\KeyRingFixtures.cs" Link="Auth\DataProtection\KeyRingFixtures.cs" />
+  </ItemGroup>
+
 </Project>

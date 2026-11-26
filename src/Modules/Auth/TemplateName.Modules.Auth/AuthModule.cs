@@ -60,7 +60,8 @@ public static class AuthModule
     /// social login's configuration (<c>Auth:External</c>, the provider catalog and the <c>oidc-discovery</c> and <c>facebook-graph</c> HTTP clients)
     /// and proof verification (the ID token verifier, the nonce replay guard and <c>IExternalIdentityVerifier</c>),
     /// the retention of time-bound rows (<c>Auth:Retention</c>) with the six recurring cleanup jobs that enforce it, and the Data Protection
-    /// key ring stored in <c>auth.DataProtectionKeys</c>. Call it after
+    /// key ring stored in <c>auth.DataProtectionKeys</c>, wrapped with the certificate of <c>Auth:DataProtection</c>, which the host
+    /// refuses to start without outside Development and Testing (<c>KeyRingStartupCheck</c>). Call it after
     /// <c>AddInfrastructureCommon</c> and before <c>AddApplicationDecorators</c>.
     /// </summary>
     public static IServiceCollection AddAuthModule(this IServiceCollection services, IConfiguration configuration)
@@ -68,6 +69,11 @@ public static class AuthModule
         var assembly = typeof(AuthModule).Assembly;
 
         services.AddModuleDbContext<AuthDbContext>(AuthDbContext.Schema);
+
+        // Registered first among this module's services, so the host refuses an unusable key ring before the module's own background
+        // work starts (the migrate mode never starts the host, so it never runs).
+        services.AddSingleton<IKeyRingReader, DbKeyRingReader>();
+        services.AddHostedService<KeyRingStartupCheck>();
         services.AddOutbox<AuthDbContext>(assembly);
         services.AddApplicationHandlers(assembly);
         services.AddErrorMessages<AuthErrorMessages>();
