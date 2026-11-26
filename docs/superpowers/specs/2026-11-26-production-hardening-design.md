@@ -42,7 +42,7 @@
 | `...:Path`, `...:Password` | `File`: a PFX; for Docker, mounted as a secret, the password from a secret or environment variable, never committed |
 | `Auth:DataProtection:PreviousCertificates` | a list of the same shape, used only to decrypt |
 
-The certificate is RSA with a private key. The code loads it lazily, when the ring is first used.
+The certificate is RSA with a private key. `AddAuthModule` reads the certificates when the section is configured and calls `ProtectKeysWithCertificate` and `UnprotectKeysWithAnyCertificate` with them (both take loaded certificates; the framework's thumbprint overload is eager too and searches only the current user's store). A certificate that cannot be loaded is recorded in a status object, not thrown, so registration never fails; the startup check (3.3) reports it. `migrate` is given none of these settings by the pipeline, so it loads nothing and needs no certificate.
 
 ### 3.3 Startup rules
 
@@ -50,15 +50,16 @@ A startup check (a hosted service ordered before the first request, `ValidateOnS
 
 1. the active certificate is not configured, is not found, has no private key, is not RSA, or is outside its validity period (an expired certificate stops a restart, so the runbook says to rotate before expiry and the message gives the expiry date);
 2. a previous certificate is not found or has no private key;
-3. `auth.DataProtectionKeys` holds a plaintext key (section 3.4).
+3. `auth.DataProtectionKeys` holds a plaintext key (section 3.4);
+4. a key in the ring is wrapped under a certificate that is not in the configuration (the message names its thumbprint; the framework would fail on first use of that key, the check fails at start instead).
 
 Each failure message names the setting and the runbook. There is no bypass flag; `build/scripts/container-verify.sh` generates a throwaway certificate for its Production-mode run (section 7).
 
-Development and Testing keep today's unprotected ring. The `migrate` mode skips the check and never loads the certificate, so the migration identity gets no decryption rights.
+Development and Testing keep today's unprotected ring unless the certificate is configured. The check is a hosted service, so the `migrate` mode, which builds the host and never starts it, skips it.
 
-### 3.4 Plaintext ring detection
+### 3.4 Ring inspection
 
-Wrapping applies only to keys created after the protector is configured; old plaintext rows would stay readable and unprotected. The check reads the ring through the context and flags any `<key ...>` element not wrapped in an `encryptedKey` element. Revocation elements are not key material and are ignored. A missing table (first start, before migrations) counts as an empty ring. The detection is a pure function over the XML strings, unit-testable without a database; its tests feed it rings the framework itself produced, with and without the protector, so the marker is proved against real output and not a hand-written sample.
+Wrapping applies only to keys created after the protector is configured; old plaintext rows would stay readable and unprotected. The check reads the ring through the context and inspects each `<key ...>` document. The framework's own output, checked in a spike on 2026-11-26, marks the two forms: a plaintext key holds a `masterKey` element (with the comment "the key below is in an unencrypted form"); a wrapped key holds an `encryptedSecret` element whose `EncryptedKey` embeds the wrapping certificate as `X509Certificate`. So a key is plaintext when it has no `encryptedSecret`, and a wrapped key names its certificate (the SHA-1 thumbprint of the embedded certificate), which is how rule 4 and the restore runbook identify the certificates a ring needs. Revocation documents (root `revocation`) are not key material and are ignored. A missing table (first start, before migrations) counts as an empty ring. The inspection is a pure function over the XML strings, unit-testable without a database; its tests feed it rings the framework itself produced, with and without the protector, so the markers are proved against real output and not a hand-written sample.
 
 ### 3.5 Rotation
 
@@ -69,8 +70,8 @@ Rotation adds the new certificate as active and moves the old one to `PreviousCe
 - A ring wrapped under the certificate is readable by a second, separately built provider.
 - After rotation, keys wrapped under the old certificate are still readable; new keys use the new one.
 - A missing certificate, a wrong thumbprint, a certificate with no private key and an expired one each fail with the message naming the setting.
-- A plaintext ring is refused; an encrypted ring and an empty ring pass; revocation rows are ignored.
-- `migrate` starts with no certificate configured.
+- A plaintext ring is refused; an encrypted ring and an empty ring pass; revocation rows are ignored; a ring wrapped under a certificate that is not configured is refused with its thumbprint.
+- `migrate` runs in Production with no certificate configured.
 - The certificates are generated in memory by the tests; no PFX is committed.
 
 ## 4. Upgrade-path test (the seed ladder)
@@ -82,19 +83,21 @@ ADR 0031 says a project is required to have this test and the template does not 
 A fixture in `tests/TemplateName.IntegrationTests/UpgradePath/`, using the integration test SQL Server container (Docker needed, as for every integration test):
 
 1. For each module that owns a `DbContext` (the same set the `migrate` mode applies), create a fresh database.
-2. Migrate to each of the module's migrations in order. After a migration that has a seed, run `Seeds/{Module}/{MigrationName}.seed.sql`.
+2. Migrate to each of the module's migrations in order. After a migration that has a seed, run `Seeds/{Module}/{MigrationName}.seed.sql`, where `{MigrationName}` is the migration class name without its timestamp (`InitialAuth`, not `20261008053947_InitialAuth`), and `{Module}` is the context's name without `DbContext` (`Auth`, `Audit`, `Notifications`, `Sample`, `Platform`). The files are embedded resources of the integration test project.
 3. Migrate to head.
 4. Run each seed's `{MigrationName}.verify.sql`. A verify script selects what is wrong and must return no rows: a seeded row that vanished, a value that did not survive a data-rewriting migration, an orphaned reference.
 5. The test fails if any migration step throws or any verify script returns a row.
 
 Modules migrate independently (no foreign keys cross schemas), so the order of modules does not matter.
 
-### 4.2 Guards (architecture tests)
+### 4.2 Guard tests (no Docker)
 
-- Every module has at least one seed.
-- A seed file names an existing migration (a renamed migration cannot leave a stale seed).
+They sit in the integration test project beside the fixture, read the migrations by reflection and the seeds as embedded resources, and take no container, so they run in a plain `dotnet test`.
+
+- Every context that has migrations has at least one seed.
+- A seed file names an existing migration (a renamed migration cannot leave a stale seed), and each seed has its verify script and the other way round.
 - Every migration marked `[ContractMigration]` has a seed on the migration before it, so the contract phase is proved over data.
-- The `modulith-module` template ships a starter seed and verify script for a new module, and the module-template smoke covers that the guard passes for a generated module.
+- The `modulith-module` template ships a placeholder seed and verify script for the migration `add-module.sh` creates (`Create{Module}Schema`), so a generated module passes the guard; the module-template smoke covers it.
 
 ### 4.3 Authoring rule
 
@@ -142,7 +145,7 @@ In `src/Host/TemplateName.Api/Program.cs`, pipeline step 6 keeps `UseHsts` and w
 - **Production checklist.** "Persisted; **not protected**" becomes satisfied, with the certificate settings, the startup refusal and the runbook links.
 - **`container-verify.sh`** generates a throwaway PFX (OpenSSL, in a temp directory) and passes its path and password to the container, and its comment about https ports is corrected.
 - **`docs/modules/auth.md`** documents the new keys; the configuration reference pages that list `Auth:` keys and the `appsettings` examples get the same, and the project-index generator is re-run.
-- **Template.** Nothing here is switch-marked except the Notifications line of 5.1. The checks before merge are the default smoke and the three off-switch smokes of `CLAUDE.md`, plus `--from-package --generate-only` only if the pack excludes change.
+- **Template.** The seeds of Notifications and the sample go in the `exclude` lists of `.template.config/template.json` beside those modules' tests. Nothing else here is switch-marked except the Notifications line of 5.1. The checks before merge are the default smoke and the three off-switch smokes of `CLAUDE.md`, plus `--from-package --generate-only` only if the pack excludes change.
 
 ## 8. Order of work (for the plan)
 
