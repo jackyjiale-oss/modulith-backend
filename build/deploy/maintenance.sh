@@ -18,11 +18,10 @@
 # `on` runs before `migrate`; `off` runs only after the smoke test of the new version passed. When the new version fails, the
 # workflow leaves maintenance mode on, so users keep seeing the page and not an error; run `off` yourself once the site is healthy.
 #
-# A limit of the workflow's detection: it compares with the previous release TAG, not with what production last ran. A contract
+# The workflow's detection compares a release with the last successful deployment to the production environment, so a contract
 # release that never reached production (this stub failing at `on` on the first one, a failed staging smoke test, a rejected
-# approval) leaves its tag behind, and the NEXT release answers "no contract migration" and goes out without the page. Until a
-# release has completed its production deploy, dispatch every later release by hand with `maintenance: on` (workflow_dispatch of
-# cd.yml with `release` ticked, the version, and `maintenance` set to on).
+# approval) is still seen by the NEXT release. A project that deployed by hand before the pipeline existed needs one dispatch of
+# cd.yml with `release` ticked, the version, and `maintenance` set to on for its first pipeline release (docs/deployment/README.md).
 #
 # This file is a stub. The template cannot know what sits in front of your API, so it fails on purpose: a project that sets the
 # repository variable DEPLOY_ENABLED to true and releases a contract migration without writing its hook gets a red job, not a
