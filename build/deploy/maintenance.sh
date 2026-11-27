@@ -60,7 +60,7 @@ page="${3:-}"
 echo "build/deploy/maintenance.sh is the template's placeholder: this project has not written its maintenance hook." >&2
 echo "Replace this file with the commands that switch maintenance mode '${mode:-<on|off>}' for '${environment:-<environment>}'," >&2
 echo "serving '${page:-<page-path>}' (see the contract and the examples at the top of the file)." >&2
-echo "Then run this release again from its tag. In auto mode this step runs only when a contract migration was detected, and this" >&2
-echo "release has not reached production, so every later release needs the input 'maintenance: on' (a manual dispatch of cd.yml with" >&2
-echo "'release' ticked) until one has completed its production deploy: the next detection compares with this release's tag." >&2
+echo "Then run this release again from its tag. In auto mode this step runs only when a contract migration was detected. This release" >&2
+echo "has not reached production, so the next release's detection, which compares with the last successful production deployment," >&2
+echo "still sees this release's migration: nothing else needs doing by hand." >&2
 exit 1

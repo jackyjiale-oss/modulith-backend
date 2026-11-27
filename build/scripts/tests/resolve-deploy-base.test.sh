@@ -21,6 +21,9 @@ printf '%s\n' "$*" >> "${FAKE_GH_LOG:-/dev/null}"
 if [[ "${FAKE_GH_FAIL:-}" == "1" ]]; then echo "gh: HTTP 403: Resource not accessible by integration" >&2; exit 1; fi
 if [[ "${FAKE_GH_GARBAGE:-}" == "1" ]]; then echo "not json"; exit 0; fi
 endpoint="$2"
+if [[ "${FAKE_GH_FAIL_STATUSES:-}" == "1" && "$endpoint" == repos/*/deployments/*/statuses* ]]; then
+  echo "gh: HTTP 502: Bad Gateway" >&2; exit 1
+fi
 case "$endpoint" in
   repos/*/deployments/*/statuses*)
     id="${endpoint#*/deployments/}"; id="${id%%/*}"
@@ -58,7 +61,7 @@ make_repo() {
   FAKE_GH_DIR="$(mktemp -d "$tmp_root/fx.XXXXXX")" || exit 1
   FAKE_GH_LOG="$FAKE_GH_DIR/log"
   export FAKE_GH_DIR FAKE_GH_LOG RESOLVE_DEPLOY_BASE_GH="$fake_gh"
-  unset FAKE_GH_FAIL FAKE_GH_GARBAGE
+  unset FAKE_GH_FAIL FAKE_GH_GARBAGE FAKE_GH_FAIL_STATUSES
   export GITHUB_REPOSITORY="owner/repo"
 }
 
@@ -222,6 +225,19 @@ case_gh_fails() {
   assert_contains "maintenance: on" "$err" "gh_fails: names the bypass"
 }
 
+# A statuses call that fails while the deployments list works must stop the lookup. Reading statuses runs in a function called from an
+# `if`, where `set -e` does not apply, so a swallowed failure would read as "no success" and let detection answer false.
+case_statuses_call_fails() {
+  make_repo
+  export FAKE_GH_FAIL_STATUSES=1
+  dep 1 3 "$sha3"; dep 1 2 "$sha2"
+  states 3 failure; states 2 success
+  run_script "$resolve" owner/repo
+  assert_eq "1" "$status" "statuses_call_fails: exit code"
+  assert_eq "" "$out" "statuses_call_fails: stdout empty"
+  assert_contains "maintenance: on" "$err" "statuses_call_fails: names the bypass"
+}
+
 case_unreadable_output() {
   make_repo
   export FAKE_GH_GARBAGE=1
@@ -262,8 +278,9 @@ for c in \
   case_newest_success case_failed_newer_than_success case_success_then_inactive_counts case_waiting_skipped \
   case_none_on_record case_no_success_in_short_history case_second_page_read case_exactly_200_no_success \
   case_over_200_no_success case_sha_not_in_checkout case_sha_not_ancestor case_gh_missing case_gh_fails \
-  case_unreadable_output case_repository_missing case_request_shape; do
-  run_case "$c"
+  case_statuses_call_fails case_unreadable_output case_repository_missing case_request_shape; do
+  # ONLY=<case name> runs one case (the 200-deployment cases make the full run slow on Windows).
+  if [[ -z "${ONLY:-}" || "$c" == "$ONLY" ]]; then run_case "$c"; fi
 done
 
 if (( failures > 0 )); then

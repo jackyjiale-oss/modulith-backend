@@ -44,7 +44,9 @@ api() {
 # succeeded <deployment-id>: true when any status of the deployment is success.
 succeeded() {
   local states
-  states="$(api "repos/$repo/deployments/$1/statuses?per_page=$page_size" '.[].state')"
+  # This function runs in an `if` condition, where `set -e` is off, and `fail` inside api() leaves only its own subshell: without
+  # the explicit `|| exit 1` a failed call would read as "no success" and detection would answer false.
+  states="$(api "repos/$repo/deployments/$1/statuses?per_page=$page_size" '.[].state')" || exit 1
   grep -qx 'success' <<< "$states"
 }
 
