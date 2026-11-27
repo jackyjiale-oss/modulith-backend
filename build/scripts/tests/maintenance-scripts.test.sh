@@ -78,33 +78,26 @@ run_script() {
 
 # --- detect-contract-migration.sh ---
 
-case_no_previous_tag() {
-  make_repo
-  commit_file README.md "first" "initial"
-  run_script "$detect"
-  assert_eq "false" "$out" "no_previous_tag: stdout"
-  assert_contains "no previous release tag" "$err" "no_previous_tag: stderr"
-  assert_eq "0" "$status" "no_previous_tag: exit code"
-}
-
-case_tag_with_no_change() {
+# Without a base the answer is false: no production deployment is on record, so nothing is serving and there is nothing to contract.
+case_no_base() {
   make_repo
   commit_file README.md "first" "initial"
   tag v1.0.0
-  commit_file README.md "second" "docs"
+  commit_file "$migration_dir/20261101000000_AddX.cs" "$contract_content" "add contract migration"
   run_script "$detect"
-  assert_eq "false" "$out" "tag_with_no_change"
-  assert_contains "comparing with release tag v1.0.0" "$err" "tag_with_no_change: base"
+  assert_eq "false" "$out" "no_base: stdout"
+  assert_contains "no production deployment on record" "$err" "no_base: stderr"
+  assert_eq "0" "$status" "no_base: exit code"
 }
 
+# The base is what the caller passes (the commit production last ran); the cases below use the commit tagged v1.0.0 as that base.
 case_added_expand_migration() {
   make_repo
   commit_file README.md "first" "initial"
   tag v1.0.0
   commit_file "$migration_dir/20261101000000_AddX.cs" "$expand_content" "add expand migration"
-  run_script "$detect"
+  run_script "$detect" v1.0.0
   assert_eq "false" "$out" "added_expand_migration"
-  assert_contains "comparing with release tag v1.0.0" "$err" "added_expand_migration: base"
 }
 
 case_added_contract_migration() {
@@ -112,7 +105,7 @@ case_added_contract_migration() {
   commit_file README.md "first" "initial"
   tag v1.0.0
   commit_file "$migration_dir/20261101000000_AddX.cs" "$contract_content" "add contract migration"
-  run_script "$detect"
+  run_script "$detect" v1.0.0
   assert_eq "true" "$out" "added_contract_migration: stdout"
   assert_eq "0" "$status" "added_contract_migration: exit code"
 }
@@ -122,9 +115,8 @@ case_modified_not_added() {
   commit_file "$migration_dir/20261101000000_AddX.cs" "$contract_content" "add contract migration"
   tag v1.0.0
   commit_file "$migration_dir/20261101000000_AddX.cs" "$contract_content // edited" "edit the applied migration"
-  run_script "$detect"
+  run_script "$detect" v1.0.0
   assert_eq "false" "$out" "modified_not_added"
-  assert_contains "comparing with release tag v1.0.0" "$err" "modified_not_added: base"
 }
 
 # A migration's marker is matched as the word ContractMigration anywhere in an added file under Migrations, the way the architecture
@@ -134,9 +126,8 @@ case_designer_file_counts() {
   commit_file README.md "first" "initial"
   tag v1.0.0
   commit_file "$migration_dir/20261101000000_AddX.Designer.cs" "$contract_content" "add designer"
-  run_script "$detect"
+  run_script "$detect" v1.0.0
   assert_eq "true" "$out" "designer_file_counts"
-  assert_contains "comparing with release tag v1.0.0" "$err" "designer_file_counts: base"
 }
 
 case_combined_attribute_list_counts() {
@@ -144,7 +135,7 @@ case_combined_attribute_list_counts() {
   commit_file README.md "first" "initial"
   tag v1.0.0
   commit_file "$migration_dir/20261101000000_AddX.cs" '[Obsolete, ContractMigration("x")]' "add combined list"
-  run_script "$detect"
+  run_script "$detect" v1.0.0
   assert_eq "true" "$out" "combined_attribute_list_counts"
 }
 
@@ -153,7 +144,7 @@ case_fully_qualified_attribute_counts() {
   commit_file README.md "first" "initial"
   tag v1.0.0
   commit_file "$migration_dir/20261101000000_AddX.cs" '[Some.Namespace.ContractMigration("x")]' "add qualified attribute"
-  run_script "$detect"
+  run_script "$detect" v1.0.0
   assert_eq "true" "$out" "fully_qualified_attribute_counts"
 }
 
@@ -162,50 +153,11 @@ case_model_snapshot_ignored() {
   commit_file README.md "first" "initial"
   tag v1.0.0
   commit_file "$migration_dir/ADbContextModelSnapshot.cs" "$contract_content" "add snapshot"
-  run_script "$detect"
+  run_script "$detect" v1.0.0
   assert_eq "false" "$out" "model_snapshot_ignored"
-  assert_contains "comparing with release tag v1.0.0" "$err" "model_snapshot_ignored: base"
 }
 
-case_head_carries_its_own_tag() {
-  make_repo
-  commit_file README.md "first" "initial"
-  tag v1.0.0
-  commit_file "$migration_dir/20261101000000_AddX.cs" "$contract_content" "add contract migration"
-  tag v1.1.0
-  run_script "$detect"
-  assert_eq "true" "$out" "head_carries_its_own_tag"
-}
-
-case_unmerged_tag_ignored() {
-  make_repo
-  commit_file README.md "first" "initial"
-  tag v1.0.0
-  must git checkout -q -b side
-  commit_file side.txt "side" "side work"
-  tag v9.9.9
-  must git checkout -q main
-  commit_file "$migration_dir/20261101000000_AddX.cs" "$contract_content" "add contract migration"
-  run_script "$detect"
-  assert_eq "true" "$out" "unmerged_tag_ignored"
-  assert_contains "comparing with release tag v1.0.0" "$err" "unmerged_tag_ignored: base"
-}
-
-# A pre-release tag ranks above its release in version order and can never be deployed to production, so it is never the base.
-case_prerelease_tag_never_the_base() {
-  make_repo
-  commit_file README.md "first" "initial"
-  tag v1.0.0
-  commit_file "$migration_dir/20261101000000_AddX.cs" "$contract_content" "add contract migration"
-  commit_file README.md "second" "docs"
-  tag v1.1.0-rc.1
-  commit_file README.md "third" "more docs"
-  run_script "$detect"
-  assert_eq "true" "$out" "prerelease_tag_never_the_base: stdout"
-  assert_contains "comparing with release tag v1.0.0" "$err" "prerelease_tag_never_the_base: base"
-}
-
-# A shallow clone has no tags and no history to diff, and would silently answer false.
+# A shallow clone has no history to diff, and would silently answer false.
 case_shallow_clone_refused() {
   make_repo
   commit_file README.md "first" "initial"
@@ -218,7 +170,6 @@ case_shallow_clone_refused() {
   assert_eq "1" "$status" "shallow_clone_refused: exit code"
   assert_eq "" "$out" "shallow_clone_refused: stdout empty"
   assert_contains "fetch-depth: 0" "$err" "shallow_clone_refused: stderr names fetch-depth"
-  assert_contains "fetch-tags: true" "$err" "shallow_clone_refused: stderr names fetch-tags"
 }
 
 case_explicit_base_ref() {
@@ -275,10 +226,9 @@ run_case() {
 }
 
 for c in \
-  case_no_previous_tag case_tag_with_no_change case_added_expand_migration case_added_contract_migration \
+  case_no_base case_added_expand_migration case_added_contract_migration \
   case_modified_not_added case_designer_file_counts case_combined_attribute_list_counts \
-  case_fully_qualified_attribute_counts case_model_snapshot_ignored case_head_carries_its_own_tag case_unmerged_tag_ignored \
-  case_prerelease_tag_never_the_base case_shallow_clone_refused \
+  case_fully_qualified_attribute_counts case_model_snapshot_ignored case_shallow_clone_refused \
   case_explicit_base_ref case_unresolvable_base_ref case_resolve_auto case_resolve_off_warns \
   case_resolve_rejects_unknown_mode; do
   run_case "$c"

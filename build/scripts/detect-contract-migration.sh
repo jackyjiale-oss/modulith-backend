@@ -7,13 +7,12 @@
 # mode on needlessly, the safe direction.
 #
 # Usage: bash build/scripts/detect-contract-migration.sh [base-ref]   (run inside the git work tree)
-#   Without base-ref the base is the highest v[0-9]* tag without a pre-release suffix (no "-" in the name) merged into HEAD
-#   whose commit is not HEAD (the release commit carries its own tag). A pre-release tag such as v1.1.0-rc.1 is skipped: it
-#   sorts above v1.1.0 and the pipeline never deploys it to production. With no such tag (the first release) the answer is
-#   "false" and stderr says why.
-#   The base is the previous TAG, not what production last ran: see docs/deployment/README.md, "Maintenance mode".
+#   base-ref is the commit production last ran; cd.yml passes the one resolve-deploy-base.sh prints (the last successful
+#   deployment to the production environment). Without base-ref no production deployment is on record, so nothing is serving
+#   and there is nothing to contract from: the answer is "false" and stderr says why.
+#   See docs/deployment/README.md, "Maintenance mode".
 # Output: "true" or "false" on stdout, nothing else. Exit 0 either way; exit 1 only on a git error, a base ref that does not
-# resolve or a shallow checkout (which has no tags to compare with and would answer "false" silently). Everything else goes to stderr.
+# resolve or a shallow checkout (which has no history to compare with and would answer "false" silently). Everything else goes to stderr.
 set -euo pipefail
 
 fail() { echo "detect-contract-migration: $*" >&2; exit 1; }
@@ -22,31 +21,16 @@ fail() { echo "detect-contract-migration: $*" >&2; exit 1; }
 
 git rev-parse --is-inside-work-tree > /dev/null 2>&1 || fail "not inside a git work tree"
 if [[ "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
-  fail "the checkout is shallow, so the answer would be false whatever the release holds; check out the whole history and the tags (actions/checkout with fetch-depth: 0 and fetch-tags: true)"
+  fail "the checkout is shallow, so the answer would be false whatever the release holds; check out the whole history (actions/checkout with fetch-depth: 0)"
 fi
-head_sha="$(git rev-parse --verify --quiet 'HEAD^{commit}')" || fail "HEAD does not resolve to a commit"
+git rev-parse --verify --quiet 'HEAD^{commit}' > /dev/null || fail "HEAD does not resolve to a commit"
 
-base=""
-if [[ $# -eq 1 ]]; then
-  base="$(git rev-parse --verify --quiet "$1^{commit}")" || fail "base ref '$1' does not resolve to a commit"
-else
-  tags="$(git tag --merged HEAD --list 'v[0-9]*' --sort=-v:refname)"
-  while IFS= read -r t; do
-    [[ -n "$t" ]] || continue
-    [[ "$t" != *-* ]] || continue   # a pre-release tag is never the base
-    tag_sha="$(git rev-list -n1 "$t")"
-    if [[ "$tag_sha" != "$head_sha" ]]; then
-      base="$tag_sha"
-      echo "detect-contract-migration: comparing with release tag $t" >&2
-      break
-    fi
-  done <<< "$tags"
-  if [[ -z "$base" ]]; then
-    echo "detect-contract-migration: no previous release tag; there is nothing to contract from" >&2
-    echo "false"
-    exit 0
-  fi
+if [[ $# -eq 0 ]]; then
+  echo "detect-contract-migration: no production deployment on record; there is nothing to contract from" >&2
+  echo "false"
+  exit 0
 fi
+base="$(git rev-parse --verify --quiet "$1^{commit}")" || fail "base ref '$1' does not resolve to a commit"
 
 # Captured into a variable first so that a git failure stops the script (a failure inside <(...) would go unnoticed).
 added="$(git -c core.quotepath=off diff --no-renames --name-only --diff-filter=A "$base"..HEAD -- '*/Migrations/*.cs')"

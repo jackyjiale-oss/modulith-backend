@@ -83,8 +83,10 @@ jobs:
           fi
 
   # Whether a production release runs in maintenance mode (decision: docs/adr/0034-maintenance-mode-for-contract-phase-releases.md). A release only: a push to
-  # main never reaches this job, nor any maintenance step. Detection reads git history, so the whole history and every tag are
-  # fetched: a shallow clone would answer false, the unsafe direction. The input is a free string when release.yml calls this
+  # main never reaches this job, nor any maintenance step. Detection compares the release with the commit production last ran, the
+  # last successful deployment to the production environment (the Deployments API, hence deployments: read); the whole history is
+  # fetched for that diff, because a shallow clone would answer false, the unsafe direction. A lookup that cannot answer fails the job,
+  # so production and IIS do not run; `on` skips the lookup and is always safe. The input is a free string when release.yml calls this
   # workflow, so it reaches the script through env and resolve-maintenance.sh rejects any value but auto, on and off (the job fails).
   maintenance:
     name: maintenance
@@ -94,24 +96,31 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      deployments: read
     outputs:
       enabled: ${{ steps.resolve.outputs.enabled }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          fetch-tags: true
           persist-credentials: false
 
       - name: Resolve the maintenance mode
         id: resolve
         env:
           MODE: ${{ inputs.maintenance }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          detected="$(bash build/scripts/detect-contract-migration.sh)"
+          if [[ "$MODE" == "on" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Maintenance mode: input 'on', the lookup of the last production deployment is skipped, maintenance page: true."
+            exit 0
+          fi
+          base="$(bash build/scripts/resolve-deploy-base.sh)"
+          detected="$(bash build/scripts/detect-contract-migration.sh ${base:+"$base"})"
           enabled="$(bash build/scripts/resolve-maintenance.sh "$MODE" "$detected")"
           echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
-          echo "Maintenance mode: input '${MODE:-auto}', contract migration detected: $detected, maintenance page: $enabled."
+          echo "Maintenance mode: input '${MODE:-auto}', last production deployment: ${base:-none}, contract migration detected: $detected, maintenance page: $enabled."
 
   # The same jobs as a pull request. A called workflow cannot raise its own permissions, so build-test's coverage comment and
   # test report need these two here.

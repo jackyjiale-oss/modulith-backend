@@ -243,6 +243,10 @@ jobs:
       - name: Maintenance scripts
         run: bash build/scripts/tests/maintenance-scripts.test.sh
 
+      # The last successful production deployment, read from the Deployments API (maintenance detection design, section 3.1); a fake gh serves the API.
+      - name: Deployment base script
+        run: bash build/scripts/tests/resolve-deploy-base.test.sh
+
       - name: PSScriptAnalyzer
         shell: pwsh
         run: |

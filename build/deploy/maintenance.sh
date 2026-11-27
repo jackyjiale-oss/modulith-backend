@@ -18,11 +18,10 @@
 # `on` runs before `migrate`; `off` runs only after the smoke test of the new version passed. When the new version fails, the
 # workflow leaves maintenance mode on, so users keep seeing the page and not an error; run `off` yourself once the site is healthy.
 #
-# A limit of the workflow's detection: it compares with the previous release TAG, not with what production last ran. A contract
+# The workflow's detection compares a release with the last successful deployment to the production environment, so a contract
 # release that never reached production (this stub failing at `on` on the first one, a failed staging smoke test, a rejected
-# approval) leaves its tag behind, and the NEXT release answers "no contract migration" and goes out without the page. Until a
-# release has completed its production deploy, dispatch every later release by hand with `maintenance: on` (workflow_dispatch of
-# cd.yml with `release` ticked, the version, and `maintenance` set to on).
+# approval) is still seen by the NEXT release. A project that deployed by hand before the pipeline existed needs one dispatch of
+# cd.yml with `release` ticked, the version, and `maintenance` set to on for its first pipeline release (docs/deployment/README.md).
 #
 # This file is a stub. The template cannot know what sits in front of your API, so it fails on purpose: a project that sets the
 # repository variable DEPLOY_ENABLED to true and releases a contract migration without writing its hook gets a red job, not a
@@ -61,7 +60,7 @@ page="${3:-}"
 echo "build/deploy/maintenance.sh is the template's placeholder: this project has not written its maintenance hook." >&2
 echo "Replace this file with the commands that switch maintenance mode '${mode:-<on|off>}' for '${environment:-<environment>}'," >&2
 echo "serving '${page:-<page-path>}' (see the contract and the examples at the top of the file)." >&2
-echo "Then run this release again from its tag. In auto mode this step runs only when a contract migration was detected, and this" >&2
-echo "release has not reached production, so every later release needs the input 'maintenance: on' (a manual dispatch of cd.yml with" >&2
-echo "'release' ticked) until one has completed its production deploy: the next detection compares with this release's tag." >&2
+echo "Then run this release again from its tag. In auto mode this step runs only when a contract migration was detected. This release" >&2
+echo "has not reached production, so the next release's detection, which compares with the last successful production deployment," >&2
+echo "still sees this release's migration: nothing else needs doing by hand." >&2
 exit 1
