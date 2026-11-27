@@ -111,6 +111,7 @@ jobs:
       packages: write
       pull-requests: write
       checks: write
+      deployments: read # cd.yml's maintenance job reads the production deployment history
     uses: ./.github/workflows/cd.yml
     with:
       release: true
