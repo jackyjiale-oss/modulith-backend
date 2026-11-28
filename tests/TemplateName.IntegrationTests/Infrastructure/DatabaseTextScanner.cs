@@ -11,6 +11,7 @@ internal static class DatabaseTextScanner
     /// <summary>
     /// Every <c>schema.table.column</c> of the test database (every module's schema) whose text holds one of <paramref name="values"/>,
     /// ignoring case. The values are letters, digits, <c>-</c>, <c>+</c> and <c>/</c>, none of which is a <c>LIKE</c> wildcard.
+    /// Each module's <c>__EFMigrationsHistory</c> is skipped: it holds migration ids, whose timestamps a random code can match.
     /// </summary>
     internal static async Task<List<string>> ColumnsContainingAsync(
         IServiceProvider services,
@@ -29,6 +30,7 @@ internal static class DatabaseTextScanner
                 FROM INFORMATION_SCHEMA.COLUMNS AS c
                 INNER JOIN INFORMATION_SCHEMA.TABLES AS t ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
                 WHERE t.TABLE_TYPE = 'BASE TABLE' AND c.DATA_TYPE IN ('char', 'varchar', 'nchar', 'nvarchar', 'text', 'ntext', 'xml')
+                  AND t.TABLE_NAME <> '__EFMigrationsHistory'
                 """;
             await using var reader = await list.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
