@@ -11,6 +11,10 @@
 #   3. No switch marker (//#if, //#endif and the like, ADR 0035) between two lines of one C# doc comment (///). In the template's
 #      own tree the marker line splits the comment into two halves that are not valid XML; the generated project never sees it.
 #      A sentence that depends on a switch goes after the doc comment, as a plain comment inside the marker.
+#   4. In a job with a step limited to the template repository (an if: on hashFiles('.template.config/...')), an
+#      actions/setup-dotnet step with cache: true carries that limit too. A generated project skips the template-only step, so
+#      nothing restores packages, and setup-dotnet's post-job cache save then fails the job because ~/.nuget/packages does not
+#      exist (seen on the first CI run of a generated project, 2026-11-28).
 #
 # Usage: bash build/scripts/tests/static-rules.test.sh   (from any directory)
 set -euo pipefail
@@ -153,6 +157,79 @@ else
   found="$(cd "$repo_root" && markers_in_doc_comments "${csharp_files[@]}")"
   [[ -z "$found" ]] || fail "a switch marker splits a doc comment (put the switch-dependent sentence after it as a plain comment):"$'\n'"$found"
 fi
+
+# uncached_restore_in_template_jobs <workflow>...: prints "file: job" for each job that has a step whose if: names
+# .template.config and also an actions/setup-dotnet step with cache: true whose own if: does not.
+uncached_restore_in_template_jobs() {
+  awk '
+    function indent_of(text) { match(text, /^ */); return RLENGTH }
+    function end_step() {
+      if (step_dotnet && step_cache && !step_template) bad_step = 1
+      if (step_template) job_template = 1
+      step_dotnet = step_cache = step_template = 0
+    }
+    function end_job() {
+      end_step()
+      if (job != "" && job_template && bad_step) print FILENAME ": " job
+      job = ""; job_template = bad_step = 0; steps_indent = -1
+    }
+    FNR == 1 { if (NR > 1) end_job(); in_jobs = 0; job = ""; steps_indent = -1 }
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      if (line ~ /^jobs:[[:space:]]*$/) { in_jobs = 1; next }
+      if (!in_jobs) next
+      if (line ~ /^  [A-Za-z0-9_-]+:[[:space:]]*$/) { end_job(); job = line; gsub(/[ :]/, "", job); next }
+      if (line ~ /^[[:space:]]*steps:[[:space:]]*$/) { steps_indent = indent_of(line); next }
+      if (steps_indent >= 0 && line ~ /^[[:space:]]*- / && indent_of(line) == steps_indent + 2) end_step()
+      if (line ~ /uses:[[:space:]]*actions\/setup-dotnet@/) step_dotnet = 1
+      if (line ~ /^[[:space:]]*cache:[[:space:]]*true[[:space:]]*$/) step_cache = 1
+      if (line ~ /if:.*\.template\.config/) step_template = 1
+    }
+    END { end_job() }
+  ' "$@"
+}
+
+# Rule 4, proven on scratch workflows.
+cat > "$tmp/bad-cache.yml" <<'YAML'
+jobs:
+  smoke:
+    steps:
+      - uses: actions/setup-dotnet@v6
+        with:
+          cache: true
+      - name: Smoke
+        if: ${{ hashFiles('.template.config/template.json') != '' }}
+        run: bash smoke.sh
+  other:
+    steps:
+      - uses: actions/setup-dotnet@v6
+        with:
+          cache: true
+      - run: dotnet build
+YAML
+found="$(uncached_restore_in_template_jobs "$tmp/bad-cache.yml")"
+[[ "$found" == "$tmp/bad-cache.yml: smoke" ]] ||
+  fail "the cache rule did not report exactly the job whose only restore is template-only; it printed: $found"
+cat > "$tmp/good-cache.yml" <<'YAML'
+jobs:
+  smoke:
+    steps:
+      - uses: actions/setup-dotnet@v6
+        if: ${{ hashFiles('.template.config/template.json') != '' }}
+        with:
+          cache: true
+      - name: Smoke
+        if: ${{ hashFiles('.template.config/template.json') != '' }}
+        run: bash smoke.sh
+YAML
+found="$(uncached_restore_in_template_jobs "$tmp/good-cache.yml")"
+[[ -z "$found" ]] || fail "the cache rule rejected a setup-dotnet step that carries the template limit: $found"
+
+# Rule 4 on the real workflows.
+found="$(cd "$repo_root" && uncached_restore_in_template_jobs .github/workflows/*.yml)"
+[[ -z "$found" ]] ||
+  fail "setup-dotnet caches in a job whose restore only runs in the template repository (give it the same if:):"$'\n'"$found"
 
 if ((failures > 0)); then
   echo "static-rules: $failures failure(s)" >&2

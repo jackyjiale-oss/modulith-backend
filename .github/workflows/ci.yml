@@ -138,7 +138,10 @@ jobs:
         with:
           persist-credentials: false
 
+      # setup-dotnet has the same condition as the smoke step below: where that step is skipped nothing is restored, and the
+      # post-job cache save would then fail the job (static-rules.test.sh, rule 4).
       - uses: actions/setup-dotnet@v6
+        if: ${{ hashFiles('.template.config/template.json') != '' }}
         with:
           global-json-file: global.json
           cache: true
