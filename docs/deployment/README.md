@@ -63,7 +63,7 @@ The `version` input is validated as a whole string and only the validated value 
 
 A production release that adds a contract migration (a drop or a rename, marked `[ContractMigration]`, [`migrations.md`](migrations.md#expand-then-contract)) cannot run with the old version still serving: after the migration the previous code cannot work on the schema. Such a release runs in **maintenance mode**: a maintenance page is up before `migrate` and comes down only after the new version passed its health check. Decision and reasons: [ADR 0034](../adr/0034-maintenance-mode-for-contract-phase-releases.md). Staging and a push to `main` never use it; the `maintenance` job and every maintenance step run for a release only.
 
-The `maintenance` job runs `build/scripts/detect-contract-migration.sh` and `build/scripts/resolve-maintenance.sh` after a checkout of the whole history and every tag. The `maintenance` input of `cd.yml` is `auto` (the default), `on` or `off`:
+The `maintenance` job runs `build/scripts/detect-contract-migration.sh` and `build/scripts/resolve-maintenance.sh` after a checkout of the whole history; the base it compares with is the commit of the last successful `production` deployment (`build/scripts/resolve-deploy-base.sh`). The `maintenance` input of `cd.yml` is `auto` (the default), `on` or `off`:
 
 | Input | Result |
 |---|---|
