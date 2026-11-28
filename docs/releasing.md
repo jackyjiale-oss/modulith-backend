@@ -44,7 +44,7 @@ If nobody approves, the release stays a GitHub Release without a package, and th
 
 ## 3. Cutting a release candidate
 
-The first published version is a release candidate, so that the whole path is proven on nuget.org before anything claims 1.0. `release-please-config.json` carries `"versioning": "prerelease"`, `"prerelease": true` and `"prerelease-type": "rc"`. Those three keys alone did not change the proposal (observed 2026-11-16: release PR #8 still proposed 1.0.0 after they were merged), so the first candidate was forced with a per-package `"release-as": "1.0.0-rc.1"` (under `packages`, `.`). That worked: #8 then proposed `1.0.0-rc.1`, and merging it on 2026-11-16 created the tag `v1.0.0-rc.1` and the GitHub Release. The `release-as` was removed again right after (step 5). The three keys stay. Whether they count `rc.2`, `rc.3` after the first candidate is not proven, so read every release PR before merging it.
+The first published version is a release candidate, so that the whole path is proven on nuget.org before anything claims 1.0. `release-please-config.json` carries `"versioning": "prerelease"`, `"prerelease": true` and `"prerelease-type": "rc"`. Those three keys alone did not change the proposal (observed 2026-11-16: release PR #8 still proposed 1.0.0 after they were merged), so the first candidate was forced with a per-package `"release-as": "1.0.0-rc.1"` (under `packages`, `.`). That worked: #8 then proposed `1.0.0-rc.1`, and merging it on 2026-11-16 created the tag `v1.0.0-rc.1` and the GitHub Release. The `release-as` was removed again right after (step 5). The three keys stay. They did count the later candidates, `rc.2` to `rc.11`, without a `release-as`; read every release PR before merging it all the same.
 
 1. Complete Section 1.
 2. **Read the release PR before merging it.** The title and `Version.props` should say the candidate you expect (`1.0.0-rc.1` for the first one). A release PR opened without the repository secret `RELEASE_PLEASE_TOKEN` is authored by `github-actions[bot]`, and its workflow runs wait for an approval (observed on #8): choose **Approve workflows to run** on the pull request, or its required checks never report and it cannot be merged. That repeats on every update of the release PR until the token is saved ([`repository-management.md`](repository-management.md) describes it).
@@ -58,17 +58,32 @@ A candidate is installed by its version (`@1.0.0-rc.1`; the SDK prints a depreca
 
 nuget.org validates a package before it serves it, so step 6 does not work the minute the job is green: `1.0.0-rc.1` could be downloaded about 12 minutes after the push, and `dotnet new install` found it a minute or two after that, once the registration index listed it. Until then the install answers "the package does not exist".
 
-## 4. Cutting v1.0 (a checklist, not yet executed)
+## 4. Cutting v1.0
 
-7c does not cut 1.0. #8 was merged as the first release candidate (Section 3), so it was the rc PR, not the 1.0 PR. The PR to merge here is the one release-please opens or updates after that, once the owner decides 1.0 is ready; it should say `1.0.0` (with the prerelease keys kept it might say `1.0.0-rc.2`; it is not proven). When the owner decides:
+The decision and the evidence are [ADR 0043](adr/0043-version-1-0-and-what-the-package-promises.md); the design is `docs/superpowers/specs/2026-11-28-v1-graduation-design.md`. In release-please 17.6.0 (the version `release-please-action@v5` bundles), `"prerelease": false` with `"versioning": "prerelease"` kept turns `1.0.0-rc.N` into `1.0.0` for any change; removing the three keys instead would propose `1.0.1-rc.N` or `1.1.0-rc.N`. A release PR opens only for a visible commit (`feat`, `fix`, `perf`, `revert`).
 
-- [ ] **Settle the open decisions.** The list is in the owner's notes (the open-items list). The ones that concern 1.0: the delivery pipeline's open triage items and the fact that `cd.yml`, the image registry and a real IIS deploy have never run from a generated project ([ADR 0033](adr/0033-delivery-pipeline.md)); whether push and SMS channels and phone-number OTP login come before 1.0.
-- [ ] **The release candidate is out and was installed** on a machine without a checkout (Section 3, step 6).
-- [ ] **Remove the three keys** `versioning`, `prerelease` and `prerelease-type` from `release-please-config.json`, so that it equals `build/template-content/release-please-config.json`. The test `build/scripts/tests/release-package.test.sh` checks that the two are equal apart from those keys, and that each of them is present in the root config: the same PR also drops the three keys from the key list and the comment in that test, or `release-package` goes red. The `release-as` of `1.0.0-rc.1` is already gone (Section 3, step 5). This PR can also set `"release-as": "1.0.0"` (next bullet); the test's key list then holds `release-as` alone until that line is removed again.
-- [ ] **Read the release PR.** It should propose `1.0.0`. It is not proven how release-please graduates from `1.0.0-rc.1` to 1.0.0, so set `"release-as": "1.0.0"` (under `packages`, `.`) for that one release whatever it proposes, let the release PR update, and check it says `1.0.0`; remove the `release-as` in a small pull request right after the release is created, with the same care as Section 3, step 5 (merge no other `feat` or `fix` and no release PR meanwhile; drop `release-as` from the key list in `release-package.test.sh` in that PR; the root config then equals the copy and the test no longer needs a key list).
-- [ ] **Merge it, then approve the `nuget` environment** (Section 2).
-- [ ] **Check as in Section 3, step 6**, with `dotnet new install Modulith.Backend.Templates` and no version.
-- [ ] **Update the README** (the stable install form, update and uninstall commands, the badge if it is not there) and the roadmap rows.
+**Gates.** All four are met before the 1.0.0 release PR is merged:
+
+- [ ] **G1. The owner's settings:** the repository secret `RELEASE_PLEASE_TOKEN` (Section 3, step 2) and the required checks `package-smoke (all-on)`, `package-smoke (all-off)`, `module-template (all-on-contracts)` and `module-template (all-off-multiword)` on `main`.
+- [ ] **G2. Native review:** every Malay and Chinese string the template ships (the `.ms.resx` and `.zh-Hans.resx` files, the Notifications templates, the maintenance page) has been reviewed by a native speaker and the result is merged.
+- [ ] **G3. Delivery proof:** `ci.yml` and `cd.yml` have run in a generated project, in a throwaway repository, through the image push, on a push to `main` and on its first release.
+- [ ] **G4. The graduation configuration:** the pull request that sets `"prerelease": false` is merged. It is a `ci` commit, so it opens no release PR.
+
+**Order.** G4 is merged before any visible commit reaches `main`: a `fix` merged earlier opens a release PR for `1.0.0-rc.N+1` (if that happened, leave it unmerged and read it again after G4 is in; if it still shows the candidate, check that release-please ran for that push, or refresh it with `gh pr update-branch`). After G4, every visible commit lands in one release PR that proposes `1.0.0`; it stays unmerged until G1 to G3 are met.
+
+**The cut.**
+
+- [ ] **Read the release PR.** Title `chore(release): release 1.0.0`, `<Version>1.0.0</Version>` in `Version.props`, `".": "1.0.0"` in `.release-please-manifest.json`, a `## [1.0.0]` entry in `CHANGELOG.md` that compares with the last candidate. Its checks start without "Approve workflows to run" once the token is saved. If it proposes anything else, do not merge: use the fallback below.
+- [ ] **Last, just before merging:** add a two-line introduction to the 1.0.0 entry, in `CHANGELOG.md` on the release branch and in the release PR's body (the first stable release; ADR 0043 for what a major version protects). It must be the last step because release-please rewrites the branch on every push to `main`. That the edited body becomes the GitHub Release text is not proven: check after the release and edit the Release by hand if it did not.
+- [ ] **Merge it, then approve the `nuget` environment** (Section 2), and confirm the deployment left "waiting".
+- [ ] **Check:** the GitHub Release `v1.0.0` is not a pre-release, is shown as Latest and carries `Modulith.Backend.Templates.1.0.0.nupkg`; nuget.org lists 1.0.0; once the registration index lists it (10 to 14 minutes after the push), `dotnet new install Modulith.Backend.Templates` with no version, in a throwaway hive with a fresh `NUGET_HTTP_CACHE_PATH`, installs 1.0.0, and a generated project builds in Release with no warning (Section 3, step 6).
+
+**After the release** (only once `v1.0.0` exists and the manifest says `1.0.0`; before that, the default strategy would propose `1.0.1-rc.N`), one `ci` pull request:
+
+- [ ] Remove `versioning`, `prerelease` and `prerelease-type` from `release-please-config.json`, so that it equals `build/template-content/release-please-config.json`; `build/scripts/tests/release-package.test.sh` drops its key list and its `prerelease` assertion and checks that the two files are identical.
+- [ ] Update the README (the stable install form, the status) and the roadmap rows, and mark this section executed.
+
+**Fallback** (the release PR proposes something other than `1.0.0`): add a per-package `"release-as": "1.0.0"` (under `packages`, `.`) and `release-as` to the key list of `release-package.test.sh`, let the release PR update and check it again; after the release, remove the `release-as` with the care of Section 3, step 5.
 
 ## 5. Recovering a failed publish
 
